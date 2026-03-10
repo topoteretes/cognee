@@ -59,7 +59,7 @@ class MistralAdapter(GenericAPIAdapter):
             image_transcribe_model=image_transcribe_model,
             llm_args=llm_args,
         )
-        self.llm_args = llm_args or {}
+        self.llm_args = llm_args
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 

@@ -85,15 +85,9 @@ class LLMConfig(BaseSettings):
     @model_validator(mode="after")
     def parse_llm_args(self) -> "LLMConfig":
         if self.llm_args and isinstance(self.llm_args, str):
-            try:
-                parsed = json.loads(self.llm_args)
-                if isinstance(parsed, dict):
-                    self.llm_args = parsed
-                else:
-                    self.llm_args = {}
-            except json.JSONDecodeError:
-                self.llm_args = {}
-        elif not isinstance(self.llm_args, dict):
+            parsed = json.loads(self.llm_args)
+            self.llm_args = parsed
+        elif self.llm_args is None:
             self.llm_args = {}
         return self
 

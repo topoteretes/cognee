@@ -88,7 +88,7 @@ class OpenAIAdapter(GenericAPIAdapter):
             fallback_endpoint=fallback_endpoint,
             llm_args=llm_args,
         )
-        self.llm_args = llm_args or {}
+        self.llm_args = llm_args
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
         # TODO: With gpt5 series models OpenAI expects JSON_SCHEMA as a mode for structured outputs.
         #       Make sure all new gpt models will work with this mode as well.

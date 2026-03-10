@@ -97,7 +97,7 @@ class GenericAPIAdapter(LLMInterface):
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
-        self.llm_args = llm_args or {}
+        self.llm_args = llm_args
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 

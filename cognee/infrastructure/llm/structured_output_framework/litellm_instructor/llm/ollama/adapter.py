@@ -60,7 +60,7 @@ class OllamaAPIAdapter(LLMInterface):
         self.api_key = api_key
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
-        self.llm_args = llm_args or {}
+        self.llm_args = llm_args
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 

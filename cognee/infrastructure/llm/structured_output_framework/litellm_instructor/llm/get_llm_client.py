@@ -69,7 +69,7 @@ def get_llm_client(raise_api_key_error: bool = True):
         else llm_config.llm_max_completion_tokens
     )
 
-    llm_args = llm_config.llm_args or {}
+    llm_args = llm_config.llm_args
 
     if provider == LLMProvider.OPENAI:
         if llm_config.llm_api_key is None and raise_api_key_error:

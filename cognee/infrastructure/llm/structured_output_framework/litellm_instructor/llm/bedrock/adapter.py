@@ -59,7 +59,7 @@ class BedrockAdapter(LLMInterface):
         self.api_key = api_key
         self.max_completion_tokens = max_completion_tokens
         self.streaming = streaming
-        self.llm_args = llm_args or {}
+        self.llm_args = llm_args
 
     def _create_bedrock_request(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
