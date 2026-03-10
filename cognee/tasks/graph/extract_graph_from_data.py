@@ -124,12 +124,6 @@ async def integrate_chunk_graphs(
             for node in graph_nodes:
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
-        cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
-        if callable(cache_entity_embeddings):
-            callback_result = cache_entity_embeddings(graph_nodes, **kwargs)
-            if inspect.isawaitable(callback_result):
-                await callback_result
-
         await add_data_points(
             data_points=graph_nodes,
             context=context,
@@ -173,6 +167,11 @@ async def extract_graph_from_data(
                 for chunk in data_chunks
             ]
         )
+    cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
+    if callable(cache_entity_embeddings):
+        callback_result = cache_entity_embeddings(chunk_graphs, **kwargs)
+        if inspect.isawaitable(callback_result):
+            await callback_result
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:

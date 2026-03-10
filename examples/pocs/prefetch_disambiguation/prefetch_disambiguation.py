@@ -43,12 +43,12 @@ def _count_reused_node_names_in_prompt_tail(
 
 
 def _check_disambiguated_entities(graph_entity_names, disambiguated_entities_names):
-    missed_entities = 0
+    disambiguated_entities = 0
     for name in graph_entity_names:
         if name in disambiguated_entities_names:
-            missed_entities += 1
+            disambiguated_entities += 1
     print(
-        f"Disambiguated entities: {(len(disambiguated_entities_names) - missed_entities) / len(disambiguated_entities_names) * 100}%"
+        f"Disambiguated entities: {(len(disambiguated_entities_names) - disambiguated_entities) / len(disambiguated_entities_names) * 100}%"
     )
 
 
@@ -162,7 +162,7 @@ async def prefetch_disambiguation(
     vector_search_limit,
     split_by_sentence,
     custom_prompt,
-    disambiguated_entities_names_file="expected_disambiguation_entities.txt",
+    disambiguated_entities_names_file: Optional[str] = None,
 ):
     df = pd.DataFrame()
     kwargs = {
@@ -174,10 +174,11 @@ async def prefetch_disambiguation(
     }
 
     parent_folder = os.path.dirname(os.path.abspath(__file__))
-    disambiguated_entities_names_file_path = os.path.join(
-        parent_folder, "data", "example2", disambiguated_entities_names_file
-    )
-    with open(disambiguated_entities_names_file_path, "r", encoding="utf-8") as f:
+    if disambiguated_entities_names_file is None:
+        disambiguated_entities_names_file = os.path.join(
+            parent_folder, "data", "example2", "expected_disambiguation_entities.txt"
+        )
+    with open(disambiguated_entities_names_file, "r", encoding="utf-8") as f:
         disambiguated_entities_names = f.read().split("\n")
 
     start = time.perf_counter()
