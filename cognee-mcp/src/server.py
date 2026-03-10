@@ -864,6 +864,23 @@ try:
         return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
 
     @mcp.tool(
+        name="execute_skill",
+        description="Execute a skill against a task. Loads the skill, sends instructions + task to the LLM, and returns the result. Automatically records the run for learning.",
+    )
+    async def execute_skill_tool(
+        skill_id: str, task_text: str, context: str = "", auto_observe: bool = True
+    ) -> list:
+        """Execute a skill and return the LLM output."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.execute(
+                skill_id=skill_id,
+                task_text=task_text,
+                context=context or None,
+                auto_observe=auto_observe,
+            )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
         name="observe_skill_run",
         description="Record a skill execution result. Required fields: task_text, selected_skill_id, success_score (0-1).",
     )

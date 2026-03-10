@@ -1,4 +1,4 @@
-"""Simplified Skills client — eight methods for the full skill routing loop."""
+"""Skills client — nine methods for the full skill routing loop."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.engine.models.node_set import NodeSet
 
+from cognee.skills.execute import execute_skill
 from cognee.skills.observe import record_skill_run
 from cognee.skills.pipeline import ingest_skills, upsert_skills, remove_skill
 from cognee.skills.promote import promote_skill_runs
@@ -28,6 +29,7 @@ class Skills:
         await skills.ingest("./my_skills")
         recs = await skills.get_context("compress my conversation")
         full = await skills.load("summarize")
+        result = await skills.execute("summarize", "compress this conversation")
         await skills.observe({"task_text": "...", "selected_skill_id": "summarize", "success_score": 0.9})
         await skills.promote()
     """
@@ -159,6 +161,55 @@ class Skills:
             "source_path": skill_node.get("source_path", ""),
             "task_patterns": patterns,
         }
+
+    async def execute(
+        self,
+        skill_id: str,
+        task_text: str,
+        context: Optional[str] = None,
+        auto_observe: bool = True,
+        session_id: str = "default",
+        node_set: str = "skills",
+    ) -> Dict[str, Any]:
+        """Load a skill and execute it against a task via the configured LLM.
+
+        Args:
+            skill_id: The skill to execute.
+            task_text: The user's task description.
+            context: Optional additional context for the LLM.
+            auto_observe: If True, automatically record the run to the observe cache.
+            session_id: Session ID for the observation record.
+            node_set: Graph node set to load the skill from.
+
+        Returns:
+            Dict with keys: output, skill_id, model, latency_ms, success, error.
+        """
+        skill = await self.load(skill_id, node_set=node_set)
+        if skill is None:
+            return {
+                "output": "",
+                "skill_id": skill_id,
+                "model": "",
+                "latency_ms": 0,
+                "success": False,
+                "error": f"Skill '{skill_id}' not found.",
+            }
+
+        result = await execute_skill(skill=skill, task_text=task_text, context=context)
+
+        if auto_observe:
+            await self.observe({
+                "session_id": session_id,
+                "task_text": task_text,
+                "selected_skill_id": skill_id,
+                "success_score": 1.0 if result["success"] else 0.0,
+                "result_summary": result["output"][:500] if result["output"] else "",
+                "latency_ms": result["latency_ms"],
+                "error_type": "llm_error" if result["error"] else "",
+                "error_message": result.get("error", "") or "",
+            })
+
+        return result
 
     async def list(self, node_set: str = "skills") -> List[Dict[str, Any]]:
         """List all ingested skills.

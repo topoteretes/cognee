@@ -6,6 +6,7 @@ Primary API (via ``from cognee import skills``):
     skills.remove()       — remove a single skill by id
     skills.get_context()  — ranked skill recommendations for a task
     skills.load()         — full details (including full instructions) for a skill by id
+    skills.execute()      — load a skill and execute it against a task via LLM
     skills.list()         — list all ingested skills with summaries
     skills.observe()      — record a skill execution to short-term cache
     skills.promote()      — promote cached runs and update prefers edges
@@ -15,6 +16,7 @@ Lower-level API:
     upsert_skills()       — diff-based re-ingestion of a skills folder
     remove_skill()        — remove a single skill by id from graph + vector
     recommend_skills()    — semantic retrieval ranked by vector similarity + prefers weights
+    execute_skill()       — execute a loaded skill dict against a task via LLM
     record_skill_run()    — record a skill execution to short-term cache
     promote_skill_runs()  — promote cached runs to the long-term graph and update prefers edges
 
@@ -23,6 +25,7 @@ Models:
 """
 
 from cognee.skills.client import Skills, skills
+from cognee.skills.execute import execute_skill
 from cognee.skills.pipeline import ingest_skills, upsert_skills, remove_skill
 from cognee.skills.retrieve import recommend_skills
 from cognee.skills.observe import record_skill_run
@@ -45,6 +48,7 @@ __all__ = [
     "upsert_skills",
     "remove_skill",
     "recommend_skills",
+    "execute_skill",
     "record_skill_run",
     "promote_skill_runs",
     "CandidateSkill",
