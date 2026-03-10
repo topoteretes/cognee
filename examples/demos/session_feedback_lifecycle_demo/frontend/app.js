@@ -616,6 +616,47 @@ function stopInitLoadingPhases(finalText = "Ready") {
   }
 }
 
+function clearLoadingGateDetails() {
+  const node = document.getElementById("loadingGateDetails");
+  if (node) {
+    node.remove();
+  }
+}
+
+function showLoadingGateDetails(text) {
+  const loadingCard = document.querySelector(".loading-card");
+  if (!loadingCard) return;
+  clearLoadingGateDetails();
+  const details = document.createElement("div");
+  details.id = "loadingGateDetails";
+  details.className = "loading-gate-details";
+  details.textContent = text;
+  loadingCard.appendChild(details);
+}
+
+async function validateRequiredDemoSettings() {
+  const gate = await api("/demo/config_gate");
+  if (gate?.ok) {
+    clearLoadingGateDetails();
+    return;
+  }
+
+  const mismatchLines = (gate?.mismatches || []).map(
+    (entry) => `- ${entry.name}: current=${entry.current || "(empty)"} expected=${entry.expected}`
+  );
+  const details = [
+    "Demo blocked: set these env vars and restart the server:",
+    "CACHING=True",
+    "AUTO_FEEDBACK=True",
+    "CACHE_BACKEND=fs",
+    "",
+    ...(mismatchLines.length ? ["Current mismatches:", ...mismatchLines] : []),
+  ].join("\n");
+  stopInitLoadingPhases("Configuration required");
+  showLoadingGateDetails(details);
+  throw new Error("Required environment settings are not configured.");
+}
+
 function renderSessionEntriesList(entries = []) {
   sessionEntries.innerHTML = "";
   if (!entries.length) {
@@ -980,6 +1021,7 @@ async function initializeDemo() {
     "Preparing demo..."
   );
   startInitLoadingPhases();
+  await validateRequiredDemoSettings();
 
   try {
     const result = await api("/demo/init", "POST");

@@ -1022,6 +1022,19 @@ body.guide-open .app-shell {
   text-wrap: nowrap;
 }
 
+.loading-gate-details {
+  width: min(520px, 90vw);
+  border: 1px solid rgba(255, 192, 167, 0.35);
+  border-radius: 12px;
+  background: rgba(56, 22, 20, 0.42);
+  color: #ffd8cc;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
 
 .selected-node {
   stroke: #ffd46b;

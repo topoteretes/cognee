@@ -33,6 +33,11 @@ DEMO_SYSTEM_DIR = BASE_DIR / ".cognee_system"
 DATASET_NAME = "session_feedback_weights_demo"
 DEFAULT_SESSION_ID = "demo_session"
 MEMIFY_ALPHA = 0.619
+REQUIRED_ENV_SETTINGS = {
+    "CACHING": "true",
+    "AUTO_FEEDBACK": "true",
+    "CACHE_BACKEND": "fs",
+}
 
 
 class SendPayload(BaseModel):
@@ -54,6 +59,49 @@ class MemifyPayload(BaseModel):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_setting(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _build_config_gate_result() -> dict[str, Any]:
+    current = {name: _normalize_setting(os.getenv(name)) for name in REQUIRED_ENV_SETTINGS}
+    expected = dict(REQUIRED_ENV_SETTINGS)
+    mismatches = [
+        {
+            "name": name,
+            "expected": expected_value,
+            "current": current.get(name, ""),
+        }
+        for name, expected_value in expected.items()
+        if current.get(name, "") != expected_value
+    ]
+    return {
+        "ok": len(mismatches) == 0,
+        "expected": expected,
+        "current": current,
+        "mismatches": mismatches,
+    }
+
+
+def _ensure_required_settings() -> None:
+    gate = _build_config_gate_result()
+    if gate["ok"]:
+        return
+    mismatch_lines = [
+        f"{entry['name']}={entry['current']!r} (expected {entry['expected']!r})"
+        for entry in gate["mismatches"]
+    ]
+    raise HTTPException(
+        status_code=412,
+        detail={
+            "message": "Demo blocked: required environment settings are not configured.",
+            "required": gate["expected"],
+            "current": gate["current"],
+            "mismatches": mismatch_lines,
+        },
+    )
 
 
 def clamp_weight(value: Any, default: float = 0.5) -> float:
@@ -372,6 +420,11 @@ async def index():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
+@app.get("/demo/config_gate")
+async def config_gate():
+    return _build_config_gate_result()
+
+
 @app.get("/demo/state")
 async def get_state():
     return {
@@ -452,6 +505,7 @@ async def get_ingested_documents():
 
 @app.post("/demo/init")
 async def init_demo():
+    _ensure_required_settings()
     steps: list[dict[str, Any]] = []
 
     def record_step(name: str, detail: str):
