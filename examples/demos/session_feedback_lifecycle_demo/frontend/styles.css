@@ -300,6 +300,17 @@ body.guide-open .app-shell {
   gap: 8px;
 }
 
+.session-content-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.session-content-section h3 {
+  margin: 0 0 6px 0;
+}
+
 .chat-resizer {
   height: 8px;
   border-radius: 999px;
@@ -638,10 +649,13 @@ body.guide-open .app-shell {
   border-radius: 14px;
   background: rgba(9, 18, 31, 0.75);
   padding: 8px;
-  height: 24vh;
-  max-height: 28vh;
-  min-height: 170px;
-  overflow: auto;
+  min-height: 140px;
+  height: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   resize: none;
 }
 
