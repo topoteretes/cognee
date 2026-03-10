@@ -53,8 +53,8 @@ let activeEdgeSelection = null;
 let loadingPhaseTimer = null;
 let loadingPhaseIndex = 0;
 const DEFAULT_LEFT_PANE_WIDTH = "62%";
-const DEFAULT_GRAPH_ROWS = "minmax(260px, 58vh) 8px minmax(120px, 1fr)";
-const DEFAULT_CHAT_ROWS = "minmax(300px, 58vh) 8px minmax(220px, 1fr)";
+const DEFAULT_GRAPH_ROWS = "minmax(0, 1fr) 8px minmax(0, 1fr)";
+const DEFAULT_CHAT_ROWS = "minmax(0, 1fr) 8px minmax(0, 1fr)";
 let guideCurrentStep = 1;
 let guideFocusedElement = null;
 let guideBeacon = null;
@@ -1044,12 +1044,14 @@ function setupGraphDetailsResizer() {
   const onMove = (event) => {
     if (!isDragging) return;
     const rect = graphBody.getBoundingClientRect();
+    const total = rect.height - 8;
+    if (total <= 0) return;
     const topPx = event.clientY - rect.top;
-    const svgPx = Math.max(220, Math.min(rect.height - 160, topPx));
-    const detailsPx = Math.max(120, rect.height - svgPx - 8);
+    const topRatio = Math.max(0.2, Math.min(0.8, topPx / total));
+    const bottomRatio = 1 - topRatio;
     document.documentElement.style.setProperty(
       "--graph-body-rows",
-      `${svgPx}px 8px ${detailsPx}px`
+      `minmax(0, ${topRatio}fr) 8px minmax(0, ${bottomRatio}fr)`
     );
   };
 
@@ -1075,12 +1077,14 @@ function setupChatResizer() {
   const onMove = (event) => {
     if (!isDragging) return;
     const rect = chatPanel.getBoundingClientRect();
+    const total = rect.height - 8;
+    if (total <= 0) return;
     const topPx = event.clientY - rect.top;
-    const topHeight = Math.max(280, Math.min(rect.height - 180, topPx));
-    const bottomHeight = Math.max(160, rect.height - topHeight - 8);
+    const topRatio = Math.max(0.2, Math.min(0.8, topPx / total));
+    const bottomRatio = 1 - topRatio;
     document.documentElement.style.setProperty(
       "--chat-rows",
-      `${topHeight}px 8px ${bottomHeight}px`
+      `minmax(0, ${topRatio}fr) 8px minmax(0, ${bottomRatio}fr)`
     );
   };
 

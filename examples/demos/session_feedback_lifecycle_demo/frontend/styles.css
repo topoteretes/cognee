@@ -8,8 +8,9 @@
   --line: rgba(142, 168, 195, 0.23);
   --ring: rgba(180, 211, 247, 0.5);
   --left-pane-width: 62%;
-  --graph-body-rows: minmax(260px, 58vh) 8px minmax(120px, 1fr);
-  --chat-rows: minmax(300px, 58vh) 8px minmax(220px, 1fr);
+  /* Use fractional rows so content always fits within viewport when resizing */
+  --graph-body-rows: minmax(0, 1fr) 8px minmax(0, 1fr);
+  --chat-rows: minmax(0, 1fr) 8px minmax(0, 1fr);
 }
 
 * {
@@ -51,7 +52,14 @@ body.guide-open .app-shell {
   padding: 12px;
   height: 100vh;
   max-height: 100vh;
+  min-height: 0;
   overflow: hidden;
+}
+
+/* Allow panels to shrink within grid so content never overflows viewport */
+.app-shell > .graph-panel,
+.app-shell > .chat-panel {
+  min-height: 0;
 }
 
 .main-resizer {
@@ -143,6 +151,7 @@ body.guide-open .app-shell {
 #graphSvg {
   width: 100%;
   height: 100%;
+  min-height: 0;
   border: 1px solid rgba(158, 185, 211, 0.24);
   border-radius: 14px;
   background: #09182a;
@@ -452,9 +461,7 @@ body.guide-open .app-shell {
   border-radius: 14px;
   background: rgba(9, 18, 31, 0.75);
   padding: 10px;
-  height: 24vh;
-  max-height: 30vh;
-  min-height: 110px;
+  min-height: 0;
   overflow: auto;
   resize: none;
   flex: 1;
@@ -649,9 +656,8 @@ body.guide-open .app-shell {
   border-radius: 14px;
   background: rgba(9, 18, 31, 0.75);
   padding: 8px;
-  min-height: 140px;
-  height: 100%;
-  max-height: 100%;
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
