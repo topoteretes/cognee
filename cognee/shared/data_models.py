@@ -48,7 +48,7 @@ else:
         name: str = ""
         type: str
         description: str
-        
+
         def __init__(self, **data):
             if not data.get("name"):
                 data["name"] = data.get("id", "")
