@@ -10,6 +10,8 @@ The aim is to achieve simplicity and clarity in the knowledge graph.
   - Don't use too generic terms like "Entity".
 **Node IDs**: Never utilize integers as node IDs.
   - Node IDs should be names or human-readable identifiers found in the text.
+**Node Names**: Every node MUST include a "name" field.
+  - Use the most complete human-readable name for the entity (e.g., "Albert Einstein", "Python").
 # 2. Handling Numerical Data and Dates
   - For example, when you identify an entity representing a date, make sure it has type **"Date"**.
   - Extract the date in the format "YYYY-MM-DD"
