@@ -45,7 +45,7 @@ else:
         """Node in a knowledge graph."""
 
         id: str
-        name: str
+        name: str = ""
         type: str
         description: str
         
