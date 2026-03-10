@@ -973,7 +973,113 @@ try:
         results = await _skills_client.list()
         return [types.TextContent(type="text", text=json.dumps(results, indent=2, cls=JSONEncoder))]
 
-    logger.info("Skills tools registered")
+    # -------------------------------------------------------------------
+    # Skills resources
+    # -------------------------------------------------------------------
+
+    @mcp.resource("skill://agent-guide")
+    async def agent_guide_resource() -> str:
+        """Return the agent_instructions.md content as markdown."""
+        # Try relative path first, then importlib.resources for installed packages
+        candidates = [
+            Path(__file__).resolve().parent.parent.parent / "cognee" / "skills" / "agent_instructions.md",
+            Path(__file__).resolve().parent.parent.parent / "skills" / "agent_instructions.md",
+        ]
+        for p in candidates:
+            if p.is_file():
+                return p.read_text(encoding="utf-8")
+
+        try:
+            import importlib.resources as pkg_resources
+
+            ref = pkg_resources.files("cognee.skills").joinpath("agent_instructions.md")
+            return ref.read_text(encoding="utf-8")
+        except Exception:
+            pass
+
+        return "# agent_instructions.md not found\n\nCould not locate the agent instructions file."
+
+    @mcp.resource("skill://index")
+    async def skill_index_resource() -> str:
+        """Return a JSON list of all ingested skills."""
+        with redirect_stdout(sys.stderr):
+            results = await _skills_client.list()
+        if not results:
+            return json.dumps(
+                {"skills": [], "hint": "No skills ingested yet. Use ingest_skills to add skills from a folder."},
+                indent=2,
+            )
+        return json.dumps({"skills": results}, indent=2, cls=JSONEncoder)
+
+    @mcp.resource("skill://{skill_id}")
+    async def skill_detail_resource(skill_id: str) -> str:
+        """Return the full skill JSON for a given skill_id."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.load(skill_id)
+        if result is None:
+            return json.dumps({"error": f"Skill '{skill_id}' not found."}, indent=2)
+        return json.dumps(result, indent=2, cls=JSONEncoder)
+
+    # -------------------------------------------------------------------
+    # Skills prompts
+    # -------------------------------------------------------------------
+
+    @mcp.prompt("route-task")
+    async def route_task_prompt(task_description: str) -> list:
+        """Guide the agent through skill-based task routing."""
+        return [
+            types.PromptMessage(
+                role="user",
+                content=types.TextContent(
+                    type="text",
+                    text=(
+                        f"I need to complete this task:\n\n{task_description}\n\n"
+                        "Follow this workflow to find and use the best skill:\n\n"
+                        "1. Call `get_skill_context` with the task description to get ranked skill recommendations\n"
+                        "2. Review the results — higher `score` means better match, "
+                        "`prefers_score > 0` means the skill has worked before for similar tasks\n"
+                        "3. Call `load_skill` on the top result to read its full instructions\n"
+                        "4. Execute the chosen skill following its instructions\n"
+                        "5. After completing the task, call `observe_skill_run` with:\n"
+                        "   - task_text: the original task description\n"
+                        "   - selected_skill_id: which skill was used\n"
+                        "   - success_score: 0.0 (failed) to 1.0 (perfect)\n"
+                        "   - result_summary: brief description of what happened\n"
+                        "6. Call `promote_skill_runs` to update preference weights"
+                    ),
+                ),
+            )
+        ]
+
+    @mcp.prompt("skill-setup")
+    async def skill_setup_prompt(skills_folder: str) -> list:
+        """Adaptive prompt: guide toward ingest or upsert based on current state."""
+        with redirect_stdout(sys.stderr):
+            existing = await _skills_client.list()
+
+        if existing:
+            guidance = (
+                f"Skills are already ingested ({len(existing)} found). "
+                f"To sync changes from `{skills_folder}`, call:\n\n"
+                f"```\nupsert_skills(skills_folder=\"{skills_folder}\")\n```\n\n"
+                "This will skip unchanged skills, update modified ones, and remove deleted ones."
+            )
+        else:
+            guidance = (
+                f"No skills are ingested yet. To get started, call:\n\n"
+                f"```\ningest_skills(skills_folder=\"{skills_folder}\")\n```\n\n"
+                "This will parse all SKILL.md files in the folder, enrich them via LLM, "
+                "and store them in the knowledge graph for routing."
+            )
+
+        return [
+            types.PromptMessage(
+                role="user",
+                content=types.TextContent(type="text", text=guidance),
+            )
+        ]
+
+    logger.info("Skills tools, resources, and prompts registered")
 
 except ImportError:
     logger.debug("cognee.skills not available, skills tools not registered")
