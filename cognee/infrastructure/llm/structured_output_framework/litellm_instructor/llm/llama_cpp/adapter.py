@@ -3,7 +3,7 @@
 import litellm
 import logging
 import instructor
-from typing import Type, Optional
+from typing import Any, Dict, Type, Optional
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
@@ -69,9 +69,11 @@ class LlamaCppAPIAdapter(LLMInterface):
         n_ctx: int = 2048,
         n_gpu_layers: int = 0,
         chat_format: str = "chatml",
+        llm_args: Optional[Dict[str, Any]] = None,
     ):
         self.name = name
         self.max_completion_tokens = max_completion_tokens
+        self.llm_args = llm_args
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         # Determine which mode to use
@@ -163,28 +165,24 @@ class LlamaCppAPIAdapter(LLMInterface):
                 {"role": "user", "content": text_input},
             ]
 
+            merged_kwargs = {**self.llm_args, **kwargs}
             if self.mode_type == "server":
-                # Server mode: use async client with OpenAI-compatible API
                 response = await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     response_model=response_model,
                     max_retries=2,
-                    max_completion_tokens=self.max_completion_tokens,
-                    **kwargs,
+                    **merged_kwargs,
                 )
 
             else:
                 import asyncio
 
-                # Local mode: instructor.patch() returns a SYNC callable
-                # Per docs: https://python.useinstructor.com/integrations/llama-cpp-python/
                 def _call_sync():
                     return self.aclient(
                         messages=messages,
                         response_model=response_model,
-                        max_tokens=self.max_completion_tokens,
-                        **kwargs,
+                        **merged_kwargs,
                     )
 
                 # Run sync function in thread pool to avoid blocking
