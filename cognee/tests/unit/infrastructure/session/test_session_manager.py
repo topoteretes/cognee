@@ -205,6 +205,7 @@ class TestSessionManager:
             answer=None,
             feedback_text=None,
             feedback_score=None,
+            memify_metadata=None,
         )
 
     @pytest.mark.asyncio
