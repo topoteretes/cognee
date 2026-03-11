@@ -1,6 +1,7 @@
 import unittest
 import os
 import uuid
+import pytest
 from unittest.mock import patch, MagicMock
 import sys
 
@@ -9,8 +10,9 @@ from cognee.shared.utils import send_telemetry
 
 
 class TestTelemetry(unittest.TestCase):
-    @patch("cognee.shared.utils.requests.post")
-    def test_telemetry_enabled(self, mock_post):
+    @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession.post")
+    async def test_telemetry_enabled(self, mock_post):
         # Setup mock response
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -82,8 +84,9 @@ class TestTelemetry(unittest.TestCase):
         else:
             del os.environ["ENV"]
 
-    @patch("cognee.shared.utils.requests.post")
-    def test_telemetry_disabled(self, mock_post):
+    @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession.post")
+    async def test_telemetry_disabled(self, mock_post):
         # Enable the TELEMETRY_DISABLED environment variable
         os.environ["TELEMETRY_DISABLED"] = "1"
 
@@ -96,8 +99,9 @@ class TestTelemetry(unittest.TestCase):
         # Clean up
         del os.environ["TELEMETRY_DISABLED"]
 
-    @patch("cognee.shared.utils.requests.post")
-    def test_telemetry_dev_env(self, mock_post):
+    @pytest.mark.asyncio
+    @patch("aiohttp.ClientSession.post")
+    async def test_telemetry_dev_env(self, mock_post):
         # Set ENV to dev which should disable telemetry
         original_env = os.environ.get("ENV")
         os.environ["ENV"] = "dev"

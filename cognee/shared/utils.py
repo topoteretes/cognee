@@ -120,13 +120,8 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
         },
     }
 
-    # Fire-and-forget async task — no threads, no blocking
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_send_telemetry_request(payload))
-    except RuntimeError:
-        # No running event loop (e.g. called from sync context) — skip silently
-        logger.debug("No running event loop for telemetry, skipping")
+    loop = asyncio.get_running_loop()
+    loop.create_task(_send_telemetry_request(payload))
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
