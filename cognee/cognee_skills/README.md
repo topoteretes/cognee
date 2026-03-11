@@ -252,6 +252,51 @@ Amendments update the `Skill` node in-place. The `SkillAmendment` node keeps the
 
 ---
 
+## SkillChangeEvent — audit trail
+
+A `SkillChangeEvent` node is written to the graph on every instruction change:
+
+| Trigger | `change_type` |
+|---------|--------------|
+| New skill ingested | `"added"` |
+| Skill content changed on upsert | `"updated"` |
+| Skill deleted | `"removed"` |
+| Amendment applied | `"amended"` |
+| Amendment reverted | `"rolled_back"` |
+
+Each event stores `skill_id`, `skill_name`, `change_type`, `old_content_hash`, `new_content_hash`, and a UTC `Timestamp` node. The hash pair lets you correlate a performance shift with the exact amendment that caused it.
+
+`SkillChangeEvent` extends cognee's `Event` DataPoint, so it's queryable via the temporal retriever alongside any other time-indexed graph data.
+
+---
+
+## Preference weights — how routing learns
+
+Skills are linked to `TaskPattern` nodes via `solves` edges. When a run is observed, the `prefers` edge between that pattern and the skill is updated with an incremental mean of all `success_score` values seen so far:
+
+```text
+new_weight = (prior_weight_sum + success_score) / (prior_run_count + 1)
+```
+
+`skills.get_context()` ranks results by `vector_score + prefers_score`. A new skill starts at `prefers_score = 0` and wins only on semantic similarity. A skill with a proven track record on the same pattern will outrank a semantically closer but untested one.
+
+For the weight to update, pass `task_pattern_id` to `observe()` — it comes back in every `get_context()` response:
+
+```python
+recs = await skills.get_context("compress this conversation")
+
+await skills.observe({
+    "task_text":          "compress this conversation",
+    "selected_skill_id":  "summarize",
+    "task_pattern_id":    recs[0]["task_pattern_id"],  # links the score to the right pattern
+    "success_score":      0.9,
+})
+```
+
+Without `task_pattern_id`, the run is still recorded as a `SkillRun` and feeds `inspect_skill`, but the preference weight is not updated.
+
+---
+
 ## MCP tools
 
 When running the cognee MCP server, all skill operations are available as tools:
