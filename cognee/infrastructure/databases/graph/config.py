@@ -25,6 +25,7 @@ class GraphConfig(BaseSettings):
     - graph_database_url
     - graph_database_username
     - graph_database_password
+    - graph_database_allow_anonymous
     - graph_database_port
     - graph_database_key
     - graph_file_path
