@@ -144,6 +144,16 @@ async def test_add_data_points_with_single_datapoint(
     mock_index_nodes.assert_awaited_once()
 
 
+def test_entity_description_included_in_embeddable_text():
+    from cognee.modules.engine.models import Entity, EntityType
+
+    entity_type = EntityType(name="Person", description="A human being")
+    entity = Entity(name="Alice", description="A software engineer", is_a=entity_type)
+    text = _extract_embeddable_text_from_datapoint(entity)
+    assert "Alice" in text
+    assert "A software engineer" in text
+
+
 def test_extract_embeddable_text_from_datapoint():
     dp = SimplePoint(text="hello world")
     text = _extract_embeddable_text_from_datapoint(dp)

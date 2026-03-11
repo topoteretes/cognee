@@ -381,8 +381,13 @@ def expand_with_nodes_and_edges(
         # Then process edges
         _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
 
-    # Return combined results
-    graph_nodes = data_chunks + list(added_ontology_nodes_map.values())
-    graph_edges = relationships + ontology_relationships
+    # Encode edges as entity.relations so the final add_data_points traversal reaches them.
+    all_nodes = {**added_nodes_map, **added_ontology_nodes_map}
+    for src_id, tgt_id, rel_name, _ in relationships + ontology_relationships:
+        src_node = all_nodes.get(f"{src_id}_entity") or all_nodes.get(f"{src_id}_type")
+        tgt_node = all_nodes.get(f"{tgt_id}_entity") or all_nodes.get(f"{tgt_id}_type")
+        if src_node and tgt_node:
+            src_node.relations.append((Edge(relationship_type=rel_name), tgt_node))
 
-    return graph_nodes, graph_edges
+    entity_nodes = list(added_nodes_map.values()) + list(added_ontology_nodes_map.values())
+    return data_chunks, entity_nodes
