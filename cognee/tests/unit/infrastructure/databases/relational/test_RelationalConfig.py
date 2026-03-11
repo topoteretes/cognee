@@ -67,3 +67,41 @@ class TestRelationalConfig:
                 "retries": 3,
                 "keepalive": True,
             }
+
+
+class TestRelationalConfigSSLMode:
+    """Test suite for RelationalConfig DB_SSL_MODE handling."""
+
+    def test_ssl_mode_not_set(self):
+        """When DB_SSL_MODE is absent, db_ssl_mode should be None."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = RelationalConfig()
+            assert config.db_ssl_mode is None
+
+    def test_ssl_mode_set_require(self):
+        """When DB_SSL_MODE=require, it should be read correctly."""
+        with patch.dict(os.environ, {"DB_SSL_MODE": "require"}):
+            config = RelationalConfig()
+            assert config.db_ssl_mode == "require"
+
+    def test_ssl_mode_set_verify_full(self):
+        """When DB_SSL_MODE=verify-full, it should be read correctly."""
+        with patch.dict(os.environ, {"DB_SSL_MODE": "verify-full"}):
+            config = RelationalConfig()
+            assert config.db_ssl_mode == "verify-full"
+
+    def test_ssl_mode_included_in_to_dict(self):
+        """db_ssl_mode should be present in to_dict() output."""
+        with patch.dict(os.environ, {"DB_SSL_MODE": "prefer"}):
+            config = RelationalConfig()
+            config_dict = config.to_dict()
+            assert "db_ssl_mode" in config_dict
+            assert config_dict["db_ssl_mode"] == "prefer"
+
+    def test_ssl_mode_none_in_to_dict(self):
+        """When DB_SSL_MODE is absent, to_dict() should include db_ssl_mode as None."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = RelationalConfig()
+            config_dict = config.to_dict()
+            assert "db_ssl_mode" in config_dict
+            assert config_dict["db_ssl_mode"] is None
