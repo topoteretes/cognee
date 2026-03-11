@@ -62,14 +62,9 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_password: Optional[str] = None,
         graph_database_name: Optional[str] = None,
         driver: Optional[Any] = None,
+        allow_anonymous: bool = False,
     ):
-        # Only use auth if both username and password are provided
-        auth = None
-        if graph_database_username and graph_database_password:
-            auth = (graph_database_username, graph_database_password)
-        elif graph_database_username or graph_database_password:
-            logger = get_logger(__name__)
-            logger.warning("Neo4j credentials incomplete – falling back to anonymous connection.")
+        auth = self._resolve_auth(graph_database_username, graph_database_password, allow_anonymous)
         self.graph_database_name = graph_database_name
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
@@ -78,6 +73,42 @@ class Neo4jAdapter(GraphDBInterface):
             notifications_min_severity="OFF",
             keep_alive=True,
         )
+
+    @staticmethod
+    def _resolve_auth(
+        username: Optional[str],
+        password: Optional[str],
+        allow_anonymous: bool,
+    ) -> Optional[Tuple[str, str]]:
+        """Resolve Neo4j authentication credentials.
+
+        Raises ValueError when credentials are incomplete or when anonymous
+        access is attempted without explicit opt-in.
+        """
+        has_username = username is not None and username != ""
+        has_password = password is not None and password != ""
+
+        if has_username and has_password:
+            return (username, password)
+
+        if has_username != has_password:
+            provided = "GRAPH_DATABASE_USERNAME" if has_username else "GRAPH_DATABASE_PASSWORD"
+            missing = "GRAPH_DATABASE_PASSWORD" if has_username else "GRAPH_DATABASE_USERNAME"
+            raise ValueError(
+                f"Neo4j credentials incomplete: {provided} is set but {missing} is missing. "
+                f"Set both GRAPH_DATABASE_USERNAME and GRAPH_DATABASE_PASSWORD in your .env file, "
+                f"or set GRAPH_DATABASE_ALLOW_ANONYMOUS=true for anonymous access."
+            )
+
+        # Both missing — anonymous access
+        if not allow_anonymous:
+            raise ValueError(
+                "Neo4j credentials not provided. Set GRAPH_DATABASE_USERNAME and "
+                "GRAPH_DATABASE_PASSWORD in your .env file, or set "
+                "GRAPH_DATABASE_ALLOW_ANONYMOUS=true to explicitly allow anonymous access."
+            )
+
+        return None
 
     async def initialize(self) -> None:
         """
