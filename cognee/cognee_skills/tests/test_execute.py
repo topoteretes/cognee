@@ -123,9 +123,10 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
-                    result = await client.execute("summarize", "do something")
-                    return result, mock_observe
+                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value="summarize:compress-text"):
+                    with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
+                        result = await client.execute("summarize", "do something")
+                        return result, mock_observe
 
         result, mock_observe = asyncio.run(_run())
 
@@ -134,6 +135,7 @@ class TestExecuteSkill(unittest.TestCase):
         obs_args = mock_observe.call_args[0][0]
         assert obs_args["selected_skill_id"] == "summarize"
         assert obs_args["success_score"] == 1.0
+        assert obs_args["task_pattern_id"] == "summarize:compress-text"
 
     @patch("cognee.cognee_skills.execute.litellm.acompletion")
     @patch("cognee.cognee_skills.execute.get_llm_config")
@@ -176,20 +178,21 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "observe", new_callable=AsyncMock):
-                    with patch.object(
-                        client,
-                        "auto_amendify",
-                        new_callable=AsyncMock,
-                        return_value=amendify_result,
-                    ) as mock_amendify:
-                        result = await client.execute(
-                            "summarize",
-                            "do something",
-                            auto_amendify=True,
-                            amendify_min_runs=1,
-                        )
-                        return result, mock_amendify
+                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
+                    with patch.object(client, "observe", new_callable=AsyncMock):
+                        with patch.object(
+                            client,
+                            "auto_amendify",
+                            new_callable=AsyncMock,
+                            return_value=amendify_result,
+                        ) as mock_amendify:
+                            result = await client.execute(
+                                "summarize",
+                                "do something",
+                                auto_amendify=True,
+                                amendify_min_runs=1,
+                            )
+                            return result, mock_amendify
 
         result, mock_amendify = asyncio.run(_run())
 
@@ -211,14 +214,15 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "observe", new_callable=AsyncMock):
-                    with patch.object(
-                        client, "auto_amendify", new_callable=AsyncMock
-                    ) as mock_amendify:
-                        result = await client.execute(
-                            "summarize", "do something", auto_amendify=True
-                        )
-                        return result, mock_amendify
+                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
+                    with patch.object(client, "observe", new_callable=AsyncMock):
+                        with patch.object(
+                            client, "auto_amendify", new_callable=AsyncMock
+                        ) as mock_amendify:
+                            result = await client.execute(
+                                "summarize", "do something", auto_amendify=True
+                            )
+                            return result, mock_amendify
 
         result, mock_amendify = asyncio.run(_run())
 

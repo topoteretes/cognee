@@ -1129,6 +1129,30 @@ try:
             ]
         return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
 
+    @mcp.tool(
+        name="run_skill",
+        description="Find the best skill for a task and execute it in one call. Automatically routes to the highest-ranked skill, observes the run, and can self-repair on failure.",
+    )
+    async def run_skill_tool(
+        task_text: str,
+        context: str = "",
+        auto_amendify: bool = True,
+        amendify_min_runs: int = 3,
+        session_id: str = "default",
+        node_set: str = "skills",
+    ) -> list:
+        """Find and execute the best skill for a task automatically."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.run(
+                task_text=task_text,
+                context=context or None,
+                auto_amendify=auto_amendify,
+                amendify_min_runs=amendify_min_runs,
+                session_id=session_id,
+                node_set=node_set,
+            )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
     # -------------------------------------------------------------------
     # Skills resources
     # -------------------------------------------------------------------

@@ -392,6 +392,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     "source_path": "",
                     "task_patterns": [],
                 }),
+                patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
                     "cognee.cognee_skills.execute.litellm.acompletion",
@@ -414,7 +415,7 @@ class TestHappyPathExecute(unittest.TestCase):
         assert result["latency_ms"] >= 0
 
     def test_execute_success_observes_score_1(self):
-        """On success, auto_observe records success_score=1.0."""
+        """On success, auto_observe records success_score=1.0 and task_pattern_id."""
         from cognee.cognee_skills.client import Skills
 
         client = Skills()
@@ -432,6 +433,11 @@ class TestHappyPathExecute(unittest.TestCase):
                     "source_path": "",
                     "task_patterns": [],
                 }),
+                patch.object(
+                    client, "_resolve_pattern",
+                    new_callable=AsyncMock,
+                    return_value="summarize:compress-text",
+                ),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
                     "cognee.cognee_skills.execute.litellm.acompletion",
@@ -453,6 +459,7 @@ class TestHappyPathExecute(unittest.TestCase):
         assert obs_call["success_score"] == 1.0
         assert obs_call["selected_skill_id"] == SKILL_ID
         assert obs_call["session_id"] == "sess-42"
+        assert obs_call["task_pattern_id"] == "summarize:compress-text"
         assert obs_call["error_type"] == ""
         assert obs_call["error_message"] == ""
 
@@ -475,6 +482,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     "source_path": "",
                     "task_patterns": [],
                 }),
+                patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
                     "cognee.cognee_skills.execute.litellm.acompletion",
@@ -554,6 +562,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     "source_path": "",
                     "task_patterns": [],
                 }),
+                patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
                     "cognee.cognee_skills.execute.litellm.acompletion",
@@ -571,20 +580,17 @@ class TestHappyPathExecute(unittest.TestCase):
         mock_observe = self._run(_go())
 
         obs_call = mock_observe.call_args[0][0]
-        # result_summary is capped at 500 chars
         assert len(obs_call["result_summary"]) <= 500
         assert obs_call["result_summary"] == long_output[:500]
 
     def test_happy_path_full_loop_load_execute_observe(self):
         """Full happy-path loop: load → execute → observe, all with real graph reads.
 
-        Uses a mock graph engine seeded with a Skill node.  load() reads
+        Uses a mock graph engine seeded with a Skill node. load() reads
         from the graph; execute_skill() calls the (mocked) LLM; observe()
-        persists the SkillRun.  Validates that IDs and scores are consistent
-        across all three steps.
+        persists the SkillRun. task_pattern_id is resolved and passed through.
         """
         from cognee.cognee_skills.client import Skills
-        from cognee.cognee_skills.observe import record_skill_run
 
         nodes = [(SKILL_NID, _SKILL_PROPS)]
         engine = _make_engine(nodes, [])
@@ -602,6 +608,11 @@ class TestHappyPathExecute(unittest.TestCase):
                     "cognee.cognee_skills.client.get_graph_engine",
                     new_callable=AsyncMock,
                     return_value=engine,
+                ),
+                patch.object(
+                    client, "_resolve_pattern",
+                    new_callable=AsyncMock,
+                    return_value="summarize:compress-text",
                 ),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
@@ -622,18 +633,139 @@ class TestHappyPathExecute(unittest.TestCase):
 
         result = self._run(_go())
 
-        # Execute result
         assert result["success"] is True
         assert "Bullet 1" in result["output"]
         assert result["skill_id"] == SKILL_ID
 
-        # Observation was recorded
         assert len(observed_runs) == 1
         obs = observed_runs[0]
         assert obs["selected_skill_id"] == SKILL_ID
         assert obs["success_score"] == 1.0
         assert obs["session_id"] == "happy-sess"
         assert obs["task_text"] == "Summarize this article"
+        assert obs["task_pattern_id"] == "summarize:compress-text"
+
+
+# ---------------------------------------------------------------------------
+# Skills.run() — one-call integration
+# ---------------------------------------------------------------------------
+
+
+class TestRun(unittest.TestCase):
+    """skills.run(task_text) = get_context + execute + observe + auto_amendify."""
+
+    def _run(self, coro):
+        return asyncio.run(coro)
+
+    def test_run_selects_top_skill_and_executes(self):
+        """run() picks the highest-scored skill and returns its output."""
+        from cognee.cognee_skills.client import Skills
+
+        client = Skills()
+
+        recs = [
+            {"skill_id": SKILL_ID, "name": "Summarize", "score": 0.95,
+             "vector_score": 0.9, "prefers_score": 0.05,
+             "instruction_summary": "", "task_pattern_id": "", "tags": []},
+        ]
+        exec_result = {
+            "output": "- Bullet 1", "skill_id": SKILL_ID,
+            "model": "openai/gpt-4o-mini", "latency_ms": 100,
+            "success": True, "error": None,
+        }
+
+        async def _go():
+            with (
+                patch.object(client, "get_context", new_callable=AsyncMock, return_value=recs),
+                patch.object(client, "execute", new_callable=AsyncMock, return_value=exec_result),
+            ):
+                return await client.run("Summarize this document")
+
+        result = self._run(_go())
+
+        assert result["success"] is True
+        assert result["output"] == "- Bullet 1"
+        assert result["skill_id"] == SKILL_ID
+        assert result["name"] == "Summarize"
+        assert result["score"] == 0.95
+
+    def test_run_passes_auto_amendify_to_execute(self):
+        """run() forwards auto_amendify and amendify_min_runs to execute()."""
+        from cognee.cognee_skills.client import Skills
+
+        client = Skills()
+
+        recs = [
+            {"skill_id": SKILL_ID, "name": "Summarize", "score": 0.9,
+             "vector_score": 0.9, "prefers_score": 0.0,
+             "instruction_summary": "", "task_pattern_id": "", "tags": []},
+        ]
+
+        async def _go():
+            with (
+                patch.object(client, "get_context", new_callable=AsyncMock, return_value=recs),
+                patch.object(client, "execute", new_callable=AsyncMock, return_value={
+                    "output": "", "skill_id": SKILL_ID, "model": "",
+                    "latency_ms": 0, "success": False, "error": "LLM error",
+                }) as mock_exec,
+            ):
+                await client.run(
+                    "Summarize this",
+                    auto_amendify=True,
+                    amendify_min_runs=5,
+                    session_id="sess-run",
+                )
+                return mock_exec
+
+        mock_exec = self._run(_go())
+
+        call_kwargs = mock_exec.call_args[1]
+        assert call_kwargs["auto_amendify"] is True
+        assert call_kwargs["amendify_min_runs"] == 5
+        assert call_kwargs["session_id"] == "sess-run"
+        assert call_kwargs["auto_observe"] is True
+
+    def test_run_returns_error_when_no_skills(self):
+        """run() returns success=False when get_context finds nothing."""
+        from cognee.cognee_skills.client import Skills
+
+        client = Skills()
+
+        async def _go():
+            with patch.object(client, "get_context", new_callable=AsyncMock, return_value=[]):
+                return await client.run("Do something")
+
+        result = self._run(_go())
+
+        assert result["success"] is False
+        assert "No skills found" in result["error"]
+        assert result["skill_id"] == ""
+
+    def test_run_passes_context_to_execute(self):
+        """run() forwards the context parameter to execute()."""
+        from cognee.cognee_skills.client import Skills
+
+        client = Skills()
+
+        recs = [
+            {"skill_id": SKILL_ID, "name": "Summarize", "score": 0.9,
+             "vector_score": 0.9, "prefers_score": 0.0,
+             "instruction_summary": "", "task_pattern_id": "", "tags": []},
+        ]
+
+        async def _go():
+            with (
+                patch.object(client, "get_context", new_callable=AsyncMock, return_value=recs),
+                patch.object(client, "execute", new_callable=AsyncMock, return_value={
+                    "output": "Done", "skill_id": SKILL_ID, "model": "",
+                    "latency_ms": 0, "success": True, "error": None,
+                }) as mock_exec,
+            ):
+                await client.run("Summarize this", context="The article is about AI.")
+                return mock_exec
+
+        mock_exec = self._run(_go())
+        assert mock_exec.call_args[1]["context"] == "The article is about AI."
 
 
 if __name__ == "__main__":

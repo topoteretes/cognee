@@ -206,11 +206,13 @@ class Skills:
         result = await execute_skill(skill=skill, task_text=task_text, context=context)
 
         if auto_observe:
+            task_pattern_id = await self._resolve_pattern(task_text, [skill], node_set=node_set)
             await self.observe(
                 {
                     "session_id": session_id,
                     "task_text": task_text,
                     "selected_skill_id": skill_id,
+                    "task_pattern_id": task_pattern_id,
                     "success_score": 1.0 if result["success"] else 0.0,
                     "result_summary": result["output"][:500] if result["output"] else "",
                     "latency_ms": result["latency_ms"],
@@ -232,6 +234,60 @@ class Skills:
                 logger.warning("Auto-amendify failed for skill '%s': %s", skill_id, exc)
                 result["amended"] = None
 
+        return result
+
+    async def run(
+        self,
+        task_text: str,
+        context: Optional[str] = None,
+        auto_amendify: bool = True,
+        amendify_min_runs: int = 3,
+        session_id: str = "default",
+        node_set: str = "skills",
+    ) -> Dict[str, Any]:
+        """Find the best skill for a task and execute it. One call does everything.
+
+        Internally: get_context → execute (with auto_observe) → auto_amendify on failure.
+
+        Args:
+            task_text: The user's task description.
+            context: Optional additional context for the LLM.
+            auto_amendify: If True and the execution fails, automatically repair the skill.
+            amendify_min_runs: Minimum failed runs before auto_amendify triggers.
+            session_id: Session ID for the observation record.
+            node_set: Graph node set.
+
+        Returns:
+            Dict with keys: output, skill_id, name, score, model, latency_ms, success, error.
+            When auto_amendify triggers, also includes an "amended" key.
+            If no skills match, returns success=False with an error message.
+        """
+        recs = await self.get_context(task_text, node_set=node_set)
+        if not recs:
+            return {
+                "output": "",
+                "skill_id": "",
+                "name": "",
+                "score": 0.0,
+                "model": "",
+                "latency_ms": 0,
+                "success": False,
+                "error": "No skills found for this task. Ingest skills first.",
+            }
+
+        top = recs[0]
+        result = await self.execute(
+            skill_id=top["skill_id"],
+            task_text=task_text,
+            context=context,
+            auto_observe=True,
+            auto_amendify=auto_amendify,
+            amendify_min_runs=amendify_min_runs,
+            session_id=session_id,
+            node_set=node_set,
+        )
+        result["name"] = top["name"]
+        result["score"] = top["score"]
         return result
 
     async def list(self, node_set: str = "skills") -> List[Dict[str, Any]]:

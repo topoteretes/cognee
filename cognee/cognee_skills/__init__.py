@@ -6,6 +6,7 @@ Primary API (via ``from cognee import skills``):
     skills.remove()              — remove a single skill by id
     skills.get_context()         — ranked skill recommendations for a task
     skills.load()                — full details (including full instructions) for a skill by id
+    skills.run()                 — find the best skill and execute it (one call does everything)
     skills.execute()             — load a skill and execute it against a task via LLM
     skills.list()                — list all ingested skills with summaries
     skills.observe()             — record a skill execution (persists to graph immediately)

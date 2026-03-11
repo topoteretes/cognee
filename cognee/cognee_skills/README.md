@@ -302,6 +302,7 @@ Without `task_pattern_id`, the run is still recorded as a `SkillRun` and feeds `
 When running the cognee MCP server, all skill operations are available as tools:
 
 ```text
+run_skill                ← one call: route → execute → observe → self-repair
 inspect_skill
 preview_amendify_skill
 amendify_skill
@@ -337,7 +338,15 @@ cd cognee-mcp && python src/server.py --transport sse
 | Windsurf | MCP settings panel |
 | Cline / Roo | VS Code MCP settings |
 
-Copy [`agent_instructions.md`](agent_instructions.md) into your IDE's agent rules and update the skills folder path.
+That's it. MCP clients discover `run_skill` and the other tools automatically from their descriptions.
+
+**Optional:** If you want the agent to prefer skills that learn from mistakes, add one line to your `CLAUDE.md` (or agent rules):
+
+```
+Use run_skill via MCP for tasks — skills learn from their mistakes and get better over time.
+```
+
+For a full tool reference, see [`agent_instructions.md`](agent_instructions.md) (also available as the `skill://agent-guide` MCP resource).
 
 ---
 
