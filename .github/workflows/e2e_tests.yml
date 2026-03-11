@@ -1043,10 +1043,15 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "redis"
 
-      - name: Install cognee-mcp (local version)
+      - name: Install cognee-mcp and override with local cognee
         shell: bash
         run: |
+          # 1. Install MCP (this will pull cognee from PyPI as a dependency)
           uv pip install -e ./cognee-mcp
+
+          # 2. Force-install the local root to overwrite the PyPI version
+          # This replaces the PyPI 'cognee' with your current branch code
+          uv pip install --force-reinstall -e .
 
       - name: Run api/tool usage logger
         env:
