@@ -64,15 +64,20 @@ class Neo4jAdapter(GraphDBInterface):
         driver: Optional[Any] = None,
         allow_anonymous: bool = False,
     ):
-        auth = self._resolve_auth(graph_database_username, graph_database_password, allow_anonymous)
         self.graph_database_name = graph_database_name
-        self.driver = driver or AsyncGraphDatabase.driver(
-            graph_database_url,
-            auth=auth,
-            max_connection_lifetime=120,
-            notifications_min_severity="OFF",
-            keep_alive=True,
-        )
+        if driver is not None:
+            self.driver = driver
+        else:
+            auth = self._resolve_auth(
+                graph_database_username, graph_database_password, allow_anonymous
+            )
+            self.driver = AsyncGraphDatabase.driver(
+                graph_database_url,
+                auth=auth,
+                max_connection_lifetime=120,
+                notifications_min_severity="OFF",
+                keep_alive=True,
+            )
 
     @staticmethod
     def _resolve_auth(

@@ -64,3 +64,28 @@ class TestResolveAuth:
         """When credentials are provided, allow_anonymous is irrelevant."""
         result = Neo4jAdapter._resolve_auth("neo4j", "pass", allow_anonymous=True)
         assert result == ("neo4j", "pass")
+
+
+class TestDriverInjection:
+    """Tests that credential validation is skipped when a driver is injected."""
+
+    def test_injected_driver_skips_credential_validation(self):
+        """When a pre-configured driver is passed, no credentials are needed."""
+        mock_driver = object()
+        adapter = Neo4jAdapter(
+            graph_database_url="bolt://localhost:7687",
+            driver=mock_driver,
+        )
+        assert adapter.driver is mock_driver
+
+    def test_injected_driver_with_no_credentials_does_not_raise(self):
+        """Injecting a driver with missing credentials should not fail."""
+        mock_driver = object()
+        # This would raise ValueError without the driver, but should succeed with it
+        adapter = Neo4jAdapter(
+            graph_database_url="bolt://localhost:7687",
+            graph_database_username="neo4j",
+            graph_database_password=None,
+            driver=mock_driver,
+        )
+        assert adapter.driver is mock_driver
