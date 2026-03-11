@@ -78,3 +78,26 @@ class TestCreateRelationalEngineSSL:
 
         url = mock_adapter.call_args[0][0]
         assert "ssl" not in url.query
+
+
+class TestCreateRelationalEngineSpecialCharacters:
+    """Verify that special characters in credentials are handled correctly."""
+
+    @patch(
+        "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
+    )
+    def test_postgres_special_chars_in_username_and_password(self, mock_adapter):
+        """Username and password with special characters should round-trip correctly."""
+        params_with_specials = {
+            **POSTGRES_PARAMS,
+            "db_username": "user#name",
+            "db_password": "p@ss:word",
+        }
+
+        create_relational_engine(**params_with_specials, db_ssl_mode="require")
+
+        url = mock_adapter.call_args[0][0]
+        # URL object should preserve the original credentials in its attributes,
+        # even though they are URL-encoded in the string form.
+        assert url.username == "user#name"
+        assert url.password == "p@ss:word"
