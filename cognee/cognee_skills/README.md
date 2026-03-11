@@ -297,56 +297,107 @@ Without `task_pattern_id`, the run is still recorded as a `SkillRun` and feeds `
 
 ---
 
-## MCP tools
+## How to use cognee-skills
 
-When running the cognee MCP server, all skill operations are available as tools:
+### Step 1: Write a SKILL.md
+
+Every skill is a markdown file. Drop a `SKILL.md` in a folder:
 
 ```text
-run_skill                ← one call: route → execute → observe → self-repair
-inspect_skill
-preview_amendify_skill
-amendify_skill
-rollback_amendify_skill
-evaluate_amendify_skill
-auto_amendify_skill
-execute_skill
-observe_skill_run
-get_skill_context
-load_skill
-list_skills
-ingest_skills
-upsert_skills
-remove_skill
+my_skills/
+  summarize/
+    SKILL.md
 ```
 
-### Start the server
+```markdown
+---
+name: summarize
+description: Summarize documents, articles, or text into concise key points.
+---
+
+## When to Activate
+
+- User asks to summarize, condense, or compress text
+
+## Process
+
+1. Identify key points
+2. Produce a concise summary
+
+## Guidelines
+
+- Preserve the original meaning
+- Keep it under 20% of the original length
+```
+
+See [`example_skills/`](example_skills/) for more examples.
+
+### Step 2: Choose how you work
+
+#### Claude Code and other MCP IDEs (no code required)
 
 ```bash
-cd cognee-mcp && python src/server.py --transport sse
+pip install cognee-mcp
 ```
 
-### Connect your IDE
+Add `.mcp.json` to your project root and check it into git — everyone on the team gets it:
 
 ```json
-{ "mcpServers": { "cognee": { "type": "sse", "url": "http://localhost:8000/sse" } } }
+{
+  "mcpServers": {
+    "cognee": {
+      "command": "cognee-mcp"
+    }
+  }
+}
 ```
 
-| IDE | Config location |
-|-----|-----------------|
-| Cursor | `.cursor/mcp.json` |
-| Claude Code | `~/.claude.json` or `claude mcp add cognee -t sse http://localhost:8000/sse` |
-| Windsurf | MCP settings panel |
-| Cline / Roo | VS Code MCP settings |
+Your IDE launches cognee locally and discovers all skill tools automatically. Nothing to host, nothing to start manually.
 
-That's it. MCP clients discover `run_skill` and the other tools automatically from their descriptions.
-
-**Optional:** If you want the agent to prefer skills that learn from mistakes, add one line to your `CLAUDE.md` (or agent rules):
+Optionally add to your `CLAUDE.md`:
 
 ```
 Use run_skill via MCP for tasks — skills learn from their mistakes and get better over time.
 ```
 
-For a full tool reference, see [`agent_instructions.md`](agent_instructions.md) (also available as the `skill://agent-guide` MCP resource).
+The agent will call `ingest_skills` to load your SKILL.md files, then use `run_skill` to find and execute the best skill for any task. Output quality is evaluated automatically, and failing skills self-repair over time.
+
+#### Python (for custom workflows)
+
+```bash
+pip install cognee
+```
+
+```python
+from cognee import skills
+
+await skills.ingest("./my_skills")
+result = await skills.run("Compress this conversation")
+```
+
+`skills.run()` does everything: finds the best skill, executes it, evaluates output quality, records the outcome, and self-repairs on failure.
+
+For step-by-step control, see the [full API](#full-api) below.
+
+### What happens behind the scenes
+
+Every time a skill runs, cognee automatically:
+
+1. **Executes** the skill via LLM
+2. **Evaluates** output quality (second LLM call, scores 0.0-1.0)
+3. **Records** the outcome to the knowledge graph
+4. **Updates** routing preferences so better skills rank higher
+5. **Self-repairs** if quality is low and enough failures have accumulated:
+
+```
+inspect: LLM diagnoses root cause from failed runs
+  → preview: LLM generates improved instructions
+  → amendify: fix applied to the graph, original preserved
+  → evaluate: before/after scores compared
+  → rollback: one call to revert if the fix didn't help
+```
+
+For manual control over the self-improvement loop, use `inspect`, `preview_amendify`, `amendify`, `evaluate_amendify`, and `rollback_amendify` — available as both Python methods and MCP tools.
 
 ---
 
