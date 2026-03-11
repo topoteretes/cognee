@@ -75,8 +75,11 @@ function getTopK() {
 }
 
 function renderLoadingSteps(steps) {
+  if (!loadingSteps) {
+    return;
+  }
   loadingSteps.innerHTML = "";
-  steps.forEach((step) => {
+  (steps || []).forEach((step) => {
     const li = document.createElement("li");
     li.textContent = `${step.name}: ${step.detail}`;
     loadingSteps.appendChild(li);
