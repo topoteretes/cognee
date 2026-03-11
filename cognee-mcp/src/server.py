@@ -885,7 +885,7 @@ try:
         description="Record a skill execution result. Required fields: task_text, selected_skill_id, success_score (0-1).",
     )
     async def observe_skill_run(run_payload: str) -> list:
-        """Record a skill run to short-term cache for later promotion."""
+        """Record a skill run to the graph and update prefers weights."""
         try:
             payload = json.loads(run_payload)
         except (json.JSONDecodeError, TypeError) as exc:
@@ -907,21 +907,6 @@ try:
             types.TextContent(
                 type="text",
                 text=f"Recorded run: skill={result.get('selected_skill_id')} score={result.get('success_score')}",
-            )
-        ]
-
-    @mcp.tool(
-        name="promote_skill_runs",
-        description="Promote cached skill runs to the knowledge graph and update preference weights.",
-    )
-    async def promote_runs(session_id: str = "") -> list:
-        """Promote runs from cache into the long-term graph."""
-        sid = session_id if session_id else None
-        result = await _skills_client.promote(session_id=sid)
-        return [
-            types.TextContent(
-                type="text",
-                text=json.dumps(result, indent=2, cls=JSONEncoder),
             )
         ]
 
@@ -1222,7 +1207,7 @@ try:
                         "   - selected_skill_id: which skill was used\n"
                         "   - success_score: 0.0 (failed) to 1.0 (perfect)\n"
                         "   - result_summary: brief description of what happened\n"
-                        "6. Call `promote_skill_runs` to update preference weights\n\n"
+                        "   Runs are persisted to the graph immediately and prefers weights update in real-time.\n\n"
                         "If a skill keeps failing, you can use the self-amendifying tools:\n"
                         "- `inspect_skill` to analyze why it fails\n"
                         "- `preview_amendify_skill` to generate an improved version\n"

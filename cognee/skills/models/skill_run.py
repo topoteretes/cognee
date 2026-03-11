@@ -48,8 +48,6 @@ class SkillRun(DataPoint):
     latency_ms: int = 0
     feedback: float = 0.0  # -1.0 to 1.0, 0 = no feedback
 
-    cache_qa_id: str = ""  # QA entry id in SessionManager cache (for promotion cleanup)
-
     previous_run: Optional["SkillRun"] = None
 
     metadata: dict = {"index_fields": ["task_text", "result_summary"]}

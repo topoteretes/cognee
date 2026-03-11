@@ -13,7 +13,6 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.skills.execute import execute_skill
 from cognee.skills.observe import record_skill_run
 from cognee.skills.pipeline import ingest_skills, upsert_skills, remove_skill
-from cognee.skills.promote import promote_skill_runs
 from cognee.skills.retrieve import recommend_skills
 
 logger = logging.getLogger(__name__)
@@ -31,7 +30,6 @@ class Skills:
         full = await skills.load("summarize")
         result = await skills.execute("summarize", "compress this conversation")
         await skills.observe({"task_text": "...", "selected_skill_id": "summarize", "success_score": 0.9})
-        await skills.promote()
     """
 
     async def ingest(
@@ -285,10 +283,6 @@ class Skills:
             latency_ms=run.get("latency_ms", 0),
         )
 
-    async def promote(self, session_id: Optional[str] = None) -> Dict[str, Any]:
-        """Promote cached runs to the long-term graph and update prefers edges."""
-        return await promote_skill_runs(session_id=session_id)
-
     # ------------------------------------------------------------------
     # Self-amendifying: inspect → preview_amendify → amendify / rollback
     # ------------------------------------------------------------------
@@ -501,9 +495,6 @@ class Skills:
             Summary dict with inspection, amendment, and apply results, or None if
             the skill has insufficient failures to trigger amendifying.
         """
-        # Promote cached runs to graph first so inspect can see them
-        await self.promote()
-
         inspection = await self.inspect(
             skill_id=skill_id,
             min_runs=min_runs,

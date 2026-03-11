@@ -6,6 +6,7 @@ import hashlib
 import logging
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -51,14 +52,29 @@ async def _load_skill_from_graph(skill_id: str, node_set: str) -> Optional[tuple
     return None
 
 
-async def _update_skill_instructions(skill_nid: str, new_instructions: str, engine) -> str:
-    """Update a skill node's instructions and content_hash in the graph."""
-    new_hash = _content_hash(new_instructions)
-    await engine.update_node(
-        skill_nid,
-        {"instructions": new_instructions, "content_hash": new_hash},
+def _reconstruct_amendment(node_dict: dict):
+    """Reconstruct a SkillAmendment DataPoint from a raw graph node dict."""
+    from cognee.skills.models.skill_amendment import SkillAmendment
+
+    node_id = node_dict.get("id", node_dict.get("nid", ""))
+    return SkillAmendment(
+        id=uuid.UUID(str(node_id)) if node_id else uuid.uuid4(),
+        amendment_id=node_dict.get("amendment_id", ""),
+        skill_id=node_dict.get("skill_id", ""),
+        skill_name=node_dict.get("skill_name", ""),
+        inspection_id=node_dict.get("inspection_id", ""),
+        original_instructions=node_dict.get("original_instructions", ""),
+        amended_instructions=node_dict.get("amended_instructions", ""),
+        change_explanation=node_dict.get("change_explanation", ""),
+        expected_improvement=node_dict.get("expected_improvement", ""),
+        status=node_dict.get("status", "proposed"),
+        amendment_model=node_dict.get("amendment_model", ""),
+        amendment_confidence=float(node_dict.get("amendment_confidence", 0.0)),
+        pre_amendment_avg_score=float(node_dict.get("pre_amendment_avg_score", 0.0)),
+        applied_at_ms=int(node_dict.get("applied_at_ms", 0)),
+        post_amendment_avg_score=float(node_dict.get("post_amendment_avg_score", 0.0)),
+        post_amendment_run_count=int(node_dict.get("post_amendment_run_count", 0)),
     )
-    return new_hash
 
 
 async def amendify(
@@ -119,19 +135,15 @@ async def amendify(
             Path(source_path).write_text(new_content, encoding="utf-8")
             logger.info("Wrote amended instructions to %s", source_path)
 
-    # Update skill in graph
-    engine = await get_graph_engine()
-    new_hash = await _update_skill_instructions(skill_nid, amended_instructions, engine)
-
-    # Re-enrich the updated skill
+    # Update skill in graph + re-enrich
+    new_hash = _content_hash(amended_instructions)
     try:
         from cognee.skills.tasks.enrich_skills import enrich_skills
         from cognee.skills.tasks.materialize_task_patterns import materialize_task_patterns
         from cognee.skills.models.skill import Skill
 
-        # Build a minimal Skill object for enrichment
         skill_obj = Skill(
-            id=skill_props.get("id", skill_nid),
+            id=uuid.UUID(str(skill_props.get("id", skill_nid))),
             skill_id=skill_id,
             name=skill_name,
             description=skill_props.get("description", ""),
@@ -144,8 +156,21 @@ async def amendify(
             materialized = await materialize_task_patterns(enriched)
             await add_data_points(materialized)
             logger.info("Re-enriched skill '%s' after amendment", skill_name)
+        else:
+            await add_data_points([skill_obj])
     except Exception as exc:
-        logger.warning("Re-enrichment after amendment failed: %s", exc)
+        logger.warning("Re-enrichment after amendment failed, persisting basic update: %s", exc)
+        from cognee.skills.models.skill import Skill
+
+        skill_obj = Skill(
+            id=uuid.UUID(str(skill_props.get("id", skill_nid))),
+            skill_id=skill_id,
+            name=skill_name,
+            description=skill_props.get("description", ""),
+            instructions=amended_instructions,
+            content_hash=new_hash,
+        )
+        await add_data_points([skill_obj])
 
     # Emit change event
     event = _make_change_event(
@@ -153,13 +178,12 @@ async def amendify(
     )
     await add_data_points([event])
 
-    # Update amendment status
+    # Update amendment status via DataPoint upsert
     applied_at_ms = int(time.time() * 1000)
-    amendment_nid = amendment_node.get("nid", "")
-    if amendment_nid:
-        await engine.update_node(
-            amendment_nid, {"status": "applied", "applied_at_ms": applied_at_ms}
-        )
+    amendment_node["status"] = "applied"
+    amendment_node["applied_at_ms"] = applied_at_ms
+    amendment_dp = _reconstruct_amendment(amendment_node)
+    await add_data_points([amendment_dp])
 
     result = {
         "success": True,
@@ -245,18 +269,15 @@ async def rollback_amendify(
             Path(source_path).write_text(new_content, encoding="utf-8")
             logger.info("Restored original instructions to %s", source_path)
 
-    # Restore original instructions
-    engine = await get_graph_engine()
-    new_hash = await _update_skill_instructions(skill_nid, original_instructions, engine)
-
-    # Re-enrich
+    # Restore original instructions + re-enrich
+    new_hash = _content_hash(original_instructions)
     try:
         from cognee.skills.tasks.enrich_skills import enrich_skills
         from cognee.skills.tasks.materialize_task_patterns import materialize_task_patterns
         from cognee.skills.models.skill import Skill
 
         skill_obj = Skill(
-            id=skill_props.get("id", skill_nid),
+            id=uuid.UUID(str(skill_props.get("id", skill_nid))),
             skill_id=skill_id,
             name=skill_name,
             description=skill_props.get("description", ""),
@@ -267,8 +288,21 @@ async def rollback_amendify(
         if enriched:
             materialized = await materialize_task_patterns(enriched)
             await add_data_points(materialized)
+        else:
+            await add_data_points([skill_obj])
     except Exception as exc:
-        logger.warning("Re-enrichment after rollback failed: %s", exc)
+        logger.warning("Re-enrichment after rollback failed, persisting basic update: %s", exc)
+        from cognee.skills.models.skill import Skill
+
+        skill_obj = Skill(
+            id=uuid.UUID(str(skill_props.get("id", skill_nid))),
+            skill_id=skill_id,
+            name=skill_name,
+            description=skill_props.get("description", ""),
+            instructions=original_instructions,
+            content_hash=new_hash,
+        )
+        await add_data_points([skill_obj])
 
     # Emit change event
     event = _make_change_event(
@@ -276,10 +310,10 @@ async def rollback_amendify(
     )
     await add_data_points([event])
 
-    # Update amendment status
-    amendment_nid = amendment_node.get("nid", "")
-    if amendment_nid:
-        await engine.update_node(amendment_nid, {"status": "rolled_back"})
+    # Update amendment status via DataPoint upsert
+    amendment_node["status"] = "rolled_back"
+    amendment_dp = _reconstruct_amendment(amendment_node)
+    await add_data_points([amendment_dp])
 
     logger.info("Rolled back amendment '%s' for skill '%s'", amendment_id, skill_name)
     return True
@@ -323,16 +357,11 @@ async def evaluate_amendify(
     improvement = post_avg - pre_avg
     recommendation = "keep" if improvement >= 0 else "rollback"
 
-    # Update the amendment node with post-amendment stats
-    amendment_nid = amendment_node.get("nid", "")
-    if amendment_nid:
-        await engine.update_node(
-            amendment_nid,
-            {
-                "post_amendment_avg_score": post_avg,
-                "post_amendment_run_count": len(post_scores),
-            },
-        )
+    # Update the amendment node with post-amendment stats via DataPoint upsert
+    amendment_node["post_amendment_avg_score"] = post_avg
+    amendment_node["post_amendment_run_count"] = len(post_scores)
+    amendment_dp = _reconstruct_amendment(amendment_node)
+    await add_data_points([amendment_dp])
 
     return {
         "amendment_id": amendment_id,

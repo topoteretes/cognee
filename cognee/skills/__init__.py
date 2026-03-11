@@ -8,8 +8,7 @@ Primary API (via ``from cognee import skills``):
     skills.load()                — full details (including full instructions) for a skill by id
     skills.execute()             — load a skill and execute it against a task via LLM
     skills.list()                — list all ingested skills with summaries
-    skills.observe()             — record a skill execution to short-term cache
-    skills.promote()             — promote cached runs and update prefers edges
+    skills.observe()             — record a skill execution (persists to graph immediately)
     skills.inspect()             — inspect why a skill fails
     skills.preview_amendify()    — preview a proposed amendment to fix a failing skill
     skills.amendify()            — apply a proposed amendment
@@ -24,8 +23,7 @@ Lower-level API:
     remove_skill()               — remove a single skill by id from graph + vector
     recommend_skills()           — semantic retrieval ranked by vector similarity + prefers weights
     execute_skill()              — execute a loaded skill dict against a task via LLM
-    record_skill_run()           — record a skill execution to short-term cache
-    promote_skill_runs()         — promote cached runs to the long-term graph and update prefers edges
+    record_skill_run()           — record a skill execution to graph and update prefers weights
     inspect_skill()              — analyze failed runs and produce an inspection
     preview_skill_amendify()     — generate amended instructions from an inspection
     amendify()                   — apply an amendment to a skill in the graph
@@ -42,7 +40,6 @@ from cognee.skills.execute import execute_skill
 from cognee.skills.pipeline import ingest_skills, upsert_skills, remove_skill
 from cognee.skills.retrieve import recommend_skills
 from cognee.skills.observe import record_skill_run
-from cognee.skills.promote import promote_skill_runs
 from cognee.skills.inspect import inspect_skill
 from cognee.skills.preview_amendify import preview_skill_amendify
 from cognee.skills.amendify import amendify, rollback_amendify, evaluate_amendify
@@ -68,7 +65,6 @@ __all__ = [
     "recommend_skills",
     "execute_skill",
     "record_skill_run",
-    "promote_skill_runs",
     "inspect_skill",
     "preview_skill_amendify",
     "amendify",

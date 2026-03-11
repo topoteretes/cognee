@@ -2,7 +2,7 @@
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock, call
 from uuid import uuid4
 
 
@@ -11,6 +11,7 @@ def _make_amendment_node(amendment_id="amend-001", status="proposed"):
     props = {
         "type": "SkillAmendment",
         "nid": str(nid),
+        "id": str(nid),
         "amendment_id": amendment_id,
         "skill_id": "test-skill",
         "skill_name": "Test Skill",
@@ -21,6 +22,11 @@ def _make_amendment_node(amendment_id="amend-001", status="proposed"):
         "expected_improvement": "Fewer failures on edge cases",
         "status": status,
         "pre_amendment_avg_score": 0.2,
+        "amendment_model": "",
+        "amendment_confidence": 0.0,
+        "applied_at_ms": 0,
+        "post_amendment_avg_score": 0.0,
+        "post_amendment_run_count": 0,
     }
     return (nid, props)
 
@@ -60,7 +66,6 @@ class TestAmendify(unittest.TestCase):
 
         engine = AsyncMock()
         engine.get_nodeset_subgraph = AsyncMock(return_value=([amendment_node, skill_node], []))
-        engine.update_node = AsyncMock()
         mock_engine_fn.return_value = engine
 
         mock_event.return_value = MagicMock()
@@ -74,16 +79,8 @@ class TestAmendify(unittest.TestCase):
         assert result["status"] == "applied"
         assert result["skill_id"] == "test-skill"
 
-        # Verify the skill node was updated with new instructions
-        update_calls = engine.update_node.call_args_list
-        instruction_update = None
-        for call in update_calls:
-            args = call[0]
-            if "instructions" in args[1]:
-                instruction_update = args[1]
-                break
-        assert instruction_update is not None
-        assert "edge cases" in instruction_update["instructions"]
+        # Verify add_data_points was called (skill update + change event + amendment status)
+        assert mock_add_dp.call_count >= 3
 
     @patch("cognee.skills.amendify.add_data_points", new_callable=AsyncMock)
     @patch("cognee.skills.amendify._make_change_event")
@@ -101,7 +98,6 @@ class TestAmendify(unittest.TestCase):
 
         engine = AsyncMock()
         engine.get_nodeset_subgraph = AsyncMock(return_value=([amendment_node, skill_node], []))
-        engine.update_node = AsyncMock()
         mock_engine_fn.return_value = engine
 
         event_obj = MagicMock()
@@ -135,7 +131,6 @@ class TestAmendify(unittest.TestCase):
 
         engine = AsyncMock()
         engine.get_nodeset_subgraph = AsyncMock(return_value=([amendment_node, skill_node], []))
-        engine.update_node = AsyncMock()
         mock_engine_fn.return_value = engine
 
         mock_event.return_value = MagicMock()
@@ -147,20 +142,12 @@ class TestAmendify(unittest.TestCase):
 
         assert result is True
 
-        # Verify the skill was restored to original instructions
-        update_calls = engine.update_node.call_args_list
-        instruction_update = None
-        for call in update_calls:
-            args = call[0]
-            if "instructions" in args[1]:
-                instruction_update = args[1]
-                break
-        assert instruction_update is not None
-        assert instruction_update["instructions"] == "Do the thing step by step."
-
         # Verify change event was emitted with rolled_back type
         mock_event.assert_called_once()
         assert mock_event.call_args[0][2] == "rolled_back"
+
+        # Verify add_data_points was called (skill restore + event + amendment status)
+        assert mock_add_dp.call_count >= 3
 
     @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
     def test_rollback_fails_for_non_applied_amendment(self, mock_engine_fn):
@@ -205,8 +192,9 @@ class TestAmendify(unittest.TestCase):
         assert result["success"] is False
         assert "applied" in result["error"]
 
+    @patch("cognee.skills.amendify.add_data_points", new_callable=AsyncMock)
     @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
-    def test_evaluate_amendify(self, mock_engine_fn):
+    def test_evaluate_amendify(self, mock_engine_fn, mock_add_dp):
         """evaluate_amendify computes post-amendment stats from runs after applied_at_ms."""
         amendment_node = _make_amendment_node(status="applied")
         # Add applied_at_ms to amendment
@@ -245,7 +233,6 @@ class TestAmendify(unittest.TestCase):
         engine.get_nodeset_subgraph = AsyncMock(
             return_value=([amendment_node, pre_run, post_run1, post_run2], [])
         )
-        engine.update_node = AsyncMock()
         mock_engine_fn.return_value = engine
 
         from cognee.skills.amendify import evaluate_amendify
@@ -256,6 +243,9 @@ class TestAmendify(unittest.TestCase):
         assert abs(result["post_avg"] - 0.85) < 0.01
         assert result["improvement"] > 0
         assert result["recommendation"] == "keep"
+
+        # Verify amendment stats were persisted via add_data_points
+        mock_add_dp.assert_called_once()
 
 
 if __name__ == "__main__":

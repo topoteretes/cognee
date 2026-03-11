@@ -8,6 +8,7 @@ AI agents usually scan all `SKILL.md` files or rely on keyword matching to choos
 
 - **Semantic routing** — finds the right skill by meaning, not keywords
 - **Learns from outcomes** — skills that work rank higher, skills that fail rank lower
+- **Self-amendifying** — skills that keep failing get automatically inspected and fixed
 - **Works everywhere** — Python, CLI, MCP (Cursor, Claude Code, Windsurf, Cline, etc.)
 
 Instead of repeatedly scanning all skills or planning from scratch, agents can retrieve the best skill instantly and improve their routing over time.
@@ -72,22 +73,18 @@ await skills.ingest("./my_skills")
 recs = await skills.get_context("compress my conversation to 8k tokens")
 # [{"skill_id": "summarize", "score": 0.98, ...}]
 
-# Record what happened
+# Record what happened (persists to graph and updates preferences immediately)
 await skills.observe({
     "task_text": "compress my conversation to 8k tokens",
     "selected_skill_id": "summarize",
     "success_score": 0.92,
 })
 
-# Update preference weights
-await skills.promote()
-
 # Next time, summarize ranks even higher for compression tasks
 recs = await skills.get_context("compress my conversation to 8k tokens")
 ```
 
-`skills.observe()` stores run outcomes in a short-term cache.
-`skills.promote()` periodically updates routing weights in the graph so future routing improves.
+`skills.observe()` persists the run to the graph and updates routing preferences immediately — no extra step needed.
 
 ---
 
@@ -102,7 +99,13 @@ Without structured routing, agents often:
 With `cognee-skills`, the routing loop becomes:
 
 ```text
-retrieve best skill → execute → observe outcome → promote learning → route better next time
+retrieve best skill → execute → observe outcome → route better next time
+```
+
+When a skill keeps failing, the self-amendifying loop kicks in:
+
+```text
+inspect why it fails → preview an amendment → apply the fix → evaluate improvement
 ```
 
 ---
@@ -113,27 +116,21 @@ retrieve best skill → execute → observe outcome → promote learning → rou
 |------|-----|
 | **Ingest skills** | `skills.ingest("./my_skills")` — parses `SKILL.md`, enriches via LLM, stores in graph + vector |
 | **Route tasks** | `skills.get_context("task description")` — semantic search + learned preferences |
+| **Execute a skill** | `skills.execute("skill-id", "task text")` — load and run via LLM |
 | **Load full details** | `skills.load("skill-id")` — returns instructions, patterns, metadata |
 | **List all skills** | `skills.list()` — everything currently ingested |
-| **Record outcomes** | `skills.observe({...})` — cache successes and failures |
-| **Update preferences** | `skills.promote()` — bake cached runs into the graph |
+| **Record outcomes** | `skills.observe({...})` — persist run and update preferences immediately |
 | **Sync changes** | `skills.upsert("./my_skills")` — skip unchanged, update changed, remove deleted |
 | **Remove a skill** | `skills.remove("skill-id")` — delete from graph and vector |
+| **Inspect failures** | `skills.inspect("skill-id")` — LLM analyzes why a skill keeps failing |
+| **Preview amendment** | `skills.preview_amendify("skill-id")` — generate improved instructions |
+| **Apply amendment** | `skills.amendify(amendment_id)` — apply the fix to the graph |
+| **Rollback amendment** | `skills.rollback_amendify(amendment_id)` — revert if the fix didn't help |
+| **Evaluate amendment** | `skills.evaluate_amendify(amendment_id)` — compare pre/post success scores |
+| **Auto-amendify** | `skills.auto_amendify("skill-id")` — full pipeline in one call |
 | **Visualize the graph** | `await cognee.visualize_graph("graph.html")` — interactive HTML |
 
-All of these are also available as **CLI commands** and **MCP tools**.
-
----
-
-## CLI
-
-```bash
-cognee-cli skills ingest ./my_skills
-cognee-cli skills recommend "summarize this"
-cognee-cli skills list
-cognee-cli skills observe '{"task_text":"...", "selected_skill_id":"summarize", "success_score":0.9}'
-cognee-cli skills promote
-```
+All of these are also available as **MCP tools**.
 
 ---
 
@@ -145,11 +142,17 @@ When running the cognee MCP server, all skill operations are available as tools:
 get_skill_context
 load_skill
 list_skills
+execute_skill
 observe_skill_run
-promote_skill_runs
 ingest_skills
 upsert_skills
 remove_skill
+inspect_skill
+preview_amendify_skill
+amendify_skill
+rollback_amendify_skill
+evaluate_amendify_skill
+auto_amendify_skill
 ```
 
 ---
@@ -187,7 +190,7 @@ cognee-cli skills ingest ./my_skills
 
 Copy [`agent_instructions.md`](agent_instructions.md) into your IDE's agent rules (`.cursor/rules/`, `CLAUDE.md`, etc.) and update the skills folder path.
 
-Your agent will now **semantically route tasks to skills and improve over time**.
+Your agent will now **semantically route tasks to skills, improve over time, and self-fix failing skills**.
 
 ---
 
@@ -198,9 +201,14 @@ SKILL.md files
     → skills.ingest()        parse + LLM enrich + store in graph/vector
     → skills.get_context()   semantic search + preference weights → ranked skills
     → agent executes skill
-    → skills.observe()       cache the outcome
-    → skills.promote()       update TaskPattern→Skill preference edges
+    → skills.observe()       persist run + update preference edges immediately
     → skills.get_context()   preferences now reflect historical performance
+
+When a skill keeps failing:
+    → skills.inspect()           analyze failed runs, identify root cause
+    → skills.preview_amendify()  generate improved instructions
+    → skills.amendify()          apply the fix to the graph
+    → skills.evaluate_amendify() compare before/after success scores
 ```
 
 ---
@@ -214,10 +222,10 @@ python -m cognee.skills.example
 Runs the full loop:
 
 ```text
-ingest → route → execute → record → promote → re-route
+ingest → route → execute → record → re-route
 ```
 
-You’ll see the **preference boost appear in the routing scores** after promotion.
+You'll see the **preference boost appear in the routing scores** after recording outcomes.
 
 An interactive graph visualization is also generated at the end.
 
@@ -250,5 +258,6 @@ my_skills/
 - **searchable**
 - **routable**
 - **learnable**
+- **self-improving**
 
 So agents stop treating skills as loose markdown files and start using them as structured workflows that improve with use.

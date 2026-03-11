@@ -233,9 +233,8 @@ class TestExecuteSkill(unittest.TestCase):
         client = Skills()
 
         async def _run():
-            with patch.object(client, "promote", new_callable=AsyncMock):
-                with patch.object(client, "inspect", new_callable=AsyncMock, return_value=None):
-                    return await client.auto_amendify("summarize")
+            with patch.object(client, "inspect", new_callable=AsyncMock, return_value=None):
+                return await client.auto_amendify("summarize")
 
         result = asyncio.run(_run())
         assert result is None
@@ -272,24 +271,23 @@ class TestExecuteSkill(unittest.TestCase):
         mock_apply = {"success": True, "status": "applied", "amendment_id": "a1"}
 
         async def _run():
-            with patch.object(client, "promote", new_callable=AsyncMock):
+            with patch.object(
+                client, "inspect", new_callable=AsyncMock, return_value=mock_inspection
+            ):
                 with patch.object(
-                    client, "inspect", new_callable=AsyncMock, return_value=mock_inspection
-                ):
+                    client,
+                    "preview_amendify",
+                    new_callable=AsyncMock,
+                    return_value=mock_amendment,
+                ) as mock_pa:
                     with patch.object(
                         client,
-                        "preview_amendify",
+                        "amendify",
                         new_callable=AsyncMock,
-                        return_value=mock_amendment,
-                    ) as mock_pa:
-                        with patch.object(
-                            client,
-                            "amendify",
-                            new_callable=AsyncMock,
-                            return_value=mock_apply,
-                        ) as mock_am:
-                            result = await client.auto_amendify("summarize", min_runs=1)
-                            return result, mock_pa, mock_am
+                        return_value=mock_apply,
+                    ) as mock_am:
+                        result = await client.auto_amendify("summarize", min_runs=1)
+                        return result, mock_pa, mock_am
 
         result, mock_pa, mock_am = asyncio.run(_run())
 

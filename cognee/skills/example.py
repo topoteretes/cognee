@@ -1,7 +1,7 @@
 """End-to-end demo: closed feedback loop.
 
 Ingest skills -> recommend -> pick top -> simulate execution -> record ->
-promote -> recommend again (prefers weights shift).
+recommend again (prefers weights shift).
 
 Usage:
     python -m cognee.skills.example                           # uses built-in example_skills/
@@ -24,7 +24,6 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.skills.pipeline import ingest_skills
 from cognee.skills.observe import record_skill_run
-from cognee.skills.promote import promote_skill_runs
 from cognee.skills.retrieve import recommend_skills
 
 COGNEE_SYSTEM_DIR = Path(__file__).parent / ".cognee_system"
@@ -106,11 +105,11 @@ def _print_recs(recs: List[Dict[str, Any]]) -> None:
             print(f"       prior_runs={len(rec['prior_runs'])}  best_score={best}")
 
 
-async def _recommend_record_promote(
+async def _recommend_and_record(
     task_text: str,
     step_label: str,
 ) -> List[Dict[str, Any]]:
-    """Full closed-loop iteration: recommend -> pick top -> record -> promote."""
+    """Full closed-loop iteration: recommend -> pick top -> record."""
     print(f"\n{'=' * 60}")
     print(f"{step_label}")
     print("=" * 60)
@@ -160,10 +159,6 @@ async def _recommend_record_promote(
         f"score={sim['success_score']}  pattern={pattern_id}"
     )
 
-    # Promote
-    result = await promote_skill_runs(session_id=SESSION_ID)
-    print(f"  Promoted: {result['promoted']}  Edges updated: {result['edges_updated']}")
-
     return recs
 
 
@@ -201,14 +196,14 @@ async def main() -> None:
 
     # ── Step 2: First recommend + record + promote (prefers all zero) ──
     query1 = "Compress my conversation history to fit in 8k tokens"
-    baseline_recs = await _recommend_record_promote(
+    baseline_recs = await _recommend_and_record(
         query1,
         "STEP 2: First query (no prefers data yet)",
     )
 
     # ── Step 3: Second task + recommend + record + promote ──
     query2 = "Reduce my prompt to under 4k tokens"
-    await _recommend_record_promote(
+    await _recommend_and_record(
         query2,
         "STEP 3: Second query (reinforces prefers stats)",
     )
