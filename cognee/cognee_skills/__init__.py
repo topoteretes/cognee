@@ -37,7 +37,7 @@ Models:
 """
 
 from cognee.cognee_skills.client import Skills, skills
-from cognee.cognee_skills.execute import execute_skill
+from cognee.cognee_skills.execute import evaluate_output, execute_skill
 from cognee.cognee_skills.pipeline import ingest_skills, upsert_skills, remove_skill
 from cognee.cognee_skills.retrieve import recommend_skills
 from cognee.cognee_skills.observe import record_skill_run
@@ -64,6 +64,7 @@ __all__ = [
     "upsert_skills",
     "remove_skill",
     "recommend_skills",
+    "evaluate_output",
     "execute_skill",
     "record_skill_run",
     "inspect_skill",

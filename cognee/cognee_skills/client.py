@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.engine.models.node_set import NodeSet
 
-from cognee.cognee_skills.execute import execute_skill
+from cognee.cognee_skills.execute import evaluate_output, execute_skill
 from cognee.cognee_skills.observe import record_skill_run
 from cognee.cognee_skills.pipeline import ingest_skills, upsert_skills, remove_skill
 from cognee.cognee_skills.retrieve import recommend_skills
@@ -166,6 +166,7 @@ class Skills:
         task_text: str,
         context: Optional[str] = None,
         auto_observe: bool = True,
+        auto_evaluate: bool = True,
         auto_amendify: bool = False,
         amendify_min_runs: int = 3,
         amendify_score_threshold: float = 0.5,
@@ -179,6 +180,9 @@ class Skills:
             task_text: The user's task description.
             context: Optional additional context for the LLM.
             auto_observe: If True, automatically record the run to the observe cache.
+            auto_evaluate: If True, score output quality with a second LLM call.
+                The score (0.0-1.0) replaces the binary success/fail for observation,
+                giving the self-improvement loop a real quality signal.
             auto_amendify: If True and the execution fails, automatically run the
                 full inspect → preview → amendify pipeline. The amended
                 skill is NOT re-executed in the same call to avoid loops.
@@ -189,6 +193,7 @@ class Skills:
 
         Returns:
             Dict with keys: output, skill_id, model, latency_ms, success, error.
+            When auto_evaluate runs, also includes "quality_score" and "quality_reason".
             When auto_amendify triggers, also includes an "amended" key with the
             amendment result.
         """
@@ -205,7 +210,23 @@ class Skills:
 
         result = await execute_skill(skill=skill, task_text=task_text, context=context)
 
+        # Evaluate output quality if execution succeeded and auto_evaluate is on
+        quality_score = None
+        if auto_evaluate and result["success"] and result["output"]:
+            evaluation = await evaluate_output(
+                skill=skill, task_text=task_text, output=result["output"]
+            )
+            quality_score = evaluation["score"]
+            result["quality_score"] = quality_score
+            result["quality_reason"] = evaluation["reason"]
+
         if auto_observe:
+            # Use quality score if available, otherwise binary
+            if quality_score is not None:
+                success_score = quality_score
+            else:
+                success_score = 1.0 if result["success"] else 0.0
+
             task_pattern_id = await self._resolve_pattern(task_text, [skill], node_set=node_set)
             await self.observe(
                 {
@@ -213,7 +234,7 @@ class Skills:
                     "task_text": task_text,
                     "selected_skill_id": skill_id,
                     "task_pattern_id": task_pattern_id,
-                    "success_score": 1.0 if result["success"] else 0.0,
+                    "success_score": success_score,
                     "result_summary": result["output"][:500] if result["output"] else "",
                     "latency_ms": result["latency_ms"],
                     "error_type": "llm_error" if result["error"] else "",
@@ -221,7 +242,11 @@ class Skills:
                 }
             )
 
-        if auto_amendify and not result["success"]:
+        # Trigger amendify on LLM error OR low quality score
+        should_amendify = not result["success"] or (
+            quality_score is not None and quality_score < amendify_score_threshold
+        )
+        if auto_amendify and should_amendify:
             try:
                 amendify_result = await self.auto_amendify(
                     skill_id=skill_id,
@@ -240,6 +265,7 @@ class Skills:
         self,
         task_text: str,
         context: Optional[str] = None,
+        auto_evaluate: bool = True,
         auto_amendify: bool = True,
         amendify_min_runs: int = 3,
         session_id: str = "default",
@@ -247,18 +273,22 @@ class Skills:
     ) -> Dict[str, Any]:
         """Find the best skill for a task and execute it. One call does everything.
 
-        Internally: get_context → execute (with auto_observe) → auto_amendify on failure.
+        Internally: get_context → execute (with auto_observe + auto_evaluate) →
+        auto_amendify on failure or low quality.
 
         Args:
             task_text: The user's task description.
             context: Optional additional context for the LLM.
-            auto_amendify: If True and the execution fails, automatically repair the skill.
+            auto_evaluate: If True, score output quality with a second LLM call.
+            auto_amendify: If True and the execution fails or scores low,
+                automatically repair the skill.
             amendify_min_runs: Minimum failed runs before auto_amendify triggers.
             session_id: Session ID for the observation record.
             node_set: Graph node set.
 
         Returns:
             Dict with keys: output, skill_id, name, score, model, latency_ms, success, error.
+            When auto_evaluate runs, also includes "quality_score" and "quality_reason".
             When auto_amendify triggers, also includes an "amended" key.
             If no skills match, returns success=False with an error message.
         """
@@ -281,6 +311,7 @@ class Skills:
             task_text=task_text,
             context=context,
             auto_observe=True,
+            auto_evaluate=auto_evaluate,
             auto_amendify=auto_amendify,
             amendify_min_runs=amendify_min_runs,
             session_id=session_id,

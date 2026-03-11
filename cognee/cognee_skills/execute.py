@@ -21,6 +21,26 @@ Follow the instructions above to complete the user's task. \
 Be thorough but concise. If the instructions reference tools or external actions \
 you cannot perform, describe what should be done instead."""
 
+EVALUATE_PROMPT = """\
+You are a quality evaluator. Score how well the output fulfills the task \
+given the skill's instructions.
+
+Skill: {skill_name}
+Instructions: {instructions}
+Task: {task_text}
+
+Output to evaluate:
+{output}
+
+Respond with ONLY a JSON object: {{"score": <float 0.0 to 1.0>, "reason": "<one sentence>"}}
+
+Scoring guide:
+- 1.0: Output fully and correctly addresses the task per the instructions
+- 0.7-0.9: Mostly correct, minor gaps
+- 0.4-0.6: Partially addresses the task, significant gaps
+- 0.1-0.3: Mostly wrong or off-topic
+- 0.0: Completely fails or is empty"""
+
 
 async def execute_skill(
     skill: Dict[str, Any],
@@ -96,3 +116,50 @@ async def execute_skill(
             "success": False,
             "error": str(exc),
         }
+
+
+async def evaluate_output(
+    skill: Dict[str, Any],
+    task_text: str,
+    output: str,
+) -> Dict[str, Any]:
+    """Score output quality with a second LLM call.
+
+    Returns:
+        Dict with keys: score (float 0.0-1.0), reason (str).
+    """
+    import json as _json
+
+    llm_config = get_llm_config()
+
+    prompt = EVALUATE_PROMPT.format(
+        skill_name=skill.get("name", "unknown"),
+        instructions=skill.get("instructions", ""),
+        task_text=task_text,
+        output=output[:2000],
+    )
+
+    try:
+        response = await litellm.acompletion(
+            model=llm_config.llm_model,
+            messages=[{"role": "user", "content": prompt}],
+            api_key=llm_config.llm_api_key,
+        )
+        raw = response.choices[0].message.content or ""
+        # Strip markdown fences if present
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        parsed = _json.loads(cleaned)
+        score = max(0.0, min(1.0, float(parsed.get("score", 0.0))))
+        reason = str(parsed.get("reason", ""))
+        logger.info(
+            "Evaluated skill '%s' output: score=%.2f reason=%s",
+            skill.get("skill_id", ""),
+            score,
+            reason,
+        )
+        return {"score": score, "reason": reason}
+    except Exception as exc:
+        logger.warning("Output evaluation failed for '%s': %s", skill.get("skill_id", ""), exc)
+        return {"score": 1.0, "reason": f"Evaluation failed: {exc}"}

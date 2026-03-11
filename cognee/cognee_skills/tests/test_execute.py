@@ -28,6 +28,8 @@ SAMPLE_SKILL = {
     "task_patterns": [],
 }
 
+MOCK_EVALUATION = {"score": 0.85, "reason": "Good summary"}
+
 
 class TestExecuteSkill(unittest.TestCase):
     @patch("cognee.cognee_skills.execute.litellm.acompletion")
@@ -95,6 +97,59 @@ class TestExecuteSkill(unittest.TestCase):
         assert "rate limit" in result["error"]
         assert result["latency_ms"] >= 0
 
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
+    def test_evaluate_output(self, mock_config, mock_acompletion):
+        """evaluate_output scores output quality via a second LLM call."""
+        mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
+        mock_acompletion.return_value = _make_mock_response(
+            '{"score": 0.75, "reason": "Decent but missing key points"}'
+        )
+
+        from cognee.cognee_skills.execute import evaluate_output
+
+        result = asyncio.run(
+            evaluate_output(
+                skill=SAMPLE_SKILL,
+                task_text="Summarize this article",
+                output="Some summary text",
+            )
+        )
+
+        assert result["score"] == 0.75
+        assert "missing key points" in result["reason"]
+
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
+    def test_evaluate_output_handles_error(self, mock_config, mock_acompletion):
+        """evaluate_output returns score 1.0 on failure (optimistic fallback)."""
+        mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
+        mock_acompletion.side_effect = Exception("API error")
+
+        from cognee.cognee_skills.execute import evaluate_output
+
+        result = asyncio.run(
+            evaluate_output(skill=SAMPLE_SKILL, task_text="task", output="output")
+        )
+
+        assert result["score"] == 1.0
+        assert "Evaluation failed" in result["reason"]
+
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
+    def test_evaluate_output_clamps_score(self, mock_config, mock_acompletion):
+        """evaluate_output clamps score to [0.0, 1.0]."""
+        mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
+        mock_acompletion.return_value = _make_mock_response('{"score": 1.5, "reason": "great"}')
+
+        from cognee.cognee_skills.execute import evaluate_output
+
+        result = asyncio.run(
+            evaluate_output(skill=SAMPLE_SKILL, task_text="task", output="output")
+        )
+
+        assert result["score"] == 1.0
+
     def test_client_execute_skill_not_found(self):
         """Client.execute returns error when skill doesn't exist."""
         from cognee.cognee_skills.client import Skills
@@ -125,16 +180,18 @@ class TestExecuteSkill(unittest.TestCase):
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
                 with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value="summarize:compress-text"):
                     with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
-                        result = await client.execute("summarize", "do something")
-                        return result, mock_observe
+                        with patch("cognee.cognee_skills.client.evaluate_output", new_callable=AsyncMock, return_value=MOCK_EVALUATION):
+                            result = await client.execute("summarize", "do something")
+                            return result, mock_observe
 
         result, mock_observe = asyncio.run(_run())
 
         assert result["success"] is True
+        assert result["quality_score"] == 0.85
         mock_observe.assert_called_once()
         obs_args = mock_observe.call_args[0][0]
         assert obs_args["selected_skill_id"] == "summarize"
-        assert obs_args["success_score"] == 1.0
+        assert obs_args["success_score"] == 0.85  # uses quality score, not binary
         assert obs_args["task_pattern_id"] == "summarize:compress-text"
 
     @patch("cognee.cognee_skills.execute.litellm.acompletion")
@@ -150,14 +207,44 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
-                    result = await client.execute("summarize", "do something", auto_observe=False)
-                    return result, mock_observe
+                with patch("cognee.cognee_skills.client.evaluate_output", new_callable=AsyncMock, return_value=MOCK_EVALUATION):
+                    with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
+                        result = await client.execute("summarize", "do something", auto_observe=False)
+                        return result, mock_observe
 
         result, mock_observe = asyncio.run(_run())
 
         assert result["success"] is True
+        assert result["quality_score"] == 0.85
         mock_observe.assert_not_called()
+
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
+    def test_client_execute_no_evaluate(self, mock_config, mock_acompletion):
+        """Client.execute skips evaluation when auto_evaluate=False."""
+        mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
+        mock_acompletion.return_value = _make_mock_response("Result")
+
+        from cognee.cognee_skills.client import Skills
+
+        client = Skills()
+
+        async def _run():
+            with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
+                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
+                    with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
+                        result = await client.execute(
+                            "summarize", "do something", auto_evaluate=False
+                        )
+                        return result, mock_observe
+
+        result, mock_observe = asyncio.run(_run())
+
+        assert result["success"] is True
+        assert "quality_score" not in result
+        # Without evaluation, observe uses binary score
+        obs_args = mock_observe.call_args[0][0]
+        assert obs_args["success_score"] == 1.0
 
     @patch("cognee.cognee_skills.execute.litellm.acompletion")
     @patch("cognee.cognee_skills.execute.get_llm_config")
@@ -203,8 +290,52 @@ class TestExecuteSkill(unittest.TestCase):
 
     @patch("cognee.cognee_skills.execute.litellm.acompletion")
     @patch("cognee.cognee_skills.execute.get_llm_config")
+    def test_client_execute_auto_amendify_on_low_quality(self, mock_config, mock_acompletion):
+        """Client.execute triggers auto_amendify when quality score is below threshold."""
+        mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
+        mock_acompletion.return_value = _make_mock_response("Bad output")
+
+        from cognee.cognee_skills.client import Skills
+
+        client = Skills()
+
+        low_eval = {"score": 0.2, "reason": "Off-topic"}
+        amendify_result = {
+            "inspection": {"inspection_id": "i1", "root_cause": "bad instructions"},
+            "amendment": {"amendment_id": "a1", "status": "proposed"},
+            "applied": {"success": True, "status": "applied"},
+        }
+
+        async def _run():
+            with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
+                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
+                    with patch.object(client, "observe", new_callable=AsyncMock):
+                        with patch("cognee.cognee_skills.client.evaluate_output", new_callable=AsyncMock, return_value=low_eval):
+                            with patch.object(
+                                client,
+                                "auto_amendify",
+                                new_callable=AsyncMock,
+                                return_value=amendify_result,
+                            ) as mock_amendify:
+                                result = await client.execute(
+                                    "summarize",
+                                    "do something",
+                                    auto_amendify=True,
+                                    amendify_min_runs=1,
+                                )
+                                return result, mock_amendify
+
+        result, mock_amendify = asyncio.run(_run())
+
+        assert result["success"] is True  # LLM didn't error
+        assert result["quality_score"] == 0.2  # but quality is low
+        assert result["amended"] is not None  # so amendify triggers
+        mock_amendify.assert_called_once()
+
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
     def test_client_execute_auto_amendify_skipped_on_success(self, mock_config, mock_acompletion):
-        """Client.execute does NOT trigger auto_amendify when execution succeeds."""
+        """Client.execute does NOT trigger auto_amendify when quality is high."""
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
         mock_acompletion.return_value = _make_mock_response("Success")
 
@@ -216,17 +347,19 @@ class TestExecuteSkill(unittest.TestCase):
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
                 with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
                     with patch.object(client, "observe", new_callable=AsyncMock):
-                        with patch.object(
-                            client, "auto_amendify", new_callable=AsyncMock
-                        ) as mock_amendify:
-                            result = await client.execute(
-                                "summarize", "do something", auto_amendify=True
-                            )
-                            return result, mock_amendify
+                        with patch("cognee.cognee_skills.client.evaluate_output", new_callable=AsyncMock, return_value=MOCK_EVALUATION):
+                            with patch.object(
+                                client, "auto_amendify", new_callable=AsyncMock
+                            ) as mock_amendify:
+                                result = await client.execute(
+                                    "summarize", "do something", auto_amendify=True
+                                )
+                                return result, mock_amendify
 
         result, mock_amendify = asyncio.run(_run())
 
         assert result["success"] is True
+        assert result["quality_score"] == 0.85
         assert "amended" not in result
         mock_amendify.assert_not_called()
 

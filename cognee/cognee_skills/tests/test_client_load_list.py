@@ -1,7 +1,7 @@
 """Tests for Skills.load(), Skills.list(), and the happy-path execute loop.
 
-Happy path: execute() succeeds → observe() records score=1.0 → auto_amendify
-is NOT triggered even when auto_amendify=True.
+Happy path: execute() succeeds → evaluate scores quality → observe records score →
+auto_amendify is NOT triggered when quality is above threshold.
 """
 
 from __future__ import annotations
@@ -51,6 +51,8 @@ _OTHER_SKILL_PROPS = {
     "complexity": "workflow",
     "source_path": "/skills/code-review/SKILL.md",
 }
+
+MOCK_EVALUATION = {"score": 0.85, "reason": "Good summary"}
 
 
 def _make_engine(nodes, edges=None):
@@ -353,7 +355,7 @@ class TestSkillsList(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Happy-path execute: success → observe score=1.0 → no auto_amendify
+# Happy-path execute: success → evaluate quality → observe → no auto_amendify
 # ---------------------------------------------------------------------------
 
 
@@ -367,14 +369,22 @@ def _make_llm_response(content: str) -> MagicMock:
     return resp
 
 
+_EVAL_PATCH = patch(
+    "cognee.cognee_skills.client.evaluate_output",
+    new_callable=AsyncMock,
+    return_value=MOCK_EVALUATION,
+)
+
+
 class TestHappyPathExecute(unittest.TestCase):
-    """execute() success path: LLM produces output, run is observed, amendify is never called."""
+    """execute() success path: LLM produces output, quality is evaluated,
+    run is observed with the quality score, amendify is never called."""
 
     def _run(self, coro):
         return asyncio.run(coro)
 
-    def test_execute_success_returns_output(self):
-        """On success, execute() returns success=True with the LLM output."""
+    def test_execute_success_returns_output_with_quality(self):
+        """On success, execute() returns output and quality_score."""
         from cognee.cognee_skills.client import Skills
 
         client = Skills()
@@ -399,6 +409,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     new_callable=AsyncMock,
                     return_value=_make_llm_response("- Point 1\n- Point 2\n- Point 3"),
                 ),
+                _EVAL_PATCH,
                 patch.object(client, "observe", new_callable=AsyncMock) as mock_observe,
             ):
                 mock_cfg.return_value = MagicMock(
@@ -411,11 +422,11 @@ class TestHappyPathExecute(unittest.TestCase):
         assert result["success"] is True
         assert result["output"] == "- Point 1\n- Point 2\n- Point 3"
         assert result["skill_id"] == SKILL_ID
+        assert result["quality_score"] == 0.85
         assert result["error"] is None
-        assert result["latency_ms"] >= 0
 
-    def test_execute_success_observes_score_1(self):
-        """On success, auto_observe records success_score=1.0 and task_pattern_id."""
+    def test_execute_success_observes_quality_score(self):
+        """On success, auto_observe records quality_score (not binary 1.0)."""
         from cognee.cognee_skills.client import Skills
 
         client = Skills()
@@ -444,6 +455,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     new_callable=AsyncMock,
                     return_value=_make_llm_response("Summary here"),
                 ),
+                _EVAL_PATCH,
                 patch.object(client, "observe", new_callable=AsyncMock) as mock_observe,
             ):
                 mock_cfg.return_value = MagicMock(
@@ -456,15 +468,13 @@ class TestHappyPathExecute(unittest.TestCase):
 
         mock_observe.assert_called_once()
         obs_call = mock_observe.call_args[0][0]
-        assert obs_call["success_score"] == 1.0
+        assert obs_call["success_score"] == 0.85  # quality score, not binary
         assert obs_call["selected_skill_id"] == SKILL_ID
         assert obs_call["session_id"] == "sess-42"
         assert obs_call["task_pattern_id"] == "summarize:compress-text"
-        assert obs_call["error_type"] == ""
-        assert obs_call["error_message"] == ""
 
     def test_execute_success_does_not_trigger_auto_amendify(self):
-        """On success, auto_amendify is never called even when auto_amendify=True."""
+        """On high quality, auto_amendify is never called even when auto_amendify=True."""
         from cognee.cognee_skills.client import Skills
 
         client = Skills()
@@ -489,6 +499,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     new_callable=AsyncMock,
                     return_value=_make_llm_response("Summary here"),
                 ),
+                _EVAL_PATCH,
                 patch.object(client, "observe", new_callable=AsyncMock),
                 patch.object(client, "auto_amendify", new_callable=AsyncMock) as mock_aa,
             ):
@@ -531,6 +542,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     new_callable=AsyncMock,
                     return_value=_make_llm_response("Summary here"),
                 ),
+                _EVAL_PATCH,
                 patch.object(client, "observe", new_callable=AsyncMock) as mock_observe,
             ):
                 mock_cfg.return_value = MagicMock(
@@ -569,6 +581,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     new_callable=AsyncMock,
                     return_value=_make_llm_response(long_output),
                 ),
+                _EVAL_PATCH,
                 patch.object(client, "observe", new_callable=AsyncMock) as mock_observe,
             ):
                 mock_cfg.return_value = MagicMock(
@@ -584,11 +597,11 @@ class TestHappyPathExecute(unittest.TestCase):
         assert obs_call["result_summary"] == long_output[:500]
 
     def test_happy_path_full_loop_load_execute_observe(self):
-        """Full happy-path loop: load → execute → observe, all with real graph reads.
+        """Full happy-path loop: load → execute → evaluate → observe.
 
         Uses a mock graph engine seeded with a Skill node. load() reads
-        from the graph; execute_skill() calls the (mocked) LLM; observe()
-        persists the SkillRun. task_pattern_id is resolved and passed through.
+        from the graph; execute_skill() calls the (mocked) LLM; evaluate
+        scores quality; observe() persists the SkillRun with the quality score.
         """
         from cognee.cognee_skills.client import Skills
 
@@ -620,6 +633,7 @@ class TestHappyPathExecute(unittest.TestCase):
                     new_callable=AsyncMock,
                     return_value=_make_llm_response("- Bullet 1\n- Bullet 2"),
                 ),
+                _EVAL_PATCH,
                 patch.object(client, "observe", side_effect=_fake_observe),
             ):
                 mock_cfg.return_value = MagicMock(
@@ -636,11 +650,12 @@ class TestHappyPathExecute(unittest.TestCase):
         assert result["success"] is True
         assert "Bullet 1" in result["output"]
         assert result["skill_id"] == SKILL_ID
+        assert result["quality_score"] == 0.85
 
         assert len(observed_runs) == 1
         obs = observed_runs[0]
         assert obs["selected_skill_id"] == SKILL_ID
-        assert obs["success_score"] == 1.0
+        assert obs["success_score"] == 0.85  # quality score, not binary
         assert obs["session_id"] == "happy-sess"
         assert obs["task_text"] == "Summarize this article"
         assert obs["task_pattern_id"] == "summarize:compress-text"
@@ -672,6 +687,7 @@ class TestRun(unittest.TestCase):
             "output": "- Bullet 1", "skill_id": SKILL_ID,
             "model": "openai/gpt-4o-mini", "latency_ms": 100,
             "success": True, "error": None,
+            "quality_score": 0.85, "quality_reason": "Good",
         }
 
         async def _go():
@@ -689,8 +705,8 @@ class TestRun(unittest.TestCase):
         assert result["name"] == "Summarize"
         assert result["score"] == 0.95
 
-    def test_run_passes_auto_amendify_to_execute(self):
-        """run() forwards auto_amendify and amendify_min_runs to execute()."""
+    def test_run_passes_auto_evaluate_and_amendify_to_execute(self):
+        """run() forwards auto_evaluate, auto_amendify, and amendify_min_runs to execute()."""
         from cognee.cognee_skills.client import Skills
 
         client = Skills()
@@ -711,6 +727,7 @@ class TestRun(unittest.TestCase):
             ):
                 await client.run(
                     "Summarize this",
+                    auto_evaluate=True,
                     auto_amendify=True,
                     amendify_min_runs=5,
                     session_id="sess-run",
@@ -720,6 +737,7 @@ class TestRun(unittest.TestCase):
         mock_exec = self._run(_go())
 
         call_kwargs = mock_exec.call_args[1]
+        assert call_kwargs["auto_evaluate"] is True
         assert call_kwargs["auto_amendify"] is True
         assert call_kwargs["amendify_min_runs"] == 5
         assert call_kwargs["session_id"] == "sess-run"

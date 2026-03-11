@@ -868,7 +868,11 @@ try:
         description="Execute a skill against a task. Loads the skill, sends instructions + task to the LLM, and returns the result. Automatically records the run for learning.",
     )
     async def execute_skill_tool(
-        skill_id: str, task_text: str, context: str = "", auto_observe: bool = True
+        skill_id: str,
+        task_text: str,
+        context: str = "",
+        auto_observe: bool = True,
+        auto_evaluate: bool = True,
     ) -> list:
         """Execute a skill and return the LLM output."""
         with redirect_stdout(sys.stderr):
@@ -877,6 +881,7 @@ try:
                 task_text=task_text,
                 context=context or None,
                 auto_observe=auto_observe,
+                auto_evaluate=auto_evaluate,
             )
         return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
 
@@ -1136,6 +1141,7 @@ try:
     async def run_skill_tool(
         task_text: str,
         context: str = "",
+        auto_evaluate: bool = True,
         auto_amendify: bool = True,
         amendify_min_runs: int = 3,
         session_id: str = "default",
@@ -1146,6 +1152,7 @@ try:
             result = await _skills_client.run(
                 task_text=task_text,
                 context=context or None,
+                auto_evaluate=auto_evaluate,
                 auto_amendify=auto_amendify,
                 amendify_min_runs=amendify_min_runs,
                 session_id=session_id,
