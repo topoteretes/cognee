@@ -65,6 +65,194 @@ class TestParseFrontmatter:
         assert body == "# Body"
 
 
+class TestFieldAliases:
+    """Parser accepts alternative frontmatter key names from multiple community formats."""
+
+    def test_title_alias_for_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text("---\ntitle: My Skill\ndescription: Does stuff.\n---\n\n# Body\n\nDo things.")
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert skill.name == "My Skill"
+
+    def test_summary_alias_for_description(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text("---\nname: aliased\nsummary: A short summary.\n---\n\n# Body")
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert skill.description == "A short summary."
+
+    def test_categories_alias_for_tags(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text("---\nname: tagged\ncategories:\n  - code\n  - review\n---\n\n# Body")
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert "code" in skill.tags
+            assert "review" in skill.tags
+
+    def test_openclaw_nested_tags(self):
+        """VoltAgent/OpenClaw format: metadata.openclaw.tags"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text(
+                "---\nname: openclaw-skill\nmetadata:\n  openclaw:\n    tags:\n      - ai\n      - tools\n---\n\n# Body"
+            )
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert "ai" in skill.tags
+            assert "tools" in skill.tags
+
+    def test_allowed_tools_hyphen(self):
+        """Anthropic spec: allowed-tools list."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text(
+                "---\nname: tool-skill\nallowed-tools:\n  - Read\n  - Edit\n  - Bash\n---\n\n# Body"
+            )
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert "Read" in skill.tools
+            assert "Edit" in skill.tools
+
+    def test_allowed_tools_underscore(self):
+        """Alternative: allowed_tools."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text("---\nname: tool-skill2\nallowed_tools: Read Edit Bash\n---\n\n# Body")
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert "Read" in skill.tools
+
+
+class TestDescriptionInference:
+    """Description can be inferred from body when not in frontmatter."""
+
+    def test_description_from_first_paragraph(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text(
+                "---\nname: no-desc\n---\n\n# Heading\n\n"
+                "This is the first non-heading paragraph which is long enough to be used."
+            )
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert "first non-heading paragraph" in skill.description
+
+    def test_description_skips_heading(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text(
+                "---\nname: skip-heading\n---\n\n# This is a heading\n\n"
+                "This paragraph comes after the heading and should be the description."
+            )
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert "paragraph" in skill.description
+            assert "heading" not in skill.description.lower().split()[0]
+
+    def test_description_from_frontmatter_takes_priority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text(
+                "---\nname: has-desc\ndescription: Explicit description.\n---\n\n"
+                "This paragraph should NOT be used as description."
+            )
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert skill.description == "Explicit description."
+
+
+class TestTriggerExtraction:
+    """Trigger phrases extracted from multiple sources."""
+
+    def test_triggers_from_frontmatter(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text(
+                "---\nname: triggered\ntriggers:\n  - summarize this\n  - compress context\n---\n\n# Body"
+            )
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert "summarize this" in skill.triggers
+
+    def test_triggers_from_when_to_activate_section(self):
+        """muratcankoylan convention: ## When to Activate section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = Path(tmpdir) / "SKILL.md"
+            f.write_text(
+                "---\nname: activate-skill\n---\n\n# Description\n\n"
+                "Some description text here that is long enough.\n\n"
+                "## When to Activate\n\n"
+                "- User asks to summarize content\n"
+                "- Context window is getting large\n"
+                "- Need to compress information\n\n"
+                "## Other Section\n\nMore content."
+            )
+            skill = parse_skill_file(f)
+            assert skill is not None
+            assert any("summarize" in t for t in skill.triggers)
+            assert any("compress" in t for t in skill.triggers)
+
+
+class TestEntryFileDiscovery:
+    """Parser tries multiple candidate filenames per folder."""
+
+    def test_skill_md_uppercase(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = Path(tmpdir) / "my-skill"
+            d.mkdir()
+            (d / "SKILL.md").write_text("---\nname: upper\ndescription: desc\n---\n\n# Body")
+            skill = parse_skill_folder(d)
+            assert skill is not None
+            assert skill.name == "upper"
+
+    def test_skill_md_lowercase(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = Path(tmpdir) / "my-skill"
+            d.mkdir()
+            (d / "skill.md").write_text("---\nname: lower\ndescription: desc\n---\n\n# Body")
+            skill = parse_skill_folder(d)
+            assert skill is not None
+            assert skill.name == "lower"
+
+    def test_readme_fallback(self):
+        """README.md used when no SKILL.md / skill.md present."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = Path(tmpdir) / "readme-skill"
+            d.mkdir()
+            (d / "README.md").write_text(
+                "---\nname: from-readme\ndescription: desc\n---\n\n# Body\n\nContent here."
+            )
+            skill = parse_skill_folder(d)
+            assert skill is not None
+            assert skill.name == "from-readme"
+
+    def test_uppercase_skill_md_preferred_over_readme(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = Path(tmpdir) / "prefer-skill"
+            d.mkdir()
+            (d / "SKILL.md").write_text(
+                "---\nname: from-skill-md\ndescription: desc\n---\n\n# Body"
+            )
+            (d / "README.md").write_text(
+                "---\nname: from-readme\ndescription: desc\n---\n\n# Body"
+            )
+            skill = parse_skill_folder(d)
+            assert skill is not None
+            assert skill.name == "from-skill-md"
+
+    def test_no_entry_file_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = Path(tmpdir) / "empty-skill"
+            d.mkdir()
+            (d / "notes.txt").write_text("just a text file")
+            skill = parse_skill_folder(d)
+            assert skill is None
+
+
 class TestParseSkillFile:
     def test_parse_flat_skill_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
