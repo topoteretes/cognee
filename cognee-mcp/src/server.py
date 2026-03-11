@@ -839,7 +839,7 @@ def load_class(model_file, model_name):
 # ---------------------------------------------------------------------------
 
 try:
-    from cognee.skills.client import Skills
+    from cognee.cognee_skills.client import Skills
 
     _skills_client = Skills()
 
@@ -1140,7 +1140,7 @@ try:
         candidates = [
             Path(__file__).resolve().parent.parent.parent
             / "cognee"
-            / "skills"
+            / "cognee_skills"
             / "agent_instructions.md",
             Path(__file__).resolve().parent.parent.parent / "skills" / "agent_instructions.md",
         ]
@@ -1151,7 +1151,7 @@ try:
         try:
             import importlib.resources as pkg_resources
 
-            ref = pkg_resources.files("cognee.skills").joinpath("agent_instructions.md")
+            ref = pkg_resources.files("cognee.cognee_skills").joinpath("agent_instructions.md")
             return ref.read_text(encoding="utf-8")
         except Exception:
             pass
@@ -1251,7 +1251,7 @@ try:
     logger.info("Skills tools, resources, and prompts registered")
 
 except ImportError:
-    logger.debug("cognee.skills not available, skills tools not registered")
+    logger.debug("cognee.cognee_skills not available, skills tools not registered")
 
 
 async def main():

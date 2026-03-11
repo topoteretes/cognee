@@ -13,7 +13,7 @@ from cognee.infrastructure.llm import get_llm_config
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.tasks.storage import add_data_points
 
-from cognee.skills.models.skill_inspection import InspectionResult, SkillInspection
+from cognee.cognee_skills.models.skill_inspection import InspectionResult, SkillInspection
 
 logger = logging.getLogger(__name__)
 

@@ -10,8 +10,8 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm import get_llm_config
 from cognee.tasks.storage import add_data_points
 
-from cognee.skills.models.skill_inspection import SkillInspection
-from cognee.skills.models.skill_amendment import AmendmentProposal, SkillAmendment
+from cognee.cognee_skills.models.skill_inspection import SkillInspection
+from cognee.cognee_skills.models.skill_amendment import AmendmentProposal, SkillAmendment
 
 logger = logging.getLogger(__name__)
 

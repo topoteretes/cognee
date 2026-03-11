@@ -1,4 +1,4 @@
-"""Tests for cognee.skills.execute — unit tests with mocked LLM."""
+"""Tests for cognee.cognee_skills.execute — unit tests with mocked LLM."""
 
 import asyncio
 import unittest
@@ -30,13 +30,13 @@ SAMPLE_SKILL = {
 
 
 class TestExecuteSkill(unittest.TestCase):
-    @patch("cognee.skills.execute.litellm.acompletion")
-    @patch("cognee.skills.execute.get_llm_config")
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
     def test_execute_returns_output(self, mock_config, mock_acompletion):
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
         mock_acompletion.return_value = _make_mock_response("- Point 1\n- Point 2")
 
-        from cognee.skills.execute import execute_skill
+        from cognee.cognee_skills.execute import execute_skill
 
         result = asyncio.run(
             execute_skill(skill=SAMPLE_SKILL, task_text="Summarize this article about AI")
@@ -59,13 +59,13 @@ class TestExecuteSkill(unittest.TestCase):
         assert messages[1]["role"] == "user"
         assert "Summarize this article about AI" in messages[1]["content"]
 
-    @patch("cognee.skills.execute.litellm.acompletion")
-    @patch("cognee.skills.execute.get_llm_config")
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
     def test_execute_with_context(self, mock_config, mock_acompletion):
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
         mock_acompletion.return_value = _make_mock_response("Done")
 
-        from cognee.skills.execute import execute_skill
+        from cognee.cognee_skills.execute import execute_skill
 
         result = asyncio.run(
             execute_skill(
@@ -80,13 +80,13 @@ class TestExecuteSkill(unittest.TestCase):
         user_msg = call_args.kwargs["messages"][1]["content"]
         assert "quantum computing" in user_msg
 
-    @patch("cognee.skills.execute.litellm.acompletion")
-    @patch("cognee.skills.execute.get_llm_config")
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
     def test_execute_handles_llm_error(self, mock_config, mock_acompletion):
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
         mock_acompletion.side_effect = Exception("API rate limit exceeded")
 
-        from cognee.skills.execute import execute_skill
+        from cognee.cognee_skills.execute import execute_skill
 
         result = asyncio.run(execute_skill(skill=SAMPLE_SKILL, task_text="Summarize this"))
 
@@ -97,7 +97,7 @@ class TestExecuteSkill(unittest.TestCase):
 
     def test_client_execute_skill_not_found(self):
         """Client.execute returns error when skill doesn't exist."""
-        from cognee.skills.client import Skills
+        from cognee.cognee_skills.client import Skills
 
         client = Skills()
 
@@ -110,14 +110,14 @@ class TestExecuteSkill(unittest.TestCase):
         assert result["success"] is False
         assert "not found" in result["error"]
 
-    @patch("cognee.skills.execute.litellm.acompletion")
-    @patch("cognee.skills.execute.get_llm_config")
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
     def test_client_execute_auto_observe(self, mock_config, mock_acompletion):
         """Client.execute auto-records the run when auto_observe=True."""
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
         mock_acompletion.return_value = _make_mock_response("Result text")
 
-        from cognee.skills.client import Skills
+        from cognee.cognee_skills.client import Skills
 
         client = Skills()
 
@@ -135,14 +135,14 @@ class TestExecuteSkill(unittest.TestCase):
         assert obs_args["selected_skill_id"] == "summarize"
         assert obs_args["success_score"] == 1.0
 
-    @patch("cognee.skills.execute.litellm.acompletion")
-    @patch("cognee.skills.execute.get_llm_config")
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
     def test_client_execute_no_observe(self, mock_config, mock_acompletion):
         """Client.execute skips observation when auto_observe=False."""
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
         mock_acompletion.return_value = _make_mock_response("Result")
 
-        from cognee.skills.client import Skills
+        from cognee.cognee_skills.client import Skills
 
         client = Skills()
 
@@ -157,14 +157,14 @@ class TestExecuteSkill(unittest.TestCase):
         assert result["success"] is True
         mock_observe.assert_not_called()
 
-    @patch("cognee.skills.execute.litellm.acompletion")
-    @patch("cognee.skills.execute.get_llm_config")
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
     def test_client_execute_auto_amendify_on_failure(self, mock_config, mock_acompletion):
         """Client.execute triggers auto_amendify when execution fails and auto_amendify=True."""
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
         mock_acompletion.side_effect = Exception("LLM error")
 
-        from cognee.skills.client import Skills
+        from cognee.cognee_skills.client import Skills
 
         client = Skills()
 
@@ -198,14 +198,14 @@ class TestExecuteSkill(unittest.TestCase):
         assert result["amended"]["applied"]["success"] is True
         mock_amendify.assert_called_once()
 
-    @patch("cognee.skills.execute.litellm.acompletion")
-    @patch("cognee.skills.execute.get_llm_config")
+    @patch("cognee.cognee_skills.execute.litellm.acompletion")
+    @patch("cognee.cognee_skills.execute.get_llm_config")
     def test_client_execute_auto_amendify_skipped_on_success(self, mock_config, mock_acompletion):
         """Client.execute does NOT trigger auto_amendify when execution succeeds."""
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini", llm_api_key="test")
         mock_acompletion.return_value = _make_mock_response("Success")
 
-        from cognee.skills.client import Skills
+        from cognee.cognee_skills.client import Skills
 
         client = Skills()
 
@@ -228,7 +228,7 @@ class TestExecuteSkill(unittest.TestCase):
 
     def test_client_auto_amendify_returns_none_no_failures(self):
         """auto_amendify returns None when there aren't enough failed runs."""
-        from cognee.skills.client import Skills
+        from cognee.cognee_skills.client import Skills
 
         client = Skills()
 
@@ -241,7 +241,7 @@ class TestExecuteSkill(unittest.TestCase):
 
     def test_client_auto_amendify_full_pipeline(self):
         """auto_amendify chains inspect → preview_amendify → amendify."""
-        from cognee.skills.client import Skills
+        from cognee.cognee_skills.client import Skills
 
         client = Skills()
 

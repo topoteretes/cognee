@@ -17,7 +17,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
-from cognee.skills.models.skill_run import SkillRun, ToolCall, CandidateSkill
+from cognee.cognee_skills.models.skill_run import SkillRun, ToolCall, CandidateSkill
 
 logger = logging.getLogger(__name__)
 

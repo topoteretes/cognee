@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from cognee.skills.models.skill import Skill
-from cognee.skills.parser.skill_parser import parse_skills_folder
+from cognee.cognee_skills.models.skill import Skill
+from cognee.cognee_skills.parser.skill_parser import parse_skills_folder
 
 
 def parse_skills_task(

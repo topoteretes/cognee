@@ -16,12 +16,12 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.engine.models.node_set import NodeSet
 
-from cognee.skills.tasks.parse_skills import parse_skills_task
-from cognee.skills.tasks.enrich_skills import enrich_skills
-from cognee.skills.tasks.materialize_task_patterns import materialize_task_patterns
-from cognee.skills.tasks.apply_node_set import apply_node_set
-from cognee.skills.models.skill_change_event import SkillChangeEvent
-from cognee.skills.utils import _make_change_event
+from cognee.cognee_skills.tasks.parse_skills import parse_skills_task
+from cognee.cognee_skills.tasks.enrich_skills import enrich_skills
+from cognee.cognee_skills.tasks.materialize_task_patterns import materialize_task_patterns
+from cognee.cognee_skills.tasks.apply_node_set import apply_node_set
+from cognee.cognee_skills.models.skill_change_event import SkillChangeEvent
+from cognee.cognee_skills.utils import _make_change_event
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ async def upsert_skills(
 
     Returns a summary dict with counts.
     """
-    from cognee.skills.parser.skill_parser import parse_skills_folder
+    from cognee.cognee_skills.parser.skill_parser import parse_skills_folder
 
     skills_folder = str(Path(skills_folder).resolve())
     await setup()

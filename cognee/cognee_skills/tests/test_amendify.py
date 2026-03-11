@@ -1,4 +1,4 @@
-"""Tests for cognee.skills.amendify — unit tests with mocked graph engine."""
+"""Tests for cognee.cognee_skills.amendify — unit tests with mocked graph engine."""
 
 import asyncio
 import unittest
@@ -50,12 +50,12 @@ def _make_skill_node(skill_id="test-skill"):
 
 
 class TestAmendify(unittest.TestCase):
-    @patch("cognee.skills.amendify.add_data_points", new_callable=AsyncMock)
-    @patch("cognee.skills.amendify._make_change_event")
-    @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
-    @patch("cognee.skills.tasks.enrich_skills.enrich_skills", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify.add_data_points", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify._make_change_event")
+    @patch("cognee.cognee_skills.amendify.get_graph_engine", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.tasks.enrich_skills.enrich_skills", new_callable=AsyncMock)
     @patch(
-        "cognee.skills.tasks.materialize_task_patterns.materialize_task_patterns",
+        "cognee.cognee_skills.tasks.materialize_task_patterns.materialize_task_patterns",
         new_callable=AsyncMock,
     )
     def test_amendify_updates_skill(
@@ -71,7 +71,7 @@ class TestAmendify(unittest.TestCase):
         mock_event.return_value = MagicMock()
         mock_enrich.return_value = []
 
-        from cognee.skills.amendify import amendify
+        from cognee.cognee_skills.amendify import amendify
 
         result = asyncio.run(amendify("amend-001"))
 
@@ -82,12 +82,12 @@ class TestAmendify(unittest.TestCase):
         # Verify add_data_points was called (skill update + change event + amendment status)
         assert mock_add_dp.call_count >= 3
 
-    @patch("cognee.skills.amendify.add_data_points", new_callable=AsyncMock)
-    @patch("cognee.skills.amendify._make_change_event")
-    @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
-    @patch("cognee.skills.tasks.enrich_skills.enrich_skills", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify.add_data_points", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify._make_change_event")
+    @patch("cognee.cognee_skills.amendify.get_graph_engine", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.tasks.enrich_skills.enrich_skills", new_callable=AsyncMock)
     @patch(
-        "cognee.skills.tasks.materialize_task_patterns.materialize_task_patterns",
+        "cognee.cognee_skills.tasks.materialize_task_patterns.materialize_task_patterns",
         new_callable=AsyncMock,
     )
     def test_amendify_emits_change_event(
@@ -104,7 +104,7 @@ class TestAmendify(unittest.TestCase):
         mock_event.return_value = event_obj
         mock_enrich.return_value = []
 
-        from cognee.skills.amendify import amendify
+        from cognee.cognee_skills.amendify import amendify
 
         asyncio.run(amendify("amend-001"))
 
@@ -115,12 +115,12 @@ class TestAmendify(unittest.TestCase):
         # Verify the event was persisted
         mock_add_dp.assert_called()
 
-    @patch("cognee.skills.amendify.add_data_points", new_callable=AsyncMock)
-    @patch("cognee.skills.amendify._make_change_event")
-    @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
-    @patch("cognee.skills.tasks.enrich_skills.enrich_skills", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify.add_data_points", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify._make_change_event")
+    @patch("cognee.cognee_skills.amendify.get_graph_engine", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.tasks.enrich_skills.enrich_skills", new_callable=AsyncMock)
     @patch(
-        "cognee.skills.tasks.materialize_task_patterns.materialize_task_patterns",
+        "cognee.cognee_skills.tasks.materialize_task_patterns.materialize_task_patterns",
         new_callable=AsyncMock,
     )
     def test_rollback_restores_original(
@@ -136,7 +136,7 @@ class TestAmendify(unittest.TestCase):
         mock_event.return_value = MagicMock()
         mock_enrich.return_value = []
 
-        from cognee.skills.amendify import rollback_amendify
+        from cognee.cognee_skills.amendify import rollback_amendify
 
         result = asyncio.run(rollback_amendify("amend-001"))
 
@@ -149,7 +149,7 @@ class TestAmendify(unittest.TestCase):
         # Verify add_data_points was called (skill restore + event + amendment status)
         assert mock_add_dp.call_count >= 3
 
-    @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify.get_graph_engine", new_callable=AsyncMock)
     def test_rollback_fails_for_non_applied_amendment(self, mock_engine_fn):
         amendment_node = _make_amendment_node(status="proposed")
 
@@ -157,26 +157,26 @@ class TestAmendify(unittest.TestCase):
         engine.get_nodeset_subgraph = AsyncMock(return_value=([amendment_node], []))
         mock_engine_fn.return_value = engine
 
-        from cognee.skills.amendify import rollback_amendify
+        from cognee.cognee_skills.amendify import rollback_amendify
 
         result = asyncio.run(rollback_amendify("amend-001"))
 
         assert result is False
 
-    @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify.get_graph_engine", new_callable=AsyncMock)
     def test_amendify_not_found(self, mock_engine_fn):
         engine = AsyncMock()
         engine.get_nodeset_subgraph = AsyncMock(return_value=([], []))
         mock_engine_fn.return_value = engine
 
-        from cognee.skills.amendify import amendify
+        from cognee.cognee_skills.amendify import amendify
 
         result = asyncio.run(amendify("nonexistent"))
 
         assert result["success"] is False
         assert "not found" in result["error"]
 
-    @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify.get_graph_engine", new_callable=AsyncMock)
     def test_amendify_rejects_already_applied(self, mock_engine_fn):
         """Cannot apply an amendment that's already been applied."""
         amendment_node = _make_amendment_node(status="applied")
@@ -185,15 +185,15 @@ class TestAmendify(unittest.TestCase):
         engine.get_nodeset_subgraph = AsyncMock(return_value=([amendment_node], []))
         mock_engine_fn.return_value = engine
 
-        from cognee.skills.amendify import amendify
+        from cognee.cognee_skills.amendify import amendify
 
         result = asyncio.run(amendify("amend-001"))
 
         assert result["success"] is False
         assert "applied" in result["error"]
 
-    @patch("cognee.skills.amendify.add_data_points", new_callable=AsyncMock)
-    @patch("cognee.skills.amendify.get_graph_engine", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify.add_data_points", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.amendify.get_graph_engine", new_callable=AsyncMock)
     def test_evaluate_amendify(self, mock_engine_fn, mock_add_dp):
         """evaluate_amendify computes post-amendment stats from runs after applied_at_ms."""
         amendment_node = _make_amendment_node(status="applied")
@@ -235,7 +235,7 @@ class TestAmendify(unittest.TestCase):
         )
         mock_engine_fn.return_value = engine
 
-        from cognee.skills.amendify import evaluate_amendify
+        from cognee.cognee_skills.amendify import evaluate_amendify
 
         result = asyncio.run(evaluate_amendify("amend-001"))
 

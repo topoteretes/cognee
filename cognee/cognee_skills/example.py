@@ -4,9 +4,9 @@ Ingest skills -> recommend -> pick top -> simulate execution -> record ->
 recommend again (prefers weights shift).
 
 Usage:
-    python -m cognee.skills.example                           # uses built-in example_skills/
-    python -m cognee.skills.example /path/to/skills           # uses external folder
-    python -m cognee.skills.example /path/to/skills my-repo   # with source_repo label
+    python -m cognee.cognee_skills.example                           # uses built-in example_skills/
+    python -m cognee.cognee_skills.example /path/to/skills           # uses external folder
+    python -m cognee.cognee_skills.example /path/to/skills my-repo   # with source_repo label
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.skills.pipeline import ingest_skills
-from cognee.skills.observe import record_skill_run
-from cognee.skills.retrieve import recommend_skills
+from cognee.cognee_skills.pipeline import ingest_skills
+from cognee.cognee_skills.observe import record_skill_run
+from cognee.cognee_skills.retrieve import recommend_skills
 
 COGNEE_SYSTEM_DIR = Path(__file__).parent / ".cognee_system"
 DEFAULT_SKILLS_DIR = Path(__file__).parent / "example_skills"

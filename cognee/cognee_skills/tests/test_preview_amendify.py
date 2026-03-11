@@ -1,12 +1,12 @@
-"""Tests for cognee.skills.preview_amendify — unit tests with mocked LLM."""
+"""Tests for cognee.cognee_skills.preview_amendify — unit tests with mocked LLM."""
 
 import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import uuid4
 
-from cognee.skills.models.skill_inspection import SkillInspection
-from cognee.skills.models.skill_amendment import AmendmentProposal
+from cognee.cognee_skills.models.skill_inspection import SkillInspection
+from cognee.cognee_skills.models.skill_amendment import AmendmentProposal
 
 
 SAMPLE_INSPECTION = SkillInspection(
@@ -51,17 +51,17 @@ MOCK_AMENDMENT_PROPOSAL = AmendmentProposal(
 
 
 class TestPreviewAmendify(unittest.TestCase):
-    @patch("cognee.skills.preview_amendify.add_data_points", new_callable=AsyncMock)
-    @patch("cognee.skills.preview_amendify.get_llm_config")
+    @patch("cognee.cognee_skills.preview_amendify.add_data_points", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.preview_amendify.get_llm_config")
     @patch(
-        "cognee.skills.preview_amendify.LLMGateway.acreate_structured_output",
+        "cognee.cognee_skills.preview_amendify.LLMGateway.acreate_structured_output",
         new_callable=AsyncMock,
     )
     def test_preview_returns_amendment(self, mock_llm, mock_config, mock_add_dp):
         mock_llm.return_value = MOCK_AMENDMENT_PROPOSAL
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini")
 
-        from cognee.skills.preview_amendify import preview_skill_amendify
+        from cognee.cognee_skills.preview_amendify import preview_skill_amendify
 
         result = asyncio.run(
             preview_skill_amendify(inspection=SAMPLE_INSPECTION, skill=SAMPLE_SKILL)
@@ -74,17 +74,17 @@ class TestPreviewAmendify(unittest.TestCase):
         assert result.amendment_confidence == 0.80
         mock_add_dp.assert_called_once()
 
-    @patch("cognee.skills.preview_amendify.add_data_points", new_callable=AsyncMock)
-    @patch("cognee.skills.preview_amendify.get_llm_config")
+    @patch("cognee.cognee_skills.preview_amendify.add_data_points", new_callable=AsyncMock)
+    @patch("cognee.cognee_skills.preview_amendify.get_llm_config")
     @patch(
-        "cognee.skills.preview_amendify.LLMGateway.acreate_structured_output",
+        "cognee.cognee_skills.preview_amendify.LLMGateway.acreate_structured_output",
         new_callable=AsyncMock,
     )
     def test_preserves_original_instructions(self, mock_llm, mock_config, mock_add_dp):
         mock_llm.return_value = MOCK_AMENDMENT_PROPOSAL
         mock_config.return_value = MagicMock(llm_model="openai/gpt-4o-mini")
 
-        from cognee.skills.preview_amendify import preview_skill_amendify
+        from cognee.cognee_skills.preview_amendify import preview_skill_amendify
 
         result = asyncio.run(
             preview_skill_amendify(inspection=SAMPLE_INSPECTION, skill=SAMPLE_SKILL)

@@ -216,7 +216,7 @@ When a skill keeps failing:
 ## Running the example
 
 ```bash
-python -m cognee.skills.example
+python -m cognee.cognee_skills.example
 ```
 
 Runs the full loop:

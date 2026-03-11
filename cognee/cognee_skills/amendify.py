@@ -14,7 +14,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.tasks.storage import add_data_points
 
-from cognee.skills.utils import _make_change_event
+from cognee.cognee_skills.utils import _make_change_event
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ async def _load_skill_from_graph(skill_id: str, node_set: str) -> Optional[tuple
 
 def _reconstruct_amendment(node_dict: dict):
     """Reconstruct a SkillAmendment DataPoint from a raw graph node dict."""
-    from cognee.skills.models.skill_amendment import SkillAmendment
+    from cognee.cognee_skills.models.skill_amendment import SkillAmendment
 
     node_id = node_dict.get("id", node_dict.get("nid", ""))
     return SkillAmendment(
@@ -138,9 +138,9 @@ async def amendify(
     # Update skill in graph + re-enrich
     new_hash = _content_hash(amended_instructions)
     try:
-        from cognee.skills.tasks.enrich_skills import enrich_skills
-        from cognee.skills.tasks.materialize_task_patterns import materialize_task_patterns
-        from cognee.skills.models.skill import Skill
+        from cognee.cognee_skills.tasks.enrich_skills import enrich_skills
+        from cognee.cognee_skills.tasks.materialize_task_patterns import materialize_task_patterns
+        from cognee.cognee_skills.models.skill import Skill
 
         skill_obj = Skill(
             id=uuid.UUID(str(skill_props.get("id", skill_nid))),
@@ -160,7 +160,7 @@ async def amendify(
             await add_data_points([skill_obj])
     except Exception as exc:
         logger.warning("Re-enrichment after amendment failed, persisting basic update: %s", exc)
-        from cognee.skills.models.skill import Skill
+        from cognee.cognee_skills.models.skill import Skill
 
         skill_obj = Skill(
             id=uuid.UUID(str(skill_props.get("id", skill_nid))),
@@ -198,7 +198,7 @@ async def amendify(
     # Optional validation
     if validate and validation_task_text:
         try:
-            from cognee.skills.execute import execute_skill
+            from cognee.cognee_skills.execute import execute_skill
 
             skill_dict = {
                 "skill_id": skill_id,
@@ -272,9 +272,9 @@ async def rollback_amendify(
     # Restore original instructions + re-enrich
     new_hash = _content_hash(original_instructions)
     try:
-        from cognee.skills.tasks.enrich_skills import enrich_skills
-        from cognee.skills.tasks.materialize_task_patterns import materialize_task_patterns
-        from cognee.skills.models.skill import Skill
+        from cognee.cognee_skills.tasks.enrich_skills import enrich_skills
+        from cognee.cognee_skills.tasks.materialize_task_patterns import materialize_task_patterns
+        from cognee.cognee_skills.models.skill import Skill
 
         skill_obj = Skill(
             id=uuid.UUID(str(skill_props.get("id", skill_nid))),
@@ -292,7 +292,7 @@ async def rollback_amendify(
             await add_data_points([skill_obj])
     except Exception as exc:
         logger.warning("Re-enrichment after rollback failed, persisting basic update: %s", exc)
-        from cognee.skills.models.skill import Skill
+        from cognee.cognee_skills.models.skill import Skill
 
         skill_obj = Skill(
             id=uuid.UUID(str(skill_props.get("id", skill_nid))),

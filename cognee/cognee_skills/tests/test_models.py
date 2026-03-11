@@ -2,9 +2,9 @@
 
 from uuid import uuid4
 
-from cognee.skills.models.skill import Skill, SkillResource
-from cognee.skills.models.skill_run import SkillRun, ToolCall, CandidateSkill
-from cognee.skills.models.task_pattern import TaskPattern
+from cognee.cognee_skills.models.skill import Skill, SkillResource
+from cognee.cognee_skills.models.skill_run import SkillRun, ToolCall, CandidateSkill
+from cognee.cognee_skills.models.task_pattern import TaskPattern
 
 
 class TestSkillModel:

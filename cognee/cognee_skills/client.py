@@ -10,10 +10,10 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.engine.models.node_set import NodeSet
 
-from cognee.skills.execute import execute_skill
-from cognee.skills.observe import record_skill_run
-from cognee.skills.pipeline import ingest_skills, upsert_skills, remove_skill
-from cognee.skills.retrieve import recommend_skills
+from cognee.cognee_skills.execute import execute_skill
+from cognee.cognee_skills.observe import record_skill_run
+from cognee.cognee_skills.pipeline import ingest_skills, upsert_skills, remove_skill
+from cognee.cognee_skills.retrieve import recommend_skills
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +298,7 @@ class Skills:
 
         Returns a dict with inspection fields, or None if insufficient failures.
         """
-        from cognee.skills.inspect import inspect_skill
+        from cognee.cognee_skills.inspect import inspect_skill
 
         inspection = await inspect_skill(
             skill_id=skill_id,
@@ -341,8 +341,8 @@ class Skills:
 
         Returns a dict with amendment fields, or None if inspection found no issues.
         """
-        from cognee.skills.inspect import inspect_skill
-        from cognee.skills.preview_amendify import preview_skill_amendify
+        from cognee.cognee_skills.inspect import inspect_skill
+        from cognee.cognee_skills.preview_amendify import preview_skill_amendify
 
         inspection = None
         if inspection_id:
@@ -357,7 +357,7 @@ class Skills:
                     props.get("type") == "SkillInspection"
                     and props.get("inspection_id") == inspection_id
                 ):
-                    from cognee.skills.models.skill_inspection import SkillInspection
+                    from cognee.cognee_skills.models.skill_inspection import SkillInspection
 
                     inspection = SkillInspection(
                         id=props.get("id", inspection_id),
@@ -425,7 +425,7 @@ class Skills:
             validation_task_text: Task text for validation.
             node_set: Graph node set.
         """
-        from cognee.skills.amendify import amendify as _amendify
+        from cognee.cognee_skills.amendify import amendify as _amendify
 
         return await _amendify(
             amendment_id=amendment_id,
@@ -448,7 +448,7 @@ class Skills:
             write_to_disk: If True, also restore the original SKILL.md on disk.
             node_set: Graph node set.
         """
-        from cognee.skills.amendify import rollback_amendify as _rollback_amendify
+        from cognee.cognee_skills.amendify import rollback_amendify as _rollback_amendify
 
         return await _rollback_amendify(
             amendment_id=amendment_id, write_to_disk=write_to_disk, node_set=node_set
@@ -463,7 +463,7 @@ class Skills:
 
         Returns dict with pre_avg, post_avg, improvement, run_count, recommendation.
         """
-        from cognee.skills.amendify import evaluate_amendify as _evaluate_amendify
+        from cognee.cognee_skills.amendify import evaluate_amendify as _evaluate_amendify
 
         return await _evaluate_amendify(amendment_id=amendment_id, node_set=node_set)
 

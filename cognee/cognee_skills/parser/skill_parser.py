@@ -21,7 +21,7 @@ from uuid import UUID, uuid5
 
 import yaml
 
-from cognee.skills.models.skill import Skill, SkillResource
+from cognee.cognee_skills.models.skill import Skill, SkillResource
 
 logger = logging.getLogger(__name__)
 

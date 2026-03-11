@@ -38,4 +38,4 @@ from .modules import pipelines
 from cognee.run_migrations import run_migrations
 
 # Skills routing
-from cognee.skills.client import skills
+from cognee.cognee_skills.client import skills

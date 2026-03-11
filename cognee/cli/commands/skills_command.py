@@ -99,7 +99,7 @@ Sub-commands:
 
     def _ingest(self, args: argparse.Namespace) -> None:
         try:
-            from cognee.skills.client import skills
+            from cognee.cognee_skills.client import skills
 
             fmt.echo(f"Ingesting skills from {args.skills_folder}...")
             asyncio.run(
@@ -116,7 +116,7 @@ Sub-commands:
 
     def _recommend(self, args: argparse.Namespace) -> None:
         try:
-            from cognee.skills.client import skills
+            from cognee.cognee_skills.client import skills
 
             fmt.echo(f"Finding skills for: '{args.task_text}'")
             recs = asyncio.run(skills.get_context(args.task_text, top_k=args.top_k))
@@ -145,7 +145,7 @@ Sub-commands:
 
     def _list(self, args: argparse.Namespace) -> None:
         try:
-            from cognee.skills.client import skills
+            from cognee.cognee_skills.client import skills
 
             results = asyncio.run(skills.list())
 
@@ -182,7 +182,7 @@ Sub-commands:
             )
 
         try:
-            from cognee.skills.client import skills
+            from cognee.cognee_skills.client import skills
 
             result = asyncio.run(skills.observe(payload))
             fmt.success(
@@ -194,7 +194,7 @@ Sub-commands:
 
     def _promote(self, args: argparse.Namespace) -> None:
         try:
-            from cognee.skills.client import skills
+            from cognee.cognee_skills.client import skills
 
             sid = args.session_id if args.session_id else None
             result = asyncio.run(skills.promote(session_id=sid))

@@ -1,4 +1,4 @@
-"""cognee.skills — skill routing with learned preferences.
+"""cognee.cognee_skills — skill routing with learned preferences.
 
 Primary API (via ``from cognee import skills``):
     skills.ingest()              — parse SKILL.md files, enrich via LLM, store in graph + vector
@@ -35,16 +35,16 @@ Models:
     SkillResource, SkillInspection, SkillAmendment
 """
 
-from cognee.skills.client import Skills, skills
-from cognee.skills.execute import execute_skill
-from cognee.skills.pipeline import ingest_skills, upsert_skills, remove_skill
-from cognee.skills.retrieve import recommend_skills
-from cognee.skills.observe import record_skill_run
-from cognee.skills.inspect import inspect_skill
-from cognee.skills.preview_amendify import preview_skill_amendify
-from cognee.skills.amendify import amendify, rollback_amendify, evaluate_amendify
+from cognee.cognee_skills.client import Skills, skills
+from cognee.cognee_skills.execute import execute_skill
+from cognee.cognee_skills.pipeline import ingest_skills, upsert_skills, remove_skill
+from cognee.cognee_skills.retrieve import recommend_skills
+from cognee.cognee_skills.observe import record_skill_run
+from cognee.cognee_skills.inspect import inspect_skill
+from cognee.cognee_skills.preview_amendify import preview_skill_amendify
+from cognee.cognee_skills.amendify import amendify, rollback_amendify, evaluate_amendify
 
-from cognee.skills.models import (
+from cognee.cognee_skills.models import (
     CandidateSkill,
     Skill,
     SkillAmendment,

@@ -13,8 +13,8 @@ from cognee.infrastructure.engine import Edge
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm import get_llm_config
 
-from cognee.skills.models.skill import Skill
-from cognee.skills.models.task_pattern import TaskPattern
+from cognee.cognee_skills.models.skill import Skill
+from cognee.cognee_skills.models.task_pattern import TaskPattern
 
 logger = logging.getLogger(__name__)
 
