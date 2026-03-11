@@ -1,6 +1,6 @@
 import sys
 import types
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
 import pytest
 
@@ -36,68 +36,33 @@ def _fake_asyncpg():
         yield
 
 
-class TestCreateRelationalEngineSSL:
-    """Verify that the SSL query parameter is handled correctly in the connection URL."""
-
-    @patch(
-        "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
-    )
-    def test_postgres_without_ssl(self, mock_adapter):
-        """When db_ssl_mode is None, the URL must NOT contain an ssl query param."""
-        create_relational_engine(**POSTGRES_PARAMS, db_ssl_mode=None)
-
-        url = mock_adapter.call_args[0][0]
-        assert "ssl" not in url.query
-
-    @patch(
-        "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
-    )
-    def test_postgres_with_ssl_require(self, mock_adapter):
-        """When db_ssl_mode='require', the URL must contain ssl=require."""
-        create_relational_engine(**POSTGRES_PARAMS, db_ssl_mode="require")
-
-        url = mock_adapter.call_args[0][0]
-        assert url.query["ssl"] == "require"
-
-    @patch(
-        "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
-    )
-    def test_postgres_with_ssl_verify_full(self, mock_adapter):
-        """When db_ssl_mode='verify-full', the URL must contain ssl=verify-full."""
-        create_relational_engine(**POSTGRES_PARAMS, db_ssl_mode="verify-full")
-
-        url = mock_adapter.call_args[0][0]
-        assert url.query["ssl"] == "verify-full"
-
-    @patch(
-        "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
-    )
-    def test_postgres_default_has_no_ssl(self, mock_adapter):
-        """When db_ssl_mode is omitted entirely, the URL must NOT contain ssl."""
-        create_relational_engine(**POSTGRES_PARAMS)
-
-        url = mock_adapter.call_args[0][0]
-        assert "ssl" not in url.query
-
-
 class TestCreateRelationalEngineSpecialCharacters:
-    """Verify that special characters in credentials are handled correctly."""
+    """Verify that special characters in credentials are handled correctly by URL.create."""
 
     @patch(
         "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
     )
     def test_postgres_special_chars_in_username_and_password(self, mock_adapter):
         """Username and password with special characters should round-trip correctly."""
-        params_with_specials = {
-            **POSTGRES_PARAMS,
-            "db_username": "user#name",
-            "db_password": "p@ss:word",
-        }
-
-        create_relational_engine(**params_with_specials, db_ssl_mode="require")
+        create_relational_engine(
+            **{**POSTGRES_PARAMS, "db_username": "user#name", "db_password": "p@ss:word"}
+        )
 
         url = mock_adapter.call_args[0][0]
-        # URL object should preserve the original credentials in its attributes,
-        # even though they are URL-encoded in the string form.
         assert url.username == "user#name"
         assert url.password == "p@ss:word"
+
+
+class TestCreateRelationalEngineConnectArgs:
+    """Verify that connect_args are forwarded to the SQLAlchemyAdapter."""
+
+    @patch(
+        "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
+    )
+    def test_postgres_no_connect_args_passes_none(self, mock_adapter):
+        """When no connect_args are provided, None should be forwarded to the adapter."""
+        create_relational_engine(**POSTGRES_PARAMS)
+
+        _, kwargs = mock_adapter.call_args
+        assert kwargs.get("connect_args") is None
+

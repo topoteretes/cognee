@@ -20,7 +20,6 @@ class RelationalConfig(BaseSettings):
     db_username: Union[str, None] = None  # "cognee"
     db_password: Union[str, None] = None  # "cognee"
     db_provider: str = "sqlite"
-    db_ssl_mode: Union[str, None] = None
     database_connect_args: Union[str, None] = None
     pool_args: Union[str, None] = None
 
@@ -77,7 +76,6 @@ class RelationalConfig(BaseSettings):
             "db_username": self.db_username,
             "db_password": self.db_password,
             "db_provider": self.db_provider,
-            "db_ssl_mode": self.db_ssl_mode,
             "database_connect_args": self.database_connect_args,
             "pool_args": self.pool_args,
         }

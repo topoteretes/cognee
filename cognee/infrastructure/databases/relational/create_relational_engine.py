@@ -12,7 +12,6 @@ def create_relational_engine(
     db_username: str,
     db_password: str,
     db_provider: str,
-    db_ssl_mode: str = None,
     database_connect_args: dict = None,
     pool_args: dict = None,
 ):
@@ -49,10 +48,6 @@ def create_relational_engine(
             import asyncpg
 
             # Handle special characters in username and password like # or @
-            query_params = {}
-            if db_ssl_mode is not None:
-                query_params["ssl"] = db_ssl_mode
-
             connection_string = URL.create(
                 "postgresql+asyncpg",
                 username=db_username,
@@ -60,7 +55,6 @@ def create_relational_engine(
                 host=db_host,
                 port=int(db_port),
                 database=db_name,
-                query=query_params,
             )
 
         except ImportError:
