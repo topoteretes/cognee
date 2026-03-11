@@ -339,7 +339,7 @@ class SessionManager:
 
         Only passed fields are updated; None preserves existing values.
         Returns True if updated, False if not found or cache unavailable.
-        memify_metadata: Optional dict with pipeline name as key (e.g. "apply_feedback_weights") and bool value.
+        memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)

@@ -7,6 +7,9 @@ from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
     SessionQAEntryValidationError,
 )
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 
 class _InMemoryRedisList:
@@ -141,13 +144,13 @@ async def test_update_memify_metadata_merges_existing_keys(adapter):
         "u1",
         "s1",
         "id1",
-        memify_metadata={"apply_feedback_weights": False},
+        memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False},
     )
     assert ok
     entries = await adapter.get_all_qa_entries("u1", "s1")
     assert entries[0]["memify_metadata"] == {
         "persist_sessions_in_knowledge_graph": True,
-        "apply_feedback_weights": False,
+        MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False,
     }
 
 

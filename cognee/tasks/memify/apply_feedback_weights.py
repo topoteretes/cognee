@@ -6,10 +6,13 @@ from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 logger = get_logger("apply_feedback_weights")
 
-MEMIFY_METADATA_KEY = "apply_feedback_weights"
+MEMIFY_METADATA_KEY = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY
 FEEDBACK_WEIGHT_DECIMALS = 4
 
 
@@ -22,6 +25,12 @@ class FeedbackItem(TypedDict, total=False):
 
 
 class ApplyFeedbackWeightsResult(TypedDict):
+    processed: int
+    applied: int
+    skipped: int
+
+
+class FeedbackItemOutcome(TypedDict):
     processed: int
     applied: int
     skipped: int
@@ -126,6 +135,81 @@ async def _mark_feedback_processed(
         )
 
 
+async def _process_feedback_item(
+    *,
+    item: FeedbackItem,
+    alpha: float,
+    user_id: str,
+    session_manager,
+    graph_engine,
+) -> FeedbackItemOutcome:
+    session_id = item.get("session_id")
+    qa_id = item.get("qa_id")
+    memify_metadata = item.get("memify_metadata")
+    memify_metadata = memify_metadata if isinstance(memify_metadata, dict) else {}
+
+    if memify_metadata.get(MEMIFY_METADATA_KEY) is True:
+        logger.info(
+            f"Session QA entry with id: {qa_id} is already processed and applied on the graph."
+        )
+        return {"processed": 0, "applied": 0, "skipped": 1}
+
+    try:
+        normalized_rating = normalize_feedback_score(item.get("feedback_score"))
+    except CogneeValidationError:
+        return {"processed": 0, "applied": 0, "skipped": 1}
+
+    node_ids = _extract_ids(item.get("used_graph_element_ids"), "node_ids")
+    edge_ids = _extract_ids(item.get("used_graph_element_ids"), "edge_ids")
+
+    if not node_ids and not edge_ids:
+        await _mark_feedback_processed(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=qa_id,
+            current_metadata=memify_metadata,
+            success=False,
+        )
+        return {"processed": 0, "applied": 0, "skipped": 1}
+
+    node_success = await _update_element_weights(
+        ids=node_ids,
+        normalized_rating=normalized_rating,
+        alpha=alpha,
+        get_weights=graph_engine.get_node_feedback_weights,
+        set_weights=graph_engine.set_node_feedback_weights,
+    )
+    edge_success = await _update_element_weights(
+        ids=edge_ids,
+        normalized_rating=normalized_rating,
+        alpha=alpha,
+        get_weights=graph_engine.get_edge_feedback_weights,
+        set_weights=graph_engine.set_edge_feedback_weights,
+    )
+
+    qa_success = node_success and edge_success
+    await _mark_feedback_processed(
+        session_manager=session_manager,
+        user_id=user_id,
+        session_id=session_id,
+        qa_id=qa_id,
+        current_metadata=memify_metadata,
+        success=qa_success,
+    )
+
+    logger.info(
+        "Processed feedback QA %s from session %s (nodes=%d, edges=%d, applied=%s)",
+        qa_id,
+        session_id,
+        len(node_ids),
+        len(edge_ids),
+        qa_success,
+    )
+
+    return {"processed": 1, "applied": 1 if qa_success else 0, "skipped": 0}
+
+
 async def apply_feedback_weights(data: Any, alpha: float = 0.1) -> ApplyFeedbackWeightsResult:
     """Apply feedback-based weight updates for graph nodes and edges."""
     if alpha <= 0 or alpha > 1:
@@ -142,77 +226,18 @@ async def apply_feedback_weights(data: Any, alpha: float = 0.1) -> ApplyFeedback
     applied = 0
     skipped = 0
 
+    user_id = str(user.id)
     for item in _iter_feedback_items(data):
-        session_id = item.get("session_id")
-        qa_id = item.get("qa_id")
-        memify_metadata = item.get("memify_metadata")
-        memify_metadata = memify_metadata if isinstance(memify_metadata, dict) else {}
-
-        if memify_metadata.get(MEMIFY_METADATA_KEY) is True:
-            logger.info(
-                f"Session QA entry with id: {qa_id} is already processed and applied on the graph."
-            )
-            skipped += 1
-            continue
-
-        try:
-            normalized_rating = normalize_feedback_score(item.get("feedback_score"))
-        except CogneeValidationError:
-            skipped += 1
-            continue
-
-        node_ids = _extract_ids(item.get("used_graph_element_ids"), "node_ids")
-        edge_ids = _extract_ids(item.get("used_graph_element_ids"), "edge_ids")
-
-        if not node_ids and not edge_ids:
-            await _mark_feedback_processed(
-                session_manager=session_manager,
-                user_id=str(user.id),
-                session_id=session_id,
-                qa_id=qa_id,
-                current_metadata=memify_metadata,
-                success=False,
-            )
-            skipped += 1
-            continue
-
-        node_success = await _update_element_weights(
-            ids=node_ids,
-            normalized_rating=normalized_rating,
+        outcome = await _process_feedback_item(
+            item=item,
             alpha=alpha,
-            get_weights=graph_engine.get_node_feedback_weights,
-            set_weights=graph_engine.set_node_feedback_weights,
-        )
-        edge_success = await _update_element_weights(
-            ids=edge_ids,
-            normalized_rating=normalized_rating,
-            alpha=alpha,
-            get_weights=graph_engine.get_edge_feedback_weights,
-            set_weights=graph_engine.set_edge_feedback_weights,
-        )
-
-        qa_success = node_success and edge_success
-        await _mark_feedback_processed(
+            user_id=user_id,
             session_manager=session_manager,
-            user_id=str(user.id),
-            session_id=session_id,
-            qa_id=qa_id,
-            current_metadata=memify_metadata,
-            success=qa_success,
+            graph_engine=graph_engine,
         )
-
-        processed += 1
-        if qa_success:
-            applied += 1
-
-        logger.info(
-            "Processed feedback QA %s from session %s (nodes=%d, edges=%d, applied=%s)",
-            qa_id,
-            session_id,
-            len(node_ids),
-            len(edge_ids),
-            qa_success,
-        )
+        processed += outcome["processed"]
+        applied += outcome["applied"]
+        skipped += outcome["skipped"]
 
     return {
         "processed": processed,

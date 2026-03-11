@@ -5,6 +5,9 @@ from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 logger = get_logger("extract_feedback_qas")
 
@@ -15,7 +18,10 @@ def _is_eligible(entry: Dict[str, Any]) -> bool:
         return False
 
     memify_metadata = entry.get("memify_metadata")
-    if isinstance(memify_metadata, dict) and memify_metadata.get("apply_feedback_weights") is True:
+    if (
+        isinstance(memify_metadata, dict)
+        and memify_metadata.get(MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY) is True
+    ):
         return False
 
     used_graph_element_ids = entry.get("used_graph_element_ids")

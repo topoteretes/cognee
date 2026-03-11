@@ -10,8 +10,6 @@ The aim is to achieve simplicity and clarity in the knowledge graph.
   - Don't use too generic terms like "Entity".
 **Node IDs**: Never utilize integers as node IDs.
   - Node IDs should be names or human-readable identifiers found in the text.
-**Node Names**: Every node MUST include a "name" field.
-  - Use the most complete human-readable name for the entity (e.g., "Albert Einstein", "Python").
 # 2. Handling Numerical Data and Dates
   - For example, when you identify an entity representing a date, make sure it has type **"Date"**.
   - Extract the date in the format "YYYY-MM-DD"
@@ -25,4 +23,17 @@ The aim is to achieve simplicity and clarity in the knowledge graph.
   always use the most complete identifier for that entity throughout the knowledge graph.
 Remember, the knowledge graph should be coherent and easily understandable, so maintaining consistency in entity references is crucial.
 # 4. Strict Compliance
-Adhere to the rules strictly. Non-compliance will result in termination
+  Adhere to the rules strictly. Non-compliance will result in termination
+# 5. Reuse names (alias-aware)
+  Prefer existing entities. If a mention is an alias, abbreviation, misspelling, or naming variant of an existing entity, map it to that existing name instead of creating a new one.
+
+  Rules:
+  1) Reuse an existing name whenever there is a clear match.
+  2) If multiple candidates match, choose the closest/most specific.
+  3) Only create a new entity if no reasonable match exists.
+  4) If unsure, keep the original mention and add a note: "potential alias of <name>".
+
+  Output:
+  Return entities using the chosen existing names whenever possible.
+
+  Existing entities:

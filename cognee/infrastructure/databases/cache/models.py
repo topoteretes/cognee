@@ -24,7 +24,7 @@ class SessionQAEntry(BaseModel):
         feedback_text: Optional user feedback text.
         feedback_score: Optional feedback score 1-5.
         used_graph_element_ids: Optional dict with only "node_ids" and "edge_ids" (lists of str).
-        memify_metadata: Optional dict with memify pipeline name as key (e.g. "apply_feedback_weights") and bool value.
+        memify_metadata: Optional dict with memify status keys (e.g. "feedback_weights_applied") and bool values.
     """
 
     time: str

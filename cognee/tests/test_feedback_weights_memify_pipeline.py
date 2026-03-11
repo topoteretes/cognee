@@ -14,6 +14,9 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import create_user, get_default_user, get_user_by_email
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 
 async def main():
@@ -94,8 +97,11 @@ async def main():
         (entry for entry in updated_entries if entry.get("qa_id") == qa_entry["qa_id"]), None
     )
     assert updated_qa is not None, "Updated QA entry not found."
-    assert updated_qa.get("memify_metadata", {}).get("apply_feedback_weights") is True, (
-        "Pipeline should mark apply_feedback_weights=True on successful QA update."
+    assert (
+        updated_qa.get("memify_metadata", {}).get(MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY)
+        is True
+    ), (
+        f"Pipeline should mark {MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY}=True on successful QA update."
     )
 
     graph_engine = await get_graph_engine()
