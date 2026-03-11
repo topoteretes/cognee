@@ -68,6 +68,32 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_cognee_server_start.py
 
+  run-telemetry-test:
+    name: Run Telemetry Test
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Telemetry Tests
+        env:
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_telemetry.py
+
   run-telemetry-pipeline-test:
     name: Run Telemetry Pipeline Test
     runs-on: ubuntu-22.04
@@ -1225,10 +1251,15 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "redis"
 
-      - name: Install cognee-mcp (local version)
+      - name: Install cognee-mcp and override with local cognee
         shell: bash
         run: |
+          # 1. Install MCP (this will pull cognee from PyPI as a dependency)
           uv pip install -e ./cognee-mcp
+
+          # 2. Force-install the local root to overwrite the PyPI version
+          # This replaces the PyPI 'cognee' with your current branch code
+          uv pip install --force-reinstall -e .
 
       - name: Run api/tool usage logger
         env:
