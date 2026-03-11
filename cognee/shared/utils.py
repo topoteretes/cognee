@@ -8,13 +8,11 @@ import socketserver
 import ssl
 from datetime import datetime, timezone
 from threading import Thread
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import aiohttp
 
-from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
