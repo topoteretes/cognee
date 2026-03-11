@@ -211,11 +211,7 @@ async def test_apply_feedback_weights_skips_already_applied():
     ):
         mock_session_user.get.return_value = _mock_user()
         result = await apply_feedback_weights(
-            [
-                _feedback_item(
-                    memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True}
-                )
-            ],
+            [_feedback_item(memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True})],
             alpha=0.1,
         )
 
