@@ -6,6 +6,9 @@ import pytest
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 extract_feedback_qas_module = sys.modules["cognee.tasks.memify.extract_feedback_qas"]
 
@@ -32,7 +35,7 @@ async def test_extract_feedback_qas_filters_eligible_entries(mock_user):
             "time": "2026-01-01T10:01:00",
             "feedback_score": 3,
             "used_graph_element_ids": {"node_ids": ["n2"]},
-            "memify_metadata": {"feedback_weights_applied": True},
+            "memify_metadata": {MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True},
         },
         {
             "qa_id": "q3",

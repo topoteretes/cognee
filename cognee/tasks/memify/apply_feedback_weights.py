@@ -6,10 +6,13 @@ from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 logger = get_logger("apply_feedback_weights")
 
-MEMIFY_METADATA_KEY = "feedback_weights_applied"
+MEMIFY_METADATA_KEY = MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY
 FEEDBACK_WEIGHT_DECIMALS = 4
 
 
