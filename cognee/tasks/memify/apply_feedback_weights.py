@@ -9,7 +9,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("apply_feedback_weights")
 
-MEMIFY_METADATA_KEY = "apply_feedback_weights"
+MEMIFY_METADATA_KEY = "feedback_weights_applied"
 FEEDBACK_WEIGHT_DECIMALS = 4
 
 

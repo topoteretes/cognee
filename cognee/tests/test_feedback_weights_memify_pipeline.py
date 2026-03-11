@@ -94,8 +94,8 @@ async def main():
         (entry for entry in updated_entries if entry.get("qa_id") == qa_entry["qa_id"]), None
     )
     assert updated_qa is not None, "Updated QA entry not found."
-    assert updated_qa.get("memify_metadata", {}).get("apply_feedback_weights") is True, (
-        "Pipeline should mark apply_feedback_weights=True on successful QA update."
+    assert updated_qa.get("memify_metadata", {}).get("feedback_weights_applied") is True, (
+        "Pipeline should mark feedback_weights_applied=True on successful QA update."
     )
 
     graph_engine = await get_graph_engine()

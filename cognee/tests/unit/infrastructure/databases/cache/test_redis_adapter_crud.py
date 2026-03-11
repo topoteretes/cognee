@@ -141,13 +141,13 @@ async def test_update_memify_metadata_merges_existing_keys(adapter):
         "u1",
         "s1",
         "id1",
-        memify_metadata={"apply_feedback_weights": False},
+        memify_metadata={"feedback_weights_applied": False},
     )
     assert ok
     entries = await adapter.get_all_qa_entries("u1", "s1")
     assert entries[0]["memify_metadata"] == {
         "persist_sessions_in_knowledge_graph": True,
-        "apply_feedback_weights": False,
+        "feedback_weights_applied": False,
     }
 
 

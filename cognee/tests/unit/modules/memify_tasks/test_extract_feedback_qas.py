@@ -32,7 +32,7 @@ async def test_extract_feedback_qas_filters_eligible_entries(mock_user):
             "time": "2026-01-01T10:01:00",
             "feedback_score": 3,
             "used_graph_element_ids": {"node_ids": ["n2"]},
-            "memify_metadata": {"apply_feedback_weights": True},
+            "memify_metadata": {"feedback_weights_applied": True},
         },
         {
             "qa_id": "q3",

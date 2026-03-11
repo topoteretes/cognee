@@ -162,7 +162,7 @@ async def test_apply_feedback_weights_neo4j_success_marks_applied_true():
     assert graph.edge_weights["e1"] == pytest.approx(0.55)
 
     call_kwargs = session_manager.update_qa.call_args.kwargs
-    assert call_kwargs["memify_metadata"]["apply_feedback_weights"] is True
+    assert call_kwargs["memify_metadata"]["feedback_weights_applied"] is True
 
 
 @pytest.mark.asyncio
@@ -208,7 +208,7 @@ async def test_apply_feedback_weights_skips_already_applied():
     ):
         mock_session_user.get.return_value = _mock_user()
         result = await apply_feedback_weights(
-            [_feedback_item(memify_metadata={"apply_feedback_weights": True})], alpha=0.1
+            [_feedback_item(memify_metadata={"feedback_weights_applied": True})], alpha=0.1
         )
 
     assert result["processed"] == 0
@@ -239,7 +239,7 @@ async def test_apply_feedback_weights_missing_mapping_sets_false():
         )
 
     call_kwargs = session_manager.update_qa.call_args.kwargs
-    assert call_kwargs["memify_metadata"]["apply_feedback_weights"] is False
+    assert call_kwargs["memify_metadata"]["feedback_weights_applied"] is False
 
 
 @pytest.mark.asyncio
@@ -264,4 +264,4 @@ async def test_apply_feedback_weights_partial_failure_keeps_false():
     assert result["processed"] == 1
     assert result["applied"] == 0
     call_kwargs = session_manager.update_qa.call_args.kwargs
-    assert call_kwargs["memify_metadata"]["apply_feedback_weights"] is False
+    assert call_kwargs["memify_metadata"]["feedback_weights_applied"] is False

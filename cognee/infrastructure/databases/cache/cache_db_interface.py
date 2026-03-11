@@ -81,7 +81,7 @@ class CacheDBInterface(ABC):
         Add a Q/A/context triplet to a cache session.
         Uses the same QA fields as update_qa_entry for consistent structure.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
-        memify_metadata: Optional dict with pipeline name as key (e.g. "apply_feedback_weights") and bool value.
+        memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         """
         pass
 
