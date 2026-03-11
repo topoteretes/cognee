@@ -3,15 +3,39 @@ import os
 import asyncio
 import datetime
 import json
+import pathlib
+import subprocess
+import sys
+from os import path
+from modal import Image
+
+
+def _ensure_runtime_deps():
+    """Ensure pydantic stack is compatible before importing cognee modules."""
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-cache-dir",
+            "--upgrade",
+            "typing_extensions>=4.12.2",
+            "pydantic>=2.10.5",
+            "pydantic-core>=2.27.2",
+            "pydantic-settings>=2.2.1",
+        ]
+    )
+
+
+_ensure_runtime_deps()
+
 from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
 from cognee.eval_framework.answer_generation.run_question_answering_module import (
     run_question_answering,
 )
-import pathlib
-from os import path
-from modal import Image
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 from cognee.eval_framework.metrics_dashboard import create_dashboard
 
@@ -42,7 +66,12 @@ app = modal.App("modal-run-eval")
 
 image = Image.from_dockerfile(
     path=pathlib.Path(path.join(path.dirname(__file__), "Dockerfile")).resolve(),
-    force_build=False,
+    force_build=True,
+).pip_install(
+    "typing_extensions>=4.12.2",
+    "pydantic>=2.10.5",
+    "pydantic-core>=2.27.2",
+    "pydantic-settings>=2.2.1",
 ).add_local_python_source("cognee")
 
 
@@ -58,7 +87,7 @@ async def modal_run_eval(eval_params=None):
     if eval_params is None:
         eval_params = EvalConfig().to_dict()
 
-    version_name = "baseline"
+    version_name = eval_params.get("version_name", "baseline")
     benchmark_name = os.environ.get("BENCHMARK", eval_params.get("benchmark", "benchmark"))
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
 
@@ -73,7 +102,7 @@ async def modal_run_eval(eval_params=None):
 
     # Run the evaluation pipeline
     await run_corpus_builder(eval_params, instance_filter=eval_params.get("instance_filter"))
-    await run_question_answering(eval_params)
+    await run_question_answering(eval_params, top_k=eval_params.get("top_k"))
     answers = await run_evaluation(eval_params)
 
     with open("/data/" + answers_filename, "w") as f:
@@ -100,30 +129,23 @@ async def modal_run_eval(eval_params=None):
 
 @app.local_entrypoint()
 async def main():
-    # List of configurations to run
+    # Run top_k variants for both benchmarks on 100 questions each.
     configs = [
         EvalConfig(
+            version_name=f"baseline-top-{top_k}",
+            top_k=top_k,
             task_getter_type="Default",
-            number_of_samples_in_corpus=25,
-            benchmark="TwoWikiMultiHop",
+            number_of_samples_in_corpus=100,
+            benchmark=benchmark,
             qa_engine="cognee_graph_completion",
             building_corpus_from_scratch=True,
             answering_questions=True,
             evaluating_answers=True,
             calculate_metrics=True,
             dashboard=True,
-        ),
-        EvalConfig(
-            task_getter_type="Default",
-            number_of_samples_in_corpus=25,
-            benchmark="Musique",
-            qa_engine="cognee_graph_completion",
-            building_corpus_from_scratch=True,
-            answering_questions=True,
-            evaluating_answers=True,
-            calculate_metrics=True,
-            dashboard=True,
-        ),
+        )
+        for benchmark in ["TwoWikiMultiHop", "Musique"]
+        for top_k in [5, 10, 15, 20]
     ]
 
     # Run evaluations in parallel with different configurations

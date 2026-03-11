@@ -4,6 +4,9 @@ from typing import List, Optional
 
 
 class EvalConfig(BaseSettings):
+    # Run labeling
+    version_name: str = "baseline"
+
     # Corpus builder params
     building_corpus_from_scratch: bool = True
     number_of_samples_in_corpus: int = 1
@@ -42,6 +45,7 @@ class EvalConfig(BaseSettings):
     direct_llm_system_prompt: str = "direct_llm_eval_system.txt"
     direct_llm_eval_prompt: str = "direct_llm_eval_prompt.txt"
     instance_filter: Optional[List[str]] = None
+    top_k: Optional[int] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -50,6 +54,7 @@ class EvalConfig(BaseSettings):
             "building_corpus_from_scratch": self.building_corpus_from_scratch,
             "number_of_samples_in_corpus": self.number_of_samples_in_corpus,
             "benchmark": self.benchmark,
+            "version_name": self.version_name,
             "answering_questions": self.answering_questions,
             "qa_engine": self.qa_engine,
             "evaluating_answers": self.evaluating_answers,
@@ -68,6 +73,7 @@ class EvalConfig(BaseSettings):
             "direct_llm_system_prompt": self.direct_llm_system_prompt,
             "direct_llm_eval_prompt": self.direct_llm_eval_prompt,
             "instance_filter": self.instance_filter,
+            "top_k": self.top_k,
         }
 
 
