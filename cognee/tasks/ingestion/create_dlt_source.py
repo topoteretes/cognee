@@ -1,3 +1,4 @@
+import os
 import re
 from typing import Optional
 
@@ -28,6 +29,12 @@ def create_dlt_source_from_connection_string(
     from dlt.sources.sql_database import sql_database
     import sqlalchemy
 
+    # SQLite paths must be absolute for SQLAlchemy to find the file.
+    # sqlite:/// = relative, sqlite://// = absolute
+    if connection_string.startswith("sqlite:///") and not connection_string.startswith("sqlite:////"):
+        relative_path = connection_string[len("sqlite:///"):]
+        connection_string = "sqlite:///" + os.path.abspath(relative_path)
+
     if query:
         table_name, where_clause = _parse_sql_query(query)
 
@@ -50,7 +57,6 @@ def create_dlt_source_from_connection_string(
 def create_dlt_source_from_csv(csv_path: str):
     """Auto-generate a dlt resource from a CSV file path."""
     from dlt.sources.filesystem import filesystem, read_csv
-    import os
 
     parent_dir = os.path.dirname(os.path.abspath(csv_path))
     filename = os.path.basename(csv_path)
