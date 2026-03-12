@@ -8,7 +8,7 @@ class CacheConfig(BaseSettings):
     Configuration for distributed cache systems (e.g., Redis), used for locking or coordination.
 
     Attributes:
-    - shared_kuzu_lock: Shared kuzu lock logic on/off.
+    - shared_ladybug_lock: Shared ladybug lock logic on/off.
     - cache_host: Hostname of the cache service.
     - cache_port: Port number for the cache service.
     - agentic_lock_expire: Automatic lock expiration time (in seconds).
@@ -21,7 +21,7 @@ class CacheConfig(BaseSettings):
     cache_backend: Literal["redis", "fs"] = "fs"
     caching: bool = False
     auto_feedback: bool = False
-    shared_kuzu_lock: bool = False
+    shared_ladybug_lock: bool = False
     cache_host: str = "localhost"
     cache_port: int = 6379
     cache_username: Optional[str] = None
@@ -38,7 +38,7 @@ class CacheConfig(BaseSettings):
             "cache_backend": self.cache_backend,
             "caching": self.caching,
             "auto_feedback": self.auto_feedback,
-            "shared_kuzu_lock": self.shared_kuzu_lock,
+            "shared_ladybug_lock": self.shared_ladybug_lock,
             "cache_host": self.cache_host,
             "cache_port": self.cache_port,
             "cache_username": self.cache_username,

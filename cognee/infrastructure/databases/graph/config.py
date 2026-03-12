@@ -35,7 +35,7 @@ class GraphConfig(BaseSettings):
 
     # Using Field we are able to dynamically load current GRAPH_DATABASE_PROVIDER value in the model validator part
     # and determine default graph db file and path based on this parameter if no values are provided
-    graph_database_provider: str = Field("kuzu", env="GRAPH_DATABASE_PROVIDER")
+    graph_database_provider: str = Field("ladybug", env="GRAPH_DATABASE_PROVIDER")
 
     graph_database_url: str = ""
     graph_database_name: str = ""
@@ -47,7 +47,7 @@ class GraphConfig(BaseSettings):
     graph_filename: str = ""
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
-    graph_dataset_database_handler: str = "kuzu"
+    graph_dataset_database_handler: str = "ladybug"
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider

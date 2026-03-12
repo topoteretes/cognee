@@ -9,34 +9,34 @@ from cognee.modules.users.models import DatasetDatabase
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 
 
-class KuzuDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
+class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
-    Handler for interacting with Kuzu Dataset databases.
+    Handler for interacting with Ladybug Dataset databases.
     """
 
     @classmethod
     async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
         """
-        Create a new Kuzu instance for the dataset. Return connection info that will be mapped to the dataset.
+        Create a new Ladybug instance for the dataset. Return connection info that will be mapped to the dataset.
 
         Args:
             dataset_id: Dataset UUID
             user: User object who owns the dataset and is making the request
 
         Returns:
-            dict: Connection details for the created Kuzu instance
+            dict: Connection details for the created Ladybug instance
 
         """
         from cognee.infrastructure.databases.graph.config import get_graph_config
 
         graph_config = get_graph_config()
 
-        if graph_config.graph_database_provider != "kuzu":
+        if graph_config.graph_database_provider != "ladybug":
             raise ValueError(
-                "KuzuDatasetDatabaseHandler can only be used with Kuzu graph database provider."
+                "LadybugDatasetDatabaseHandler can only be used with Ladybug graph database provider."
             )
 
-        graph_db_name = f"{dataset_id}.pkl"
+        graph_db_name = f"{dataset_id}.lbug"
         graph_db_url = graph_config.graph_database_url
         graph_db_key = graph_config.graph_database_key
         graph_db_username = graph_config.graph_database_username
@@ -47,7 +47,7 @@ class KuzuDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "graph_database_url": graph_db_url,
             "graph_database_provider": graph_config.graph_database_provider,
             "graph_database_key": graph_db_key,
-            "graph_dataset_database_handler": "kuzu",
+            "graph_dataset_database_handler": "ladybug",
             "graph_database_connection_info": {
                 "graph_database_username": graph_db_username,
                 "graph_database_password": graph_db_password,

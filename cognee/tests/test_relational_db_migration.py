@@ -89,7 +89,7 @@ async def relational_db_migration():
             found_edges.add((source_name, target_name))
             distinct_node_names.update([source_name, target_name])
 
-    elif graph_db_provider == "kuzu":
+    elif graph_db_provider == "ladybug":
         query_str = f"""
         MATCH (n:Node)-[r:EDGE]->(m:Node)
         WHERE r.relationship_name = '{relationship_label}'
@@ -150,7 +150,7 @@ async def relational_db_migration():
             node_count = rows[0]["node_count"]
             edge_count = rows[0]["edge_count"]
 
-        elif graph_db_provider == "kuzu":
+        elif graph_db_provider == "ladybug":
             query_nodes = "MATCH (n:Node) RETURN count(n) as c"
             rows_n = await graph_engine.query(query_nodes)
             node_count = rows_n[0][0]
@@ -181,7 +181,7 @@ async def relational_db_migration():
             node_count = rows[0]["node_count"]
             edge_count = rows[0]["edge_count"]
 
-        elif graph_db_provider == "kuzu":
+        elif graph_db_provider == "ladybug":
             query_nodes = "MATCH (n:Node) RETURN count(n) as c"
             rows_n = await graph_engine.query(query_nodes)
             node_count = rows_n[0][0]
@@ -243,7 +243,7 @@ async def test_schema_only_migration():
             rows = await graph_engine.query(query_str)
             edge_counts[rel_type] = rows[0]["c"]
 
-    elif graph_db_provider == "kuzu":
+    elif graph_db_provider == "ladybug":
         for rel_type in edge_counts.keys():
             query_str = f"""
             MATCH ()-[r:EDGE]->()
