@@ -188,7 +188,7 @@ class TestCogneeServerStart(unittest.TestCase):
             len(ontology_nodes), 0, "No ontology nodes found - ontology was not integrated"
         )
 
-        # TODO: Add test to verify cognify pipeline is complete before testing search
+        # TODO(#2350): Add test to verify cognify pipeline is complete before testing search
 
         # Search request
         url = "http://127.0.0.1:8000/api/v1/search"

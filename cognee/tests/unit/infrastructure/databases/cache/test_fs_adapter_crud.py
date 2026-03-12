@@ -87,7 +87,6 @@ async def test_prune(adapter):
     assert await adapter.get_all_qa_entries("u1", "s1") == []
 
 
-# Backward-compatibility tests (add_qa, get_latest_qa, get_all_qas):TODO: Can be deleted after session manager integration into retrievers
 
 
 @pytest.mark.asyncio

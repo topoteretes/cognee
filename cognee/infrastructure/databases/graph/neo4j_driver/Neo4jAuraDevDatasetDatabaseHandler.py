@@ -75,7 +75,7 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "Content-Type": "application/json",
         }
 
-        # TODO: Maybe we can allow **kwargs parameter forwarding for cases like these
+        # TODO(#2354): Maybe we can allow **kwargs parameter forwarding for cases like these
         #       Too allow different configurations between datasets
         payload = {
             "version": "5",
@@ -83,7 +83,7 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "memory": "1GB",
             "name": graph_db_name[
                 0:29
-            ],  # TODO: Find better name to name Neo4j instance within 30 character limit
+            ],  # TODO(#2354): Find better name to name Neo4j instance within 30 character limit
             "type": "professional-db",
             "tenant_id": tenant_id,
             "cloud_provider": "gcp",
