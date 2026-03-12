@@ -18,45 +18,61 @@ pip install cognee
 
 Set `LLM_API_KEY` in your `.env` (defaults to OpenAI).
 
-### 2. Write a skill
+### 2. Load the meta-skill and run it
 
-```text
-my_skills/
-  summarize/
-    SKILL.md
-```
-
-```markdown
----
-name: summarize
-description: Summarize documents, articles, or text into concise key points.
----
-
-## When to Activate
-
-- User asks to summarize, condense, or compress text
-
-## Process
-
-1. Identify key points
-2. Produce a concise summary
-
-## Guidelines
-
-- Preserve the original meaning
-- Keep it under 20% of the original length
-```
-
-### 3. Run it
+cognee-skills ships with its own skill — the meta-skill — that teaches agents how to use the self-improvement loop. It's the fastest way to see the system working without writing anything yourself.
 
 ```python
 from cognee import skills
 
+# Load the meta-skill (describes how to run, inspect, fix, and roll back skills)
+await skills.ingest_meta_skill()
+
+# Run a task — cognee finds the right skill and executes it
+result = await skills.run("A skill keeps producing wrong output. How do I fix it?")
+print(result["output"])
+```
+
+`skills.run()` does everything: finds the best skill, executes it, scores the output, records the outcome, and self-repairs on failure.
+
+### 3. Add your own skills
+
+Put a `SKILL.md` in a folder and ingest it alongside the meta-skill:
+
+```python
 await skills.ingest("./my_skills")
+await skills.ingest_meta_skill()
+
 result = await skills.run("Compress this conversation")
 ```
 
-`skills.run()` does everything: finds the best skill, executes it, scores the output, records the outcome, and self-repairs on failure. That's the full loop.
+Every skill is a markdown file with a name, description, and instructions. See the [full SKILL.md format](#repository-structure) and [`example/`](example/) for working examples.
+
+---
+
+## The meta-skill
+
+cognee-skills ships with a built-in skill that teaches agents how to use the self-improvement loop — how to run skills, inspect failures, review proposed fixes, apply amendments, and roll back changes.
+
+There are two ways to include it, depending on how you work:
+
+**Programmatic — nothing to copy, loads from the installed package:**
+
+```python
+await skills.ingest_meta_skill()
+```
+
+Use this with the Python SDK or CLI. The skill is read from inside the cognee package and loaded into the graph — no files are written to your project.
+
+**As a file in your skills folder — visible, editable, version-controlled:**
+
+```bash
+cp /path/to/site-packages/cognee/cognee_skills/meta-skill/SKILL.md ./my_skills/cognee-skills/SKILL.md
+```
+
+Then it gets picked up automatically when you call `skills.ingest("./my_skills")` — no separate call needed. This is the better option for Claude Code users, since Claude discovers it alongside all your other skills in one ingest call.
+
+Once the meta-skill is loaded, an agent that encounters a failing skill can diagnose it, propose a fix, apply it, and roll back if needed — all on its own, without you explaining the process.
 
 ---
 
@@ -92,15 +108,21 @@ Add `.mcp.json` to your project root and check it into git — everyone on the t
 }
 ```
 
+Copy the meta-skill into your skills folder so Claude discovers it automatically:
+
+```bash
+cp /path/to/site-packages/cognee/cognee_skills/meta-skill/SKILL.md ./my_skills/cognee-skills/SKILL.md
+```
+
 Add to your `CLAUDE.md` (replace `./my_skills` with your skills folder):
 
 ```
-Skills are in ./my_skills. Call ingest_skills(skills_folder="./my_skills") and ingest_meta_skill() if skills haven't been loaded yet, then use run_skill for tasks — skills learn from their mistakes and get better over time.
+Skills are in ./my_skills. Call ingest_skills(skills_folder="./my_skills") if skills haven't been loaded yet, then use run_skill for tasks — skills learn from their mistakes and get better over time.
 ```
 
-Your IDE launches cognee locally. Claude loads your skills on first use, routes every task to the best one, evaluates output quality, and self-repairs failing skills over time — no code required.
+Your IDE launches cognee locally. Claude loads your skills on first use — including the meta-skill — routes every task to the best one, evaluates output quality, and self-repairs failing skills over time. No code required.
 
-`ingest_meta_skill()` loads the cognee-skills self-improvement guide as a skill. Once loaded, Claude knows how to inspect failing skills, review proposed fixes, apply amendments, and roll back changes on its own.
+With the meta-skill loaded, Claude knows how to inspect failing skills, review proposed fixes, apply amendments, and roll back changes on its own.
 
 ---
 
