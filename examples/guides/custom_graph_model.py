@@ -1,5 +1,8 @@
 import os
 import asyncio
+from typing import Any
+from pydantic import SkipValidation
+
 from cognee import add, cognify, prune, visualize_graph
 from cognee.low_level import DataPoint
 
@@ -21,7 +24,7 @@ class ProgrammingLanguageType(DataPoint):
 
 class ProgrammingLanguage(DataPoint):
     name: str
-    used_in: list[Field] = []
+    used_in: SkipValidation[Any] = None
     is_type: ProgrammingLanguageType
     metadata: dict = {"index_fields": ["name"]}
 
