@@ -101,15 +101,16 @@ class Neo4jAdapter(GraphDBInterface):
             missing = "GRAPH_DATABASE_PASSWORD" if has_username else "GRAPH_DATABASE_USERNAME"
             raise ValueError(
                 f"Neo4j credentials incomplete: {provided} is set but {missing} is missing. "
-                f"Set both GRAPH_DATABASE_USERNAME and GRAPH_DATABASE_PASSWORD in your .env file, "
+                f"Provide both GRAPH_DATABASE_USERNAME and GRAPH_DATABASE_PASSWORD "
+                f"(via .env or constructor arguments), "
                 f"or set GRAPH_DATABASE_ALLOW_ANONYMOUS=true for anonymous access."
             )
 
         # Both missing — anonymous access
         if not allow_anonymous:
             raise ValueError(
-                "Neo4j credentials not provided. Set GRAPH_DATABASE_USERNAME and "
-                "GRAPH_DATABASE_PASSWORD in your .env file, or set "
+                "Neo4j credentials not provided. Provide GRAPH_DATABASE_USERNAME and "
+                "GRAPH_DATABASE_PASSWORD (via .env or constructor arguments), or set "
                 "GRAPH_DATABASE_ALLOW_ANONYMOUS=true to explicitly allow anonymous access."
             )
 
