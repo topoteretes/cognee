@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from cognee.api.DTO import InDTO
 from pydantic import EmailStr
 
+from cognee.modules.users.models.User import User
+from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.methods.get_user_id_by_email import get_user_id_by_email
 
 
@@ -13,7 +15,7 @@ def get_user_id_by_email_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("/get-user-id")
-    async def get_user_id(body: UserEmailRequest):
+    async def get_user_id(body: UserEmailRequest, user: User = Depends(get_authenticated_user)):
         user_id = await get_user_id_by_email(str(body.email))
 
         if user_id is None:
