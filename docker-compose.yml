@@ -91,7 +91,7 @@ services:
       - cognee-network
 
   neo4j:
-    image: neo4j:latest
+    image: neo4j:5.26  # Pinned to 5.x; compatible with neo4j Python driver >=5.28,<6
     container_name: neo4j
     restart: always
     profiles:
