@@ -4,7 +4,186 @@
 
 AI agents accumulate failing skills. A skill that worked last month stops working when the codebase changes, the model changes, or the task scope shifts. Usually nobody notices until a user complains.
 
-**cognee-skills** gives every skill a self-improvement loop:
+**cognee-skills** gives every skill a self-improvement loop: every run is scored, failures are diagnosed, and fixes are proposed and applied — automatically or step-by-step.
+
+---
+
+## Quickstart
+
+### 1. Install
+
+```bash
+pip install cognee
+```
+
+Set `LLM_API_KEY` in your `.env` (defaults to OpenAI).
+
+### 2. Write a skill
+
+```text
+my_skills/
+  summarize/
+    SKILL.md
+```
+
+```markdown
+---
+name: summarize
+description: Summarize documents, articles, or text into concise key points.
+---
+
+## When to Activate
+
+- User asks to summarize, condense, or compress text
+
+## Process
+
+1. Identify key points
+2. Produce a concise summary
+
+## Guidelines
+
+- Preserve the original meaning
+- Keep it under 20% of the original length
+```
+
+### 3. Run it
+
+```python
+from cognee import skills
+
+await skills.ingest("./my_skills")
+result = await skills.run("Compress this conversation")
+```
+
+`skills.run()` does everything: finds the best skill, executes it, scores the output, records the outcome, and self-repairs on failure. That's the full loop.
+
+---
+
+## Integrations
+
+There are four ways to use cognee-skills. Pick the one that fits your setup:
+
+| | Who it's for |
+|---|---|
+| [Claude Code / MCP IDEs](#claude-code--mcp-ides-no-code-required) | Vibe-coders, anyone using Claude Code or a MCP-enabled IDE |
+| [Python SDK](#python-sdk) | Developers building custom workflows or agents |
+| [CLI](#cli) | Terminal users, shell scripts, CI pipelines |
+| [MCP programmatically](#mcp-programmatically) | Custom agents or services that speak MCP |
+
+---
+
+### Claude Code / MCP IDEs (no code required)
+
+```bash
+pip install cognee-mcp
+export LLM_API_KEY="your-openai-api-key"
+```
+
+Add `.mcp.json` to your project root and check it into git — everyone on the team gets it:
+
+```json
+{
+  "mcpServers": {
+    "cognee": {
+      "command": "cognee-mcp"
+    }
+  }
+}
+```
+
+Add to your `CLAUDE.md` (replace `./my_skills` with your skills folder):
+
+```
+Skills are in ./my_skills. Call ingest_skills(skills_folder="./my_skills") and ingest_meta_skill() if skills haven't been loaded yet, then use run_skill for tasks — skills learn from their mistakes and get better over time.
+```
+
+Your IDE launches cognee locally. Claude loads your skills on first use, routes every task to the best one, evaluates output quality, and self-repairs failing skills over time — no code required.
+
+`ingest_meta_skill()` loads the cognee-skills self-improvement guide as a skill. Once loaded, Claude knows how to inspect failing skills, review proposed fixes, apply amendments, and roll back changes on its own.
+
+---
+
+### Python SDK
+
+```bash
+pip install cognee
+```
+
+```python
+from cognee import skills
+
+await skills.ingest("./my_skills")
+result = await skills.run("Compress this conversation")
+```
+
+For step-by-step control over the repair loop:
+
+```python
+# Inspect why a skill keeps failing
+inspection = await skills.inspect("summarize")
+
+# Preview the proposed fix before applying
+amendment = await skills.preview_amendify("summarize")
+
+# Apply it
+await skills.amendify(amendment["amendment_id"])
+
+# Roll back if it didn't help
+await skills.rollback_amendify(amendment["amendment_id"])
+```
+
+See the [full API](#full-api) for all available methods.
+
+---
+
+### CLI
+
+```bash
+pip install cognee
+```
+
+```bash
+cognee-cli skills ingest ./my_skills
+cognee-cli skills run "Compress this conversation"
+
+# Inspect and fix a failing skill
+cognee-cli skills inspect summarize
+cognee-cli skills preview summarize
+cognee-cli skills amendify <amendment_id>
+
+# JSON output for scripting
+cognee-cli skills run "Compress this conversation" -f json
+```
+
+All commands support `-f json` for machine-readable output. Good for shell scripts and CI pipelines.
+
+---
+
+### MCP programmatically
+
+Any agent or service that speaks MCP over stdio can connect directly — not just Claude Code:
+
+```python
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+server_params = StdioServerParameters(command="cognee-mcp")
+
+async with stdio_client(server_params) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        await session.call_tool("ingest_skills", {"skills_folder": "./my_skills"})
+        result = await session.call_tool("run_skill", {"task_text": "Compress this conversation"})
+```
+
+See [`example/test_mcp.py`](example/test_mcp.py) for the full self-improvement loop over MCP.
+
+---
+
+## The self-improvement loop
+
+Every run is scored 0.0–1.0 by a second LLM call. Failures accumulate. Once the threshold is hit, the loop kicks in:
 
 ```text
 skill fails
@@ -15,33 +194,10 @@ skill fails
   → rollback: one call to revert if the fix didn't help
 ```
 
-This runs automatically on failure (`auto_amendify=True`) or manually step-by-step. Every run, pass or fail, feeds back into routing preferences so the best skills rise and the broken ones surface for repair.
-
----
-
-## The self-improvement loop
-
 ### Automatic (one call)
 
 ```python
-from cognee import skills
-
-# Execute with automatic self-repair on failure
-result = await skills.execute(
-    "summarize",
-    "Compress this conversation",
-    auto_amendify=True,      # trigger repair if it fails
-    amendify_min_runs=3,     # only after 3+ failures
-)
-
-# result["success"]  — whether execution succeeded
-# result["amended"]  — amendment applied if it failed (or None)
-```
-
-Or trigger repair directly:
-
-```python
-# Inspect → preview → apply in one call
+# Full pipeline in one call
 result = await skills.auto_amendify("summarize")
 
 # {
@@ -49,6 +205,17 @@ result = await skills.auto_amendify("summarize")
 #   "amendment":  {"change_explanation": "...", "amendment_confidence": 0.82, ...},
 #   "applied":    {"success": True, "status": "applied", ...}
 # }
+```
+
+Or trigger repair automatically on execution failure:
+
+```python
+result = await skills.execute(
+    "summarize",
+    "Compress this conversation",
+    auto_amendify=True,      # trigger repair if it fails
+    amendify_min_runs=3,     # only after 3+ failures
+)
 ```
 
 ### Manual (step-by-step)
@@ -94,8 +261,6 @@ result = await skills.amendify("amend-abc123")
 # {"success": True, "status": "applied", "skill_id": "summarize", ...}
 ```
 
-The skill's instructions in the graph are updated immediately. Future executions use the amended version.
-
 **Step 4 — Evaluate: check whether the fix helped**
 
 ```python
@@ -137,65 +302,7 @@ await skills.observe({
 })
 ```
 
-When `skills.execute()` is called with `auto_observe=True` (the default), this is handled automatically.
-
----
-
-## Quickstart
-
-### 1. Install
-
-```bash
-pip install cognee
-```
-
-Set `LLM_API_KEY` in your `.env` (defaults to OpenAI).
-
-### 2. Write a skill
-
-```text
-my_skills/
-  summarize/
-    SKILL.md
-```
-
-```markdown
----
-name: summarize
-description: Summarize documents, articles, or text into concise key points.
----
-
-## When to Activate
-
-- User asks to summarize, condense, or compress text
-
-## Process
-
-1. Identify key points
-2. Produce a concise summary
-
-## Guidelines
-
-- Preserve the original meaning
-- Keep it under 20% of the original length
-```
-
-### 3. Ingest, execute, observe
-
-```python
-from cognee import skills
-
-await skills.ingest("./my_skills")
-
-result = await skills.execute(
-    "summarize",
-    "Compress this conversation",
-    auto_observe=True,
-    auto_amendify=True,
-)
-```
-
-That's the full loop. Successes raise routing scores. Failures accumulate until the repair threshold is hit, then the LLM inspects and fixes the skill automatically.
+When `skills.run()` or `skills.execute()` is used, this is handled automatically.
 
 ---
 
@@ -217,7 +324,8 @@ That's the full loop. Successes raise routing scores. Failures accumulate until 
 
 | Call | What it does |
 |------|-------------|
-| `skills.execute(skill_id, task_text)` | Load skill and run via LLM |
+| `skills.run(task_text)` | Find the best skill and execute it — one call does everything |
+| `skills.execute(skill_id, task_text)` | Execute a specific skill by ID |
 | `skills.observe({...})` | Record outcome; updates preferences immediately |
 | `skills.get_context(task_text)` | Semantic search + learned preferences → ranked skills |
 | `skills.load(skill_id)` | Full skill details: instructions, patterns, metadata |
@@ -228,10 +336,29 @@ That's the full loop. Successes raise routing scores. Failures accumulate until 
 | Call | What it does |
 |------|-------------|
 | `skills.ingest(folder)` | Parse SKILL.md files, enrich via LLM, store in graph + vector |
+| `skills.ingest_meta_skill()` | Ingest the cognee-skills guide as a skill — agents learn the self-improvement loop |
 | `skills.upsert(folder)` | Sync: skip unchanged, update changed, remove deleted |
 | `skills.remove(skill_id)` | Delete from graph and vector |
 
-All of these are also available as **MCP tools** — see [MCP tools](#mcp-tools) below.
+All of these are also available as **MCP tools**.
+
+---
+
+## Visualize the graph
+
+Every skill, run, inspection, and amendment is a node in the cognee knowledge graph. You can visualize it:
+
+```python
+from cognee.api.v1.visualize import start_visualization_server
+await start_visualization_server(port=8080)
+```
+
+```bash
+# Or via CLI
+cognee-cli -ui  # launches UI at http://localhost:3000
+```
+
+See a live example at [graphskills.vercel.app](https://graphskills.vercel.app), built from the [Agent Skills for Context Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) repo.
 
 ---
 
@@ -249,24 +376,6 @@ Skill              — instructions, metadata, content hash
 ```
 
 Amendments update the `Skill` node in-place. The `SkillAmendment` node keeps the original instructions so rollback is always possible.
-
----
-
-## SkillChangeEvent — audit trail
-
-A `SkillChangeEvent` node is written to the graph on every instruction change:
-
-| Trigger | `change_type` |
-|---------|--------------|
-| New skill ingested | `"added"` |
-| Skill content changed on upsert | `"updated"` |
-| Skill deleted | `"removed"` |
-| Amendment applied | `"amended"` |
-| Amendment reverted | `"rolled_back"` |
-
-Each event stores `skill_id`, `skill_name`, `change_type`, `old_content_hash`, `new_content_hash`, and a UTC `Timestamp` node. The hash pair lets you correlate a performance shift with the exact amendment that caused it.
-
-`SkillChangeEvent` extends cognee's `Event` DataPoint, so it's queryable via the temporal retriever alongside any other time-indexed graph data.
 
 ---
 
@@ -297,137 +406,19 @@ Without `task_pattern_id`, the run is still recorded as a `SkillRun` and feeds `
 
 ---
 
-## How to use cognee-skills
+## SkillChangeEvent — audit trail
 
-### Step 1: Write a SKILL.md
+A `SkillChangeEvent` node is written to the graph on every instruction change:
 
-Every skill is a markdown file. Drop a `SKILL.md` in a folder:
+| Trigger | `change_type` |
+|---------|--------------|
+| New skill ingested | `"added"` |
+| Skill content changed on upsert | `"updated"` |
+| Skill deleted | `"removed"` |
+| Amendment applied | `"amended"` |
+| Amendment reverted | `"rolled_back"` |
 
-```text
-my_skills/
-  summarize/
-    SKILL.md
-```
-
-```markdown
----
-name: summarize
-description: Summarize documents, articles, or text into concise key points.
----
-
-## When to Activate
-
-- User asks to summarize, condense, or compress text
-
-## Process
-
-1. Identify key points
-2. Produce a concise summary
-
-## Guidelines
-
-- Preserve the original meaning
-- Keep it under 20% of the original length
-```
-
-See [`example/`](example/) for a working demo with skills and test scripts.
-
-### Step 2: Choose how you work
-
-#### Claude Code and other MCP IDEs (no code required)
-
-```bash
-pip install cognee-mcp
-```
-
-Add `.mcp.json` to your project root and check it into git — everyone on the team gets it:
-
-```json
-{
-  "mcpServers": {
-    "cognee": {
-      "command": "cognee-mcp"
-    }
-  }
-}
-```
-
-Your IDE launches cognee locally and discovers all skill tools automatically. Nothing to host, nothing to start manually.
-
-Optionally add to your `CLAUDE.md`:
-
-```
-Use run_skill via MCP for tasks — skills learn from their mistakes and get better over time.
-```
-
-The agent will call `ingest_skills` to load your SKILL.md files, then use `run_skill` to find and execute the best skill for any task. Output quality is evaluated automatically, and failing skills self-repair over time.
-
-#### Python (for custom workflows)
-
-```bash
-pip install cognee
-```
-
-```python
-from cognee import skills
-
-await skills.ingest("./my_skills")
-result = await skills.run("Compress this conversation")
-```
-
-`skills.run()` does everything: finds the best skill, executes it, evaluates output quality, records the outcome, and self-repairs on failure.
-
-For step-by-step control, see the [full API](#full-api) below.
-
-### What happens behind the scenes
-
-Every time a skill runs, cognee automatically:
-
-1. **Executes** the skill via LLM
-2. **Evaluates** output quality (second LLM call, scores 0.0-1.0)
-3. **Records** the outcome to the knowledge graph
-4. **Updates** routing preferences so better skills rank higher
-5. **Self-repairs** if quality is low and enough failures have accumulated:
-
-```
-inspect: LLM diagnoses root cause from failed runs
-  → preview: LLM generates improved instructions
-  → amendify: fix applied to the graph, original preserved
-  → evaluate: before/after scores compared
-  → rollback: one call to revert if the fix didn't help
-```
-
-For manual control over the self-improvement loop, use `inspect`, `preview_amendify`, `amendify`, `evaluate_amendify`, and `rollback_amendify` — available as both Python methods and MCP tools.
-
----
-
-## Running the example
-
-```bash
-python -m cognee.cognee_skills.example
-```
-
-Runs: ingest → route → execute → observe → re-route, and shows the preference boost in scores.
-
-> **Warning:** Calls `cognee.prune.prune_system()` at startup — deletes all existing cognee data.
-
----
-
-## Visualize the graph
-
-Every skill, run, inspection, and amendment is a node in the cognee knowledge graph. You can visualize it:
-
-```python
-from cognee.api.v1.visualize import start_visualization_server
-await start_visualization_server(port=8080)
-```
-
-```bash
-# Or via CLI
-cognee-cli -ui  # launches UI at http://localhost:3000
-```
-
-See a live example at [graphskills.vercel.app](https://graphskills.vercel.app), built from the [Agent Skills for Context Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) repo.
+Each event stores `skill_id`, `skill_name`, `change_type`, `old_content_hash`, `new_content_hash`, and a UTC `Timestamp` node. The hash pair lets you correlate a performance shift with the exact amendment that caused it.
 
 ---
 
@@ -444,3 +435,5 @@ my_skills/
 ```
 
 Each skill folder is a structured unit: instructions, execution history, routing preferences, inspections, and amendment history all live together in the graph.
+
+See [`example/`](example/) for a working demo with skills and test scripts for all four integration paths.

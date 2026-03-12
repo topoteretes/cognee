@@ -2,6 +2,7 @@
 
 Primary API (via ``from cognee import skills``):
     skills.ingest()              — parse SKILL.md files, enrich via LLM, store in graph + vector
+    skills.ingest_meta_skill()   — ingest the cognee-skills meta-skill (self-improvement loop guide)
     skills.upsert()              — re-ingest, skipping unchanged, updating changed, removing deleted
     skills.remove()              — remove a single skill by id
     skills.get_context()         — ranked skill recommendations for a task

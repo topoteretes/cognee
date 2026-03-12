@@ -1,10 +1,12 @@
 ---
 name: skill self-improvement
 description: >
-  Execute skills, record outcomes, and automatically fix failing skills.
-  Triggers: "run this skill", "this skill keeps failing", "fix this skill",
-  "why does X fail", "improve this skill's instructions",
-  "the skill isn't working", "apply an amendment", "rollback the fix".
+  Manage and improve skills over time. Use this when you need to run a skill,
+  diagnose why a skill keeps producing wrong or low-quality output, propose and
+  review a fix before applying it, apply an amendment to update a skill's
+  instructions, evaluate whether a fix actually helped, or revert a change that
+  made things worse. Covers the full self-improvement loop: execute → inspect →
+  preview → amendify → evaluate → rollback.
 ---
 
 # Skill Self-Improvement

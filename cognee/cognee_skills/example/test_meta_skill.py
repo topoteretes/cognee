@@ -22,8 +22,7 @@ from cognee import skills
 
 
 # Dedicated folder containing only the meta-skill SKILL.md
-# (avoids picking up README.md / agent_instructions.md from the cognee_skills root)
-META_SKILL_DIR = Path(__file__).parent / "meta-skill"
+META_SKILL_DIR = Path(__file__).parent.parent / "meta-skill"
 
 
 async def main():

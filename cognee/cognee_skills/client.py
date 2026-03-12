@@ -57,6 +57,22 @@ class Skills:
             node_set=node_set,
         )
 
+    async def ingest_meta_skill(self) -> None:
+        """Ingest the cognee-skills meta-skill into the graph.
+
+        The meta-skill describes how to use the self-improvement loop
+        (run_skill, inspect_skill, preview_amendify_skill, amendify_skill,
+        rollback_amendify_skill). Once ingested, agents can route to it
+        automatically when a skill is failing or needs repair.
+
+        Drop-in for any skills folder — call once alongside ingest():
+
+            await skills.ingest("./my_skills")
+            await skills.ingest_meta_skill()
+        """
+        meta_skill_dir = Path(__file__).parent / "meta-skill"
+        await ingest_skills(skills_folder=meta_skill_dir, source_repo="cognee-skills")
+
     async def upsert(
         self,
         skills_folder: Union[str, Path],
