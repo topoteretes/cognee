@@ -96,14 +96,15 @@ def resolve_logs_dir():
         logs_root_directory.mkdir(parents=True, exist_ok=True)
         if os.access(logs_root_directory, os.W_OK):
             return logs_root_directory
-    except OSError:
+    except Exception:
         pass
+
     try:
         tmp_log_path = Path(os.path.join("/tmp", "cognee_logs"))
         tmp_log_path.mkdir(parents=True, exist_ok=True)
         if os.access(tmp_log_path, os.W_OK):
             return tmp_log_path
-    except OSError:
+    except Exception:
         pass
 
     return None
