@@ -42,7 +42,7 @@ class GraphConfig(BaseSettings):
     graph_database_name: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
-    graph_database_allow_anonymous: bool = Field(False, env="GRAPH_DATABASE_ALLOW_ANONYMOUS")
+    graph_database_allow_anonymous: bool = False
     graph_database_port: int = 123
     graph_database_key: str = ""
     graph_file_path: str = ""
