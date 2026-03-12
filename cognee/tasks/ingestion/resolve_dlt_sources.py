@@ -49,7 +49,7 @@ async def resolve_dlt_sources(
         return data
 
     primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
-    write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "merge"
+    write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
     query = kwargs["query"] if "query" in kwargs else None
     max_rows_per_table = kwargs.get("max_rows_per_table")
 

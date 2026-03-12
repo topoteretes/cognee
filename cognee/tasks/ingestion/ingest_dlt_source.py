@@ -35,7 +35,7 @@ async def ingest_dlt_source(
     dlt_source,
     dataset_name: str,
     primary_key: Optional[str] = None,
-    write_disposition: str = "merge",
+    write_disposition: str = "replace",
     max_rows_per_table: Optional[int] = None,
 ) -> List[DltRowData]:
     """
@@ -88,15 +88,15 @@ async def ingest_dlt_source(
         dataset_name=dataset_name,
     )
 
-    effective_pk = primary_key or "id"
-
     # Build run kwargs based on disposition
     run_kwargs = {
         "write_disposition": write_disposition,
     }
-    # Only pass primary_key for merge disposition (required for upsert)
-    if write_disposition == "merge":
-        run_kwargs["primary_key"] = effective_pk
+    # Only pass primary_key for merge disposition (required for upsert).
+    # When the user didn't provide an explicit primary_key, omit it so dlt
+    # can auto-detect PKs from the source schema per table.
+    if write_disposition == "merge" and primary_key:
+        run_kwargs["primary_key"] = primary_key
 
     try:
         # dlt's pipeline.run() is synchronous and potentially long-running;
