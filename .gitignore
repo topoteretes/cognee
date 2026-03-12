@@ -1,5 +1,6 @@
 .data
 .env
+.env.example
 .local.env
 .prod.env
 cognee/.data/
