@@ -8,6 +8,8 @@ from uuid import uuid5, UUID
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm import get_llm_config
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.storage import add_data_points
 
 from cognee.cognee_skills.models.skill_inspection import SkillInspection
@@ -104,6 +106,9 @@ async def preview_skill_amendify(
         amendment_confidence=result.confidence,
         pre_amendment_avg_score=inspection.avg_success_score,
     )
+
+    ns = NodeSet(id=generate_node_id("NodeSet:skills"), name="skills")
+    amendment.belongs_to_set = [ns]
 
     await add_data_points([amendment])
     logger.info(

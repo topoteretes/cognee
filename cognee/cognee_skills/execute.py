@@ -22,24 +22,24 @@ Be thorough but concise. If the instructions reference tools or external actions
 you cannot perform, describe what should be done instead."""
 
 EVALUATE_PROMPT = """\
-You are a quality evaluator. Score how well the output fulfills the task \
-given the skill's instructions.
+You are a quality evaluator. Score how useful the output is for the user's task.
 
-Skill: {skill_name}
-Instructions: {instructions}
+The skill's instructions may be flawed — that's exactly what we're trying to detect. \
+Do NOT score based on whether the output follows the instructions. \
+Score based on whether a human reading this output would find it helpful for their task.
+
 Task: {task_text}
-
 Output to evaluate:
 {output}
 
 Respond with ONLY a JSON object: {{"score": <float 0.0 to 1.0>, "reason": "<one sentence>"}}
 
 Scoring guide:
-- 1.0: Output fully and correctly addresses the task per the instructions
-- 0.7-0.9: Mostly correct, minor gaps
-- 0.4-0.6: Partially addresses the task, significant gaps
-- 0.1-0.3: Mostly wrong or off-topic
-- 0.0: Completely fails or is empty"""
+- 1.0: Output is exactly what someone would want for this task
+- 0.7-0.9: Mostly useful, minor gaps
+- 0.4-0.6: Partially useful, significant gaps
+- 0.1-0.3: Mostly unhelpful or off-topic
+- 0.0: Completely useless or empty"""
 
 
 async def execute_skill(
@@ -133,8 +133,6 @@ async def evaluate_output(
     llm_config = get_llm_config()
 
     prompt = EVALUATE_PROMPT.format(
-        skill_name=skill.get("name", "unknown"),
-        instructions=skill.get("instructions", ""),
         task_text=task_text,
         output=output[:2000],
     )

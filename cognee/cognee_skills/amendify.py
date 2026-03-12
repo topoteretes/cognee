@@ -12,11 +12,21 @@ from typing import Optional
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.storage import add_data_points
 
 from cognee.cognee_skills.utils import _make_change_event
 
 logger = logging.getLogger(__name__)
+
+
+def _tag_with_nodeset(items, node_set: str = "skills"):
+    """Tag DataPoints with belongs_to_set so they appear in nodeset subgraph queries."""
+    ns = NodeSet(id=generate_node_id(f"NodeSet:{node_set}"), name=node_set)
+    for item in items:
+        if hasattr(item, "belongs_to_set"):
+            item.belongs_to_set = [ns]
+    return items
 
 
 def _content_hash(text: str) -> str:
@@ -154,9 +164,11 @@ async def amendify(
         enriched = await enrich_skills([skill_obj])
         if enriched:
             materialized = await materialize_task_patterns(enriched)
+            _tag_with_nodeset(materialized, node_set)
             await add_data_points(materialized)
             logger.info("Re-enriched skill '%s' after amendment", skill_name)
         else:
+            _tag_with_nodeset([skill_obj], node_set)
             await add_data_points([skill_obj])
     except Exception as exc:
         logger.warning("Re-enrichment after amendment failed, persisting basic update: %s", exc)
@@ -170,12 +182,14 @@ async def amendify(
             instructions=amended_instructions,
             content_hash=new_hash,
         )
+        _tag_with_nodeset([skill_obj], node_set)
         await add_data_points([skill_obj])
 
     # Emit change event
     event = _make_change_event(
         skill_id, skill_name, "amended", old_hash=old_hash, new_hash=new_hash
     )
+    _tag_with_nodeset([event], node_set)
     await add_data_points([event])
 
     # Update amendment status via DataPoint upsert
@@ -183,6 +197,7 @@ async def amendify(
     amendment_node["status"] = "applied"
     amendment_node["applied_at_ms"] = applied_at_ms
     amendment_dp = _reconstruct_amendment(amendment_node)
+    _tag_with_nodeset([amendment_dp], node_set)
     await add_data_points([amendment_dp])
 
     result = {
@@ -287,8 +302,10 @@ async def rollback_amendify(
         enriched = await enrich_skills([skill_obj])
         if enriched:
             materialized = await materialize_task_patterns(enriched)
+            _tag_with_nodeset(materialized, node_set)
             await add_data_points(materialized)
         else:
+            _tag_with_nodeset([skill_obj], node_set)
             await add_data_points([skill_obj])
     except Exception as exc:
         logger.warning("Re-enrichment after rollback failed, persisting basic update: %s", exc)
@@ -302,17 +319,20 @@ async def rollback_amendify(
             instructions=original_instructions,
             content_hash=new_hash,
         )
+        _tag_with_nodeset([skill_obj], node_set)
         await add_data_points([skill_obj])
 
     # Emit change event
     event = _make_change_event(
         skill_id, skill_name, "rolled_back", old_hash=old_hash, new_hash=new_hash
     )
+    _tag_with_nodeset([event], node_set)
     await add_data_points([event])
 
     # Update amendment status via DataPoint upsert
     amendment_node["status"] = "rolled_back"
     amendment_dp = _reconstruct_amendment(amendment_node)
+    _tag_with_nodeset([amendment_dp], node_set)
     await add_data_points([amendment_dp])
 
     logger.info("Rolled back amendment '%s' for skill '%s'", amendment_id, skill_name)
@@ -361,6 +381,7 @@ async def evaluate_amendify(
     amendment_node["post_amendment_avg_score"] = post_avg
     amendment_node["post_amendment_run_count"] = len(post_scores)
     amendment_dp = _reconstruct_amendment(amendment_node)
+    _tag_with_nodeset([amendment_dp], node_set)
     await add_data_points([amendment_dp])
 
     return {

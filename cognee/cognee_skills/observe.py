@@ -18,6 +18,7 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
 from cognee.cognee_skills.models.skill_run import SkillRun, ToolCall, CandidateSkill
+from cognee.modules.engine.utils.generate_node_id import generate_node_id
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,10 @@ async def record_skill_run(
         latency_ms=latency_ms,
         feedback=feedback,
     )
+
+    # Tag the SkillRun with the node set so it's visible to inspect/amendify
+    ns = NodeSet(id=generate_node_id("NodeSet:skills"), name="skills")
+    skill_run.belongs_to_set = [ns]
 
     await add_data_points([skill_run])
     await index_graph_edges()

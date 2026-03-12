@@ -413,6 +413,24 @@ Runs: ingest → route → execute → observe → re-route, and shows the prefe
 
 ---
 
+## Visualize the graph
+
+Every skill, run, inspection, and amendment is a node in the cognee knowledge graph. You can visualize it:
+
+```python
+from cognee.api.v1.visualize import start_visualization_server
+await start_visualization_server(port=8080)
+```
+
+```bash
+# Or via CLI
+cognee-cli -ui  # launches UI at http://localhost:3000
+```
+
+See a live example at [graphskills.vercel.app](https://graphskills.vercel.app), built from the [Agent Skills for Context Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) repo.
+
+---
+
 ## Repository structure
 
 ```text

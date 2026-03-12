@@ -488,6 +488,8 @@ class Skills:
             "skill_id": amendment.skill_id,
             "skill_name": amendment.skill_name,
             "inspection_id": amendment.inspection_id,
+            "original_instructions": amendment.original_instructions,
+            "amended_instructions": amendment.amended_instructions,
             "change_explanation": amendment.change_explanation,
             "expected_improvement": amendment.expected_improvement,
             "status": amendment.status,
