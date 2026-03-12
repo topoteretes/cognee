@@ -330,7 +330,7 @@ description: Summarize documents, articles, or text into concise key points.
 - Keep it under 20% of the original length
 ```
 
-See [`example_skills/`](example_skills/) for more examples.
+See [`example/`](example/) for a working demo with skills and test scripts.
 
 ### Step 2: Choose how you work
 

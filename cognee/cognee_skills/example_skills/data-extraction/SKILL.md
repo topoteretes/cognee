@@ -10,7 +10,7 @@ description: >
 # Data Extraction
 
 This skill extracts structured data from unstructured sources.
-
+let;
 ## When to Activate
 
 - User provides text and wants specific fields extracted
