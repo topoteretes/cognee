@@ -1,10 +1,8 @@
 # cognee-skills
 
-> Skills that fix themselves. Agents that get better with every run.
+Skills are static. They repeat the same mistakes, produce the same bad output, and the only way to fix them is manually (if someone notices at all).
 
-AI agents accumulate failing skills. A skill that worked last month stops working when the codebase changes, the model changes, or the task scope shifts. Usually nobody notices until a user complains.
-
-**cognee-skills** gives every skill a self-improvement loop: every run is scored, failures are diagnosed, and fixes are proposed and applied — automatically or step-by-step.
+**cognee-skills** gives every skill a self-improvement loop. Every run is scored. Failures are diagnosed. Fixes are proposed, applied, and verified automatically.
 
 ---
 
