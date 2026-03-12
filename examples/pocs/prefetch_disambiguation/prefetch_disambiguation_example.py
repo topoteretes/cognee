@@ -16,7 +16,9 @@ from examples.pocs.prefetch_disambiguation.prefetch_disambiguation import (
 
 async def main(
     example,
-    prefetch_disambiguation: (Callable[[str, int, bool, str | None], Awaitable[Any]] | None) = None,
+    prefetch_disambiguation_fun: (
+        Callable[[str, int, bool, str | None], Awaitable[Any]] | None
+    ) = None,
     split_by_sentence: Optional[bool] = False,
     vector_search_limit: Optional[int] = None,
     custom_prompt: Optional[str] = None,
@@ -26,13 +28,13 @@ async def main(
 
     graph_visualization_path = os.path.join(
         os.path.dirname(__file__),
-        f"results/{'poc_' if prefetch_disambiguation else ''}cognify_disambiguate_{example}_result.html",
+        f"results/{'poc_' if prefetch_disambiguation_fun else ''}cognify_disambiguate_{example}_result.html",
     )
 
     parts_dir = Path(__file__).resolve().parent / "data" / example
 
-    if prefetch_disambiguation:
-        await prefetch_disambiguation(
+    if prefetch_disambiguation_fun:
+        await prefetch_disambiguation_fun(
             parts_dir, vector_search_limit, split_by_sentence, custom_prompt
         )
     else:
@@ -56,7 +58,7 @@ async def _run():
 
     await main(
         example="example2",
-        prefetch_disambiguation=prefetch_disambiguation,
+        prefetch_disambiguation_fun=prefetch_disambiguation,
         # split_by_sentence=True,
         vector_search_limit=40,
         custom_prompt=custom_prompt_text,

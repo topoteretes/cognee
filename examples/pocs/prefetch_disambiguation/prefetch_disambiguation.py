@@ -37,18 +37,17 @@ def _count_reused_node_names_in_prompt_tail(
         if not name:
             continue
         if name.casefold() in tail_blob:
-            print(name)
             count += 1
     return count
 
 
-def _check_disambiguated_entities(graph_entity_names, disambiguated_entities_names):
-    disambiguated_entities = 0
+def _report_disambiguation_rate(graph_entity_names, entities_to_disambiguate):
+    unresolved_entities_count = 0
     for name in graph_entity_names:
-        if name in disambiguated_entities_names:
-            disambiguated_entities += 1
+        if name in entities_to_disambiguate:
+            unresolved_entities_count += 1
     print(
-        f"Disambiguated entities: {(len(disambiguated_entities_names) - disambiguated_entities) / len(disambiguated_entities_names) * 100}%"
+        f"Disambiguated entities: {(len(entities_to_disambiguate) - unresolved_entities_count) / len(entities_to_disambiguate) * 100}%"
     )
 
 
@@ -193,7 +192,7 @@ async def prefetch_disambiguation(
         print(f"Elapsed: {elapsed:.6f} seconds")
 
         graph_entity_names = await _get_entity_names_from_graph()
-        _check_disambiguated_entities(graph_entity_names, disambiguated_entities_names)
+        _report_disambiguation_rate(graph_entity_names, disambiguated_entities_names)
 
     print(f"Reused instances: {kwargs.get('stats').get('reused_entities')}")
 

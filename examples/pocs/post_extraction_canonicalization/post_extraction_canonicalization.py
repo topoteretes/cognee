@@ -12,7 +12,6 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.engine.models import Entity, EntityType
 
 
 def _get_closest_match(df: DataFrame, query_vector) -> list[Any] | tuple[Any, float]:
@@ -117,14 +116,13 @@ async def _get_entity_names_from_graph() -> set[str]:
     return names
 
 
-def _check_disambiguated_entities(graph_entity_names, disambiguated_entities_names):
-    disambiguated_entities = 0
+def _report_disambiguation_rate(graph_entity_names, entities_to_disambiguate):
+    unresolved_entities_count = 0
     for name in graph_entity_names:
-        if name in disambiguated_entities_names:
-            print(name)
-            disambiguated_entities += 1
+        if name in entities_to_disambiguate:
+            unresolved_entities_count += 1
     print(
-        f"Disambiguated entities: {(len(disambiguated_entities_names) - disambiguated_entities) / len(disambiguated_entities_names) * 100}%"
+        f"Disambiguated entities: {(len(entities_to_disambiguate) - unresolved_entities_count) / len(entities_to_disambiguate) * 100}%"
     )
 
 
@@ -191,6 +189,6 @@ async def post_extraction_canonicalization(
         print(f"Elapsed: {elapsed:.6f} seconds")
 
         graph_entity_names = await _get_entity_names_from_graph()
-        _check_disambiguated_entities(graph_entity_names, disambiguated_entities_names)
+        _report_disambiguation_rate(graph_entity_names, disambiguated_entities_names)
 
     print(f"Reused instances: {kwargs.get('stats').get('reused_entities')}")
