@@ -181,7 +181,9 @@ def get_cognify_router() -> APIRouter:
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):
-                first_err = next((v for v in cognify_run.values() if isinstance(v, PipelineRunErrored)), None)
+                first_err = next(
+                    (v for v in cognify_run.values() if isinstance(v, PipelineRunErrored)), None
+                )
                 detail = None
                 if first_err is not None:
                     detail = getattr(first_err, "error", None) or str(first_err)

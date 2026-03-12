@@ -184,7 +184,6 @@ def get_search_router() -> APIRouter:
                 ).model_dump(),
             )
 
-
         except Exception as error:
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
