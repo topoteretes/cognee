@@ -2,6 +2,25 @@ from typing import Union, Callable, Any, Coroutine, Generator, AsyncGenerator
 import inspect
 
 
+def task_summary(template: str):
+    """Decorator that attaches a human-readable summary template to a task function.
+
+    The template should contain ``{n}`` as a placeholder for the result count.
+
+    Example::
+
+        @task_summary("Classified {n} document(s)")
+        async def classify_documents(data_documents):
+            ...
+    """
+
+    def decorator(func):
+        func.__task_summary__ = template
+        return func
+
+    return decorator
+
+
 class Task:
     executable: Union[
         Callable[..., Any],

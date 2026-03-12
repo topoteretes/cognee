@@ -36,3 +36,12 @@ from .api.v1.session import session
 from .modules import pipelines
 
 from cognee.run_migrations import run_migrations
+
+# Tracing / Observability
+from cognee.modules.observability.trace_context import (
+    enable_tracing,
+    disable_tracing,
+    get_last_trace,
+    get_all_traces,
+    clear_traces,
+)

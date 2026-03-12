@@ -23,6 +23,27 @@ logger = get_logger()
 
 
 class datasets:
+    """
+    Dataset management namespace for Cognee.
+
+    All methods are static and provide operations for listing, inspecting,
+    and deleting datasets and the data items within them.
+
+    Example:
+        ```python
+        import cognee
+
+        # List all accessible datasets
+        all_datasets = await cognee.datasets.list_datasets()
+
+        # Check cognify processing status for datasets
+        status = await cognee.datasets.get_status([dataset_id])
+
+        # Delete a specific data item from a dataset
+        await cognee.datasets.delete_data(dataset_id=dataset_id, data_id=data_id)
+        ```
+    """
+
     @staticmethod
     async def list_datasets(user: Optional[User] = None):
         if user is None:

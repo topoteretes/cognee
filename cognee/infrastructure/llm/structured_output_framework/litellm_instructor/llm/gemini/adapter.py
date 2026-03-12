@@ -2,7 +2,7 @@
 
 import litellm
 import instructor
-from typing import Type
+from typing import Any, Dict, Type, Optional
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
@@ -58,6 +58,7 @@ class GeminiAdapter(GenericAPIAdapter):
         fallback_model: str = None,
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
+        llm_args: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             api_key=api_key,
@@ -70,7 +71,9 @@ class GeminiAdapter(GenericAPIAdapter):
             fallback_model=fallback_model,
             fallback_api_key=fallback_api_key,
             fallback_endpoint=fallback_endpoint,
+            llm_args=llm_args,
         )
+        self.llm_args = llm_args
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.from_litellm(
@@ -113,6 +116,7 @@ class GeminiAdapter(GenericAPIAdapter):
               output from the language model.
         """
 
+        merged_kwargs = {**self.llm_args, **kwargs}
         try:
             async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(
@@ -132,6 +136,7 @@ class GeminiAdapter(GenericAPIAdapter):
                     api_base=self.endpoint,
                     api_version=self.api_version,
                     response_model=response_model,
+                    **merged_kwargs,
                 )
         except (
             ContentFilterFinishReasonError,
@@ -167,6 +172,7 @@ class GeminiAdapter(GenericAPIAdapter):
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
+                        **merged_kwargs,
                     )
             except (
                 ContentFilterFinishReasonError,
