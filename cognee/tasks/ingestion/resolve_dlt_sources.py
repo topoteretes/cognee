@@ -89,11 +89,17 @@ async def resolve_dlt_sources(
         all_rows.extend(rows)
 
     # --- Phase 1: compute stable data_ids for all rows (for FK resolution) --
-    row_id_lookup: dict[tuple[str, str], UUID] = {}
+    # Primary lookup uses content_hash for uniqueness (handles tables with
+    # non-unique fallback PKs like junction tables).
+    row_id_lookup: dict[tuple[str, str, str], UUID] = {}
+    # FK lookup maps (table, pk_value) → data_id for foreign key resolution.
+    # When multiple rows share a PK value, the last one wins (best-effort).
+    fk_lookup: dict[tuple[str, str], UUID] = {}
     for row in all_rows:
-        row_identifier = f"dlt:{row.table_name}:{row.primary_key_value}"
+        row_identifier = f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
         data_id = await get_unique_data_id(row_identifier, user)
-        row_id_lookup[(row.table_name, row.primary_key_value)] = data_id
+        row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)] = data_id
+        fk_lookup[(row.table_name, row.primary_key_value)] = data_id
 
     # --- Phase 2: create DataItems ------------------------------------------
     # Build table-level metadata once per table so all rows share the same
@@ -112,10 +118,10 @@ async def resolve_dlt_sources(
 
     expanded_items: list[DataItem] = []
     for row in all_rows:
-        data_id = row_id_lookup[(row.table_name, row.primary_key_value)]
+        data_id = row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)]
 
         enriched_text = _build_schema_context_text(row)
-        fk_references = _resolve_fk_references(row, row_id_lookup)
+        fk_references = _resolve_fk_references(row, fk_lookup)
         table_meta = _get_table_meta(row)
 
         ext_metadata = {
