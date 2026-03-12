@@ -1,0 +1,65 @@
+name: automation | Sync Mintlify Docs
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  sync-mintlify-docs:
+    if: ${{ github.event.release.prerelease == false }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out core repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Prepare release body file
+        id: release_meta
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          BODY_FILE="$(mktemp)"
+          printf "%s" "${RELEASE_BODY}" > "${BODY_FILE}"
+          echo "body_file=${BODY_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Check out docs repository
+        uses: actions/checkout@v6
+        with:
+          repository: topoteretes/cognee-docs
+          token: ${{ secrets.DOCS_REPO_TOKEN }}
+          ref: main
+          path: docs-repo
+
+      - name: Sync OpenAPI and changelog
+        run: |
+          uv run python tools/sync_release_docs.py \
+            --docs-repo "${GITHUB_WORKSPACE}/docs-repo" \
+            --tag "${{ github.event.release.tag_name }}" \
+            --release-url "${{ github.event.release.html_url }}" \
+            --published-at "${{ github.event.release.published_at }}" \
+            --release-body-file "${{ steps.release_meta.outputs.body_file }}"
+
+      - name: Commit and push docs changes
+        working-directory: docs-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cognee_openapi_spec.json changelog.mdx
+          git diff --cached --quiet && exit 0
+          git commit -m "docs: sync release ${{ github.event.release.tag_name }}"
+          git push origin HEAD:main
