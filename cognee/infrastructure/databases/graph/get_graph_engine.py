@@ -71,8 +71,9 @@ def _create_graph_engine(
     Create a graph engine based on the specified provider type.
 
     This factory function initializes and returns the appropriate graph client depending on
-    the database provider specified. It validates required parameters and raises an
-    EnvironmentError if any are missing for the respective provider implementations.
+    the database provider specified. It validates required parameters and raises
+    EnvironmentError if any are missing for the respective provider, or ValueError
+    if Neo4j credentials are incomplete (see Neo4jAdapter._resolve_auth).
 
     Parameters:
     -----------
