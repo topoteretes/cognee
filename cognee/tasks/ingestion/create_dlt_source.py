@@ -31,8 +31,10 @@ def create_dlt_source_from_connection_string(
 
     # SQLite paths must be absolute for SQLAlchemy to find the file.
     # sqlite:/// = relative, sqlite://// = absolute
-    if connection_string.startswith("sqlite:///") and not connection_string.startswith("sqlite:////"):
-        relative_path = connection_string[len("sqlite:///"):]
+    if connection_string.startswith("sqlite:///") and not connection_string.startswith(
+        "sqlite:////"
+    ):
+        relative_path = connection_string[len("sqlite:///") :]
         connection_string = "sqlite:///" + os.path.abspath(relative_path)
 
     if query:
