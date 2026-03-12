@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   greeting:
+    if: github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]' && !contains(github.event.pull_request.body, 'Generated with [Claude Code]')
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/first-interaction@v3
