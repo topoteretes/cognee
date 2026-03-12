@@ -1,0 +1,26 @@
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+WORKDIR /app
+ENV UV_LINK_MODE=copy
+
+# System deps (superset of all CI needs)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ libpq-dev git curl cmake clang build-essential \
+    postgresql-client libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml uv.lock README.md ./
+
+# ALL extras used across CI - no-install-project so project code isn't baked in
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project \
+    --extra api --extra docs --extra evals --extra codegraph --extra ollama \
+    --extra dev --extra neo4j --extra redis --extra postgres --extra aws \
+    --extra baml --extra distributed --extra deepeval --extra scraping \
+    --extra notebook --extra docling
+
+# Marker file for container detection in cognee_setup
+RUN echo "test-machine" > /app/.anon_id
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1

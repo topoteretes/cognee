@@ -103,12 +103,13 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     """
     If backend access control is enabled this function will ensure all datasets have their own databases,
     access to which will be enforced by given permissions.
-    Database name will be determined by dataset_id and LanceDB and KuzuDB use will be enforced.
+    Database name will be determined by dataset and the appropriate vector and
+    graph database handlers will be enforced.
 
     Note: This is only currently supported by the following databases:
           Relational: SQLite, Postgres
-          Vector: LanceDB
-          Graph: KuzuDB
+          Vector: LanceDB, pgvector
+          Graph: KuzuDB, neo4j_aura_dev
 
     Args:
         dataset: Cognee dataset name or id
@@ -137,8 +138,6 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     )
 
     # Set vector and graph database configuration based on dataset database information
-    # TODO: Add better handling of vector and graph config across Cognee.
-    #  LRU_CACHE takes into account order of inputs, if order of inputs is changed it will be registered as a new DB adapter
     vector_config = {
         "vector_db_provider": dataset_database.vector_database_provider,
         "vector_db_url": dataset_database.vector_database_url,

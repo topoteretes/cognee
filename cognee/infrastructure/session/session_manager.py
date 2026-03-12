@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
-    generate_completion_with_optional_summary,
+    generate_session_completion_with_optional_summary,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -84,9 +84,11 @@ class SessionManager:
         session_id: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
+        used_graph_element_ids: Optional[dict] = None,
     ) -> Optional[str]:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
+        used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id)
@@ -104,6 +106,7 @@ class SessionManager:
             answer=answer,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            used_graph_element_ids=used_graph_element_ids,
         )
         return qa_id
 
@@ -136,6 +139,7 @@ class SessionManager:
         system_prompt: Optional[str] = None,
         response_model: Type = str,
         summarize_context: bool = False,
+        used_graph_element_ids: Optional[dict] = None,
     ) -> Any:
         """
         Run single-query completion with session: read history, generate, save QA.
@@ -174,7 +178,27 @@ class SessionManager:
 
         resolved_session_id = self._resolve_session_id(session_id)
         conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
-        completion, context_to_store = await generate_completion_with_optional_summary(
+
+        cache_config = CacheConfig()
+        run_auto_feedback = cache_config.caching and cache_config.auto_feedback
+
+        last_qa_id: Optional[str] = None
+        if run_auto_feedback:
+            entries = await self.get_session(
+                user_id=str(user_id),
+                session_id=resolved_session_id,
+                formatted=False,
+                last_n=1,
+            )
+            if isinstance(entries, list) and entries:
+                last_entry = entries[-1]
+                last_qa_id = last_entry.get("qa_id") if isinstance(last_entry, dict) else None
+
+        (
+            completion,
+            context_to_store,
+            feedback_result,
+        ) = await generate_session_completion_with_optional_summary(
             query=query,
             context=context,
             conversation_history=conversation_history,
@@ -183,14 +207,53 @@ class SessionManager:
             system_prompt=system_prompt,
             response_model=response_model,
             summarize_context=summarize_context,
+            run_feedback_detection=run_auto_feedback,
         )
+
+        feedback_detected = (
+            run_auto_feedback
+            and feedback_result is not None
+            and feedback_result.feedback_detected
+            and last_qa_id is not None
+        )
+
+        if feedback_detected:
+            try:
+                score: Optional[int] = None
+                if feedback_result.feedback_score is not None:
+                    s = float(feedback_result.feedback_score)
+                    score = int(round(min(5, max(1, s))))
+                feedback_text = (feedback_result.feedback_text or "").strip()
+                if not feedback_text:
+                    feedback_text = f"User message: {query.strip()}"
+                await self.add_feedback(
+                    user_id=str(user_id),
+                    session_id=resolved_session_id,
+                    qa_id=last_qa_id,
+                    feedback_text=feedback_text,
+                    feedback_score=score,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Auto-feedback persistence failed, proceeding without storing feedback: %s",
+                    e,
+                    exc_info=False,
+                )
+            if not feedback_result.contains_followup_question:
+                response = (feedback_result.response_to_user or "").strip()
+                return response if response else "Thanks for your feedback."
+
         await self.add_qa(
             user_id=str(user_id),
             question=query,
             context=context_to_store,
             answer=str(completion),
             session_id=resolved_session_id,
+            used_graph_element_ids=used_graph_element_ids,
         )
+        if feedback_detected and feedback_result.contains_followup_question:
+            thanks = (feedback_result.response_to_user or "").strip()
+            return f"{thanks}\n\n{completion}" if thanks else completion
         return completion
 
     @staticmethod
@@ -268,6 +331,7 @@ class SessionManager:
         answer: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
+        memify_metadata: Optional[dict] = None,
         session_id: Optional[str] = None,
     ) -> bool:
         """
@@ -275,6 +339,7 @@ class SessionManager:
 
         Only passed fields are updated; None preserves existing values.
         Returns True if updated, False if not found or cache unavailable.
+        memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
@@ -291,6 +356,7 @@ class SessionManager:
             answer=answer,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            memify_metadata=memify_metadata,
         )
 
     async def add_feedback(

@@ -1,5 +1,6 @@
 from cognee.modules.data.models import Data
 import json
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.data.processing.document_types import (
     Document,
     PdfDocument,
@@ -89,9 +90,10 @@ def update_node_set(document):
         NodeSet(id=generate_node_id(f"NodeSet:{node_set_name}"), name=node_set_name)
         for node_set_name in node_set
     ]
-    document.source_note_set = ", ".join(node_set)
+    document.source_node_set = ", ".join(node_set)
 
 
+@task_summary("Classified {n} document(s)")
 async def classify_documents(data_documents: list[Data]) -> list[Document]:
     """
     Classifies a list of data items into specific document types based on their file

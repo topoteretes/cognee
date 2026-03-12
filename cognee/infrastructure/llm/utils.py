@@ -77,10 +77,14 @@ async def test_llm_connection():
     Test connectivity to the LLM endpoint using a simple completion call.
     """
     try:
-        await LLMGateway.acreate_structured_output(
-            text_input="test",
-            system_prompt='Respond to me with the following string: "test"',
-            response_model=str,
+        logger.info("Testing connection to LLM endpoint...")
+        await asyncio.wait_for(
+            LLMGateway.acreate_structured_output(
+                text_input="test",
+                system_prompt='Respond to me with the following string: "test"',
+                response_model=str,
+            ),
+            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
         msg = (
@@ -115,6 +119,7 @@ async def test_embedding_connection():
         # NOTE: Vector engine import must be done in function to avoid circular import issue
         from cognee.infrastructure.databases.vector import get_vector_engine
 
+        logger.info("Testing connection to Embedding endpoint...")
         await asyncio.wait_for(
             get_vector_engine().embedding_engine.embed_text("test"),
             timeout=CONNECTION_TEST_TIMEOUT_SECONDS,

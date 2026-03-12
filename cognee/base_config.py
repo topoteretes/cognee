@@ -47,6 +47,17 @@ class BaseConfig(BaseSettings):
     langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
     default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
     default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
+
+    # OpenTelemetry / tracing
+    cognee_tracing_enabled: bool = os.getenv("COGNEE_TRACING_ENABLED", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "cognee")
+    otel_exporter_otlp_endpoint: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    otel_exporter_otlp_headers: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
+
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:

@@ -14,7 +14,6 @@ import GraphVisualization, { GraphVisualizationAPI } from "@/app/(graph)/GraphVi
 import NotebookCellHeader from "./NotebookCellHeader";
 import MarkdownPreview from "./MarkdownPreview";
 import { Cell, Notebook as NotebookType } from "./types";
-import GraphVisualization from "../GraphVisualization";
 
 interface NotebookProps {
   notebook: NotebookType;

@@ -50,6 +50,10 @@ async def relational_db_migration():
     graph_engine = await get_graph_engine()
     await migrate_relational_database(graph_engine, schema=schema)
 
+    # Create the dataset so search can find it by name
+    user = await get_default_user()
+    await create_authorized_dataset(TEST_DATASET_NAME, user)
+
     # 1. Search the graph
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
@@ -353,7 +357,7 @@ async def test_migration_postgres():
     cognee.config.set_migration_db_config(
         {
             "migration_db_name": "test_migration_db",
-            "migration_db_host": "127.0.0.1",
+            "migration_db_host": os.environ.get("DB_HOST", "127.0.0.1"),
             "migration_db_port": "5432",
             "migration_db_username": "cognee",
             "migration_db_password": "cognee",
