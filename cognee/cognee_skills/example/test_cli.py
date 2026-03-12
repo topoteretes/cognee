@@ -11,6 +11,9 @@ Prerequisites:
 import json
 import subprocess
 import sys
+from pathlib import Path
+
+SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 def run(cmd: str) -> str:
@@ -41,10 +44,10 @@ def main():
     # STEP 1: Ingest
     # ──────────────────────────────────────────────────────────────────
     print("\n=== STEP 1: Ingest skills ===")
-    print(f"  {run('cognee-cli skills ingest ./skills')}")
+    print(f"  {run(f'cognee-cli skills ingest {SKILLS_DIR}')}")
 
-    skills = run_json("cognee-cli skills list -f json")
-    for s in skills:
+    skills_list = run_json("cognee-cli skills list -f json")
+    for s in skills_list:
         print(f"  Ingested: {s['skill_id']}")
 
     # ──────────────────────────────────────────────────────────────────
@@ -73,7 +76,7 @@ def main():
     # ──────────────────────────────────────────────────────────────────
     print("\n=== STEP 3: Inspect the skill ===")
 
-    skill_id = skills[0]["skill_id"]
+    skill_id = skills_list[0]["skill_id"]
     inspection = run_json(
         f'cognee-cli skills inspect {skill_id} --score-threshold 0.8 -f json'
     )

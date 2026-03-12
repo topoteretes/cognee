@@ -9,9 +9,11 @@ Prerequisites:
 """
 
 import asyncio
+from pathlib import Path
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
 
-from dotenv import load_dotenv
-load_dotenv()
+SKILLS_DIR = Path(__file__).parent / "skills"
 
 import cognee
 from cognee import skills
@@ -25,7 +27,7 @@ async def main():
     # STEP 1: Ingest
     # ──────────────────────────────────────────────────────────────────
     print("\n=== STEP 1: Ingest skills ===")
-    await skills.ingest("./skills")
+    await skills.ingest(SKILLS_DIR)
 
     all_skills = await skills.list()
     for s in all_skills:

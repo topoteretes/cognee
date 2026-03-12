@@ -6,8 +6,11 @@ output. After a few runs, cognee detects the pattern and fixes the skill.
 """
 
 import asyncio
-from dotenv import load_dotenv
-load_dotenv()
+from pathlib import Path
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
+
+SKILLS_DIR = Path(__file__).parent / "skills"
 
 import cognee
 from cognee import skills
@@ -22,7 +25,7 @@ async def main():
     # ──────────────────────────────────────────────────────────────────
     print("\n=== STEP 1: Ingest skills ===")
 
-    await skills.ingest("./skills")  # <-- cognee-skills: ingest
+    await skills.ingest(SKILLS_DIR)  # <-- cognee-skills: ingest
 
     all_skills = await skills.list()  # <-- cognee-skills: list
     for s in all_skills:

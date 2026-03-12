@@ -11,9 +11,12 @@ Prerequisites:
 import asyncio
 import json
 import os
+from pathlib import Path
 
-from dotenv import load_dotenv
-load_dotenv()
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
+
+SKILLS_DIR = str(Path(__file__).parent / "skills")
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -53,7 +56,7 @@ async def main():
             print(f"  Pruned: {prune_result}" if isinstance(prune_result, str) else "  Pruned")
 
             ingest_result = await call_tool(session, "ingest_skills", {
-                "skills_folder": "./skills",
+                "skills_folder": SKILLS_DIR,
             })
             if isinstance(ingest_result, str):
                 print(f"  {ingest_result}")
