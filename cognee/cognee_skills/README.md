@@ -307,28 +307,9 @@ The original instructions are restored. The amendment history is kept in the gra
 
 ---
 
-## Recording outcomes
-
-Every observation drives both routing preferences and the repair loop. Without observations, `inspect` has nothing to analyze.
-
-```python
-await skills.observe({
-    "task_text": "Compress this conversation",
-    "selected_skill_id": "summarize",
-    "success_score": 0.0,           # 0.0 = failed, 1.0 = perfect
-    "error_type": "instruction_gap",
-    "error_message": "Output was empty",
-    "result_summary": "Skill returned nothing",
-    "session_id": "sess-abc",
-    "latency_ms": 1200,
-})
-```
-
-When `skills.run()` or `skills.execute()` is used, this is handled automatically.
-
 ---
 
-## Full API
+## Reference
 
 ### Self-improvement
 
@@ -342,14 +323,13 @@ When `skills.run()` or `skills.execute()` is used, this is handled automatically
 | `skills.auto_amendify(skill_id)` | Full pipeline in one call |
 | `skills.execute(..., auto_amendify=True)` | Execute + repair on failure, in one call |
 
-### Routing and observation
+### Execution
 
 | Call | What it does |
 |------|-------------|
 | `skills.run(task_text)` | Find the best skill and execute it — one call does everything |
 | `skills.execute(skill_id, task_text)` | Execute a specific skill by ID |
-| `skills.observe({...})` | Record outcome; updates preferences immediately |
-| `skills.get_context(task_text)` | Semantic search + learned preferences → ranked skills |
+| `skills.observe({...})` | Record an outcome manually (handled automatically by `run()` and `execute()`) |
 | `skills.load(skill_id)` | Full skill details: instructions, patterns, metadata |
 | `skills.list()` | All ingested skills (summaries only) |
 
@@ -401,32 +381,6 @@ Amendments update the `Skill` node in-place. The `SkillAmendment` node keeps the
 
 ---
 
-## Preference weights — how routing learns
-
-Skills are linked to `TaskPattern` nodes via `solves` edges. When a run is observed, the `prefers` edge between that pattern and the skill is updated with an incremental mean of all `success_score` values seen so far:
-
-```text
-new_weight = (prior_weight_sum + success_score) / (prior_run_count + 1)
-```
-
-`skills.get_context()` ranks results by `vector_score + prefers_score`. A new skill starts at `prefers_score = 0` and wins only on semantic similarity. A skill with a proven track record on the same pattern will outrank a semantically closer but untested one.
-
-For the weight to update, pass `task_pattern_id` to `observe()` — it comes back in every `get_context()` response:
-
-```python
-recs = await skills.get_context("compress this conversation")
-
-await skills.observe({
-    "task_text":          "compress this conversation",
-    "selected_skill_id":  "summarize",
-    "task_pattern_id":    recs[0]["task_pattern_id"],  # links the score to the right pattern
-    "success_score":      0.9,
-})
-```
-
-Without `task_pattern_id`, the run is still recorded as a `SkillRun` and feeds `inspect_skill`, but the preference weight is not updated.
-
----
 
 ## SkillChangeEvent — audit trail
 
