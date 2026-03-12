@@ -106,7 +106,7 @@ async def add_data_points(
     await graph_engine.add_nodes(nodes)
     await index_data_points(nodes, vector_engine=vector_engine)
 
-    if user and dataset and data:
+    if user and dataset and data and hasattr(data, "id"):
         await upsert_nodes(
             nodes, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
         )
@@ -123,7 +123,7 @@ async def add_data_points(
         await graph_engine.add_edges(custom_edges)
         await index_graph_edges(custom_edges, vector_engine=vector_engine)
 
-        if user and dataset and data:
+        if user and dataset and data and hasattr(data, "id"):
             await upsert_edges(
                 custom_edges,
                 tenant_id=user.tenant_id,

@@ -463,6 +463,38 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 - **cognify_status / codify_status**: Track pipeline progress
 
+### Skills Tools
+
+When `cognee.skills` is installed, the following additional tools are available for intelligent skill routing:
+
+- **get_skill_context**: Find the best skills for a task using semantic search and learned preferences
+- **load_skill**: Load full details for a skill by its skill_id
+- **list_skills**: List all skills currently ingested in the knowledge graph
+- **observe_skill_run**: Record a skill execution outcome (success/failure)
+- **promote_skill_runs**: Promote cached runs to the graph and update preference weights
+- **ingest_skills**: Parse SKILL.md files from a folder and store in the knowledge graph
+- **upsert_skills**: Re-ingest a folder: skip unchanged, update changed, remove deleted
+- **remove_skill**: Remove a single skill by skill_id
+
+To teach your agent when and how to use these tools, copy the contents of [`cognee/skills/agent_instructions.md`](../cognee/skills/agent_instructions.md) into your IDE's agent instructions (Cursor rules, CLAUDE.md, Cline custom instructions, etc.). See [cognee/skills/README.md](../cognee/skills/README.md) for the SKILL.md format and full setup guide.
+
+#### Skills Resources
+
+MCP resources provide read-only discoverable content that agents can browse before using tools:
+
+- **`skill://agent-guide`** — Returns the `agent_instructions.md` content (markdown) explaining the skill routing workflow
+- **`skill://index`** — Returns a JSON list of all ingested skills, or a hint message when none exist
+- **`skill://{skill_id}`** — Resource template. Returns the full skill JSON for a given skill_id
+
+These enable a progressive disclosure pattern: browse agent-guide → browse skill index → read specific skill → use tools to act.
+
+#### Skills Prompts
+
+Reusable prompt templates that guide agents through skill workflows:
+
+- **`route-task(task_description)`** — Walks the agent through the full routing workflow: get_skill_context → pick best → load_skill → execute → observe_skill_run → promote_skill_runs
+- **`skill-setup(skills_folder)`** — Checks if skills exist and adaptively guides toward `ingest_skills` (first time) or `upsert_skills` (existing skills)
+
 **Data Management Examples:**
 ```bash
 # List all available datasets and data items

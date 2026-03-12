@@ -45,3 +45,6 @@ from cognee.modules.observability.trace_context import (
     get_all_traces,
     clear_traces,
 )
+
+# Skills routing
+from cognee.cognee_skills.client import skills
