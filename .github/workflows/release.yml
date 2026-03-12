@@ -73,6 +73,7 @@ jobs:
         with:
           tag_name: ${{ steps.create_tag.outputs.tag }}
           body: ${{ steps.generate_notes.outputs.RELEASE_NOTES }}
+          prerelease: ${{ github.ref_name == 'dev' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 
