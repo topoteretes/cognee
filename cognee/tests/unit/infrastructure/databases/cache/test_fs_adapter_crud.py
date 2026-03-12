@@ -8,6 +8,9 @@ from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
     SessionQAEntryValidationError,
 )
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 
 @pytest.fixture
@@ -91,6 +94,32 @@ async def test_delete_feedback(adapter):
     entries = await adapter.get_all_qa_entries("u1", "s1")
     e = entries[0]
     assert e.get("feedback_text") is None and e.get("feedback_score") is None
+
+
+@pytest.mark.asyncio
+async def test_update_memify_metadata_merges_existing_keys(adapter):
+    """update_qa_entry merges memify_metadata keys instead of replacing the map."""
+    await adapter.create_qa_entry(
+        "u1",
+        "s1",
+        "Q",
+        "C",
+        "A",
+        qa_id="id1",
+        memify_metadata={"persist_sessions_in_knowledge_graph": True},
+    )
+    ok = await adapter.update_qa_entry(
+        "u1",
+        "s1",
+        "id1",
+        memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False},
+    )
+    assert ok
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert entries[0]["memify_metadata"] == {
+        "persist_sessions_in_knowledge_graph": True,
+        MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False,
+    }
 
 
 @pytest.mark.asyncio

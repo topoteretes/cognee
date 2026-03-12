@@ -3,6 +3,7 @@ name: Release Test Workflow
 
 permissions:
   contents: read
+  packages: write
 
 on:
   workflow_dispatch:
@@ -14,4 +15,11 @@ jobs:
   load-tests:
     name: Load Tests
     uses: ./.github/workflows/load_tests.yml
+    secrets: inherit
+
+  dev-canary-release:
+    name: Dev Canary Release
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: load-tests
+    uses: ./.github/workflows/dev_canary_release.yml
     secrets: inherit

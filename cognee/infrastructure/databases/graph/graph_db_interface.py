@@ -291,3 +291,35 @@ class GraphDBInterface(ABC):
               are lists of attribute values to filter by.
         """
         raise NotImplementedError
+
+    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve node feedback weights for multiple node ids.
+        Returns only found node ids.
+        """
+        raise NotImplementedError("get_node_feedback_weights is not implemented for this adapter")
+
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist node feedback weights for multiple node ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_node_feedback_weights is not implemented for this adapter")
+
+    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve edge feedback weights for multiple edge_object_ids.
+        Returns only found edge ids.
+        """
+        raise NotImplementedError("get_edge_feedback_weights is not implemented for this adapter")
+
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist edge feedback weights for multiple edge_object_ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_edge_feedback_weights is not implemented for this adapter")
