@@ -82,7 +82,7 @@ async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
                             },
                         )
                     )
-            except TypeError as e:
+            except Exception as e:
                 logger.info(f"Warning: Skipping invalid rule due to error: {e}")
     else:
         logger.info("No valid origin_id or rules provided.")

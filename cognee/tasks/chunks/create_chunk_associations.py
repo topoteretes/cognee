@@ -61,7 +61,7 @@ async def _compare_chunks(
             system_prompt=system_prompt,
             response_model=ChunkSimilarity,
         )
-    except (OSError, ValueError, RuntimeError) as e:
+    except Exception as e:
         logger.warning(f"LLM comparison failed: {e}")
         return ChunkSimilarity(
             are_similar=False, similarity_score=0.0, reasoning="LLM error", association_type=None
@@ -129,9 +129,7 @@ async def create_chunk_associations(
         Each chunk from the input list, unchanged.
 
     Raises:
-        OSError: Re-raised if persisting edges to the graph database fails due to I/O error.
-        ValueError: Re-raised if persisting edges fails due to invalid data.
-        RuntimeError: Re-raised if persisting edges fails due to runtime error.
+        Exception: Re-raised if persisting edges to the graph database fails.
     """
     if not isinstance(chunks, list):
         chunks = [chunks]
@@ -161,7 +159,7 @@ async def create_chunk_associations(
             if results:
                 chunk_id = str(results[0].id)
                 id_to_text[chunk_id] = chunk_text
-        except (OSError, ValueError, RuntimeError) as e:
+        except Exception as e:
             logger.warning(f"Failed to find chunk ID for text: {chunk_text[:50]}... Error: {e}")
 
     logger.info(f"Found {len(id_to_text)} chunk IDs from vector search")
@@ -176,7 +174,7 @@ async def create_chunk_associations(
             candidates = await vector_engine.search(
                 "DocumentChunk_text", chunk_text, limit=search_limit
             )
-        except (OSError, ValueError, RuntimeError) as e:
+        except Exception as e:
             logger.warning(f"Vector search failed for chunk: {chunk_text[:50]}... Error: {e}")
             continue
 
@@ -215,7 +213,7 @@ async def create_chunk_associations(
             await graph_engine.add_edges(edges)
             await index_graph_edges(edges)
             logger.info(f"Successfully persisted {len(edges)} edges to graph database")
-        except (OSError, ValueError, RuntimeError) as e:
+        except Exception as e:
             logger.error(f"Failed to persist edges to graph database: {e}")
             raise
 
