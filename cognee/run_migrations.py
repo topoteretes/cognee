@@ -1,8 +1,11 @@
 import os
 import sys
+import logging
 import subprocess
 from pathlib import Path
 import importlib.resources as pkg_resources
+
+logger = logging.getLogger(__name__)
 
 # Assuming your package is named 'cognee' and the migrations are under 'cognee/alembic'
 # This is a placeholder for the path logic.
@@ -42,7 +45,7 @@ async def run_migrations():
 
     if migration_result.returncode != 0:
         migration_output = migration_result.stderr + migration_result.stdout
-        print(f"Migration failed with unexpected error: {migration_output}")
+        logger.error("Migration failed with unexpected error: %s", migration_output)
         sys.exit(1)
 
-    print("Migration completed successfully.")
+    logger.info("Migration completed successfully.")

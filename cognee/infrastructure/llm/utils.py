@@ -78,10 +78,13 @@ async def test_llm_connection():
     """
     try:
         logger.info("Testing connection to LLM endpoint...")
-        await LLMGateway.acreate_structured_output(
-            text_input="test",
-            system_prompt='Respond to me with the following string: "test"',
-            response_model=str,
+        await asyncio.wait_for(
+            LLMGateway.acreate_structured_output(
+                text_input="test",
+                system_prompt='Respond to me with the following string: "test"',
+                response_model=str,
+            ),
+            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
         msg = (

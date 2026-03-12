@@ -789,8 +789,13 @@ class NeptuneGraphDB(GraphDBInterface):
             }
 
             results = await self.query(query, params)
-            logger.debug(f"Found {len(results)} existing edges out of {len(edges)} checked")
-            return [result["edge_exists"] for result in results]
+            existing_edges = [
+                (str(result["from_node"]), str(result["to_node"]), str(result["relationship_name"]))
+                for result in results
+                if result["edge_exists"]
+            ]
+            logger.debug(f"Found {len(existing_edges)} existing edges out of {len(edges)} checked")
+            return existing_edges
 
         except Exception as e:
             error_msg = format_neptune_error(e)
