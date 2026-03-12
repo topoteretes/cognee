@@ -4,6 +4,8 @@ from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
+from cognee.contracts import DataContract
+from cognee.contracts.violations import handle_violation
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 from cognee.modules.ingestion.exceptions import IngestionError
@@ -23,6 +25,70 @@ from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
 
 
+def _enforce_ingestion_contract(
+    ingestion_contract,
+    original_file_metadata: dict,
+    storage_file_metadata: dict,
+) -> bool:
+    """Check ingestion contract rules and return True if the item should be skipped."""
+    from cognee.contracts.models import IngestionContract
+
+    if not isinstance(ingestion_contract, IngestionContract):
+        return False
+
+    mode = ingestion_contract.on_violation
+
+    # File size check
+    if ingestion_contract.max_file_size_bytes is not None:
+        file_size = original_file_metadata.get("file_size", 0)
+        if file_size > ingestion_contract.max_file_size_bytes:
+            result = handle_violation(
+                mode,
+                f"File size {file_size} exceeds max {ingestion_contract.max_file_size_bytes} bytes.",
+                entity_name=original_file_metadata.get("name"),
+            )
+            if result is None:
+                return True
+
+    # MIME type check
+    if ingestion_contract.allowed_mime_types is not None:
+        mime_type = original_file_metadata.get("mime_type", "")
+        if mime_type not in ingestion_contract.allowed_mime_types:
+            result = handle_violation(
+                mode,
+                f"MIME type '{mime_type}' not in allowed types: {ingestion_contract.allowed_mime_types}.",
+                entity_name=original_file_metadata.get("name"),
+            )
+            if result is None:
+                return True
+
+    # Extension check
+    if ingestion_contract.allowed_extensions is not None:
+        extension = original_file_metadata.get("extension", "")
+        if extension not in ingestion_contract.allowed_extensions:
+            result = handle_violation(
+                mode,
+                f"Extension '{extension}' not in allowed extensions: {ingestion_contract.allowed_extensions}.",
+                entity_name=original_file_metadata.get("name"),
+            )
+            if result is None:
+                return True
+
+    # Required metadata fields check
+    if ingestion_contract.required_metadata_fields is not None:
+        for field in ingestion_contract.required_metadata_fields:
+            if not original_file_metadata.get(field):
+                result = handle_violation(
+                    mode,
+                    f"Required metadata field '{field}' is missing or empty.",
+                    entity_name=original_file_metadata.get("name"),
+                )
+                if result is None:
+                    return True
+
+    return False
+
+
 async def ingest_data(
     data: Any,
     dataset_name: str,
@@ -30,6 +96,7 @@ async def ingest_data(
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
+    contract: Optional[DataContract] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -47,6 +114,7 @@ async def ingest_data(
         node_set: Optional[List[str]] = None,
         dataset_id: UUID = None,
         preferred_loaders: dict[str, dict[str, Any]] = None,
+        contract: Optional[DataContract] = None,
     ):
         new_datapoints = []
         existing_data_points = []
@@ -115,6 +183,17 @@ async def ingest_data(
             async with open_data_file(cognee_storage_file_path) as file:
                 classified_data = ingestion.classify(file)
                 storage_file_metadata = classified_data.get_metadata()
+
+            # --- Enforce ingestion contract (if provided) ---
+            ingestion_contract = contract.ingestion if isinstance(contract, DataContract) else None
+            if ingestion_contract is not None:
+                skip_item = _enforce_ingestion_contract(
+                    ingestion_contract,
+                    original_file_metadata,
+                    storage_file_metadata,
+                )
+                if skip_item:
+                    continue
 
             from sqlalchemy import select
 
@@ -206,5 +285,5 @@ async def ingest_data(
         return existing_data_points + dataset_new_data_points + new_datapoints
 
     return await store_data_to_dataset(
-        data, dataset_name, user, node_set, dataset_id, preferred_loaders
+        data, dataset_name, user, node_set, dataset_id, preferred_loaders, contract
     )
