@@ -41,7 +41,8 @@ WORKDIR /app
 COPY --from=uv /usr/local /usr/local
 COPY --from=uv /app /app
 
-RUN chmod +x /app/entrypoint.sh
+# Strip Windows carriage returns (fixes "no such file" on Windows Docker)
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
