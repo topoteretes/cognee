@@ -43,6 +43,7 @@ async def resolve_dlt_sources(
     # Lazy-import DLT types so the dlt package is not a hard dependency
     try:
         from dlt.extract import DltResource, SourceFactory
+        from dlt.extract.source import DltSource
     except ImportError:
         # dlt not installed — nothing to resolve
         return data
@@ -66,7 +67,7 @@ async def resolve_dlt_sources(
     non_dlt_items = []
 
     for item in data_list:
-        if isinstance(item, (DltResource, SourceFactory)):
+        if isinstance(item, (DltResource, DltSource, SourceFactory)):
             dlt_items.append(item)
         else:
             non_dlt_items.append(item)
