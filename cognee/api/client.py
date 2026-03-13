@@ -30,6 +30,7 @@ from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.health.routers import get_health_router
 from cognee.api.v1.update.routers import get_update_router
+from cognee.api.v1.skills.routers import get_skills_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -249,6 +250,8 @@ app.include_router(
     prefix="/api/v1/checks",
     tags=["checks"],
 )
+
+app.include_router(get_skills_router(), prefix="/api/v1/skills", tags=["skills"])
 
 app.include_router(
     get_health_router(),
