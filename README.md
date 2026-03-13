@@ -176,6 +176,10 @@ See Cognee in action:
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
 
+### Agent Skills with Self-Improvement
+
+cognee-skills gives agents a self-improvement loop: every skill run is scored, failures are diagnosed, and fixes are applied automatically. Check out the [full docs](cognee/cognee_skills/README.md).
+
 ## Community & Support
 
 ### Contributing
