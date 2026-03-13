@@ -41,6 +41,7 @@ async def search(
     triplet_distance_penalty: Optional[float] = 3.5,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
 ) -> List[SearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -229,6 +230,7 @@ async def search(
             triplet_distance_penalty=triplet_distance_penalty,
             verbose=verbose,
             retriever_specific_config=retriever_specific_config,
+            neighborhood_depth=neighborhood_depth,
         )
 
         n = len(filtered_search_results) if filtered_search_results else 0

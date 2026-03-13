@@ -158,6 +158,61 @@ class CogneeGraph(CogneeAbstractGraph):
             raise EntityNotFoundError(message="Empty filtered graph projected from the database.")
         return nodes_data, edges_data
 
+    def _process_nodes_and_edges(
+        self,
+        nodes_data,
+        edges_data,
+        node_properties_to_project: List[str],
+        edge_properties_to_project: List[str],
+        directed: bool,
+        node_dimension: int,
+        edge_dimension: int,
+        triplet_distance_penalty: float,
+    ) -> None:
+        """Process raw node and edge data into graph elements."""
+        self.triplet_distance_penalty = triplet_distance_penalty
+
+        start_time = time.time()
+        # Process nodes
+        for node_id, properties in nodes_data:
+            node_attributes = {key: properties.get(key) for key in node_properties_to_project}
+            self.add_node(
+                Node(
+                    str(node_id),
+                    node_attributes,
+                    dimension=node_dimension,
+                    node_penalty=triplet_distance_penalty,
+                )
+            )
+
+        # Process edges
+        for source_id, target_id, relationship_type, properties in edges_data:
+            source_node = self.get_node(str(source_id))
+            target_node = self.get_node(str(target_id))
+            if source_node and target_node:
+                edge_attributes = {key: properties.get(key) for key in edge_properties_to_project}
+                edge_attributes["relationship_type"] = relationship_type
+
+                edge = Edge(
+                    source_node,
+                    target_node,
+                    attributes=edge_attributes,
+                    directed=directed,
+                    dimension=edge_dimension,
+                    edge_penalty=triplet_distance_penalty,
+                )
+                self.add_edge(edge)
+            else:
+                raise EntityNotFoundError(
+                    message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                )
+
+        # Final statistics
+        projection_time = time.time() - start_time
+        logger.info(
+            f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
+        )
+
     async def project_graph_from_db(
         self,
         adapter: Union[GraphDBInterface],
@@ -188,53 +243,66 @@ class CogneeGraph(CogneeAbstractGraph):
                     adapter, memory_fragment_filter
                 )
 
-            self.triplet_distance_penalty = triplet_distance_penalty
-
-            start_time = time.time()
-            # Process nodes
-            for node_id, properties in nodes_data:
-                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(
-                    Node(
-                        str(node_id),
-                        node_attributes,
-                        dimension=node_dimension,
-                        node_penalty=triplet_distance_penalty,
-                    )
-                )
-
-            # Process edges
-            for source_id, target_id, relationship_type, properties in edges_data:
-                source_node = self.get_node(str(source_id))
-                target_node = self.get_node(str(target_id))
-                if source_node and target_node:
-                    edge_attributes = {
-                        key: properties.get(key) for key in edge_properties_to_project
-                    }
-                    edge_attributes["relationship_type"] = relationship_type
-
-                    edge = Edge(
-                        source_node,
-                        target_node,
-                        attributes=edge_attributes,
-                        directed=directed,
-                        dimension=edge_dimension,
-                        edge_penalty=triplet_distance_penalty,
-                    )
-                    self.add_edge(edge)
-                else:
-                    raise EntityNotFoundError(
-                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
-                    )
-
-            # Final statistics
-            projection_time = time.time() - start_time
-            logger.info(
-                f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
+            self._process_nodes_and_edges(
+                nodes_data,
+                edges_data,
+                node_properties_to_project,
+                edge_properties_to_project,
+                directed,
+                node_dimension,
+                edge_dimension,
+                triplet_distance_penalty,
             )
 
         except Exception as e:
             logger.error(f"Error during graph projection: {str(e)}")
+            raise
+
+    async def project_neighborhood_from_db(
+        self,
+        adapter: Union[GraphDBInterface],
+        node_properties_to_project: List[str],
+        edge_properties_to_project: List[str],
+        seed_node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+        directed: bool = True,
+        node_dimension: int = 1,
+        edge_dimension: int = 1,
+        triplet_distance_penalty: float = 3.5,
+    ) -> None:
+        """
+        Project a neighborhood subgraph from the database around seed nodes.
+
+        Calls adapter.get_neighborhood() and processes nodes/edges the same way
+        as project_graph_from_db.
+        """
+        if node_dimension < 1 or edge_dimension < 1:
+            raise InvalidDimensionsError()
+        try:
+            logger.info(f"Retrieving {depth}-hop neighborhood for {len(seed_node_ids)} seed nodes.")
+            nodes_data, edges_data = await adapter.get_neighborhood(
+                node_ids=seed_node_ids,
+                depth=depth,
+                edge_types=edge_types,
+            )
+
+            if not nodes_data or not edges_data:
+                raise EntityNotFoundError(message="Empty neighborhood projected from the database.")
+
+            self._process_nodes_and_edges(
+                nodes_data,
+                edges_data,
+                node_properties_to_project,
+                edge_properties_to_project,
+                directed,
+                node_dimension,
+                edge_dimension,
+                triplet_distance_penalty,
+            )
+
+        except Exception as e:
+            logger.error(f"Error during neighborhood projection: {str(e)}")
             raise
 
     async def map_vector_distances_to_graph_nodes(

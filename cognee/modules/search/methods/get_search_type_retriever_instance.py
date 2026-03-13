@@ -59,6 +59,7 @@ async def get_search_type_retriever_instance(
     wide_search_top_k = kwargs.get("wide_search_top_k", 100)
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 3.5)
     session_id = kwargs.get("session_id")
+    neighborhood_depth = kwargs.get("neighborhood_depth")
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
@@ -99,6 +100,7 @@ async def get_search_type_retriever_instance(
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
+                "neighborhood_depth": neighborhood_depth,
             },
         ),
         SearchType.GRAPH_COMPLETION_COT: (
@@ -143,6 +145,7 @@ async def get_search_type_retriever_instance(
                 ),
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
+                "neighborhood_depth": neighborhood_depth,
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (
