@@ -12,3 +12,11 @@ from .exceptions import (
     CogneeConfigurationError,
     CogneeTransientError,
 )
+
+__all__ = [
+    "CogneeApiError",
+    "CogneeSystemError",
+    "CogneeValidationError",
+    "CogneeConfigurationError",
+    "CogneeTransientError",
+]
