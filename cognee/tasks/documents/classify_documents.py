@@ -9,10 +9,12 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
     CsvDocument,
+    DltRowDocument,
 )
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.documents.exceptions import WrongDataDocumentInputError
+from cognee.tasks.ingestion.dlt_utils import is_dlt_sourced
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
@@ -122,7 +124,12 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
 
     documents = []
     for data_item in data_documents:
-        document = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension](
+        if is_dlt_sourced(data_item):
+            doc_class = DltRowDocument
+        else:
+            doc_class = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension]
+
+        document = doc_class(
             id=data_item.id,
             title=f"{data_item.name}.{data_item.extension}",
             raw_data_location=data_item.raw_data_location,
