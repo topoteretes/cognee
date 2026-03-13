@@ -18,7 +18,7 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import Em
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager, estimate_tokens
 from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger("OllamaEmbeddingEngine")
@@ -140,7 +140,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            async with embedding_rate_limiter_context_manager():
+            async with embedding_rate_limiter_context_manager(estimate_tokens(truncated_prompt)):
                 async with session.post(
                     self.endpoint, json=payload, headers=headers, timeout=60.0
                 ) as response:

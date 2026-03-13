@@ -17,7 +17,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.observability.get_observe import get_observe
 import logging
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager, estimate_tokens
 from cognee.shared.logging_utils import get_logger
 from tenacity import (
     retry,
@@ -143,7 +143,7 @@ class GenericAPIAdapter(LLMInterface):
 
         merged_kwargs = {**self.llm_args, **kwargs}
         try:
-            async with llm_rate_limiter_context_manager():
+            async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
                 result = await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -181,7 +181,7 @@ class GenericAPIAdapter(LLMInterface):
                 ) from error
 
             try:
-                async with llm_rate_limiter_context_manager():
+                async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
                     return await self.aclient.chat.completions.create(
                         model=self.fallback_model,
                         messages=[

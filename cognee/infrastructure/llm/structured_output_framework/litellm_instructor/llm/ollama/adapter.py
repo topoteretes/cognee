@@ -11,7 +11,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 )
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager, estimate_tokens
 from tenacity import (
     retry,
     stop_after_delay,
@@ -101,7 +101,7 @@ class OllamaAPIAdapter(LLMInterface):
             - BaseModel: A structured output that conforms to the specified response model.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
-        async with llm_rate_limiter_context_manager():
+        async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
             response = self.aclient.chat.completions.create(
                 model=self.model,
                 messages=[

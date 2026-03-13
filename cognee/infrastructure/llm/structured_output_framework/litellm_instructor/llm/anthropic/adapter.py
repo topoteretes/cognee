@@ -17,7 +17,7 @@ from tenacity import (
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
 )
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager, estimate_tokens
 from cognee.infrastructure.llm.config import get_llm_config
 
 logger = get_logger()
@@ -85,7 +85,7 @@ class AnthropicAdapter(GenericAPIAdapter):
             - BaseModel: An instance of BaseModel containing the structured response.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
-        async with llm_rate_limiter_context_manager():
+        async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
             return await self.aclient(
                 model=self.model,
                 max_retries=2,
