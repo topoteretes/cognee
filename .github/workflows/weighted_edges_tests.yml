@@ -135,7 +135,7 @@ jobs:
 
       - name: Verify Visualization File Created
         run: |
-          if [ -f "examples/demos/dunder_mifflin_company_graph.html" ]; then
+          if [ -f "examples/demos/.artifacts/dunder_mifflin_company_graph.html" ]; then
             echo "✅ Visualization file created successfully"
             ls -la examples/demos/dunder_mifflin_company_graph.html
           else
