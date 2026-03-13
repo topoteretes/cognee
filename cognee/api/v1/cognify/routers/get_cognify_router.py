@@ -52,6 +52,8 @@ class CognifyPayloadDTO(InDTO):
     )
     chunks_per_batch: Optional[int] = Field(
         default=None,
+        ge=1,
+        le=10000,
         description="Number of chunks to process per task batch in Cognify (overrides default).",
         examples=[10, 20, 50, 100],
     )
