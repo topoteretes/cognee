@@ -271,9 +271,9 @@ def _process_graph_edges(
 ) -> None:
     """Process edges in a knowledge graph"""
     for edge in graph.edges:
-        # Apply name mapping if exists
-        source_id = name_mapping.get(edge.source_node_id, edge.source_node_id)
-        target_id = name_mapping.get(edge.target_node_id, edge.target_node_id)
+        # Normalize before lookup so case differences don't cause misses
+        source_id = name_mapping.get(generate_node_name(edge.source_node_id), edge.source_node_id)
+        target_id = name_mapping.get(generate_node_name(edge.target_node_id), edge.target_node_id)
 
         source_node_id = generate_node_id(source_id)
         target_node_id = generate_node_id(target_id)
@@ -297,14 +297,22 @@ def _process_graph_edges(
             existing_edges_map[edge_key] = True
 
 
-def _populate_node_relations(all_nodes: dict, relationships: list) -> None:
+def _resolve_node(node_id: str, all_nodes: dict, key_mapping: dict):
+    entity_key = key_mapping.get(f"{node_id}_entity", f"{node_id}_entity")
+    type_key = key_mapping.get(f"{node_id}_type", f"{node_id}_type")
+    return all_nodes.get(entity_key) or all_nodes.get(type_key)
+
+
+def _populate_node_relations(all_nodes: dict, relationships: list, key_mapping: dict) -> None:
     """Attach edges to nodes via .relations for downstream traversal and persistence."""
     for src_id, tgt_id, rel_name, _ in relationships:
-        src_node = all_nodes.get(f"{src_id}_entity") or all_nodes.get(f"{src_id}_type")
-        tgt_node = all_nodes.get(f"{tgt_id}_entity") or all_nodes.get(f"{tgt_id}_type")
+        src_node = _resolve_node(src_id, all_nodes, key_mapping)
+        tgt_node = _resolve_node(tgt_id, all_nodes, key_mapping)
 
-        if src_node and tgt_node:
-            src_node.relations.append((Edge(relationship_type=rel_name), tgt_node))
+        if src_node is None or tgt_node is None:
+            continue
+
+        src_node.relations.append((Edge(relationship_type=rel_name), tgt_node))
 
 
 def expand_with_nodes_and_edges(
@@ -393,7 +401,7 @@ def expand_with_nodes_and_edges(
 
     all_nodes = {**added_nodes_map, **added_ontology_nodes_map}
     all_relationships = relationships + ontology_relationships
-    _populate_node_relations(all_nodes, all_relationships)
+    _populate_node_relations(all_nodes, all_relationships, key_mapping)
 
     entity_nodes = list(added_nodes_map.values()) + list(added_ontology_nodes_map.values())
 
