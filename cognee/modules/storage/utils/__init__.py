@@ -20,7 +20,9 @@ class JSONEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-def copy_model(model: DataPoint, include_fields: dict | None = None, exclude_fields: list | None = None):
+def copy_model(
+    model: DataPoint, include_fields: dict | None = None, exclude_fields: list | None = None
+):
     if include_fields is None:
         include_fields = {}
     if exclude_fields is None:

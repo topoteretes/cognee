@@ -3,7 +3,9 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.engine.utils import generate_edge_id, generate_node_id
 
 
-def extract_relationships(document_chunk: DocumentChunk, graph: KnowledgeGraph, cache: dict | None = None):
+def extract_relationships(
+    document_chunk: DocumentChunk, graph: KnowledgeGraph, cache: dict | None = None
+):
     if cache is None:
         cache = {}
     relationships = []
