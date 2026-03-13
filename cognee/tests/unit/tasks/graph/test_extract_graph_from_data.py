@@ -1,3 +1,4 @@
+import importlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -5,7 +6,7 @@ import pytest
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
 from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 
-egd_module = "cognee.tasks.graph.extract_graph_from_data"
+egd_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
 
 
 def _mock_resolver():
@@ -33,7 +34,7 @@ def _two_node_graph():
 
 
 @pytest.mark.asyncio
-@patch(f"{egd_module}.retrieve_existing_edges", new_callable=AsyncMock)
+@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
 async def test_integration_does_not_write_to_db(mock_retrieve):
     mock_retrieve.return_value = {}
     chunk = _make_chunk()
@@ -49,7 +50,7 @@ async def test_integration_does_not_write_to_db(mock_retrieve):
 
 
 @pytest.mark.asyncio
-@patch(f"{egd_module}.retrieve_existing_edges", new_callable=AsyncMock)
+@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
 async def test_chunk_contains_entities_after_integration(mock_retrieve):
     mock_retrieve.return_value = {}
     chunk = _make_chunk()
@@ -63,7 +64,7 @@ async def test_chunk_contains_entities_after_integration(mock_retrieve):
 
 
 @pytest.mark.asyncio
-@patch(f"{egd_module}.retrieve_existing_edges", new_callable=AsyncMock)
+@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
 async def test_entity_relations_populated_after_integration(mock_retrieve):
     mock_retrieve.return_value = {}
     chunk = _make_chunk()
@@ -80,7 +81,7 @@ async def test_entity_relations_populated_after_integration(mock_retrieve):
 
 
 @pytest.mark.asyncio
-@patch(f"{egd_module}.retrieve_existing_edges", new_callable=AsyncMock)
+@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
 async def test_cache_entity_embeddings_hook_called(mock_retrieve):
     mock_retrieve.return_value = {}
     chunk = _make_chunk()
