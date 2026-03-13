@@ -96,16 +96,13 @@ class CogneeGraph(CogneeAbstractGraph):
             )
         return per_query_lists
 
-    async def _get_nodeset_subgraph(
-        self,
-        adapter,
-        node_type,
-        node_name,
-    ):
+    async def _get_nodeset_subgraph(self, adapter, node_type, node_name, node_name_filter_operator):
         """Retrieve subgraph based on node type and name."""
         logger.info("Retrieving graph filtered by node type and node name (NodeSet).")
         nodes_data, edges_data = await adapter.get_nodeset_subgraph(
-            node_type=node_type, node_name=node_name
+            node_type=node_type,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
         )
         if not nodes_data or not edges_data:
             raise EntityNotFoundError(
@@ -169,6 +166,7 @@ class CogneeGraph(CogneeAbstractGraph):
         memory_fragment_filter=[],
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
         relevant_ids_to_filter: Optional[List[str]] = None,
         triplet_distance_penalty: float = 3.5,
     ) -> None:
@@ -177,7 +175,7 @@ class CogneeGraph(CogneeAbstractGraph):
         try:
             if node_type is not None and node_name not in [None, [], ""]:
                 nodes_data, edges_data = await self._get_nodeset_subgraph(
-                    adapter, node_type, node_name
+                    adapter, node_type, node_name, node_name_filter_operator
                 )
             elif len(memory_fragment_filter) == 0:
                 nodes_data, edges_data = await self._get_full_or_id_filtered_graph(

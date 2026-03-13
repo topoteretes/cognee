@@ -89,40 +89,139 @@ async def test_vector_engine_search_none_limit():
 
 
 async def test_vector_engine_search_with_nodeset_filtering():
-    node_set = ["Quantum", "Computers"]
-    query_text = "Tell me about Quantum computers"
+    node_set_a = ["NLP"]
+    node_set_b = ["Quantum", "Computers"]
+    node_set_c = ["Quantum"]
+
+    explanation_file_path_nlp = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
+    )
+    await cognee.add([explanation_file_path_nlp], node_set=node_set_a)
+
+    explanation_file_path_quantum = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
+    )
+
+    await cognee.add([explanation_file_path_quantum], node_set=node_set_b)
+
+    await cognee.add("Alice is an expert in Quantum Mechanics", node_set=node_set_c)
+
+    await cognee.cognify()
+
+    node_set = ["NLP", "Quantum"]
+    query_text = "Tell me about NLP"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
 
+    # Search with "OR" operator
     result = await vector_engine.search(
         collection_name="DocumentChunk_text",
         query_vector=query_vector,
         include_payload=True,
+        limit=None,
         node_name=node_set,
+        node_name_filter_operator="OR",
     )
 
     assert all(nodeset in node_set for nodeset in result[0].payload["belongs_to_set"]), (
         "Only results from relevant nodesets should be returned"
     )
 
+    # Search with "AND" operator
+    result = await vector_engine.search(
+        collection_name="DocumentChunk_text",
+        query_vector=query_vector,
+        include_payload=True,
+        limit=None,
+        node_name=node_set,
+        node_name_filter_operator="AND",
+    )
+
+    assert len(result) == 0, f"Results for search with all nodesets in {node_set} should be empty"
+
+    node_set = ["Quantum", "Computers"]
+
+    # Search with "OR" operator
+    result = await vector_engine.search(
+        collection_name="Entity_name",
+        query_vector=query_vector,
+        include_payload=True,
+        limit=None,
+        node_name=node_set,
+        node_name_filter_operator="OR",
+    )
+
+    assert any(entity.payload["text"].lower() == "alice" for entity in result), (
+        "Entity of Alice should be present in the results"
+    )
+
+    # Search with "AND" operator
+    result = await vector_engine.search(
+        collection_name="Entity_name",
+        query_vector=query_vector,
+        include_payload=True,
+        limit=None,
+        node_name=node_set,
+        node_name_filter_operator="AND",
+    )
+
+    assert all(entity.payload["text"].lower() != "alice" for entity in result), (
+        "Entity of Alice should NOT be present in the results"
+    )
+
 
 async def test_vector_nodeset_filtering_retriever_integration():
-    node_set_a = ["NLP"]
+    node_set = ["NLP", "Quantum"]
     query_text = "Tell me about Quantum computers"
 
     from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
-    retriever = GraphCompletionRetriever(node_name=node_set_a)
+    # Search with "OR" operator
+    retriever = GraphCompletionRetriever(
+        node_name=node_set, node_name_filter_operator="OR", top_k=100
+    )
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
     context = await retriever.get_context_from_objects(
         query=query_text, retrieved_objects=retrieved_objects
     )
 
-    assert "Quantum" not in context
+    assert "Quantum" in context
     assert "NLP" in context
+
+    # Search with "AND" operator
+    retriever = GraphCompletionRetriever(node_name=node_set, node_name_filter_operator="AND")
+    retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
+
+    assert len(retrieved_objects) == 0, (
+        f"Results for search with all nodesets in {node_set} should be empty"
+    )
+
+    node_set = ["Quantum", "Computers"]
+
+    # Search with "OR" operator
+    retriever = GraphCompletionRetriever(
+        node_name=node_set, node_name_filter_operator="OR", top_k=100
+    )
+    retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
+    context = await retriever.get_context_from_objects(
+        query=query_text, retrieved_objects=retrieved_objects
+    )
+
+    assert "Alice" in context
+
+    # Search with "AND" operator
+    retriever = GraphCompletionRetriever(
+        node_name=node_set, node_name_filter_operator="AND", top_k=100
+    )
+    retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
+    context = await retriever.get_context_from_objects(
+        query=query_text, retrieved_objects=retrieved_objects
+    )
+
+    assert "Alice" not in context
 
 
 async def main():
@@ -231,7 +330,9 @@ async def main():
     await test_vector_engine_search_none_limit()
 
     await test_vector_engine_search_with_nodeset_filtering()
-
+    # Note: make sure to call test_vector_engine_search_with_nodeset_filtering()
+    # before test_vector_nodeset_filtering_retriever_integration() because another cognify happens in the first test,
+    # and the second one depends on it. Done like this to minimize number of cognify invocations.
     await test_vector_nodeset_filtering_retriever_integration()
 
     await test_local_file_deletion(
