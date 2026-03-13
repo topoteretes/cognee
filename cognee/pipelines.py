@@ -1,5 +1,5 @@
-# Don't add any more code here, this file is used only for the purpose
-# of enabling imports from `cognee.pipelines` module.
-# `from cognee.pipelines import Task` for example.
+# Re-export pipeline symbols for `from cognee.pipelines import Task`, etc.
 
-from .modules.pipelines import *
+from .modules.pipelines import Task, run_pipeline, run_tasks, run_tasks_parallel
+
+__all__ = ["Task", "run_pipeline", "run_tasks", "run_tasks_parallel"]
