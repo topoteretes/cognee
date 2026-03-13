@@ -78,8 +78,9 @@ class SQLAlchemyAdapter:
                 connect_args={**{"timeout": 30}, **final_connect_args},
             )
         else:
-            if pool_args is None:
-                pool_args = {}
+            # Transform pool_args from tuple into dict if provided
+            # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
+            pool_args = pool_args or {}
 
             if pool_args.get("pool_size") is None:
                 pool_args["pool_size"] = 20
@@ -407,7 +408,10 @@ class SQLAlchemyAdapter:
                 # Load table information from schema into MetaData
                 await connection.run_sync(metadata.reflect, schema=schema_name)
                 # Define the full table name
-                full_table_name = f"{schema_name}.{table_name}"
+                if schema_name is None:
+                    full_table_name = table_name
+                else:
+                    full_table_name = f"{schema_name}.{table_name}"
                 # Check if table is in list of tables for the given schema
                 if full_table_name in metadata.tables:
                     return metadata.tables[full_table_name]
@@ -557,6 +561,12 @@ class SQLAlchemyAdapter:
                 await file_storage.ensure_directory_exists()
 
         async with self.engine.begin() as connection:
+            # Import here to avoid circular imports
+            from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+            vector_config = get_vectordb_config()
+            if vector_config.vector_db_provider == "pgvector":
+                await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             if len(Base.metadata.tables.keys()) > 0:
                 await connection.run_sync(Base.metadata.create_all)
 

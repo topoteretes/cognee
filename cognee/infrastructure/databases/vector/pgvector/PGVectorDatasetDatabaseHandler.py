@@ -71,16 +71,6 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
         dataset_database = await cls.resolve_dataset_connection_info(dataset_database)
-        vector_engine = create_vector_engine(
-            vector_db_provider=dataset_database.vector_database_provider,
-            vector_db_url=dataset_database.vector_database_url,
-            vector_db_name=dataset_database.vector_database_name,
-            vector_db_port=dataset_database.vector_database_connection_info["port"],
-            vector_db_username=dataset_database.vector_database_connection_info["username"],
-            vector_db_password=dataset_database.vector_database_connection_info["password"],
-        )
-        # Prune data
-        await vector_engine.prune()
 
         # Drop entire database
         await delete_pg_database(dataset_database)
