@@ -11,7 +11,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     LLMInterface,
 )
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager, estimate_tokens
 
 from tenacity import (
     retry,
@@ -158,7 +158,7 @@ class LlamaCppAPIAdapter(LLMInterface):
         --------
             - BaseModel: A structured output that conforms to the specified response model.
         """
-        async with llm_rate_limiter_context_manager():
+        async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
             # Prepare messages (system first, then user is more standard)
             messages = [
                 {"role": "system", "content": system_prompt},

@@ -17,7 +17,7 @@ from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
 )
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager, estimate_tokens
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
@@ -97,7 +97,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             if self.mock:
                 return [[0.0] * self.dimensions for _ in text]
             else:
-                async with embedding_rate_limiter_context_manager():
+                async with embedding_rate_limiter_context_manager(estimate_tokens(*text)):
                     embeddings = self.embedding_model.embed(
                         text,
                         batch_size=len(text),

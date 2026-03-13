@@ -21,7 +21,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
 )
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager, estimate_tokens
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -141,7 +141,7 @@ class OpenAIAdapter(GenericAPIAdapter):
 
         merged_kwargs = {**self.llm_args, **kwargs}
         try:
-            async with llm_rate_limiter_context_manager():
+            async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
                 return await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -169,7 +169,7 @@ class OpenAIAdapter(GenericAPIAdapter):
             if not (self.fallback_model and self.fallback_api_key):
                 raise e
             try:
-                async with llm_rate_limiter_context_manager():
+                async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
                     return await self.aclient.chat.completions.create(
                         model=self.fallback_model,
                         messages=[

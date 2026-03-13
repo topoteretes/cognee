@@ -9,7 +9,7 @@ from litellm.exceptions import ContentPolicyViolationError
 from instructor.core import InstructorRetryException
 
 import logging
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager, estimate_tokens
 
 from tenacity import (
     retry,
@@ -118,7 +118,7 @@ class GeminiAdapter(GenericAPIAdapter):
 
         merged_kwargs = {**self.llm_args, **kwargs}
         try:
-            async with llm_rate_limiter_context_manager():
+            async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
                 return await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -155,7 +155,7 @@ class GeminiAdapter(GenericAPIAdapter):
                 )
 
             try:
-                async with llm_rate_limiter_context_manager():
+                async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
                     return await self.aclient.chat.completions.create(
                         model=self.fallback_model,
                         messages=[

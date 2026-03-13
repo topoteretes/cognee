@@ -18,7 +18,7 @@ from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.type
     TypeBuilder,
 )
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client import b
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager, estimate_tokens
 import logging
 
 logger = get_logger()
@@ -59,7 +59,7 @@ async def acreate_structured_output(
     tb = TypeBuilder()
     type_builder = create_dynamic_baml_type(tb, tb.ResponseModel, response_model)
 
-    async with llm_rate_limiter_context_manager():
+    async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
         result = await b.AcreateStructuredOutput(
             text_input=text_input,
             system_prompt=system_prompt,

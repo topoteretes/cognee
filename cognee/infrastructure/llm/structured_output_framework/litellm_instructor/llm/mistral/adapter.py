@@ -10,7 +10,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     GenericAPIAdapter,
 )
 from cognee.infrastructure.llm.config import get_llm_config
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager, estimate_tokens
 
 import logging
 from tenacity import (
@@ -111,7 +111,7 @@ class MistralAdapter(GenericAPIAdapter):
             ]
             merged_kwargs = {**self.llm_args, **kwargs}
             try:
-                async with llm_rate_limiter_context_manager():
+                async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
                     response = await self.aclient.chat.completions.create(
                         model=self.model,
                         max_retries=2,
