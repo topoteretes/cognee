@@ -90,6 +90,8 @@ class RedisAdapter(CacheDBInterface):
         qa_id: str | None = None,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
     ) -> dict:
         entry = SessionQAEntry(
             time=datetime.utcnow().isoformat(),
@@ -99,6 +101,8 @@ class RedisAdapter(CacheDBInterface):
             qa_id=qa_id or str(uuid.uuid4()),
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            used_graph_element_ids=used_graph_element_ids,
+            memify_metadata=memify_metadata,
         )
         return entry.model_dump()
 
@@ -122,6 +126,8 @@ class RedisAdapter(CacheDBInterface):
         answer: str | None = None,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
     ) -> dict:
         merged = {**entry}
         if question is not None:
@@ -134,6 +140,14 @@ class RedisAdapter(CacheDBInterface):
             merged["feedback_text"] = feedback_text
         if feedback_score is not None:
             merged["feedback_score"] = feedback_score
+        if used_graph_element_ids is not None:
+            merged["used_graph_element_ids"] = used_graph_element_ids
+        if memify_metadata is not None:
+            existing_metadata = merged.get("memify_metadata")
+            if isinstance(existing_metadata, dict):
+                merged["memify_metadata"] = {**existing_metadata, **memify_metadata}
+            else:
+                merged["memify_metadata"] = memify_metadata
         return merged
 
     @staticmethod
@@ -204,6 +218,8 @@ class RedisAdapter(CacheDBInterface):
         qa_id: str | None = None,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
     ):
         """
         Add a Q/A/context triplet to a Redis list for this session.
@@ -212,7 +228,14 @@ class RedisAdapter(CacheDBInterface):
         try:
             session_key = self._session_key(user_id, session_id)
             qa_entry = self._build_qa_entry_dump(
-                question, context, answer, qa_id, feedback_text, feedback_score
+                question,
+                context,
+                answer,
+                qa_id,
+                feedback_text,
+                feedback_score,
+                used_graph_element_ids=used_graph_element_ids,
+                memify_metadata=memify_metadata,
             )
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
         except (redis.ConnectionError, redis.TimeoutError) as e:
@@ -252,6 +275,8 @@ class RedisAdapter(CacheDBInterface):
         answer: str | None = None,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -265,7 +290,14 @@ class RedisAdapter(CacheDBInterface):
             if idx is None:
                 return False
             merged = self._merge_entry_update(
-                entries[idx], question, context, answer, feedback_text, feedback_score
+                entries[idx],
+                question,
+                context,
+                answer,
+                feedback_text,
+                feedback_score,
+                used_graph_element_ids=used_graph_element_ids,
+                memify_metadata=memify_metadata,
             )
             entries[idx] = self._validate_entry_dict(merged)
             await self._write_entry_at(session_key, idx, entries[idx])

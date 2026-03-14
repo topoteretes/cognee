@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.5.4"
+version = "0.5.5"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -158,7 +158,21 @@ dev = [
 debug = ["debugpy>=1.8.9,<2.0.0"]
 redis = ["redis>=5.0.3,<6.0.0"]
 
-monitoring = ["sentry-sdk[fastapi]>=2.9.0,<3", "langfuse>=2.32.0,<3"]
+tracing = [
+    "opentelemetry-api>=1.20.0,<2",
+    "opentelemetry-sdk>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0,<2",
+]
+
+monitoring = [
+    "sentry-sdk[fastapi]>=2.9.0,<3",
+    "langfuse>=2.32.0,<3",
+    "opentelemetry-api>=1.20.0,<2",
+    "opentelemetry-sdk>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0,<2",
+]
 
 docling = ["docling>=2.54", "transformers>=4.55"]
 

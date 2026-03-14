@@ -15,6 +15,24 @@ from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 
 
 class config:
+    """
+    Configuration namespace for Cognee's runtime settings.
+
+    All methods are static and configure LLM providers, database backends,
+    chunking strategies, and storage paths at runtime without requiring
+    environment variable changes.
+
+    Example:
+        ```python
+        import cognee
+
+        cognee.config.set_llm_api_key("your-api-key")
+        cognee.config.set_llm_model("gpt-4o-mini")
+        cognee.config.system_root_directory("/path/to/system")
+        cognee.config.set_vector_db_provider("chromadb")
+        ```
+    """
+
     @staticmethod
     def system_root_directory(system_root_directory: str):
         base_config = get_base_config()

@@ -10,6 +10,8 @@ services:
     volumes:
       - ./cognee:/app/cognee
       - .env:/app/.env
+      # Uncomment to allow ingestion of local files from host:
+      # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
@@ -43,6 +45,8 @@ services:
     volumes:
       - .env:/app/.env
       - ./cognee:/app/cognee
+      # Uncomment to allow ingestion of local files from host:
+      # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
       - ENVIRONMENT=local
@@ -91,7 +95,7 @@ services:
       - cognee-network
 
   neo4j:
-    image: neo4j:latest
+    image: neo4j:5.26  # Pinned to 5.x; compatible with neo4j Python driver >=5.28,<6
     container_name: neo4j
     restart: always
     profiles:
