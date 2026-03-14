@@ -131,6 +131,7 @@ class ProcurementMemorySystem:
 
 
 async def run_procurement_example():
+    backend_access_control_enabled = os.environ["ENABLE_BACKEND_ACCESS_CONTROL"].lower() == "true"
     """Main function demonstrating procurement memory system"""
     print("Building AI Procurement System with Memory: Cognee Integration...\n")
 
@@ -168,7 +169,11 @@ async def run_procurement_example():
         for q in questions:
             print(f"Question: \n{q}")
             results = await procurement_system.search_memory(q, search_categories=[category])
-            top_answer = results[category][0]["search_result"][0]
+            top_answer = (
+                results[category][0]["search_result"][0]
+                if backend_access_control_enabled
+                else results[category][0]
+            )
             print(f"Answer: \n{top_answer}\n")
             research_notes[category].append({"question": q, "answer": top_answer})
 
