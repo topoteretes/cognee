@@ -137,7 +137,7 @@ jobs:
         run: |
           if [ -f "examples/demos/.artifacts/dunder_mifflin_company_graph.html" ]; then
             echo "✅ Visualization file created successfully"
-            ls -la examples/demos/dunder_mifflin_company_graph.html
+            ls -la examples/demos/.artifacts/dunder_mifflin_company_graph.html
           else
             echo "❌ Visualization file not found"
             exit 1
