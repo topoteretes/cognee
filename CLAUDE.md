@@ -286,7 +286,7 @@ GRAPH_DATABASE_PASSWORD=your_password
 
 ### LLM Provider Configuration
 
-Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, AWS Bedrock, Ollama, LM Studio, Custom (OpenAI-compatible APIs)
+Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, MiniMax, AWS Bedrock, Ollama, LM Studio, Custom (OpenAI-compatible APIs)
 
 #### OpenAI (Recommended - Minimal Setup)
 ```bash
@@ -328,6 +328,17 @@ EMBEDDING_PROVIDER="ollama"
 EMBEDDING_MODEL="nomic-embed-text:latest"
 EMBEDDING_ENDPOINT="http://localhost:11434/api/embed"
 HUGGINGFACE_TOKENIZER="nomic-ai/nomic-embed-text-v1.5"
+```
+
+#### MiniMax
+```bash
+LLM_PROVIDER="minimax"
+LLM_MODEL="MiniMax-M2.5"
+LLM_API_KEY="your_minimax_api_key"
+# International endpoint (default):
+LLM_ENDPOINT="https://api.minimax.io/v1"
+# China mainland endpoint:
+# LLM_ENDPOINT="https://api.minimaxi.com/v1"
 ```
 
 #### Custom / OpenRouter / vLLM
