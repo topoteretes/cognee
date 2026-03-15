@@ -18,6 +18,13 @@ from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
+from cognee.modules.observability import new_span
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_SYSTEM,
+    COGNEE_VECTOR_COLLECTION,
+    COGNEE_VECTOR_RESULT_COUNT,
+)
+
 
 class IndexSchema(DataPoint):
     """
@@ -240,60 +247,74 @@ class LanceDBAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
     ):
-        if query_text is None and query_vector is None:
-            raise MissingQueryParameterError()
+        with new_span("cognee.db.vector.search") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
+            otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, collection_name)
 
-        if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+            if query_text is None and query_vector is None:
+                raise MissingQueryParameterError()
 
-        collection = await self.get_collection(collection_name)
+            if query_text and not query_vector:
+                query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
-        if limit is None:
-            limit = await collection.count_rows()
+            collection = await self.get_collection(collection_name)
 
-        # LanceDB search will break if limit is 0 so we must return
-        if limit <= 0:
-            return []
+            if limit is None:
+                limit = await collection.count_rows()
 
-        # Note: Exclude payload if not needed to optimize performance
-        select_columns = (
-            ["id", "vector", "payload", "_distance"]
-            if include_payload
-            else ["id", "vector", "_distance"]
-        )
-        if node_name:
-            # Escape quotes to make this input safer, since it's coming from the user
-            # At the time of writing this, no specific binding instructions found on LanceDB docs
-            escaped_node_names = [name.replace("'", "''") for name in node_name]
-            literal_node_names = "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
+            # LanceDB search will break if limit is 0 so we must return
+            if limit <= 0:
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                return []
 
-            result_values = (
-                await collection.vector_search(query_vector)
-                .where(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
-                .select(select_columns)
-                .limit(limit)
-                .to_list()
-            )
-        else:
-            result_values = (
-                await collection.vector_search(query_vector)
-                .select(select_columns)
-                .limit(limit)
-                .to_list()
+            # Note: Exclude payload if not needed to optimize performance
+            select_columns = (
+                ["id", "vector", "payload", "_distance"]
+                if include_payload
+                else ["id", "vector", "_distance"]
             )
 
-        if not result_values:
-            return []
-        normalized_values = normalize_distances(result_values)
+            if node_name:
+                # Escape quotes to make this input safer, since it's coming from the user
+                # At the time of writing this, no specific binding instructions found on LanceDB docs
+                escaped_node_names = [name.replace("'", "''") for name in node_name]
+                literal_node_names = (
+                    "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
+                )
 
-        return [
-            ScoredResult(
-                id=parse_id(result["id"]),
-                payload=result["payload"] if include_payload else None,
-                score=normalized_values[value_index],
-            )
-            for value_index, result in enumerate(result_values)
-        ]
+                result_values = (
+                    await collection.vector_search(query_vector)
+                    .where(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
+                    .select(select_columns)
+                    .limit(limit)
+                    .to_list()
+                )
+            else:
+                result_values = (
+                    await collection.vector_search(query_vector)
+                    .select(select_columns)
+                    .limit(limit)
+                    .to_list()
+                )
+
+            if not result_values:
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                return []
+
+            normalized_values = normalize_distances(result_values)
+
+            results = [
+                ScoredResult(
+                    id=parse_id(result["id"]),
+                    payload=result["payload"] if include_payload else None,
+                    score=normalized_values[value_index],
+                )
+                for value_index, result in enumerate(result_values)
+            ]
+
+            otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, len(results))
+
+            return results
 
     async def batch_search(
         self,

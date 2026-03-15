@@ -1,5 +1,6 @@
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
+
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
@@ -11,13 +12,22 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def add(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
+    data: Union[
+        BinaryIO,
+        list[BinaryIO],
+        str,
+        list[str],
+        DataItem,
+        list[DataItem],
+        Any,  # DltResource, SourceFactory, or other dlt types
+    ],
     dataset_name: str = "main_dataset",
     user: User = None,
     node_set: Optional[List[str]] = None,
@@ -27,6 +37,7 @@ async def add(
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
+    **kwargs,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -190,6 +201,15 @@ async def add(
 
     user, authorized_dataset = await resolve_authorized_user_dataset(
         dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
+
+    # Expand DLT resources (and auto-detected CSV/connection strings) into
+    # standard DataItems before the pipeline sees them.
+    data = await resolve_dlt_sources(
+        data,
+        dataset_name=dataset_name,
+        user=user,
+        **kwargs,
     )
 
     await reset_dataset_pipeline_run_status(
