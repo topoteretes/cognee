@@ -847,17 +847,31 @@ async def cognify_status():
     - The function retrieves pipeline status specifically for the "cognify_pipeline" on the "main_dataset"
     - Status information includes job progress, execution time, and completion status
     - The status is returned in string format for easy reading
-    - This operation is not available in API mode
+    - In API mode, status is retrieved via the backend REST endpoint
     """
     with redirect_stdout(sys.stderr):
         try:
-            from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
-            from cognee.modules.users.methods import get_default_user
+            if cognee_client.use_api:
+                # API mode: resolve dataset via HTTP instead of local DB
+                from uuid import UUID
+                datasets = await cognee_client.list_datasets()
+                dataset_ids = [
+                    UUID(d["id"]) for d in datasets if d.get("name") == "main_dataset"
+                ]
+                if not dataset_ids:
+                    return [types.TextContent(type="text", text="{}")]
+                status = await cognee_client.get_pipeline_status(
+                    dataset_ids, "cognify_pipeline"
+                )
+            else:
+                # Direct mode: use local cognee functions
+                from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
+                from cognee.modules.users.methods import get_default_user
 
-            user = await get_default_user()
-            status = await cognee_client.get_pipeline_status(
-                [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
-            )
+                user = await get_default_user()
+                status = await cognee_client.get_pipeline_status(
+                    [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
+                )
 
             # Append any background task errors
             status_text = str(status)
@@ -868,10 +882,6 @@ async def cognify_status():
                 status_text += "\n".join(error_lines)
 
             return [types.TextContent(type="text", text=status_text)]
-        except NotImplementedError:
-            error_msg = "❌ Pipeline status is not available in API mode"
-            logger.error(error_msg)
-            return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
             error_msg = f"❌ Failed to get cognify status: {str(e)}"
             # Still report background errors even if pipeline status fails

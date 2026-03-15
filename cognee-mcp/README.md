@@ -429,12 +429,12 @@ docker run \
 **API Mode limitations:**
 Some features are only available in direct mode:
 - `codify` (code graph pipeline)
-- `cognify_status` / `codify_status` (pipeline status tracking)
+- `codify_status` (code pipeline status tracking)
 - `prune` (data reset)
 - `get_developer_rules` (developer rules retrieval)
 - `list_data` with specific dataset_id (detailed data listing)
 
-Basic operations like `cognify`, `search`, `delete`, and `list_data` (all datasets) work in both modes.
+Basic operations like `cognify`, `cognify_status`, `search`, `delete`, and `list_data` (all datasets) work in both modes.
 
 ## 💻 Basic Usage
 
