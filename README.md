@@ -108,7 +108,7 @@ os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
 Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
 
-To integrate other LLM providers, see our [LLM Provider Documentation](https://docs.cognee.ai/setup-configuration/llm-providers).
+Cognee supports multiple LLM providers including OpenAI, Anthropic, Google Gemini, Mistral, MiniMax, AWS Bedrock, and Ollama. To integrate other LLM providers, see our [LLM Provider Documentation](https://docs.cognee.ai/setup-configuration/llm-providers).
 
 ### Step 3: Run the Pipeline
 
