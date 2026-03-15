@@ -859,10 +859,11 @@ async def cognify_status():
                     UUID(d["id"]) for d in datasets if d.get("name") == "main_dataset"
                 ]
                 if not dataset_ids:
-                    return [types.TextContent(type="text", text="{}")]
-                status = await cognee_client.get_pipeline_status(
-                    dataset_ids, "cognify_pipeline"
-                )
+                    status = "{}"
+                else:
+                    status = await cognee_client.get_pipeline_status(
+                        dataset_ids, "cognify_pipeline"
+                    )
             else:
                 # Direct mode: use local cognee functions
                 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
