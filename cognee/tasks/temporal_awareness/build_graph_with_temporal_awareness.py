@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import List
 from datetime import datetime
 
@@ -7,6 +8,8 @@ from graphiti_core.nodes import EpisodeType
 
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.modules.data.models import Data
+
+logger = logging.getLogger(__name__)
 
 
 async def build_graph_with_temporal_awareness(data: List[Data]):
@@ -24,7 +27,7 @@ async def build_graph_with_temporal_awareness(data: List[Data]):
     graphiti = Graphiti(url, "neo4j", password)
 
     await graphiti.build_indices_and_constraints()
-    print("Graph database initialized.")
+    logger.info("Graph database initialized.")
 
     for i, text in enumerate(text_list):
         await graphiti.add_episode(
@@ -34,6 +37,6 @@ async def build_graph_with_temporal_awareness(data: List[Data]):
             source_description="input",
             reference_time=datetime.now(),
         )
-        print(f"Added text: {text[:35]}...")
+        logger.debug("Added text: %s...", text[:35])
 
     return graphiti

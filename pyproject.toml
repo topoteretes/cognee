@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.5.3"
+version = "0.5.5"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -55,7 +55,6 @@ dependencies = [
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
     "websockets>=15.0.1,<16.0.0",
-    "mistralai>=1.9.10",
     "tenacity>=9.0.0",
     "fakeredis[lua]>=2.32.0",
     "diskcache>=5.6.3",
@@ -104,7 +103,7 @@ langchain = [
 llama-index = ["llama-index-core>=0.13.0,<0.14"]
 huggingface = ["transformers>=4.46.3,<5"]
 ollama = ["transformers>=4.46.3,<5"]
-mistral = ["mistral-common>=1.5.2,<2"]
+mistral = ["mistral-common>=1.5.2,<2", "mistralai>=1.9.10,<2"]
 anthropic = ["anthropic>=0.27"]
 deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
@@ -159,7 +158,21 @@ dev = [
 debug = ["debugpy>=1.8.9,<2.0.0"]
 redis = ["redis>=5.0.3,<6.0.0"]
 
-monitoring = ["sentry-sdk[fastapi]>=2.9.0,<3", "langfuse>=2.32.0,<3"]
+tracing = [
+    "opentelemetry-api>=1.20.0,<2",
+    "opentelemetry-sdk>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0,<2",
+]
+
+monitoring = [
+    "sentry-sdk[fastapi]>=2.9.0,<3",
+    "langfuse>=2.32.0,<3",
+    "opentelemetry-api>=1.20.0,<2",
+    "opentelemetry-sdk>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0,<2",
+]
 
 docling = ["docling>=2.54", "transformers>=4.55"]
 

@@ -84,9 +84,11 @@ class SessionManager:
         session_id: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
+        used_graph_element_ids: Optional[dict] = None,
     ) -> Optional[str]:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
+        used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id)
@@ -104,6 +106,7 @@ class SessionManager:
             answer=answer,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            used_graph_element_ids=used_graph_element_ids,
         )
         return qa_id
 
@@ -136,6 +139,7 @@ class SessionManager:
         system_prompt: Optional[str] = None,
         response_model: Type = str,
         summarize_context: bool = False,
+        used_graph_element_ids: Optional[dict] = None,
     ) -> Any:
         """
         Run single-query completion with session: read history, generate, save QA.
@@ -245,6 +249,7 @@ class SessionManager:
             context=context_to_store,
             answer=str(completion),
             session_id=resolved_session_id,
+            used_graph_element_ids=used_graph_element_ids,
         )
         if feedback_detected and feedback_result.contains_followup_question:
             thanks = (feedback_result.response_to_user or "").strip()
@@ -326,6 +331,7 @@ class SessionManager:
         answer: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
+        memify_metadata: Optional[dict] = None,
         session_id: Optional[str] = None,
     ) -> bool:
         """
@@ -333,6 +339,7 @@ class SessionManager:
 
         Only passed fields are updated; None preserves existing values.
         Returns True if updated, False if not found or cache unavailable.
+        memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
@@ -349,6 +356,7 @@ class SessionManager:
             answer=answer,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            memify_metadata=memify_metadata,
         )
 
     async def add_feedback(
