@@ -290,8 +290,11 @@ class CogneeClient:
             Status information
         """
         if self.use_api:
-            # Note: This would need a custom endpoint on the API side
-            raise NotImplementedError("Pipeline status is not available via API")
+            endpoint = f"{self.api_url}/api/v1/datasets/status"
+            params = [("dataset", str(did)) for did in dataset_ids]
+            response = await self.client.get(endpoint, params=params, headers=self._get_headers())
+            response.raise_for_status()
+            return str(response.json())
         else:
             # Direct mode: Call cognee directly
             from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
