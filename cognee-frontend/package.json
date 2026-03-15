@@ -19,7 +19,10 @@
     "react-force-graph-2d": "^1.27.1",
     "three": "^0.175.0",
     "troika-three-text": "^0.52.4",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "react-markdown": "^9.0.0",
+    "ngraph.graph": "^20.0.0",
+    "ngraph.forcelayout": "^3.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
