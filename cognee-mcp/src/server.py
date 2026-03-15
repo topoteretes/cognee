@@ -41,7 +41,9 @@ except ModuleNotFoundError:
     )
 
 
-mcp = FastMCP("Cognee")
+import os
+_stateless = os.environ.get("MCP_STATELESS_HTTP", "false").lower() == "true"
+mcp = FastMCP("Cognee", stateless_http=_stateless)
 
 logger = get_logger()
 
