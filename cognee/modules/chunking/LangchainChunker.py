@@ -25,7 +25,8 @@ class LangchainChunker(Chunker):
         chunk_size: int = 1024,
         chunk_overlap=10,
     ):
-        super().__init__(document, get_text, max_chunk_tokens, chunk_size)
+        super().__init__(document, get_text, max_chunk_tokens)
+        self.max_chunk_tokens = max_chunk_tokens
 
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
@@ -42,7 +43,7 @@ class LangchainChunker(Chunker):
                     yield DocumentChunk(
                         id=uuid5(NAMESPACE_OID, chunk),
                         text=chunk,
-                        word_count=len(chunk.split()),
+                        chunk_size=len(chunk.split()),
                         token_count=token_count,
                         is_part_of=self.document,
                         chunk_index=self.chunk_index,
