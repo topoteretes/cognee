@@ -853,9 +853,10 @@ async def cognify_status():
         try:
             if cognee_client.use_api:
                 # API mode: resolve dataset via HTTP instead of local DB
+                from uuid import UUID
                 datasets = await cognee_client.list_datasets()
                 dataset_ids = [
-                    d["id"] for d in datasets if d.get("name") == "main_dataset"
+                    UUID(d["id"]) for d in datasets if d.get("name") == "main_dataset"
                 ]
                 if not dataset_ids:
                     return [types.TextContent(type="text", text="{}")]
