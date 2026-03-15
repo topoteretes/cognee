@@ -40,9 +40,9 @@ def make_text_generator():
 
 @pytest.fixture
 def mock_tokenizer():
-    """Mock get_vector_engine with a tokenizer that returns 5 tokens per chunk."""
+    """Mock get_vector_engine with a tokenizer that approximates real token counts."""
     tokenizer = MagicMock()
-    tokenizer.count_tokens.return_value = 5
+    tokenizer.count_tokens.side_effect = lambda text: len(text.split())
     engine = MagicMock()
     engine.embedding_engine.tokenizer = tokenizer
     with patch(
@@ -165,7 +165,7 @@ async def test_unicode_input_is_handled(make_document, make_text_generator, mock
     chunks = await collect_chunks(chunker)
     assert len(chunks) >= 1, "Unicode input should produce at least one chunk"
     all_text = " ".join(c.text for c in chunks)
-    assert "日本語" in all_text or "Arabic" in all_text, "Unicode content should be preserved"
+    assert "日本語" in all_text, "Non-ASCII content should be preserved in chunks"
 
 
 @pytest.mark.asyncio
