@@ -7,7 +7,7 @@ from cognee.infrastructure.engine import DataPoint
 logger = get_logger("index_data_points")
 
 
-async def index_data_points(data_points: list[DataPoint]):
+async def index_data_points(data_points: list[DataPoint], vector_engine=None):
     """Index data points in the vector engine by creating embeddings for specified fields.
 
     Process:
@@ -19,13 +19,15 @@ async def index_data_points(data_points: list[DataPoint]):
     Args:
         data_points: List of DataPoint objects to index. Each DataPoint's metadata must
                      contain an 'index_fields' list specifying which fields to embed.
+        vector_engine: Optional pre-created vector engine. Falls back to
+                       ``get_vector_engine()`` when not supplied.
 
     Returns:
         The original data_points list.
     """
     data_points_by_type = {}
 
-    vector_engine = get_vector_engine()
+    vector_engine = vector_engine or get_vector_engine()
 
     for data_point in data_points:
         data_point_type = type(data_point)

@@ -1,0 +1,50 @@
+{
+  "nodes": [
+    {
+      "id": "Alice",
+      "name": "Alice",
+      "type": "Person",
+      "description": "Person mentioned in the text"
+    },
+    {
+      "id": "Mark",
+      "name": "Mark",
+      "type": "Person",
+      "description": "Person mentioned in the text"
+    },
+    {
+      "id": "Bob",
+      "name": "Bob",
+      "type": "Person",
+      "description": "Person mentioned in the text"
+    },
+    {
+      "id": "Mary",
+      "name": "Mary",
+      "type": "Person",
+      "description": "Person mentioned in the text"
+    }
+  ],
+  "edges": [
+    {
+      "source_node_id": "Alice",
+      "target_node_id": "Mark",
+      "relationship_name": "knows"
+    },
+    {
+      "source_node_id": "Mark",
+      "target_node_id": "Bob",
+      "relationship_name": "had_dinner_with"
+    },
+    {
+      "source_node_id": "Mark",
+      "target_node_id": "Alice",
+      "relationship_name": "had_dinner_with"
+    },
+    {
+      "source_node_id": "Bob",
+      "target_node_id": "Mary",
+      "relationship_name": "knows"
+    }
+  ]
+}

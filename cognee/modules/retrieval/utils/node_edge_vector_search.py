@@ -5,6 +5,7 @@ from typing import Any, List, Optional
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.observability import new_span, COGNEE_VECTOR_COLLECTION
 
 logger = get_logger(level=ERROR)
 
@@ -43,25 +44,38 @@ class NodeEdgeVectorSearch:
         if not collections:
             raise ValueError("'collections' must be a non-empty list.")
 
-        start_time = time.time()
+        with new_span("cognee.retrieval.vector_search") as span:
+            span.set_attribute("cognee.vector.collection_count", len(collections))
+            span.set_attribute(COGNEE_VECTOR_COLLECTION, ", ".join(collections))
+            span.set_attribute(
+                "cognee.vector.mode", "batch" if query_batch is not None else "single"
+            )
+            if wide_search_limit is not None:
+                span.set_attribute("cognee.vector.wide_search_limit", wide_search_limit)
 
-        if query_batch is not None:
-            self.query_list_length = len(query_batch)
-            search_results = await self._run_batch_search(collections, query_batch)
-        else:
-            self.query_list_length = None
-            search_results = await self._run_single_search(
-                collections, query, wide_search_limit, node_name
+            start_time = time.time()
+
+            if query_batch is not None:
+                self.query_list_length = len(query_batch)
+                span.set_attribute("cognee.vector.batch_size", len(query_batch))
+                search_results = await self._run_batch_search(collections, query_batch)
+            else:
+                self.query_list_length = None
+                search_results = await self._run_single_search(
+                    collections, query, wide_search_limit, node_name
+                )
+
+            elapsed_time = time.time() - start_time
+            collections_with_results = sum(1 for result in search_results if any(result))
+            logger.info(
+                f"Vector collection retrieval completed: Retrieved distances from "
+                f"{collections_with_results} collections in {elapsed_time:.2f}s"
             )
 
-        elapsed_time = time.time() - start_time
-        collections_with_results = sum(1 for result in search_results if any(result))
-        logger.info(
-            f"Vector collection retrieval completed: Retrieved distances from "
-            f"{collections_with_results} collections in {elapsed_time:.2f}s"
-        )
+            span.set_attribute("cognee.vector.collections_with_results", collections_with_results)
+            span.set_attribute("cognee.vector.duration_ms", round(elapsed_time * 1000, 1))
 
-        self.set_distances_from_results(collections, search_results, self.query_list_length)
+            self.set_distances_from_results(collections, search_results, self.query_list_length)
 
     def has_results(self) -> bool:
         """Checks if any collections returned results."""
@@ -166,8 +180,11 @@ class NodeEdgeVectorSearch:
 
     async def _embed_query(self, query: str):
         """Embeds the query and stores the resulting vector."""
-        query_embeddings = await self.vector_engine.embedding_engine.embed_text([query])
-        self.query_vector = query_embeddings[0]
+        with new_span("cognee.retrieval.embed_query") as span:
+            span.set_attribute("cognee.vector.query_length", len(query))
+            query_embeddings = await self.vector_engine.embedding_engine.embed_text([query])
+            self.query_vector = query_embeddings[0]
+            span.set_attribute("cognee.vector.embedding_dimensions", len(self.query_vector))
 
     async def _search_single_collection(
         self,
