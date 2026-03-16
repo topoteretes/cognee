@@ -25,11 +25,9 @@ async def start_neo4j_server():
 
     # Set initial password
     password = neo4j_env_dict["NEO4J_AUTH"].split("/")[1]
-    set_password_command = f"neo4j-admin dbms set-initial-password {password}"
     try:
         subprocess.run(
-            f"su-exec neo4j:neo4j {set_password_command}",
-            shell=True,
+            ["su-exec", "neo4j:neo4j", "neo4j-admin", "dbms", "set-initial-password", password],
             check=True,
             capture_output=True,
             text=True,
@@ -45,8 +43,7 @@ async def start_neo4j_server():
 
     # Start Neo4j server
     neo4j_process = subprocess.Popen(
-        "su-exec neo4j:neo4j neo4j console",
-        shell=True,
+        ["su-exec", "neo4j:neo4j", "neo4j", "console"],
     )
 
     print("Waiting for Neo4j server to become available on port 7474...")
