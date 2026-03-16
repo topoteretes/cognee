@@ -111,7 +111,7 @@ async def ingest_database_schema(
                     source_column=fk["column"],
                     target_column=fk["ref_column"],
                     description=f"Relational database table foreign key relationship between: {table_name}.{fk['column']} → {ref_table_fq}.{fk['ref_column']}"
-                    f"This foreing key relationship between table columns is a part of the following database: {migration_config.migration_db_name}",
+                    f"This foreign key relationship between table columns is a part of the following database: {migration_config.migration_db_name}",
                 )
                 schema_relationships.append(relationship)
 

@@ -297,7 +297,7 @@ async def main():
 
     "Tests the correct number of DocumentChunk nodes after session persistence"
     assert type_counts.get("DocumentChunk", 0) == 4, (
-        f"Number of DocumentChunk ndoes in the graph is incorrect, found {type_counts.get('DocumentChunk', 0)} but there should be exactly 4 (2 original documents, 2 sessions)."
+        f"Number of DocumentChunk nodes in the graph is incorrect, found {type_counts.get('DocumentChunk', 0)} but there should be exactly 4 (2 original documents, 2 sessions)."
     )
 
     from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine

@@ -41,7 +41,7 @@ class CypherSearchRetriever(BaseRetriever):
 
             result = await graph_engine.query(query)
         except Exception as e:
-            logger.error("Failed to execture cypher search retrieval: %s", str(e))
+            logger.error("Failed to execute cipher search retrieval: %s", str(e))
             raise CypherSearchError() from e
         return result
 
