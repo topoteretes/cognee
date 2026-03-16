@@ -255,7 +255,8 @@
       def set_embedding_dimensions(embedding_dimensions: int):
           """Set the embedding vector dimensions.
 
-          Coerces string inputs to int for CLI compatibility.
+          Coerces string inputs to int for CLI compatibility and validates
+          the value is a positive integer.
 
           Parameters
           ----------
@@ -266,10 +267,15 @@
           Raises
           ------
           ValueError
-              If the value cannot be converted to an integer.
+              If the value cannot be converted to an integer or is not positive.
           """
           if isinstance(embedding_dimensions, str):
-              embedding_dimensions = int(embedding_dimensions)
+              try:
+                  embedding_dimensions = int(embedding_dimensions)
+              except ValueError as exc:
+                  raise ValueError("embedding_dimensions must be a positive integer.") from exc
+          if embedding_dimensions <= 0:
+              raise ValueError("embedding_dimensions must be a positive integer.")
           embedding_config = get_embedding_config()
           embedding_config.embedding_dimensions = embedding_dimensions
 
@@ -301,6 +307,9 @@
       def set_embedding_config(config_dict: dict):
           """Update the embedding config with values from a dictionary.
 
+          Routes embedding_dimensions through set_embedding_dimensions to ensure
+          type coercion and positive-value validation are applied.
+
           Parameters
           ----------
           config_dict : dict
@@ -320,7 +329,10 @@
               })
               ```
           """
-          config._update_config(get_embedding_config(), config_dict)
+          normalized_config = dict(config_dict)
+          if "embedding_dimensions" in normalized_config:
+              config.set_embedding_dimensions(normalized_config.pop("embedding_dimensions"))
+          config._update_config(get_embedding_config(), normalized_config)
 
       @staticmethod
       def set_chunk_strategy(chunk_strategy: object):
@@ -494,6 +506,10 @@
           Generic setter that maps configuration keys to their specific setter methods.
           This enables CLI commands like 'cognee config set llm_api_key <value>'.
 
+          For embedding keys not explicitly listed in the mapping but present on
+          EmbeddingConfig, the value is routed through set_embedding_config as a
+          fallback so that all valid embedding attributes are accessible via CLI.
+
           Parameters
           ----------
           key : str
@@ -532,10 +548,16 @@
               "data_root_directory": "data_root_directory",
           }
 
-          if key not in setter_mapping:
-              raise InvalidConfigAttributeError(attribute=key)
+          if key in setter_mapping:
+              method_name = setter_mapping[key]
+              method = getattr(config, method_name)
+              method(value)
+              return
 
-          method_name = setter_mapping[key]
-          method = getattr(config, method_name)
-          method(value)
+          embedding_config = get_embedding_config()
+          if hasattr(embedding_config, key):
+              config.set_embedding_config({key: value})
+              return
+
+          raise InvalidConfigAttributeError(attribute=key)
   
