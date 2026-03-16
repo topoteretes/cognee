@@ -17,6 +17,7 @@ import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
 from mcp.server import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from cognee.modules.storage.utils import JSONEncoder
 from starlette.responses import JSONResponse
 from starlette.middleware import Middleware
@@ -41,7 +42,12 @@ except ModuleNotFoundError:
     )
 
 
-mcp = FastMCP("Cognee")
+mcp = FastMCP(
+    "Cognee",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    )
+)
 
 logger = get_logger()
 
@@ -97,7 +103,7 @@ async def run_sse_with_cors():
     sse_app = mcp.sse_app()
     sse_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=["http://localhost:*", "http://192.168.24.157:*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -118,7 +124,7 @@ async def run_http_with_cors():
     http_app = mcp.streamable_http_app()
     http_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=["http://localhost:*", "http://192.168.24.157:*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
