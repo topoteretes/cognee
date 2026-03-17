@@ -95,7 +95,7 @@ async def main():
 
     print("Step 4: Ask one neutral query while sweeping beta.")
     print(
-        "  As beta increases, ranking should shift toward positively-rated context."
+        "  As beta increases, ranking should shift toward positively-rated context (companies focused on car manufacturers)."
         " 1 means only feedback score is taken into account nothing else.\n"
     )
     final_query = "List the companies in the context"

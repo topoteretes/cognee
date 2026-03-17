@@ -863,6 +863,38 @@ async def test_calculate_top_triplet_importances_clamps_and_coerces_feedback_wei
 
 
 @pytest.mark.asyncio
+async def test_calculate_top_triplet_importances_blends_distance_with_feedback_influence(
+    setup_graph,
+):
+    """Test mid-range feedback_influence uses the weighted blend formula."""
+    graph = setup_graph
+
+    node1 = Node("1", {"feedback_weight": 1.0})
+    node2 = Node("2", {"feedback_weight": 1.0})
+    node3 = Node("3", {"feedback_weight": 0.0})
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+
+    edge_feedback_favored = Edge(node1, node2, attributes={"feedback_weight": 1.0})
+    edge_distance_favored = Edge(node2, node3, attributes={"feedback_weight": 0.0})
+    graph.add_edge(edge_feedback_favored)
+    graph.add_edge(edge_distance_favored)
+
+    node1.add_attribute("vector_distance", [0.6])
+    node2.add_attribute("vector_distance", [0.6])
+    node3.add_attribute("vector_distance", [0.2])
+    edge_feedback_favored.add_attribute("vector_distance", [0.6])
+    edge_distance_favored.add_attribute("vector_distance", [0.2])
+
+    distance_only_results = await graph.calculate_top_triplet_importances(k=1, feedback_influence=0.0)
+    blended_results = await graph.calculate_top_triplet_importances(k=1, feedback_influence=0.75)
+
+    assert distance_only_results == [edge_distance_favored]
+    assert blended_results == [edge_feedback_favored]
+
+
+@pytest.mark.asyncio
 async def test_calculate_top_triplet_importances_raises_on_short_list(setup_graph):
     """Test that scoring raises ValueError when list is too short for query_index."""
     graph = setup_graph
