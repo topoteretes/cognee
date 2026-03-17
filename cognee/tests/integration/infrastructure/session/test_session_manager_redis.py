@@ -12,6 +12,8 @@ class _InMemoryRedisList:
 
     def __init__(self):
         self.data: dict[str, list[str]] = {}
+        self.ttls: dict[str, int] = {}
+        self.expire_calls: list[tuple[str, int]] = []
 
     async def rpush(self, key: str, *vals: str):
         self.data.setdefault(key, []).extend(vals)
@@ -30,10 +32,17 @@ class _InMemoryRedisList:
         self.data[key][idx] = val
 
     async def delete(self, key: str):
+        self.ttls.pop(key, None)
         return 1 if self.data.pop(key, None) is not None else 0
 
     async def expire(self, key: str, ttl: int):
-        pass
+        self.ttls[key] = ttl
+        self.expire_calls.append((key, ttl))
+
+    async def ttl(self, key: str):
+        if key not in self.data:
+            return -2
+        return self.ttls.get(key, -1)
 
     async def flushdb(self):
         self.data.clear()
@@ -72,6 +81,30 @@ async def test_add_qa_and_get_session(session_manager):
     assert entries[0]["question"] == "Q1?"
     assert entries[0]["answer"] == "A1."
     assert entries[0]["qa_id"] == qa_id
+
+
+@pytest.mark.asyncio
+async def test_add_qa_sets_session_ttl(session_manager, redis_adapter):
+    """Session writes through SessionManager apply Redis TTL to the session key."""
+    await session_manager.add_qa(
+        user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
+    )
+
+    assert await redis_adapter.async_redis.ttl("agent_sessions:u1:s1") == 604800
+
+
+@pytest.mark.asyncio
+async def test_get_session_does_not_refresh_session_ttl(session_manager, redis_adapter):
+    """Read-only session access should not refresh TTL."""
+    await session_manager.add_qa(
+        user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
+    )
+    redis_adapter.async_redis.expire_calls.clear()
+
+    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+
+    assert len(entries) == 1
+    assert redis_adapter.async_redis.expire_calls == []
 
 
 @pytest.mark.asyncio
