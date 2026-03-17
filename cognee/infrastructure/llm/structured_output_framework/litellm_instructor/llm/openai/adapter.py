@@ -78,18 +78,12 @@ class OpenAIAdapter(LLMInterface):
         fallback_endpoint: str = None,
     ):
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
-        # TODO: With gpt5 series models OpenAI expects JSON_SCHEMA as a mode for structured outputs.
-        #       Make sure all new gpt models will work with this mode as well.
-        if "gpt-5" in model:
-            self.aclient = instructor.from_litellm(
-                litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
-            )
-            self.client = instructor.from_litellm(
-                litellm.completion, mode=instructor.Mode(self.instructor_mode)
-            )
-        else:
-            self.aclient = instructor.from_litellm(litellm.acompletion)
-            self.client = instructor.from_litellm(litellm.completion)
+        self.aclient = instructor.from_litellm(
+            litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
+        )
+        self.client = instructor.from_litellm(
+            litellm.completion, mode=instructor.Mode(self.instructor_mode)
+        )
 
         self.transcription_model = transcription_model
         self.model = model
