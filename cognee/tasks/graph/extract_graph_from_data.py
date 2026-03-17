@@ -124,12 +124,6 @@ async def integrate_chunk_graphs(
             for node in graph_nodes:
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
-        cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
-        if callable(cache_entity_embeddings):
-            callback_result = cache_entity_embeddings(graph_nodes, **kwargs)
-            if inspect.isawaitable(callback_result):
-                await callback_result
-
         await add_data_points(
             data_points=graph_nodes,
             context=context,
@@ -160,9 +154,21 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
+    # Skip LLM extraction for DLT row chunks — their graph is built
+    # deterministically by extract_dlt_fk_edges from schema metadata.
+    from cognee.modules.data.processing.document_types import DltRowDocument
+
+    dlt_chunks = [
+        c for c in data_chunks if isinstance(getattr(c, "is_part_of", None), DltRowDocument)
+    ]
+    non_dlt_chunks = [c for c in data_chunks if c not in dlt_chunks]
+
+    if not non_dlt_chunks:
+        return data_chunks
+
     calculate_chunk_graphs = kwargs.get("calculate_chunk_graphs")
     if callable(calculate_chunk_graphs):
-        extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
+        extracted = calculate_chunk_graphs(non_dlt_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
         chunk_graphs = await asyncio.gather(
@@ -170,9 +176,14 @@ async def extract_graph_from_data(
                 extract_content_graph(
                     chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
                 )
-                for chunk in data_chunks
+                for chunk in non_dlt_chunks
             ]
         )
+    cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
+    if callable(cache_entity_embeddings):
+        callback_result = cache_entity_embeddings(chunk_graphs, **kwargs)
+        if inspect.isawaitable(callback_result):
+            await callback_result
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:
@@ -207,8 +218,8 @@ async def extract_graph_from_data(
     pipeline_name = context.get("pipeline_name") if isinstance(context, dict) else None
     task_name = "extract_graph_from_data"
 
-    return await integrate_chunk_graphs(
-        data_chunks,
+    integrated = await integrate_chunk_graphs(
+        non_dlt_chunks,
         chunk_graphs,
         graph_model,
         ontology_resolver,
@@ -217,3 +228,5 @@ async def extract_graph_from_data(
         task_name=task_name,
         **kwargs,
     )
+
+    return integrated + dlt_chunks
