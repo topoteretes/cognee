@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 import cognee
 from cognee.api.client import app
 from cognee.modules.users.methods import get_default_user, get_authenticated_user
+from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
 
 
 async def _reset_engines_and_prune():
@@ -42,9 +44,13 @@ def e2e_config():
     os.environ["CACHE_BACKEND"] = "redis"
     os.environ["CACHE_HOST"] = "localhost"
     os.environ["CACHE_PORT"] = "6379"
+    get_cache_config.cache_clear()
+    create_cache_engine.cache_clear()
     yield
     os.environ.clear()
     os.environ.update(original_env)
+    get_cache_config.cache_clear()
+    create_cache_engine.cache_clear()
 
 
 @pytest.fixture(scope="session")
