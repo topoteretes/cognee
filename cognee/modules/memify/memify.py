@@ -86,7 +86,7 @@ async def memify(
         ```
     """
 
-    # Use default coding rules tasks if no tasks were provided
+    # Use default triplet embedding tasks if no tasks were provided
     if not extraction_tasks:
         extraction_tasks = get_default_memify_extraction_tasks()
     if not enrichment_tasks:
