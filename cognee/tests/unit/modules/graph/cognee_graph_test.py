@@ -887,7 +887,9 @@ async def test_calculate_top_triplet_importances_blends_distance_with_feedback_i
     edge_feedback_favored.add_attribute("vector_distance", [0.6])
     edge_distance_favored.add_attribute("vector_distance", [0.2])
 
-    distance_only_results = await graph.calculate_top_triplet_importances(k=1, feedback_influence=0.0)
+    distance_only_results = await graph.calculate_top_triplet_importances(
+        k=1, feedback_influence=0.0
+    )
     blended_results = await graph.calculate_top_triplet_importances(k=1, feedback_influence=0.75)
 
     assert distance_only_results == [edge_distance_favored]
