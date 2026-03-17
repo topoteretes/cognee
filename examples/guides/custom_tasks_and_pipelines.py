@@ -52,7 +52,9 @@ async def extract_people(data: LightweightData) -> List[Person]:
     # Create a mapping of name -> Person DataPoint
     person_map: Dict[str, Person] = {}
     for data_item in data:
-        people_llm = await LLMGateway.acreate_structured_output(data_item.text, system_prompt, PeopleLLM)
+        people_llm = await LLMGateway.acreate_structured_output(
+            data_item.text, system_prompt, PeopleLLM
+        )
 
         for person_llm in people_llm.persons:
             person_map[person_llm.name] = Person(name=person_llm.name)
@@ -75,7 +77,9 @@ async def main(text_data):
         Task(add_data_points),  # input: list[Person] -> output: list[Person]
     ]
 
-    await cognee.run_custom_pipeline(tasks=tasks, data=build_lightweight_data_object(text_data), dataset="people_demo")
+    await cognee.run_custom_pipeline(
+        tasks=tasks, data=build_lightweight_data_object(text_data), dataset="people_demo"
+    )
 
     await cognee.cognify()
 

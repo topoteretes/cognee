@@ -129,7 +129,9 @@ async def main():
 
     # Or use our simple graph preview
     graph_file_path = str(
-        os.path.join(os.path.dirname(__file__), ".artifacts/organizational_hierarchy_pipeline_example.html")
+        os.path.join(
+            os.path.dirname(__file__), ".artifacts/organizational_hierarchy_pipeline_example.html"
+        )
     )
     await visualize_graph(graph_file_path)
 
