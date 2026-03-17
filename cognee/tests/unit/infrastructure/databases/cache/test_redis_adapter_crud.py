@@ -53,6 +53,7 @@ class _InMemoryRedisList:
     async def flushdb(self):
         self.data.clear()
         self.ttls.clear()
+        self.expire_calls.clear()
 
 
 @pytest.fixture
