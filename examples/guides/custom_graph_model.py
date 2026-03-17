@@ -7,26 +7,20 @@ from cognee import add, cognify, prune, visualize_graph
 from cognee.low_level import DataPoint
 
 CUSTOM_PROMPT = """
-    Extract information as a simple, consistent knowledge graph.
-
-    - Nodes are entities or concepts.
-    - Edges are relationships between them.
+    Extract a simple knowledge graph from the data.
 
     Rules:
-    - Use general node labels like `Person`, not `Scientist` or `Mathematician`.
-    - Put specific roles or categories in properties, such as `profession`.
-    - Do not use vague labels like `Entity`.
+    - Identify the main technology, concept, or entity as a node.
+    - Identify important application areas, domains, or fields as separate nodes.
+    - Use simple, consistent labels such as `Technology` and `Field`.
     - Never use integers for node IDs.
-    - Use human-readable IDs from the text.
-    - Every node must include a `name` field.
-    - Always use the most complete human-readable name.
-    - Store properties as key-value pairs.
-    - Do not use escaped quotes inside property values.
-    - Use `snake_case` for relationship names, for example `acted_in`.
-    - Use the most complete name consistently for the same entity.
-
-    Goal:
-    Keep the graph clear, simple, and easy to understand.
+    - Use human-readable IDs and include a `name` field for every node.
+    - Use the most complete name found in the text.
+    - Create edges for meaningful relationships only.
+    - Use `snake_case` for relationship names, such as `used_in`.
+    - Resolve repeated mentions to the same entity.
+    - If nodes have same name, merge them.
+    - Keep the graph minimal, clear, and consistent.
 """
 
 
