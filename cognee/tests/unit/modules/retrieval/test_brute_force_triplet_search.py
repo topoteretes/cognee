@@ -384,6 +384,7 @@ async def test_get_memory_fragment_projects_feedback_weight_only_when_feedback_i
         kwargs_with_feedback = mock_fragment.project_graph_from_db.call_args.kwargs
         assert "feedback_weight" in kwargs_with_feedback["node_properties_to_project"]
         assert "feedback_weight" in kwargs_with_feedback["edge_properties_to_project"]
+        assert kwargs_with_feedback["feedback_influence"] == 0.2
 
 
 @pytest.mark.asyncio
@@ -393,6 +394,15 @@ async def test_brute_force_triplet_search_invalid_feedback_influence_raises():
         CogneeValidationError, match="feedback_influence must be in range \\[0, 1\\]"
     ):
         await brute_force_triplet_search(query="test query", feedback_influence=1.5)
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_negative_feedback_influence_raises():
+    """Test feedback_influence lower bound validation."""
+    with pytest.raises(
+        CogneeValidationError, match="feedback_influence must be in range \\[0, 1\\]"
+    ):
+        await brute_force_triplet_search(query="test query", feedback_influence=-0.1)
 
 
 @pytest.mark.asyncio

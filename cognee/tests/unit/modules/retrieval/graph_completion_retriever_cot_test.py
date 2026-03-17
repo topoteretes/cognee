@@ -42,6 +42,7 @@ async def test_init_custom_params():
         validation_system_prompt_path="custom_validation_system.txt",
         followup_system_prompt_path="custom_followup_system.txt",
         followup_user_prompt_path="custom_followup_user.txt",
+        feedback_influence=0.25,
     )
 
     assert retriever.top_k == 10
@@ -51,6 +52,7 @@ async def test_init_custom_params():
     assert retriever.validation_system_prompt_path == "custom_validation_system.txt"
     assert retriever.followup_system_prompt_path == "custom_followup_system.txt"
     assert retriever.followup_user_prompt_path == "custom_followup_user.txt"
+    assert retriever.feedback_influence == 0.25
 
 
 @pytest.mark.asyncio
