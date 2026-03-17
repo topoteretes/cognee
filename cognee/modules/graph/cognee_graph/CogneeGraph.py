@@ -29,6 +29,7 @@ class CogneeGraph(CogneeAbstractGraph):
     edges_by_distance_key: Dict[str, List[Edge]]
     directed: bool
     triplet_distance_penalty: float
+    feedback_influence: float
 
     def __init__(self, directed: bool = True):
         self.nodes = {}
@@ -36,6 +37,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.edges_by_distance_key = {}
         self.directed = directed
         self.triplet_distance_penalty = 3.5
+        self.feedback_influence = 0.0
 
     def add_node(self, node: Node) -> None:
         if node.id not in self.nodes:
@@ -171,6 +173,7 @@ class CogneeGraph(CogneeAbstractGraph):
         node_name: Optional[List[str]] = None,
         relevant_ids_to_filter: Optional[List[str]] = None,
         triplet_distance_penalty: float = 3.5,
+        feedback_influence: float = 0.0,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
@@ -189,6 +192,7 @@ class CogneeGraph(CogneeAbstractGraph):
                 )
 
             self.triplet_distance_penalty = triplet_distance_penalty
+            self.feedback_influence = feedback_influence
 
             start_time = time.time()
             # Process nodes
@@ -306,8 +310,26 @@ class CogneeGraph(CogneeAbstractGraph):
         self,
         k: int,
         query_index: int = 0,
+        feedback_influence: Optional[float] = None,
     ) -> List[Edge]:
         """Calculate top k triplet importances for a specific query index."""
+        active_feedback_influence = (
+            self.feedback_influence if feedback_influence is None else feedback_influence
+        )
+
+        def _effective_distance(distance: float, feedback_weight: Any) -> float:
+            if active_feedback_influence <= 0.0:
+                return distance
+
+            try:
+                normalized_feedback_weight = float(feedback_weight)
+            except (TypeError, ValueError):
+                normalized_feedback_weight = 0.5
+
+            normalized_feedback_weight = max(0.0, min(1.0, normalized_feedback_weight))
+            return (1.0 - active_feedback_influence) * distance + active_feedback_influence * (
+                1.0 - normalized_feedback_weight
+            )
 
         def score(edge: Edge) -> float:
             elements = (
@@ -327,24 +349,31 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                 value = distances[query_index]
                 try:
-                    importances.append(float(value))
+                    distance = float(value)
                 except (TypeError, ValueError):
                     raise ValueError(
                         f"{label}: vector_distance[{query_index}] must be float-like, "
                         f"got {type(value).__name__}"
                     )
+                feedback_weight = element.attributes.get("feedback_weight", 0.5)
+                importances.append(_effective_distance(distance, feedback_weight))
 
             return sum(importances)
 
         return heapq.nsmallest(k, self.edges, key=score)
 
     async def calculate_top_triplet_importances(
-        self, k: int, query_list_length: Optional[int] = None
+        self,
+        k: int,
+        query_list_length: Optional[int] = None,
+        feedback_influence: Optional[float] = None,
     ) -> Union[List[Edge], List[List[Edge]]]:
         """Calculate top k triplet importances, supporting both single and multi-query modes."""
         query_count = query_list_length or 1
         results = [
-            self._calculate_query_top_triplet_importances(k=k, query_index=i)
+            self._calculate_query_top_triplet_importances(
+                k=k, query_index=i, feedback_influence=feedback_influence
+            )
             for i in range(query_count)
         ]
 
