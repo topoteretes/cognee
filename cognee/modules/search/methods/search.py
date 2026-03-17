@@ -49,6 +49,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    feedback_influence: float = 0.0,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
 ) -> List[SearchResult]:
@@ -100,6 +101,7 @@ async def search(
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
             retriever_specific_config=retriever_specific_config,
         )
 
@@ -137,6 +139,7 @@ async def authorized_search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    feedback_influence: float = 0.0,
     retriever_specific_config: Optional[dict] = None,
 ) -> List[Tuple[Any, Union[List[Edge], str], List[Dataset]]]:
     """
@@ -162,6 +165,7 @@ async def authorized_search(
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
+        feedback_influence=feedback_influence,
         retriever_specific_config=retriever_specific_config,
     )
 
@@ -181,6 +185,7 @@ async def search_in_datasets_context(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    feedback_influence: float = 0.0,
     retriever_specific_config: Optional[dict] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
@@ -201,6 +206,7 @@ async def search_in_datasets_context(
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        feedback_influence: float = 0.0,
         retriever_specific_config: Optional[dict] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         with new_span("cognee.search.dataset") as span:
@@ -245,6 +251,7 @@ async def search_in_datasets_context(
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
                 retriever_specific_config=retriever_specific_config,
             )
 
@@ -266,6 +273,7 @@ async def search_in_datasets_context(
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
+                    feedback_influence=feedback_influence,
                     retriever_specific_config=retriever_specific_config,
                 )
             )
@@ -286,6 +294,7 @@ async def search_in_datasets_context(
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
                 retriever_specific_config=retriever_specific_config,
             )
         )
