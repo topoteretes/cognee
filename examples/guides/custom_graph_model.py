@@ -6,22 +6,9 @@ from pydantic import SkipValidation
 from cognee import add, cognify, prune, visualize_graph
 from cognee.low_level import DataPoint
 
-CUSTOM_PROMPT = """
-    Extract a simple knowledge graph from the data.
-
-    Rules:
-    - Identify the main technology, concept, or entity as a node.
-    - Identify important application areas, domains, or fields as separate nodes.
-    - Use simple, consistent labels such as `Technology` and `Field`.
-    - Never use integers for node IDs.
-    - Use human-readable IDs and include a `name` field for every node.
-    - Use the most complete name found in the text.
-    - Create edges for meaningful relationships only.
-    - Use `snake_case` for relationship names, such as `used_in`.
-    - Resolve repeated mentions to the same entity.
-    - If nodes have same name, merge them.
-    - Keep the graph minimal, clear, and consistent.
-"""
+CUSTOM_PROMPT = (
+    "Extract a simple graph containing Programming Language and Fields that it is used in."
+)
 
 
 # Define a custom graph model for programming languages.
