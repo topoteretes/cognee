@@ -61,15 +61,20 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_username: Optional[str] = None,
         graph_database_password: Optional[str] = None,
         graph_database_name: Optional[str] = None,
+        graph_database_allow_anonymous: bool = False,
         driver: Optional[Any] = None,
     ):
         # Only use auth if both username and password are provided
         auth = None
+
         if graph_database_username and graph_database_password:
             auth = (graph_database_username, graph_database_password)
-        elif graph_database_username or graph_database_password:
-            logger = get_logger(__name__)
-            logger.warning("Neo4j credentials incomplete – falling back to anonymous connection.")
+        elif not graph_database_allow_anonymous:
+            raise ValueError(
+                "Neo4j credentials incomplete. Set GRAPH_DATABASE_USERNAME and "
+                "GRAPH_DATABASE_PASSWORD in your .env file, or configure them programmatically."
+            )
+
         self.graph_database_name = graph_database_name
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
