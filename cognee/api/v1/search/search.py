@@ -39,6 +39,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    feedback_influence: float = 0.0,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,
 ) -> List[SearchResult]:
@@ -227,6 +228,7 @@ async def search(
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
             verbose=verbose,
             retriever_specific_config=retriever_specific_config,
         )
