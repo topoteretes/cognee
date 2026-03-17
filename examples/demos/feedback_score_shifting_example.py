@@ -54,7 +54,6 @@ Each of these companies has significantly impacted the technology landscape, dri
 
 
 async def main():
-
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
