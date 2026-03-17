@@ -116,20 +116,11 @@ async def integrate_chunk_graphs(
             for node in entity_nodes:
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
-<<<<<<< feature/cog-4211-optimize-datapoints-ingestion-in-cognify
         cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
         if callable(cache_entity_embeddings):
             callback_result = cache_entity_embeddings(entity_nodes, **kwargs)
             if inspect.isawaitable(callback_result):
                 await callback_result
-=======
-        await add_data_points(
-            data_points=graph_nodes,
-            context=context,
-            custom_edges=graph_edges,
-            embed_triplets=embed_triplets,
-        )
->>>>>>> dev
 
     return data_chunks
 
