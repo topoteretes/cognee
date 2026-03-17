@@ -2,9 +2,17 @@ import asyncio
 
 import cognee
 from cognee.api.v1.search import SearchType
+from cognee.exceptions import CogneeConfigurationError
+from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import ERROR, setup_logging
+
+cache_config = get_cache_config()
+if not cache_config.caching or cache_config.cache_backend != "fs":
+    raise CogneeConfigurationError(
+        "feedback_score_shifting_example requires caching=True and CACHE_BACKEND=fs."
+    )
 
 TEXT_1 = """
 1. Audi
@@ -46,6 +54,7 @@ Each of these companies has significantly impacted the technology landscape, dri
 
 
 async def main():
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
