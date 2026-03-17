@@ -1,6 +1,6 @@
 import os
 import asyncio
-from typing import Any
+from typing import Any, List
 from pydantic import SkipValidation
 
 from cognee import add, cognify, prune, visualize_graph
@@ -24,7 +24,7 @@ class ProgrammingLanguageType(DataPoint):
 
 class ProgrammingLanguage(DataPoint):
     name: str
-    used_in: SkipValidation[Any] = None
+    used_in: List[Field] = None
     is_type: ProgrammingLanguageType
     metadata: dict = {"index_fields": ["name"]}
 
@@ -37,8 +37,6 @@ async def visualize_data():
 
 
 async def main():
-    # set_up_config()
-
     # Prune data and system metadata before running, only if we want "fresh" state.
     await prune.prune_data()
     await prune.prune_system(metadata=True)
