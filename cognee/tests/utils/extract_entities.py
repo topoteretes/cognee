@@ -3,7 +3,9 @@ from cognee.modules.engine.utils import generate_node_id, generate_node_name
 from cognee.shared.data_models import KnowledgeGraph
 
 
-def extract_entities(graph: KnowledgeGraph, cache: dict = {}):
+def extract_entities(graph: KnowledgeGraph, cache: dict | None = None):
+    if cache is None:
+        cache = {}
     entities = []
     entity_types = []
 
