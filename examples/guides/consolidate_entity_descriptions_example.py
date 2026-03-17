@@ -25,11 +25,15 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await cognee.add(
-        [
-            "Alice moved to Paris in 2010, while Bob has always lived in New York.",
-            "Andreas was born in Venice, but later settled in Lisbon.",
-            "Diana and Tom were born and raised in Helsinki. Diana currently resides in Berlin, while Tom never moved.",
-        ]
+        "Diana and Tom were born and raised in Helsinki. Diana currently resides in Berlin, while Tom never moved.",
+        importance_weight=0.55,
+    )
+    await cognee.add(
+        "Alice moved to Paris in 2010, while Bob has always lived in New York.",
+        importance_weight=0.7,
+    )
+    await cognee.add(
+        "Andreas was born in Venice, but later settled in Lisbon.", importance_weight=0.3
     )
     await cognee.cognify(custom_prompt=custom_prompt)
 

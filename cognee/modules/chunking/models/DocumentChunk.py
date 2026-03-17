@@ -33,4 +33,5 @@ class DocumentChunk(DataPoint):
     cut_type: str
     is_part_of: Document
     contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
+    importance_weight: float = 0.5
     metadata: dict = {"index_fields": ["text"]}

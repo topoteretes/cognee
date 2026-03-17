@@ -17,6 +17,7 @@ class TextSummary(DataPoint):
     text: str
     made_from: DocumentChunk
     metadata: dict = {"index_fields": ["text"]}
+    importance_weight: float
 
 
 class CodeSummary(DataPoint):
