@@ -47,20 +47,20 @@ async def main():
 
     # Test data
     text_1 = """
-    Apple Inc. is an American multinational technology company that specializes in consumer electronics, 
-    software, and online services. Apple is the world's largest technology company by revenue and, 
+    Apple Inc. is an American multinational technology company that specializes in consumer electronics,
+    software, and online services. Apple is the world's largest technology company by revenue and,
     since January 2021, the world's most valuable company.
     """
 
     text_2 = """
-    Microsoft Corporation is an American multinational technology corporation which produces computer software, 
-    consumer electronics, personal computers, and related services. Its best known software products are the 
+    Microsoft Corporation is an American multinational technology corporation which produces computer software,
+    consumer electronics, personal computers, and related services. Its best known software products are the
     Microsoft Windows line of operating systems and the Microsoft Office suite.
     """
 
     text_3 = """
-    Google LLC is an American multinational technology company that specializes in Internet-related services and products, 
-    which include online advertising technologies, search engine, cloud computing, software, and hardware. Google has been 
+    Google LLC is an American multinational technology company that specializes in Internet-related services and products,
+    which include online advertising technologies, search engine, cloud computing, software, and hardware. Google has been
     referred to as the most powerful company in the world and one of the world's most valuable brands.
     """
 

@@ -17,7 +17,7 @@ The `cognee config` command allows you to view and modify configuration settings
 
 You can:
 - View all current configuration settings
-- Get specific configuration values  
+- Get specific configuration values
 - Set configuration values
 - Unset (reset to default) specific configuration values
 - Reset all configuration to defaults

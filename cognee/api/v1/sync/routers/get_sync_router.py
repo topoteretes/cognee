@@ -71,7 +71,7 @@ def get_sync_router() -> APIRouter:
           -H "Content-Type: application/json" \\
           -H "Cookie: auth_token=your-token" \\
           -d '{"dataset_ids": ["123e4567-e89b-12d3-a456-426614174000", "456e7890-e12b-34c5-d678-901234567000"]}'
-        
+
         # Sync all user datasets (empty request body or null dataset_ids)
         curl -X POST "http://localhost:8000/api/v1/sync" \\
           -H "Content-Type: application/json" \\
@@ -88,7 +88,7 @@ def get_sync_router() -> APIRouter:
         - **413 Payload Too Large**: Dataset too large for current cloud plan
         - **429 Too Many Requests**: Rate limit exceeded
 
-        ## Notes  
+        ## Notes
         - Sync operations run in the background - you get an immediate response
         - Use the returned run_id to track progress (status API coming soon)
         - Large datasets are automatically chunked for efficient transfer
@@ -179,7 +179,7 @@ def get_sync_router() -> APIRouter:
         ```
 
         ## Example Responses
-        
+
         **No running syncs:**
         ```json
         {

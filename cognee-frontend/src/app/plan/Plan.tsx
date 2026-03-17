@@ -45,7 +45,7 @@ export default function Plan() {
           <div className="bg-white rounded-xl px-5 py-5 mb-2">
             Affordable and transparent pricing
           </div>
-        
+
           <div className="grid grid-cols-3 gap-x-2.5">
             <div className="pt-13 py-4 px-5 mb-2.5 rounded-tl-xl rounded-tr-xl bg-white h-full">
               <div>Basic</div>

@@ -8,15 +8,14 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager
-from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine
-
+from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
-    record_graph_changes,
 )
 from cognee.modules.storage.utils import JSONEncoder
 
@@ -34,8 +33,17 @@ from .neo4j_metrics_utils import (
 )
 from .deadlock_retry import deadlock_retry
 
+from cognee.modules.observability import new_span
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_SYSTEM,
+    COGNEE_DB_QUERY,
+    COGNEE_DB_ROW_COUNT,
+    redact_secrets,
+)
+
 
 logger = get_logger("Neo4jAdapter")
+
 
 BASE_LABEL = "__Node__"
 
@@ -118,14 +126,21 @@ class Neo4jAdapter(GraphDBInterface):
             - List[Dict[str, Any]]: A list of dictionaries representing the result of the query
               execution.
         """
-        try:
-            async with self.get_session() as session:
-                result = await session.run(query, parameters=params)
-                data = await result.data()
-                return data
-        except Neo4jError as error:
-            logger.error("Neo4j query error: %s", error, exc_info=True)
-            raise error
+        with new_span("cognee.db.graph.query") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "neo4j")
+            otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
+
+            try:
+                async with self.get_session() as session:
+                    result = await session.run(query, parameters=params)
+                    data = await result.data()
+                    otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(data))
+                    return data
+            except Neo4jError as error:
+                otel_span.set_status(StatusCode.ERROR, str(error))
+                otel_span.record_exception(error)
+                logger.error("Neo4j query error: %s", error, exc_info=True)
+                raise error
 
     async def has_node(self, node_id: str) -> bool:
         """
@@ -184,7 +199,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    @record_graph_changes
     @override_distributed(queued_add_nodes)
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
         """
@@ -455,7 +469,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return flattened
 
-    @record_graph_changes
     @override_distributed(queued_add_edges)
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         """
@@ -680,6 +693,10 @@ class Neo4jAdapter(GraphDBInterface):
         """
         Get all neighbors of a specified node, including all directly connected nodes.
 
+        This method retrieves all neighboring nodes connected to a specified node and returns
+        their properties as a list of dictionaries. It may return an empty list if no neighbors exist or an
+        error occurs.
+
         Parameters:
         -----------
 
@@ -690,7 +707,16 @@ class Neo4jAdapter(GraphDBInterface):
 
             - List[Dict[str, Any]]: A list of neighboring nodes represented as dictionaries.
         """
-        return await self.get_neighbours(node_id)
+        query = f"""
+           MATCH (n: `{BASE_LABEL}` {{id: $node_id}})--(m: `{BASE_LABEL}`)
+           RETURN DISTINCT properties(m) AS properties
+           """
+        try:
+            result = await self.query(query, {"node_id": node_id})
+            return [row["properties"] for row in result] if result else []
+        except Exception as exc:
+            logger.error(f"Failed to get neighbors for node {node_id}: {exc}")
+            raise exc
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -735,6 +761,117 @@ class Neo4jAdapter(GraphDBInterface):
         """
         results = await self.query(query, {"node_ids": node_ids})
         return [result["node"] for result in results]
+
+    def _build_node_feedback_items(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for node feedback weight updates."""
+        return [
+            {"node_id": node_id, "feedback_weight": float(weight)}
+            for node_id, weight in node_feedback_weights.items()
+            if isinstance(node_id, str) and node_id
+        ]
+
+    async def _execute_node_feedback_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
+        """Run node feedback weight UNWIND/SET; return set of updated node_ids."""
+        if not items:
+            return set()
+        query = """
+        UNWIND $items AS item
+        MATCH (n:`__Node__` {id: item.node_id})
+        SET n.feedback_weight = item.feedback_weight, n.updated_at = timestamp()
+        RETURN n.id AS node_id
+        """
+        results = await self.query(query, {"items": items})
+        return {str(r["node_id"]) for r in results if r.get("node_id") is not None}
+
+    def _build_edge_feedback_items(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for edge feedback weight updates."""
+        return [
+            {"edge_object_id": edge_object_id, "feedback_weight": float(weight)}
+            for edge_object_id, weight in edge_feedback_weights.items()
+            if isinstance(edge_object_id, str) and edge_object_id
+        ]
+
+    async def _execute_edge_feedback_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
+        """Run edge feedback weight UNWIND/SET; return set of updated edge_object_ids."""
+        if not items:
+            return set()
+        query = """
+        UNWIND $items AS item
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = item.edge_object_id
+        SET r.feedback_weight = item.feedback_weight, r.updated_at = timestamp()
+        RETURN r.edge_object_id AS edge_object_id
+        """
+        results = await self.query(query, {"items": items})
+        return {str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None}
+
+    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        if not node_ids:
+            return {}
+        valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
+        if not valid_node_ids:
+            return {}
+        query = """
+        UNWIND $node_ids AS node_id
+        MATCH (n:`__Node__` {id: node_id})
+        RETURN n.id AS node_id, coalesce(n.feedback_weight, $default_weight) AS feedback_weight
+        """
+        results = await self.query(query, {"node_ids": valid_node_ids, "default_weight": 0.5})
+        return {
+            str(row["node_id"]): float(row["feedback_weight"])
+            for row in results
+            if row.get("node_id") is not None
+        }
+
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        if not node_feedback_weights:
+            return {}
+        node_ids = list(node_feedback_weights.keys())
+        items = self._build_node_feedback_items(node_feedback_weights)
+        if not items:
+            return {nid: False for nid in node_ids}
+        updated_ids = await self._execute_node_feedback_updates(items)
+        return {nid: (nid in updated_ids) for nid in node_ids}
+
+    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        if not edge_object_ids:
+            return {}
+        valid_edge_ids = [eid for eid in edge_object_ids if isinstance(eid, str) and eid]
+        if not valid_edge_ids:
+            return {}
+        query = """
+        UNWIND $edge_object_ids AS edge_object_id
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = edge_object_id
+        RETURN r.edge_object_id AS edge_object_id, coalesce(r.feedback_weight, $default_weight) AS feedback_weight
+        """
+        results = await self.query(
+            query,
+            {"edge_object_ids": valid_edge_ids, "default_weight": 0.5},
+        )
+        return {
+            str(row["edge_object_id"]): float(row["feedback_weight"])
+            for row in results
+            if row.get("edge_object_id") is not None
+        }
+
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        if not edge_feedback_weights:
+            return {}
+        edge_ids = list(edge_feedback_weights.keys())
+        items = self._build_edge_feedback_items(edge_feedback_weights)
+        if not items:
+            return {eid: False for eid in edge_ids}
+        updated_ids = await self._execute_edge_feedback_updates(items)
+        return {eid: (eid in updated_ids) for eid in edge_ids}
 
     async def get_connections(self, node_id: UUID) -> list:
         """
@@ -1391,55 +1528,6 @@ class Neo4jAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
-
-    async def get_last_user_interaction_ids(self, limit: int) -> List[str]:
-        """
-        Retrieve the IDs of the most recent CogneeUserInteraction nodes.
-        Parameters:
-        -----------
-        - limit (int): The maximum number of interaction IDs to return.
-        Returns:
-        --------
-        - List[str]: A list of interaction IDs, sorted by created_at descending.
-        """
-
-        query = """
-        MATCH (n)
-        WHERE n.type = 'CogneeUserInteraction'
-        RETURN n.id as id
-        ORDER BY n.created_at DESC
-        LIMIT $limit
-        """
-        rows = await self.query(query, {"limit": limit})
-
-        id_list = [row["id"] for row in rows if "id" in row]
-        return id_list
-
-    async def apply_feedback_weight(
-        self,
-        node_ids: List[str],
-        weight: float,
-    ) -> None:
-        """
-        Increment `feedback_weight` on relationships `:used_graph_element_to_answer`
-        outgoing from nodes whose `id` is in `node_ids`.
-
-        Args:
-            node_ids: List of node IDs to match.
-            weight: Amount to add to `r.feedback_weight` (can be negative).
-
-        Side effects:
-            Updates relationship property `feedback_weight`, defaulting missing values to 0.
-        """
-        query = """
-        MATCH (n)-[r]->()
-        WHERE n.id IN $node_ids AND r.relationship_name = 'used_graph_element_to_answer'
-        SET r.feedback_weight = coalesce(r.feedback_weight, 0) + $weight
-        """
-        await self.query(
-            query,
-            params={"weight": float(weight), "node_ids": list(node_ids)},
-        )
 
     async def collect_events(self, ids: List[str]) -> Any:
         """

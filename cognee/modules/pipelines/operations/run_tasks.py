@@ -1,9 +1,9 @@
 import os
 
 import asyncio
-from uuid import UUID
-from typing import Any, List
 from functools import wraps
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -54,25 +54,23 @@ def override_run_tasks(new_gen):
 async def run_tasks(
     tasks: List[Task],
     dataset_id: UUID,
-    data: List[Any] = None,
-    user: User = None,
+    data: Optional[List[Any]] = None,
+    user: Optional[User] = None,
     pipeline_name: str = "unknown_pipeline",
-    context: dict = None,
+    context: Optional[Dict] = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
 ):
     if not user:
         user = await get_default_user()
 
-    # Get Dataset object
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
+    async with get_relational_engine().get_async_session() as session:
         from cognee.modules.data.models import Dataset
 
         dataset = await session.get(Dataset, dataset_id)
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
-    pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
+    pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset.id, data)
     pipeline_run_id = pipeline_run.pipeline_run_id
 
     yield PipelineRunStarted(
@@ -103,8 +101,13 @@ async def run_tasks(
                         pipeline_name,
                         pipeline_id,
                         pipeline_run_id,
-                        context,
-                        user,
+                        {
+                            **(context or {}),
+                            "user": user,  # Used by tasks via context["user"]
+                            "data": data_item,
+                            "dataset": dataset,
+                        },
+                        user,  # Used by pipeline framework for telemetry
                         incremental_loading,
                     )
                 )
@@ -126,7 +129,7 @@ async def run_tasks(
             )
 
         await log_pipeline_run_complete(
-            pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data
+            pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
         )
 
         yield PipelineRunCompleted(
@@ -146,7 +149,7 @@ async def run_tasks(
 
     except Exception as error:
         await log_pipeline_run_error(
-            pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data, error
+            pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
         )
 
         yield PipelineRunErrored(

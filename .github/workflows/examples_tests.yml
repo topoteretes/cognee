@@ -2,17 +2,24 @@ name: Reusable Examples Tests
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_call:
+    inputs:
+      ci-image:
+        required: false
+        type: string
+        default: ''
 
 jobs:
   test-multimedia-example:
     name: Run Multimedia Example
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -24,14 +31,15 @@ jobs:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: uv run python ./examples/python/multimedia_example.py
+        run: uv run python ./examples/demos/multimedia_processing/multimedia_audio_image_processing_example.py
 
   test-eval-example:
     name: Run Eval Example
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -47,6 +55,7 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -58,7 +67,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -78,6 +87,7 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -88,39 +98,13 @@ jobs:
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
         run: uv run python ./cognee/tests/tasks/descriptive_metrics/neo4j_metrics_test.py
 
-
-  test-dynamic-steps-metrics:
-    name: Run Dynamic Steps Example
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run Dynamic Steps Tests
-        env:
-          ENV: 'dev'
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./examples/python/dynamic_steps_example.py
-
   test-temporal-example:
     name: Run Temporal Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -135,18 +119,20 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./examples/python/temporal_example.py
+        run: uv run python ./examples/demos/temporal_awareness_example/temporal_awareness_example.py
 
   test-ontology-example:
     name: Run Ontology Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -161,18 +147,20 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./examples/python/ontology_demo_example.py
+        run: uv run python ./examples/demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py
 
   test-agentic-reasoning:
     name: Run Agentic Reasoning Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -187,18 +175,20 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./examples/python/agentic_reasoning_procurement_example.py
+        run: uv run python ./examples/custom_pipelines/agentic_reasoning_procurement_example.py
 
   test-memify:
     name: Run Memify Example
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -213,18 +203,20 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./examples/python/memify_coding_agent_example.py
+        run: uv run python ./examples/custom_pipelines/memify_coding_agent_rule_extraction_example.py
 
   test-custom-pipeline:
     name: Run Custom Pipeline Example
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -239,25 +231,27 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./examples/python/run_custom_pipeline_example.py
+        run: uv run python ./examples/custom_pipelines/custom_cognify_pipeline_example.py
 
   test-permissions-example:
     name: Run Permissions Example
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
 
-      - name: Run Memify Tests
+      - name: Run Permissions Example
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -265,17 +259,80 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./examples/python/permissions_example.py
+        run: uv run python ./examples/configurations/permissions_example/user_permissions_and_access_control_example.py
+
+  test-s3-permissions-example: # Make sure permission and multi-user mode work with S3 file system
+    name: Run Permissions Example
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres: # Using postgres to avoid storing and using SQLite from S3
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "postgres aws"
+
+      - name: Run S3 Permissions Example
+        env:
+          ENV: 'dev'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          STORAGE_BACKEND: 's3'
+          AWS_REGION: eu-west-1
+          AWS_ENDPOINT_URL: https://s3-eu-west-1.amazonaws.com
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          STORAGE_BUCKET_NAME: github-runner-cognee-tests
+          DATA_ROOT_DIRECTORY: "s3://github-runner-cognee-tests/cognee/data"
+          SYSTEM_ROOT_DIRECTORY: "s3://github-runner-cognee-tests/cognee/system"
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+        run: uv run python ./examples/configurations/permissions_example/user_permissions_and_access_control_example.py
+
+  # Docling test - NO container (runs on macOS, container only works on Linux)
   test_docling_add:
     name: Run Add with Docling Test
     runs-on: macos-15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -291,6 +348,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}

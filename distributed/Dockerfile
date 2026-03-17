@@ -1,12 +1,11 @@
-FROM python:3.11-slim
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 # Set environment variables
-ENV PIP_NO_CACHE_DIR=true
-ENV PATH="${PATH}:/root/.poetry/bin"
 ENV PYTHONPATH=/app
 ENV RUN_MODE=modal
 ENV SKIP_MIGRATIONS=true
 ENV COGNEE_DISTRIBUTED=true
+ENV UV_LINK_MODE=copy
 
 # System dependencies
 RUN apt-get update && apt-get install -y \
@@ -19,13 +18,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock README.md /app/
+COPY pyproject.toml uv.lock README.md /app/
 
-RUN pip install poetry
-
-RUN poetry config virtualenvs.create false
-
-RUN poetry install --extras neo4j --extras postgres --extras aws --extras distributed --no-root
+RUN uv sync --frozen --no-dev --extra neo4j --extra postgres --extra aws --extra distributed --no-install-project
 
 COPY cognee/ /app/cognee
 COPY distributed/ /app/distributed
+
+# Modal's post-build steps require pip available on the default Python
+RUN uv pip install pip wheel
+
+ENV PATH="/app/.venv/bin:$PATH"

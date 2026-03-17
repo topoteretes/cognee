@@ -20,7 +20,13 @@ class JSONEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-def copy_model(model: DataPoint, include_fields: dict = {}, exclude_fields: list = []):
+def copy_model(
+    model: DataPoint, include_fields: dict | None = None, exclude_fields: list | None = None
+):
+    if include_fields is None:
+        include_fields = {}
+    if exclude_fields is None:
+        exclude_fields = []
     fields = {
         name: (field.annotation, field.default if field.default is not None else PydanticUndefined)
         for name, field in model.model_fields.items()
@@ -48,7 +54,11 @@ def get_own_properties(data_point: DataPoint):
             field_name == "metadata"
             or isinstance(field_value, dict)
             or isinstance(field_value, DataPoint)
-            or (isinstance(field_value, list) and isinstance(field_value[0], DataPoint))
+            or (
+                isinstance(field_value, list)
+                and len(field_value) > 0
+                and isinstance(field_value[0], DataPoint)
+            )
         ):
             continue
 

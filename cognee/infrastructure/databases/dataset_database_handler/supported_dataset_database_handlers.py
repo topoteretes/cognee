@@ -7,6 +7,9 @@ from cognee.infrastructure.databases.vector.lancedb.LanceDBDatasetDatabaseHandle
 from cognee.infrastructure.databases.graph.kuzu.KuzuDatasetDatabaseHandler import (
     KuzuDatasetDatabaseHandler,
 )
+from cognee.infrastructure.databases.vector.pgvector.PGVectorDatasetDatabaseHandler import (
+    PGVectorDatasetDatabaseHandler,
+)
 
 supported_dataset_database_handlers = {
     "neo4j_aura_dev": {
@@ -14,5 +17,9 @@ supported_dataset_database_handlers = {
         "handler_provider": "neo4j",
     },
     "lancedb": {"handler_instance": LanceDBDatasetDatabaseHandler, "handler_provider": "lancedb"},
+    "pgvector": {
+        "handler_instance": PGVectorDatasetDatabaseHandler,
+        "handler_provider": "pgvector",
+    },
     "kuzu": {"handler_instance": KuzuDatasetDatabaseHandler, "handler_provider": "kuzu"},
 }

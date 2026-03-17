@@ -10,10 +10,29 @@ from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
+from cognee.tasks.translation.config import get_translation_config
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 
 
 class config:
+    """
+    Configuration namespace for Cognee's runtime settings.
+
+    All methods are static and configure LLM providers, database backends,
+    chunking strategies, and storage paths at runtime without requiring
+    environment variable changes.
+
+    Example:
+        ```python
+        import cognee
+
+        cognee.config.set_llm_api_key("your-api-key")
+        cognee.config.set_llm_model("gpt-4o-mini")
+        cognee.config.system_root_directory("/path/to/system")
+        cognee.config.set_vector_db_provider("chromadb")
+        ```
+    """
+
     @staticmethod
     def system_root_directory(system_root_directory: str):
         base_config = get_base_config()
@@ -83,16 +102,24 @@ class config:
         llm_config.llm_api_key = llm_api_key
 
     @staticmethod
+    def _update_config(config_obj, config_dict: dict):
+        """
+        Updates a config object with values from config_dict after attribute validation.
+        """
+        for key, value in config_dict.items():
+            if hasattr(config_obj, key):
+                object.__setattr__(config_obj, key, value)
+            else:
+                raise InvalidConfigAttributeError(attribute=key)
+
+        return config_obj
+
+    @staticmethod
     def set_llm_config(config_dict: dict):
         """
         Updates the llm config with values from config_dict.
         """
-        llm_config = get_llm_config()
-        for key, value in config_dict.items():
-            if hasattr(llm_config, key):
-                object.__setattr__(llm_config, key, value)
-            else:
-                raise InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_llm_config(), config_dict)
 
     @staticmethod
     def set_chunk_strategy(chunk_strategy: object):
@@ -124,48 +151,28 @@ class config:
         """
         Updates the relational db config with values from config_dict.
         """
-        relational_db_config = get_relational_config()
-        for key, value in config_dict.items():
-            if hasattr(relational_db_config, key):
-                object.__setattr__(relational_db_config, key, value)
-            else:
-                raise InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_relational_config(), config_dict)
 
     @staticmethod
     def set_migration_db_config(config_dict: dict):
         """
         Updates the relational db config with values from config_dict.
         """
-        migration_db_config = get_migration_config()
-        for key, value in config_dict.items():
-            if hasattr(migration_db_config, key):
-                object.__setattr__(migration_db_config, key, value)
-            else:
-                raise InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_migration_config(), config_dict)
 
     @staticmethod
     def set_graph_db_config(config_dict: dict) -> None:
         """
         Updates the graph db config with values from config_dict.
         """
-        graph_db_config = get_graph_config()
-        for key, value in config_dict.items():
-            if hasattr(graph_db_config, key):
-                object.__setattr__(graph_db_config, key, value)
-            else:
-                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
+        config._update_config(get_graph_config(), config_dict)
 
     @staticmethod
     def set_vector_db_config(config_dict: dict):
         """
         Updates the vector db config with values from config_dict.
         """
-        vector_db_config = get_vectordb_config()
-        for key, value in config_dict.items():
-            if hasattr(vector_db_config, key):
-                object.__setattr__(vector_db_config, key, value)
-            else:
-                InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_vectordb_config(), config_dict)
 
     @staticmethod
     def set_vector_db_key(db_key: str):
@@ -176,3 +183,58 @@ class config:
     def set_vector_db_url(db_url: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_url = db_url
+
+    # Translation configuration methods
+
+    @staticmethod
+    def set_translation_provider(provider: str):
+        """Set the translation provider (llm, google, azure)."""
+        translation_config = get_translation_config()
+        translation_config.translation_provider = provider
+
+    @staticmethod
+    def set_translation_target_language(target_language: str):
+        """Set the default target language for translations."""
+        translation_config = get_translation_config()
+        translation_config.target_language = target_language
+
+    @staticmethod
+    def set_translation_config(config_dict: dict):
+        """
+        Updates the translation config with values from config_dict.
+        """
+        config._update_config(get_translation_config(), config_dict)
+
+    @staticmethod
+    def set(key: str, value):
+        """
+        Generic setter that maps configuration keys to their specific setter methods.
+        This enables CLI commands like 'cognee config set llm_api_key <value>'.
+        """
+        # Map configuration keys to their setter methods
+        setter_mapping = {
+            "llm_provider": "set_llm_provider",
+            "llm_model": "set_llm_model",
+            "llm_api_key": "set_llm_api_key",
+            "llm_endpoint": "set_llm_endpoint",
+            "graph_database_provider": "set_graph_database_provider",
+            "vector_db_provider": "set_vector_db_provider",
+            "vector_db_url": "set_vector_db_url",
+            "vector_db_key": "set_vector_db_key",
+            "chunk_size": "set_chunk_size",
+            "chunk_overlap": "set_chunk_overlap",
+            "chunk_strategy": "set_chunk_strategy",
+            "chunk_engine": "set_chunk_engine",
+            "classification_model": "set_classification_model",
+            "summarization_model": "set_summarization_model",
+            "graph_model": "set_graph_model",
+            "system_root_directory": "system_root_directory",
+            "data_root_directory": "data_root_directory",
+        }
+
+        if key not in setter_mapping:
+            raise InvalidConfigAttributeError(attribute=key)
+
+        method_name = setter_mapping[key]
+        method = getattr(config, method_name)
+        method(value)

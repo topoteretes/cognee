@@ -48,7 +48,7 @@ async def main():
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-    random_node = (await vector_engine.search("Entity_name", "AI"))[0]
+    random_node = (await vector_engine.search("Entity_name", "AI", include_payload=True))[0]
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(
@@ -94,13 +94,12 @@ async def main():
         query_text="What information do you contain?",
         dataset_ids=[pipeline_run_obj.dataset_id],
     )
-    assert "Mark" in search_results[0]["search_result"][0], (
-        "Failed to update document, no mention of Mark in search results"
-    )
-    assert "Cindy" in search_results[0]["search_result"][0], (
+    result_text = search_results[0]["search_result"][0].lower()
+    assert "mark" in result_text, "Failed to update document, no mention of Mark in search results"
+    assert "cindy" in result_text, (
         "Failed to update document, no mention of Cindy in search results"
     )
-    assert "Artificial intelligence" not in search_results[0]["search_result"][0], (
+    assert "artificial intelligence" not in result_text, (
         "Failed to update document, Artificial intelligence still mentioned in search results"
     )
 

@@ -8,7 +8,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time to fill out this bug report! Please provide a clear and detailed description.
-        
+
   - type: textarea
     id: description
     attributes:
@@ -17,7 +17,7 @@ body:
       placeholder: Describe the bug in detail...
     validations:
       required: true
-      
+
   - type: textarea
     id: reproduction
     attributes:
@@ -29,7 +29,7 @@ body:
         3. See error...
     validations:
       required: true
-      
+
   - type: textarea
     id: expected
     attributes:
@@ -38,7 +38,7 @@ body:
       placeholder: Describe what you expected...
     validations:
       required: true
-      
+
   - type: textarea
     id: actual
     attributes:
@@ -47,7 +47,7 @@ body:
       placeholder: Describe what actually happened...
     validations:
       required: true
-      
+
   - type: textarea
     id: environment
     attributes:
@@ -61,7 +61,7 @@ body:
         - Database: [e.g. Neo4j]
     validations:
       required: true
-      
+
   - type: textarea
     id: logs
     attributes:
@@ -71,7 +71,7 @@ body:
       render: shell
     validations:
       required: false
-      
+
   - type: textarea
     id: additional
     attributes:
@@ -80,7 +80,7 @@ body:
       placeholder: Any additional information...
     validations:
       required: false
-      
+
   - type: checkboxes
     id: checklist
     attributes:

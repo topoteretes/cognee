@@ -11,6 +11,22 @@ MOCK_JSONL_DATA = """\
 {"id": "2", "question": "What is ML?", "answer": "Machine Learning", "paragraphs": [{"paragraph_text": "ML is a subset of AI."}]}
 """
 
+MOCK_HOTPOT_CORPUS = [
+    {
+        "_id": "1",
+        "question": "Next to which country is Germany located?",
+        "answer": "Netherlands",
+        # HotpotQA uses "level"; TwoWikiMultiHop uses "type".
+        "level": "easy",
+        "type": "comparison",
+        "context": [
+            ["Germany", ["Germany is in Europe."]],
+            ["Netherlands", ["The Netherlands borders Germany."]],
+        ],
+        "supporting_facts": [["Netherlands", 0]],
+    }
+]
+
 
 ADAPTER_CLASSES = [
     HotpotQAAdapter,
@@ -32,6 +48,11 @@ def test_adapter_can_instantiate_and_load(AdapterClass):
             patch("builtins.open", new_callable=mock_open, read_data=MOCK_JSONL_DATA),
             patch("os.path.exists", return_value=True),
         ):
+            adapter = AdapterClass()
+            result = adapter.load_corpus()
+
+    elif AdapterClass in (HotpotQAAdapter, TwoWikiMultihopAdapter):
+        with patch.object(AdapterClass, "_get_raw_corpus", return_value=MOCK_HOTPOT_CORPUS):
             adapter = AdapterClass()
             result = adapter.load_corpus()
 
@@ -62,6 +83,10 @@ def test_adapter_returns_some_content(AdapterClass):
             patch("builtins.open", new_callable=mock_open, read_data=MOCK_JSONL_DATA),
             patch("os.path.exists", return_value=True),
         ):
+            adapter = AdapterClass()
+            corpus_list, qa_pairs = adapter.load_corpus(limit=limit)
+    elif AdapterClass in (HotpotQAAdapter, TwoWikiMultihopAdapter):
+        with patch.object(AdapterClass, "_get_raw_corpus", return_value=MOCK_HOTPOT_CORPUS):
             adapter = AdapterClass()
             corpus_list, qa_pairs = adapter.load_corpus(limit=limit)
     else:

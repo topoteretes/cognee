@@ -57,7 +57,7 @@ export default function GraphVisualization({ ref, data, graphControls, className
     // Initial size calculation
     handleResize();
 
-    // ResizeObserver 
+    // ResizeObserver
     const resizeObserver = new ResizeObserver(() => {
       handleResize();
     });
@@ -216,7 +216,7 @@ export default function GraphVisualization({ ref, data, graphControls, className
   }, [data, graphRef]);
 
   const [graphShape, setGraphShape] = useState<string>();
-  
+
   const zoomToFit: ForceGraphMethods["zoomToFit"] = (
     durationMs?: number,
     padding?: number,
@@ -227,15 +227,15 @@ export default function GraphVisualization({ ref, data, graphControls, className
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return undefined as any;
     }
-  
+
     return graphRef.current.zoomToFit?.(durationMs, padding, nodeFilter);
   };
-  
+
   useImperativeHandle(ref, () => ({
     zoomToFit,
     setGraphShape,
   }));
-  
+
 
   return (
     <div ref={containerRef} className={classNames("w-full h-full", className)} id="graph-container">

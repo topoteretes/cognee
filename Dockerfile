@@ -32,18 +32,14 @@ COPY README.md pyproject.toml uv.lock entrypoint.sh ./
 
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
-
-# Copy Alembic configuration
-COPY alembic.ini /app/alembic.ini
-COPY alembic/ /app/alembic
+    uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --extra chromadb --frozen --no-install-project --no-dev --no-editable
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
 COPY ./cognee /app/cognee
 COPY ./distributed /app/distributed
 RUN --mount=type=cache,target=/root/.cache/uv \
-uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
+uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --extra chromadb --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm
 
@@ -57,7 +53,8 @@ COPY --from=uv /app /app
 # COPY --from=uv /app/.venv /app/.venv
 # COPY --from=uv /root/.local /root/.local
 
-RUN chmod +x /app/entrypoint.sh
+# Strip Windows carriage returns (fixes "no such file" on Windows Docker)
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"

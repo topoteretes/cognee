@@ -8,10 +8,11 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect
+from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, func
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
+from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -29,9 +30,30 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str):
+    def __init__(self, connection_string: str, connect_args: dict = None, pool_args: dict = None):
+        """
+        Initialize the SQLAlchemy adapter with connection settings.
+
+        Parameters:
+        -----------
+            connection_string (str): The database connection string (e.g., 'sqlite:///path/to/db'
+                or 'postgresql://user:pass@host:port/db').
+            connect_args (dict, optional): Database driver connection arguments.
+                Configuration is loaded from RelationalConfig.database_connect_args, which reads
+                from the DATABASE_CONNECT_ARGS environment variable.
+
+                Examples:
+                    PostgreSQL with SSL:
+                        DATABASE_CONNECT_ARGS='{"sslmode": "require", "connect_timeout": 10}'
+
+                    SQLite with custom timeout:
+                        DATABASE_CONNECT_ARGS='{"timeout": 60}'
+        """
         self.db_path: str = None
         self.db_uri: str = connection_string
+
+        # Use provided connect_args (already parsed from config)
+        final_connect_args = connect_args or {}
 
         if "sqlite" in connection_string:
             [prefix, db_path] = connection_string.split("///")
@@ -53,16 +75,32 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
-                connect_args={"timeout": 30},
+                connect_args={**{"timeout": 30}, **final_connect_args},
             )
         else:
+            # Transform pool_args from tuple into dict if provided
+            # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
+            pool_args = pool_args or {}
+
+            if pool_args.get("pool_size") is None:
+                pool_args["pool_size"] = 20
+
+            if pool_args.get("max_overflow") is None:
+                pool_args["max_overflow"] = 20
+
+            if pool_args.get("pool_pre_ping") is None:
+                pool_args["pool_pre_ping"] = True
+
+            if pool_args.get("pool_recycle") is None:
+                pool_args["pool_recycle"] = 280
+
+            if pool_args.get("pool_timeout") is None:
+                pool_args["pool_timeout"] = 280
+
             self.engine = create_async_engine(
                 connection_string,
-                pool_size=20,
-                max_overflow=20,
-                pool_recycle=280,
-                pool_pre_ping=True,
-                pool_timeout=280,
+                **pool_args,
+                connect_args=final_connect_args,
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
@@ -265,7 +303,7 @@ class SQLAlchemyAdapter:
                 await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
                 await session.commit()
 
-    async def delete_data_entity(self, data_id: UUID):
+    async def delete_data_entity(self, data_id: UUID, dataset_id: UUID):
         """
         Delete a data entity along with its local files if no references remain in the database.
 
@@ -279,6 +317,30 @@ class SQLAlchemyAdapter:
                 # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
+
+            # Delete DatasetData instances referencing this data_id first to maintain referential integrity.
+            await session.execute(
+                delete(DatasetData).where(
+                    DatasetData.data_id == data_id,
+                    DatasetData.dataset_id == dataset_id,
+                )
+            )
+            # Flush to ensure the count in the next step is accurate within the transaction
+            await session.flush()
+
+            # Check if any references to this data_id still exist in the DatasetData table
+            remaining_refs = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(DatasetData)
+                    .where(DatasetData.data_id == data_id)
+                )
+            ).scalar()
+
+            # If there are still datasets using this data, we stop here.
+            if remaining_refs > 0:
+                await session.commit()
+                return
 
             try:
                 data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
@@ -346,7 +408,10 @@ class SQLAlchemyAdapter:
                 # Load table information from schema into MetaData
                 await connection.run_sync(metadata.reflect, schema=schema_name)
                 # Define the full table name
-                full_table_name = f"{schema_name}.{table_name}"
+                if schema_name is None:
+                    full_table_name = table_name
+                else:
+                    full_table_name = f"{schema_name}.{table_name}"
                 # Check if table is in list of tables for the given schema
                 if full_table_name in metadata.tables:
                     return metadata.tables[full_table_name]
@@ -496,6 +561,12 @@ class SQLAlchemyAdapter:
                 await file_storage.ensure_directory_exists()
 
         async with self.engine.begin() as connection:
+            # Import here to avoid circular imports
+            from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+            vector_config = get_vectordb_config()
+            if vector_config.vector_db_provider == "pgvector":
+                await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             if len(Base.metadata.tables.keys()) > 0:
                 await connection.run_sync(Base.metadata.create_all)
 
@@ -527,6 +598,7 @@ class SQLAlchemyAdapter:
                             )
                             await connection.execute(drop_table_query)
                         metadata.clear()
+
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
             raise e

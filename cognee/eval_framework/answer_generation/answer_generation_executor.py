@@ -32,16 +32,15 @@ class AnswerGeneratorExecutor:
             query_text = instance["question"]
             correct_answer = instance["answer"]
 
-            retrieval_context = await retriever.get_context(query_text)
-            search_results = await retriever.get_completion(query_text, retrieval_context)
+            retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
+            retrieval_context = await retriever.get_context_from_objects(
+                query=query_text, retrieved_objects=retrieved_objects
+            )
+            search_results = await retriever.get_completion_from_context(
+                query=query_text, retrieved_objects=retrieved_objects, context=retrieval_context
+            )
 
             ############
-            #:TODO This is a quick fix until we don't structure retriever results properly but lets not leave it like this...this is needed now due to the changed combined retriever structure..
-            if isinstance(retrieval_context, list):
-                retrieval_context = await retriever.convert_retrieved_objects_to_context(
-                    triplets=retrieval_context
-                )
-
             if isinstance(search_results, str):
                 search_results = [search_results]
             #############

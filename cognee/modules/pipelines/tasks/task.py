@@ -2,6 +2,25 @@ from typing import Union, Callable, Any, Coroutine, Generator, AsyncGenerator
 import inspect
 
 
+def task_summary(template: str):
+    """Decorator that attaches a human-readable summary template to a task function.
+
+    The template should contain ``{n}`` as a placeholder for the result count.
+
+    Example::
+
+        @task_summary("Classified {n} document(s)")
+        async def classify_documents(data_documents):
+            ...
+    """
+
+    def decorator(func):
+        func.__task_summary__ = template
+        return func
+
+    return decorator
+
+
 class Task:
     executable: Union[
         Callable[..., Any],
@@ -49,10 +68,10 @@ class Task:
 
         return self.executable(*combined_args, **combined_kwargs)
 
-    async def execute_async_generator(self, args):
+    async def execute_async_generator(self, args, kwargs):
         """Execute async generator task and collect results in batches."""
         results = []
-        async_iterator = self.run(*args)
+        async_iterator = self.run(*args, **kwargs)
 
         async for partial_result in async_iterator:
             results.append(partial_result)
@@ -64,11 +83,11 @@ class Task:
         if results:
             yield results
 
-    async def execute_generator(self, args):
+    async def execute_generator(self, args, kwargs):
         """Execute generator task and collect results in batches."""
         results = []
 
-        for partial_result in self.run(*args):
+        for partial_result in self.run(*args, **kwargs):
             results.append(partial_result)
 
             if len(results) == self._next_batch_size:
@@ -78,20 +97,20 @@ class Task:
         if results:
             yield results
 
-    async def execute_coroutine(self, args):
+    async def execute_coroutine(self, args, kwargs):
         """Execute coroutine task and yield the result."""
-        task_result = await self.run(*args)
+        task_result = await self.run(*args, **kwargs)
         yield task_result
 
-    async def execute_function(self, args):
+    async def execute_function(self, args, kwargs):
         """Execute function task and yield the result."""
-        task_result = self.run(*args)
+        task_result = self.run(*args, **kwargs)
         yield task_result
 
-    async def execute(self, args, next_batch_size=None):
+    async def execute(self, args, kwargs, next_batch_size=None):
         """Execute the task based on its type and yield results with the next task's batch size."""
         if next_batch_size is not None:
             self._next_batch_size = next_batch_size
 
-        async for result in self._execute_method(args):
+        async for result in self._execute_method(args, kwargs):
             yield result

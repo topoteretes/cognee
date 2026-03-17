@@ -2,7 +2,7 @@ import base64
 import litellm
 import logging
 import instructor
-from typing import Type
+from typing import Any, Dict, Type, Optional
 from openai import OpenAI
 from pydantic import BaseModel
 
@@ -12,7 +12,6 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-
 from tenacity import (
     retry,
     stop_after_delay,
@@ -54,12 +53,14 @@ class OllamaAPIAdapter(LLMInterface):
         name: str,
         max_completion_tokens: int,
         instructor_mode: str = None,
+        llm_args: Optional[Dict[str, Any]] = None,
     ):
         self.name = name
         self.model = model
         self.api_key = api_key
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
+        self.llm_args = llm_args
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -71,7 +72,9 @@ class OllamaAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type(
+            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+        ),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -97,6 +100,7 @@ class OllamaAPIAdapter(LLMInterface):
 
             - BaseModel: A structured output that conforms to the specified response model.
         """
+        merged_kwargs = {**self.llm_args, **kwargs}
         async with llm_rate_limiter_context_manager():
             response = self.aclient.chat.completions.create(
                 model=self.model,
@@ -112,6 +116,7 @@ class OllamaAPIAdapter(LLMInterface):
                 ],
                 max_retries=2,
                 response_model=response_model,
+                **merged_kwargs,
             )
 
         return response
@@ -119,11 +124,13 @@ class OllamaAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type(
+            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+        ),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input_file: str, **kwargs) -> str:
+    async def create_transcript(self, input: str, **kwargs) -> str:
         """
         Generate an audio transcript from a user query.
 
@@ -134,7 +141,7 @@ class OllamaAPIAdapter(LLMInterface):
         Parameters:
         -----------
 
-            - input_file (str): The path to the audio file to be transcribed.
+            - input (str): The path to the audio file to be transcribed.
 
         Returns:
         --------
@@ -142,7 +149,7 @@ class OllamaAPIAdapter(LLMInterface):
             - str: The transcription of the audio as a string.
         """
 
-        async with open_data_file(input_file, mode="rb") as audio_file:
+        async with open_data_file(input, mode="rb") as audio_file:
             transcription = self.aclient.audio.transcriptions.create(
                 model="whisper-1",  # Ensure the correct model for transcription
                 file=audio_file,
@@ -158,11 +165,13 @@ class OllamaAPIAdapter(LLMInterface):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type(
+            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+        ),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def transcribe_image(self, input_file: str, **kwargs) -> str:
+    async def transcribe_image(self, input: str, **kwargs) -> str:
         """
         Transcribe content from an image using base64 encoding.
 
@@ -174,7 +183,7 @@ class OllamaAPIAdapter(LLMInterface):
         Parameters:
         -----------
 
-            - input_file (str): The path to the image file to be transcribed.
+            - input (str): The path to the image file to be transcribed.
 
         Returns:
         --------
@@ -182,7 +191,7 @@ class OllamaAPIAdapter(LLMInterface):
             - str: The transcription of the image's content as a string.
         """
 
-        async with open_data_file(input_file, mode="rb") as image_file:
+        async with open_data_file(input, mode="rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         response = self.aclient.chat.completions.create(

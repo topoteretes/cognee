@@ -1,8 +1,16 @@
 import asyncio
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
+from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.modules.graph.methods import upsert_edges, upsert_nodes
+from cognee.modules.graph.utils import (
+    deduplicate_nodes_and_edges,
+    ensure_default_edge_properties,
+    get_graph_from_model,
+)
+from cognee.modules.users.models import User
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
@@ -15,8 +23,12 @@ from ...modules.engine.utils import generate_node_id
 logger = get_logger("add_data_points")
 
 
+@task_summary("Stored {n} data point(s)")
 async def add_data_points(
-    data_points: List[DataPoint], custom_edges: Optional[List] = None, embed_triplets: bool = False
+    data_points: List[DataPoint],
+    context: Optional[Dict[str, Any]] = None,
+    custom_edges: Optional[List] = None,
+    embed_triplets: bool = False,
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -45,8 +57,15 @@ async def add_data_points(
         - Updates the node index via `index_data_points`.
         - Inserts nodes and edges into the graph engine.
         - Optionally updates the edge index via `index_graph_edges`.
-        - Optionally creates and indexes triplet embeddings if embed_triplets is True.
     """
+    user: Optional[User] = None
+    data = None
+    dataset = None
+
+    if context:
+        data = context["data"]
+        dataset = context["dataset"]
+        user = context["user"]
 
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
@@ -78,24 +97,47 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    graph_engine = await get_graph_engine()
+    edges = ensure_default_edge_properties(edges)
+
+    unified = await get_unified_engine()
+    graph_engine = unified.graph
+    vector_engine = unified.vector
 
     await graph_engine.add_nodes(nodes)
-    await index_data_points(nodes)
+    await index_data_points(nodes, vector_engine=vector_engine)
+
+    if user and dataset and data:
+        await upsert_nodes(
+            nodes, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+        )
+        await upsert_edges(
+            edges, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+        )
 
     await graph_engine.add_edges(edges)
-    await index_graph_edges(edges)
+    await index_graph_edges(edges, vector_engine=vector_engine)
 
     if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
+        custom_edges = ensure_default_edge_properties(custom_edges)
         await graph_engine.add_edges(custom_edges)
-        await index_graph_edges(custom_edges)
+        await index_graph_edges(custom_edges, vector_engine=vector_engine)
+
+        if user and dataset and data:
+            await upsert_edges(
+                custom_edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data.id,
+            )
+
         edges.extend(custom_edges)
 
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)
         if triplets:
-            await index_data_points(triplets)
+            await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
     return data_points

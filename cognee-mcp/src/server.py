@@ -1,13 +1,18 @@
 import json
 import os
+import re
 import sys
 import argparse
 import asyncio
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-
+from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
+from cognee.modules.data.methods.get_last_added_data import get_last_added_data
+from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
+from cognee.shared.usage_logger import log_usage
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
@@ -42,6 +47,50 @@ logger = get_logger()
 
 cognee_client: Optional[CogneeClient] = None
 
+# Stores background task errors so cognify_status can report them
+_task_errors: dict[str, str] = {}
+
+
+def _is_running_in_docker() -> bool:
+    """Check if the process is running inside a Docker container."""
+    return os.path.exists("/.dockerenv") or os.path.isdir("/app")
+
+
+def _looks_like_file_path(data: str) -> bool:
+    """Check if the data string looks like a local file path."""
+    data = data.strip()
+    # Unix absolute path, Windows drive letter path, or file:// URI
+    if data.startswith("/") or re.match(r"^[A-Za-z]:\\", data) or data.startswith("file://"):
+        return True
+    return False
+
+
+def _validate_file_path(data: str) -> Optional[str]:
+    """
+    If data looks like a file path, validate it exists.
+    Returns an error message string if invalid, or None if OK.
+    """
+    if not _looks_like_file_path(data):
+        return None
+
+    path = data.strip()
+    if path.startswith("file://"):
+        path = path[7:]
+
+    if not os.path.exists(path):
+        msg = f"File not found: {path}"
+        if _is_running_in_docker():
+            msg += (
+                "\n\nIt looks like you're running inside Docker. Host file paths are not "
+                "accessible inside the container. To ingest local files, mount a volume in "
+                "docker-compose.yml:\n"
+                "  volumes:\n"
+                "    - /path/to/your/data:/data\n"
+                "Then reference the file as /data/<filename> instead."
+            )
+        return msg
+    return None
+
 
 async def run_sse_with_cors():
     """Custom SSE transport with CORS middleware."""
@@ -50,7 +99,7 @@ async def run_sse_with_cors():
         CORSMiddleware,
         allow_origins=["http://localhost:3000"],
         allow_credentials=True,
-        allow_methods=["GET"],
+        allow_methods=["*"],
         allow_headers=["*"],
     )
 
@@ -71,7 +120,7 @@ async def run_http_with_cors():
         CORSMiddleware,
         allow_origins=["http://localhost:3000"],
         allow_credentials=True,
-        allow_methods=["GET"],
+        allow_methods=["*"],
         allow_headers=["*"],
     )
 
@@ -91,6 +140,7 @@ async def health_check(request):
 
 
 @mcp.tool()
+@log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
     data: str, graph_model_file: str = None, graph_model_name: str = None, custom_prompt: str = None
 ) -> list:
@@ -200,6 +250,16 @@ async def cognify(
 
     """
 
+    # Validate file paths before launching background task
+    file_error = _validate_file_path(data)
+    if file_error:
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Error: {file_error}",
+            )
+        ]
+
     async def cognify_task(
         data: str,
         graph_model_file: str = None,
@@ -230,8 +290,17 @@ async def cognify(
                 logger.error("Cognify process failed.")
                 raise ValueError(f"Failed to cognify: {str(e)}")
 
+    async def cognify_task_wrapper(**kwargs):
+        """Wrapper that captures errors from the background task."""
+        try:
+            await cognify_task(**kwargs)
+        except Exception as e:
+            timestamp = datetime.now(timezone.utc).isoformat()
+            _task_errors[timestamp] = str(e)
+            logger.error(f"Background cognify task failed: {e}")
+
     asyncio.create_task(
-        cognify_task(
+        cognify_task_wrapper(
             data=data,
             graph_model_file=graph_model_file,
             graph_model_name=graph_model_name,
@@ -257,6 +326,7 @@ async def cognify(
 @mcp.tool(
     name="save_interaction", description="Logs user-agent interactions and query-answer pairs"
 )
+@log_usage(function_name="MCP save_interaction", log_type="mcp_tool")
 async def save_interaction(data: str) -> list:
     """
     Transform and save a user-agent interaction into structured knowledge.
@@ -281,12 +351,26 @@ async def save_interaction(data: str) -> list:
 
             try:
                 await cognee_client.cognify()
+
+                user = await get_default_user()
+                datasets = await get_datasets_by_name("main_dataset", user_id=user.id)
+                dataset = datasets[0]
+                added_data = await get_last_added_data(dataset.id)
+
                 logger.info("Save interaction process finished.")
 
                 # Rule associations only work in direct mode
                 if not cognee_client.use_api:
                     logger.info("Generating associated rules from interaction data.")
-                    await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+                    await add_rule_associations(
+                        data=data,
+                        rules_nodeset_name="coding_agent_rules",
+                        context={
+                            "user": user,
+                            "dataset": dataset,
+                            "data": added_data,
+                        },
+                    )
                     logger.info("Associated rules generated from interaction data.")
                 else:
                     logger.warning("Rule associations are not available in API mode, skipping.")
@@ -316,7 +400,8 @@ async def save_interaction(data: str) -> list:
 
 
 @mcp.tool()
-async def search(search_query: str, search_type: str) -> list:
+@log_usage(function_name="MCP search", log_type="mcp_tool")
+async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -389,6 +474,13 @@ async def search(search_query: str, search_type: str) -> list:
 
         The search_type is case-insensitive and will be converted to uppercase.
 
+    top_k : int, optional
+        Maximum number of results to return (default: 10).
+        Controls the amount of context retrieved from the knowledge graph.
+        - Lower values (3-5): Faster, more focused results
+        - Higher values (10-20): More comprehensive, but slower and more context-heavy
+        Helps manage response size and context window usage in MCP clients.
+
     Returns
     -------
     list
@@ -425,13 +517,32 @@ async def search(search_query: str, search_type: str) -> list:
 
     """
 
-    async def search_task(search_query: str, search_type: str) -> str:
-        """Search the knowledge graph"""
+    async def search_task(search_query: str, search_type: str, top_k: int) -> str:
+        """
+        Internal task to execute knowledge graph search with result formatting.
+
+        Handles the actual search execution and formats results appropriately
+        for MCP clients based on the search type and execution mode (API vs direct).
+
+        Parameters
+        ----------
+        search_query : str
+            The search query in natural language
+        search_type : str
+            Type of search to perform (GRAPH_COMPLETION, CHUNKS, etc.)
+        top_k : int
+            Maximum number of results to return
+
+        Returns
+        -------
+        str
+            Formatted search results as a string, with format depending on search_type
+        """
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
             search_results = await cognee_client.search(
-                query_text=search_query, query_type=search_type
+                query_text=search_query, query_type=search_type, top_k=top_k
             )
 
             # Handle different result formats based on API vs direct mode
@@ -465,11 +576,12 @@ async def search(search_query: str, search_type: str) -> list:
                 else:
                     return str(search_results)
 
-    search_results = await search_task(search_query, search_type)
+    search_results = await search_task(search_query, search_type, top_k)
     return [types.TextContent(type="text", text=search_results)]
 
 
 @mcp.tool()
+@log_usage(function_name="MCP list_data", log_type="mcp_tool")
 async def list_data(dataset_id: str = None) -> list:
     """
     List all datasets and their data items with IDs for deletion operations.
@@ -598,6 +710,7 @@ async def list_data(dataset_id: str = None) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP delete", log_type="mcp_tool")
 async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
     """
     Delete specific data from a dataset in the Cognee knowledge graph.
@@ -677,6 +790,7 @@ async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP prune", log_type="mcp_tool")
 async def prune():
     """
     Reset the Cognee knowledge graph by removing all stored information.
@@ -713,6 +827,7 @@ async def prune():
 
 
 @mcp.tool()
+@log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
 async def cognify_status():
     """
     Get the current status of the cognify pipeline.
@@ -743,13 +858,28 @@ async def cognify_status():
             status = await cognee_client.get_pipeline_status(
                 [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
             )
-            return [types.TextContent(type="text", text=str(status))]
+
+            # Append any background task errors
+            status_text = str(status)
+            if _task_errors:
+                error_lines = ["\n\nBackground task errors:"]
+                for ts, err in sorted(_task_errors.items(), reverse=True):
+                    error_lines.append(f"  [{ts}] {err}")
+                status_text += "\n".join(error_lines)
+
+            return [types.TextContent(type="text", text=status_text)]
         except NotImplementedError:
             error_msg = "❌ Pipeline status is not available in API mode"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
             error_msg = f"❌ Failed to get cognify status: {str(e)}"
+            # Still report background errors even if pipeline status fails
+            if _task_errors:
+                error_lines = ["\n\nBackground task errors:"]
+                for ts, err in sorted(_task_errors.items(), reverse=True):
+                    error_lines.append(f"  [{ts}] {err}")
+                error_msg += "\n".join(error_lines)
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
@@ -850,50 +980,34 @@ async def main():
     cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
 
     mcp.settings.host = args.host
-    mcp.settings.port = args.port
+    mcp.settings.port = int(args.port)
 
     # Skip migrations when in API mode (the API server handles its own database)
     if not args.no_migration and not args.api_url:
         from cognee.modules.engine.operations.setup import setup
+        from cognee.run_migrations import run_migrations
+
+        logger.info("Running database migrations...")
 
         await setup()
-
-        # Run Alembic migrations from the main cognee directory where alembic.ini is located
-        logger.info("Running database migrations...")
-        migration_result = subprocess.run(
-            ["python", "-m", "alembic", "upgrade", "head"],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).resolve().parent.parent.parent,
-        )
-
-        if migration_result.returncode != 0:
-            migration_output = migration_result.stderr + migration_result.stdout
-            # Check for the expected UserAlreadyExists error (which is not critical)
-            if (
-                "UserAlreadyExists" in migration_output
-                or "User default_user@example.com already exists" in migration_output
-            ):
-                logger.warning("Warning: Default user already exists, continuing startup...")
-            else:
-                logger.error(f"Migration failed with unexpected error: {migration_output}")
-                sys.exit(1)
+        await run_migrations()
 
         logger.info("Database migrations done.")
-    elif args.api_url:
-        logger.info("Skipping database migrations (using API mode)")
+    elif not args.api_url:
+        logger.info("Skipping DB migrations")
 
-    logger.info(f"Starting MCP server with transport: {args.transport}")
-    if args.transport == "stdio":
-        await mcp.run_stdio_async()
-    elif args.transport == "sse":
-        logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
-        await run_sse_with_cors()
-    elif args.transport == "http":
-        logger.info(
-            f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
-        )
-        await run_http_with_cors()
+    match args.transport.lower():
+        case "sse":
+            logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
+            await run_sse_with_cors()
+        case "http":
+            logger.info(
+                f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
+            )
+            await run_http_with_cors()
+        case _:
+            logger.info("Running MCP server with stdio")
+            await mcp.run_stdio_async()
 
 
 if __name__ == "__main__":

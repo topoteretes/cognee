@@ -3,7 +3,7 @@ tag-template: 'v$NEXT_PATCH_VERSION'
 
 categories:
   - title: 'Features'
-    labels: ['feature', 'enhancement']    
+    labels: ['feature', 'enhancement']
   - title: 'Bug Fixes'
     labels: ['bug', 'fix']
   - title: 'Maintenance'

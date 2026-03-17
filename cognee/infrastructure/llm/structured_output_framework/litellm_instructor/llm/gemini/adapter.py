@@ -1,20 +1,16 @@
-"""Adapter for Generic API LLM provider API"""
+"""Adapter for Gemini API LLM provider"""
 
 import litellm
 import instructor
-from typing import Type
+from typing import Any, Dict, Type, Optional
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
 from instructor.core import InstructorRetryException
 
-from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
-    LLMInterface,
-)
 import logging
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-from cognee.shared.logging_utils import get_logger
+
 from tenacity import (
     retry,
     stop_after_delay,
@@ -23,59 +19,74 @@ from tenacity import (
     before_sleep_log,
 )
 
+from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
+    GenericAPIAdapter,
+)
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability.get_observe import get_observe
+
 logger = get_logger()
+observe = get_observe()
 
 
-class GeminiAdapter(LLMInterface):
+class GeminiAdapter(GenericAPIAdapter):
     """
     Adapter for Gemini API LLM provider.
 
     This class initializes the API adapter with necessary credentials and configurations for
     interacting with the gemini LLM models. It provides methods for creating structured outputs
-    based on user input and system prompts.
+    based on user input and system prompts, as well as multimodal processing capabilities.
 
     Public methods:
-    - acreate_structured_output(text_input: str, system_prompt: str, response_model:
-    Type[BaseModel]) -> BaseModel
+    - acreate_structured_output(text_input: str, system_prompt: str, response_model: Type[BaseModel]) -> BaseModel
+    - create_transcript(input) -> BaseModel: Transcribe audio files to text
+    - transcribe_image(input) -> BaseModel: Inherited from GenericAPIAdapter
     """
 
-    name: str
-    model: str
-    api_key: str
     default_instructor_mode = "json_mode"
 
     def __init__(
         self,
-        endpoint,
         api_key: str,
         model: str,
-        api_version: str,
         max_completion_tokens: int,
+        endpoint: str = None,
+        api_version: str = None,
+        transcription_model: str = None,
         instructor_mode: str = None,
         fallback_model: str = None,
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
+        llm_args: Optional[Dict[str, Any]] = None,
     ):
-        self.model = model
-        self.api_key = api_key
-        self.endpoint = endpoint
-        self.api_version = api_version
-        self.max_completion_tokens = max_completion_tokens
-
-        self.fallback_model = fallback_model
-        self.fallback_api_key = fallback_api_key
-        self.fallback_endpoint = fallback_endpoint
-
+        super().__init__(
+            api_key=api_key,
+            model=model,
+            max_completion_tokens=max_completion_tokens,
+            name="Gemini",
+            endpoint=endpoint,
+            api_version=api_version,
+            transcription_model=transcription_model,
+            fallback_model=fallback_model,
+            fallback_api_key=fallback_api_key,
+            fallback_endpoint=fallback_endpoint,
+            llm_args=llm_args,
+        )
+        self.llm_args = llm_args
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.from_litellm(
             litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
         )
 
+    @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type(
+            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+        ),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -105,6 +116,7 @@ class GeminiAdapter(LLMInterface):
               output from the language model.
         """
 
+        merged_kwargs = {**self.llm_args, **kwargs}
         try:
             async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(
@@ -124,6 +136,7 @@ class GeminiAdapter(LLMInterface):
                     api_base=self.endpoint,
                     api_version=self.api_version,
                     response_model=response_model,
+                    **merged_kwargs,
                 )
         except (
             ContentFilterFinishReasonError,
@@ -159,6 +172,7 @@ class GeminiAdapter(LLMInterface):
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
+                        **merged_kwargs,
                     )
             except (
                 ContentFilterFinishReasonError,

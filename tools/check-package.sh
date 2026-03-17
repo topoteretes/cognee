@@ -58,4 +58,3 @@ fi
 
 # error in package
 exit 1
-

@@ -8,7 +8,7 @@ body:
     attributes:
       value: |
         Thanks for suggesting a new feature! Please provide a clear and detailed description of your idea.
-        
+
   - type: textarea
     id: problem
     attributes:
@@ -17,7 +17,7 @@ body:
       placeholder: I'm always frustrated when...
     validations:
       required: true
-      
+
   - type: textarea
     id: solution
     attributes:
@@ -26,7 +26,7 @@ body:
       placeholder: I would like to see...
     validations:
       required: true
-      
+
   - type: textarea
     id: alternatives
     attributes:
@@ -35,7 +35,7 @@ body:
       placeholder: I have also considered...
     validations:
       required: false
-      
+
   - type: textarea
     id: use-case
     attributes:
@@ -44,7 +44,7 @@ body:
       placeholder: This feature would help me...
     validations:
       required: true
-      
+
   - type: textarea
     id: implementation
     attributes:
@@ -53,7 +53,7 @@ body:
       placeholder: This could be implemented by...
     validations:
       required: false
-      
+
   - type: textarea
     id: additional
     attributes:
@@ -62,7 +62,7 @@ body:
       placeholder: Additional context...
     validations:
       required: false
-      
+
   - type: checkboxes
     id: checklist
     attributes:
@@ -75,4 +75,3 @@ body:
           required: true
         - label: I have described my specific use case
           required: true
-

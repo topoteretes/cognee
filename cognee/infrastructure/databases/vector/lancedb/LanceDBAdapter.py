@@ -1,5 +1,6 @@
 import asyncio
 from os import path
+from uuid import UUID
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
@@ -16,6 +17,13 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
+
+from cognee.modules.observability import new_span
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_SYSTEM,
+    COGNEE_VECTOR_COLLECTION,
+    COGNEE_VECTOR_RESULT_COUNT,
+)
 
 
 class IndexSchema(DataPoint):
@@ -34,6 +42,7 @@ class IndexSchema(DataPoint):
     text: str
 
     metadata: dict = {"index_fields": ["text"]}
+    belongs_to_set: List[str] = []
 
 
 class LanceDBAdapter(VectorDBInterface):
@@ -204,15 +213,19 @@ class LanceDBAdapter(VectorDBInterface):
             )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        collection = await self.get_collection(collection_name)
+        try:
+            collection = await self.get_collection(collection_name)
+        except CollectionNotFoundError:
+            # If collection doesn't exist, return empty list (no items to retrieve)
+            return []
 
         if len(data_point_ids) == 1:
-            results = await collection.query().where(f"id = '{data_point_ids[0]}'")
+            query = collection.query().where(f"id = '{data_point_ids[0]}'")
         else:
-            results = await collection.query().where(f"id IN {tuple(data_point_ids)}")
+            query = collection.query().where(f"id IN {tuple(data_point_ids)}")
 
         # Convert query results to list format
-        results_list = results.to_list() if hasattr(results, "to_list") else list(results)
+        results_list = await query.to_list()
 
         return [
             ScoredResult(
@@ -231,37 +244,77 @@ class LanceDBAdapter(VectorDBInterface):
         limit: Optional[int] = 15,
         with_vector: bool = False,
         normalized: bool = True,
+        include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
-        if query_text is None and query_vector is None:
-            raise MissingQueryParameterError()
+        with new_span("cognee.db.vector.search") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
+            otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, collection_name)
 
-        if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+            if query_text is None and query_vector is None:
+                raise MissingQueryParameterError()
 
-        collection = await self.get_collection(collection_name)
+            if query_text and not query_vector:
+                query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
 
-        if limit is None:
-            limit = await collection.count_rows()
+            collection = await self.get_collection(collection_name)
 
-        # LanceDB search will break if limit is 0 so we must return
-        if limit <= 0:
-            return []
+            if limit is None:
+                limit = await collection.count_rows()
 
-        result_values = await collection.vector_search(query_vector).limit(limit).to_list()
+            # LanceDB search will break if limit is 0 so we must return
+            if limit <= 0:
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                return []
 
-        if not result_values:
-            return []
-
-        normalized_values = normalize_distances(result_values)
-
-        return [
-            ScoredResult(
-                id=parse_id(result["id"]),
-                payload=result["payload"],
-                score=normalized_values[value_index],
+            # Note: Exclude payload if not needed to optimize performance
+            select_columns = (
+                ["id", "vector", "payload", "_distance"]
+                if include_payload
+                else ["id", "vector", "_distance"]
             )
-            for value_index, result in enumerate(result_values)
-        ]
+
+            if node_name:
+                # Escape quotes to make this input safer, since it's coming from the user
+                # At the time of writing this, no specific binding instructions found on LanceDB docs
+                escaped_node_names = [name.replace("'", "''") for name in node_name]
+                literal_node_names = (
+                    "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
+                )
+
+                result_values = (
+                    await collection.vector_search(query_vector)
+                    .where(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
+                    .select(select_columns)
+                    .limit(limit)
+                    .to_list()
+                )
+            else:
+                result_values = (
+                    await collection.vector_search(query_vector)
+                    .select(select_columns)
+                    .limit(limit)
+                    .to_list()
+                )
+
+            if not result_values:
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                return []
+
+            normalized_values = normalize_distances(result_values)
+
+            results = [
+                ScoredResult(
+                    id=parse_id(result["id"]),
+                    payload=result["payload"] if include_payload else None,
+                    score=normalized_values[value_index],
+                )
+                for value_index, result in enumerate(result_values)
+            ]
+
+            otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, len(results))
+
+            return results
 
     async def batch_search(
         self,
@@ -269,6 +322,8 @@ class LanceDBAdapter(VectorDBInterface):
         query_texts: List[str],
         limit: Optional[int] = None,
         with_vectors: bool = False,
+        include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -279,12 +334,18 @@ class LanceDBAdapter(VectorDBInterface):
                     query_vector=query_vector,
                     limit=limit,
                     with_vector=with_vectors,
+                    include_payload=include_payload,
+                    node_name=node_name,
                 )
                 for query_vector in query_vectors
             ]
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        # Skip deletion if collection doesn't exist
+        if not await self.has_collection(collection_name):
+            return
+
         collection = await self.get_collection(collection_name)
 
         # Delete one at a time to avoid commit conflicts
@@ -305,6 +366,7 @@ class LanceDBAdapter(VectorDBInterface):
                 IndexSchema(
                     id=str(data_point.id),
                     text=getattr(data_point, data_point.metadata["index_fields"][0]),
+                    belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
             ],

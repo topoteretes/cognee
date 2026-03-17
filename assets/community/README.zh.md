@@ -114,7 +114,7 @@ if __name__ == '__main__':
 示例输出：
 ```
   自然语言处理（NLP）是计算机科学和信息检索的跨学科领域。它关注计算机和人类语言之间的交互，使机器能够理解和处理自然语言。
-  
+
 ```
 图形可视化：
 <a href="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.html"><img src="https://rawcdn.githack.com/topoteretes/cognee/refs/heads/main/assets/graph_visualization.png" width="100%" alt="图形可视化"></a>

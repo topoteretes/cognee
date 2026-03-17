@@ -34,14 +34,14 @@ runs:
           -e NEO4J_apoc_export_file_enabled=true \
           -e NEO4J_apoc_import_file_enabled=true \
           neo4j:${{ inputs.neo4j-version }}
-    
+
     - name: Wait for Neo4j to be ready
       shell: bash
       run: |
         echo "Waiting for Neo4j to start..."
         timeout=60
         counter=0
-        
+
         while [ $counter -lt $timeout ]; do
           if docker exec neo4j-test cypher-shell -u neo4j -p "${{ inputs.neo4j-password }}" "RETURN 1" > /dev/null 2>&1; then
             echo "Neo4j is ready!"
@@ -51,13 +51,13 @@ runs:
           sleep 2
           counter=$((counter + 2))
         done
-        
+
         if [ $counter -ge $timeout ]; then
           echo "Neo4j failed to start within $timeout seconds"
           docker logs neo4j-test
           exit 1
         fi
-    
+
     - name: Verify GDS is available
       shell: bash
       run: |

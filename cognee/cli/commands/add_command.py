@@ -21,7 +21,7 @@ binary streams, then stores them in a specified dataset for further processing.
 
 Supported Input Types:
 - **Text strings**: Direct text content
-- **File paths**: Local file paths (absolute paths starting with "/")  
+- **File paths**: Local file paths (absolute paths starting with "/")
 - **File URLs**: "file:///absolute/path" or "file://relative/path"
 - **S3 paths**: "s3://bucket-name/path/to/file"
 - **Lists**: Multiple files or text strings in a single call

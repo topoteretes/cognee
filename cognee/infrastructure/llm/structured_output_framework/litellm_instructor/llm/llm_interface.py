@@ -3,18 +3,14 @@
 from typing import Type, Protocol
 from abc import abstractmethod
 from pydantic import BaseModel
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
 class LLMInterface(Protocol):
     """
-    Define an interface for LLM models with methods for structured output and prompt
-    display.
+    Define an interface for LLM models with methods for structured output, multimodal processing, and prompt display.
 
     Methods:
-    - acreate_structured_output(text_input: str, system_prompt: str, response_model:
-    Type[BaseModel])
-    - show_prompt(text_input: str, system_prompt: str)
+    - acreate_structured_output(text_input: str, system_prompt: str, response_model: Type[BaseModel])
     """
 
     @abstractmethod

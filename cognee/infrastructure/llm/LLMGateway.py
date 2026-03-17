@@ -38,19 +38,6 @@ class LLMGateway:
             )
 
     @staticmethod
-    def create_structured_output(
-        text_input: str, system_prompt: str, response_model: Type[BaseModel]
-    ) -> BaseModel:
-        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
-            get_llm_client,
-        )
-
-        llm_client = get_llm_client()
-        return llm_client.create_structured_output(
-            text_input=text_input, system_prompt=system_prompt, response_model=response_model
-        )
-
-    @staticmethod
     def create_transcript(input) -> Coroutine:
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,

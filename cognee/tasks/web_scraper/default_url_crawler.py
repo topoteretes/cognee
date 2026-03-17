@@ -5,6 +5,7 @@ import time
 from typing import Any, Union, List, Dict, Optional
 from urllib.parse import urlparse
 import httpx
+import os
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
@@ -14,13 +15,13 @@ logger = get_logger()
 try:
     from protego import Protego
 except ImportError:
-    logger.warning("Failed to import protego, make sure to install using pip install protego>=0.1")
+    logger.debug("Failed to import protego, make sure to install using pip install protego>=0.1")
     Protego = None
 
 try:
     from playwright.async_api import async_playwright
 except ImportError:
-    logger.warning(
+    logger.debug(
         "Failed to import playwright, make sure to install using pip install playwright>=1.9.0"
     )
     async_playwright = None
@@ -47,8 +48,8 @@ class DefaultUrlCrawler:
         *,
         concurrency: int = 5,
         crawl_delay: float = 0.5,
-        max_crawl_delay: Optional[float] = 10.0,
-        timeout: float = 15.0,
+        max_crawl_delay: Optional[float] = float(os.getenv("WEB_SCRAPER_MAX_DELAY", 10.0)),
+        timeout: float = float(os.getenv("WEB_SCRAPER_TIMEOUT", 15.0)),
         max_retries: int = 2,
         retry_delay_factor: float = 0.5,
         headers: Optional[Dict[str, str]] = None,
@@ -73,7 +74,11 @@ class DefaultUrlCrawler:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay_factor = retry_delay_factor
-        self.headers = headers or {"User-Agent": "Cognee-Scraper/1.0"}
+        self.headers = headers or {
+            "User-Agent": "Cognee-Scraper/1.0 (hello@cognee.ai)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
         self.robots_cache_ttl = robots_cache_ttl
         self._last_request_time_per_domain: Dict[str, float] = {}
         self._robots_cache: Dict[str, RobotsTxtCache] = {}
@@ -288,7 +293,7 @@ class DefaultUrlCrawler:
         while True:
             try:
                 await self._respect_rate_limit(url, crawl_delay)
-                resp = await self._client.get(url)
+                resp = await self._client.get(url, headers=self.headers)
                 resp.raise_for_status()
                 logger.info(
                     f"Successfully fetched {url} (status={resp.status_code}, size={len(resp.text)} bytes)"

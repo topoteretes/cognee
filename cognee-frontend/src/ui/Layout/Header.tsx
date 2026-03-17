@@ -46,7 +46,7 @@ export default function Header({ user }: HeaderProps) {
 
     checkMCPConnection();
     const interval = setInterval(checkMCPConnection, 30000);
-    
+
     return () => clearInterval(interval);
   }, [setMCPConnected, setMCPDisconnected]);
 

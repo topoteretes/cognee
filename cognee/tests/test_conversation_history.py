@@ -1,14 +1,11 @@
 """
 End-to-end integration test for conversation history feature.
 
-Tests all retrievers that save conversation history to Redis cache:
-1. GRAPH_COMPLETION
-2. RAG_COMPLETION
-3. GRAPH_COMPLETION_COT
-4. GRAPH_COMPLETION_CONTEXT_EXTENSION
-5. GRAPH_SUMMARY_COMPLETION
-6. TEMPORAL
-7. TRIPLET_COMPLETION
+Covers retrievers that save conversation history (via SessionManager / cache):
+  GRAPH_COMPLETION, RAG_COMPLETION, GRAPH_COMPLETION_COT,
+  GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL, TRIPLET_COMPLETION.
+Uses cache_engine.get_latest_qa for legacy assertions and cognee.session.get_session for
+session history; e2e for session SDK (get_session, add_feedback, delete_feedback) at end.
 """
 
 import os
@@ -25,7 +22,27 @@ from collections import Counter
 logger = get_logger()
 
 
+def _assert_used_graph_element_ids_shape(entry: dict, expect_none: bool = False) -> None:
+    """Assert entry has used_graph_element_ids key and valid shape (or None for Triplet)."""
+    assert "used_graph_element_ids" in entry, "QA entry should have used_graph_element_ids key"
+    ids = entry["used_graph_element_ids"]
+    if expect_none:
+        assert ids is None, "Triplet retriever should store used_graph_element_ids as None"
+        return
+    if ids is None:
+        return
+    assert isinstance(ids, dict), "used_graph_element_ids must be dict or None"
+    assert set(ids.keys()) <= {"node_ids", "edge_ids"}, (
+        "used_graph_element_ids may only have node_ids and edge_ids"
+    )
+    for key in ("node_ids", "edge_ids"):
+        if key in ids:
+            assert isinstance(ids[key], list), f"{key} must be a list"
+            assert all(isinstance(x, str) for x in ids[key]), f"{key} must be list of str"
+
+
 async def main():
+    ######BEGIN: OLD SESSION FUNCTIONALITY (to be updated/removed in COG-3881; prefer pytest) ######
     data_directory_path = str(
         pathlib.Path(
             os.path.join(
@@ -85,6 +102,7 @@ async def main():
     assert "answer" in our_qa[0] and "context" in our_qa[0], (
         "Q&A should contain answer and context fields"
     )
+    _assert_used_graph_element_ids_shape(our_qa[0])
 
     result2 = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
@@ -149,6 +167,7 @@ async def main():
     history_rag = await cache_engine.get_latest_qa(str(user.id), session_id_rag, last_n=10)
     our_qa_rag = [h for h in history_rag if h["question"] == "What companies are mentioned?"]
     assert len(our_qa_rag) == 1, "Should find RAG question in history"
+    _assert_used_graph_element_ids_shape(our_qa_rag[0])
 
     session_id_cot = "test_session_cot"
 
@@ -165,6 +184,7 @@ async def main():
     history_cot = await cache_engine.get_latest_qa(str(user.id), session_id_cot, last_n=10)
     our_qa_cot = [h for h in history_cot if h["question"] == "What do you know about TechCorp?"]
     assert len(our_qa_cot) == 1, "Should find CoT question in history"
+    _assert_used_graph_element_ids_shape(our_qa_cot[0])
 
     session_id_ext = "test_session_ext"
 
@@ -181,6 +201,7 @@ async def main():
     history_ext = await cache_engine.get_latest_qa(str(user.id), session_id_ext, last_n=10)
     our_qa_ext = [h for h in history_ext if h["question"] == "Tell me about DataCo"]
     assert len(our_qa_ext) == 1, "Should find Context Extension question in history"
+    _assert_used_graph_element_ids_shape(our_qa_ext[0])
 
     session_id_summary = "test_session_summary"
 
@@ -199,6 +220,7 @@ async def main():
         h for h in history_summary if h["question"] == "What are the key points about TechCorp?"
     ]
     assert len(our_qa_summary) == 1, "Should find Summary question in history"
+    _assert_used_graph_element_ids_shape(our_qa_summary[0])
 
     session_id_temporal = "test_session_temporal"
 
@@ -219,6 +241,7 @@ async def main():
         h for h in history_temporal if h["question"] == "Tell me about the companies"
     ]
     assert len(our_qa_temporal) == 1, "Should find Temporal question in history"
+    _assert_used_graph_element_ids_shape(our_qa_temporal[0])
 
     session_id_triplet = "test_session_triplet"
 
@@ -237,19 +260,17 @@ async def main():
         h for h in history_triplet if h["question"] == "What companies are mentioned?"
     ]
     assert len(our_qa_triplet) == 1, "Should find Triplet question in history"
+    _assert_used_graph_element_ids_shape(our_qa_triplet[0], expect_none=True)
 
-    from cognee.modules.retrieval.utils.session_cache import (
-        get_conversation_history,
+    # Session history via new session SDK (replaces legacy get_conversation_history)
+    entries = await cognee.session.get_session(session_id=session_id_1, user=user, last_n=10)
+    assert len(entries) >= 2, (
+        "Session should have at least 2 Q&A entries (two searches in session_id_1)"
     )
-
-    formatted_history = await get_conversation_history(session_id=session_id_1)
-
-    assert "Previous conversation:" in formatted_history, (
-        "Formatted history should contain 'Previous conversation:' header"
-    )
-    assert "QUESTION:" in formatted_history, "Formatted history should contain 'QUESTION:' prefix"
-    assert "CONTEXT:" in formatted_history, "Formatted history should contain 'CONTEXT:' prefix"
-    assert "ANSWER:" in formatted_history, "Formatted history should contain 'ANSWER:' prefix"
+    for entry in entries:
+        assert getattr(entry, "question", None), "Entry should have question"
+        assert getattr(entry, "context", None) is not None, "Entry should have context"
+        assert getattr(entry, "answer", None), "Entry should have answer"
 
     from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
         persist_sessions_in_knowledge_graph_pipeline,
@@ -290,6 +311,87 @@ async def main():
     assert len(collection_size) == 4, (
         f"DocumentChunk_text collection should have exactly 4 embeddings, found {len(collection_size)}"
     )
+    ######END: OLD SESSION FUNCTIONALITY######
+
+    ######E2E: NEW SESSION SDK (get_session, add_feedback, delete_feedback) ######
+    logger.info("Starting e2e tests for session SDK: get_session, add_feedback, delete_feedback")
+    session_id_sdk = "test_session_graph"  # reuse session that has Q&As from above
+    entries = await cognee.session.get_session(session_id=session_id_sdk, user=user, last_n=10)
+    assert len(entries) >= 2, (
+        f"Expected at least 2 entries for session {session_id_sdk!r}, got {len(entries)}"
+    )
+    latest = entries[-1]
+    assert latest.qa_id, "Latest entry should have qa_id"
+    qa_id_for_feedback = latest.qa_id
+
+    ok_add = await cognee.session.add_feedback(
+        session_id=session_id_sdk,
+        qa_id=qa_id_for_feedback,
+        feedback_text="E2E test feedback",
+        feedback_score=5,
+        user=user,
+    )
+    assert ok_add is True, "add_feedback should return True"
+
+    entries_after_add = await cognee.session.get_session(
+        session_id=session_id_sdk, user=user, last_n=10
+    )
+    latest_after = next((e for e in entries_after_add if e.qa_id == qa_id_for_feedback), None)
+    assert latest_after is not None, "Entry with qa_id should exist after add_feedback"
+    assert latest_after.feedback_text == "E2E test feedback", "feedback_text should be set"
+    assert latest_after.feedback_score == 5, "feedback_score should be 5"
+
+    ok_del = await cognee.session.delete_feedback(
+        session_id=session_id_sdk, qa_id=qa_id_for_feedback, user=user
+    )
+    assert ok_del is True, "delete_feedback should return True"
+
+    entries_after_del = await cognee.session.get_session(
+        session_id=session_id_sdk, user=user, last_n=10
+    )
+    latest_after_del = next((e for e in entries_after_del if e.qa_id == qa_id_for_feedback), None)
+    assert latest_after_del is not None, "Entry should still exist after delete_feedback"
+    assert latest_after_del.feedback_text is None, "feedback_text should be cleared"
+    assert latest_after_del.feedback_score is None, "feedback_score should be cleared"
+    logger.info("Session SDK e2e tests (get_session, add_feedback, delete_feedback) passed")
+    ###### END E2E: NEW SESSION SDK #####
+
+    ###### E2E: Automatic feedback detection (when caching and auto_feedback enabled) ######
+    logger.info("Starting e2e tests for automatic feedback detection")
+    session_id_autofeedback = "test_session_autofeedback"
+    await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What is TechCorp?",
+        session_id=session_id_autofeedback,
+    )
+    result_autofeedback = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="Thanks, that was really helpful!",
+        session_id=session_id_autofeedback,
+    )
+    assert result_autofeedback is not None, (
+        "Second search (feedback-like message) should return a result"
+    )
+    entries_autofeedback = await cognee.session.get_session(
+        session_id=session_id_autofeedback, user=user, last_n=10
+    )
+    assert len(entries_autofeedback) == 1, (
+        "With auto_feedback enabled, a feedback-only message must not create a new QA; "
+        f"expected 1 entry, got {len(entries_autofeedback)}"
+    )
+    entry_autofeedback = entries_autofeedback[0]
+    assert entry_autofeedback.question == "What is TechCorp?", (
+        "Single entry must be the first question (feedback was attached to it, not stored as new QA)"
+    )
+    assert getattr(entry_autofeedback, "feedback_text", None) and getattr(
+        entry_autofeedback, "feedback_score", None
+    ), "Automatic feedback must be stored on the previous QA (feedback_text or feedback_score set)"
+    logger.info(
+        "Automatic feedback detection e2e passed: feedback_text=%s, feedback_score=%s",
+        getattr(entry_autofeedback, "feedback_text", None),
+        getattr(entry_autofeedback, "feedback_score", None),
+    )
+    ###### END E2E: Automatic feedback detection #####
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)

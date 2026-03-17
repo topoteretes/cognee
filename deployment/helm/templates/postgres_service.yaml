@@ -11,4 +11,3 @@ spec:
       targetPort: {{ .Values.postgres.port }}
   selector:
     app: {{ .Release.Name }}-postgres
-

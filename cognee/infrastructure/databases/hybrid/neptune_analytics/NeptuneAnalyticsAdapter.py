@@ -26,12 +26,14 @@ class IndexSchema(DataPoint):
     Attributes:
     - id: A string representing the unique identifier for the data point.
     - text: A string representing the content of the data point.
+    - belongs_to_set: A list of node names this data point belongs to, used for filtering.
     - metadata: A dictionary with default index fields for the schema, currently configured
     to include 'text'.
     """
 
     id: str
     text: str
+    belongs_to_set: List[str] = []
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -236,6 +238,8 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         query_vector: Optional[List[float]] = None,
         limit: Optional[int] = None,
         with_vector: bool = False,
+        include_payload: bool = False,  # TODO: Add support for this parameter
+        node_name: Optional[List[str]] = None,
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -290,16 +294,25 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         query_string = f"""
         CALL neptune.algo.vectors.topKByEmbeddingWithFiltering({{
                 topK: {limit},
-                embedding: {embedding}, 
+                embedding: {embedding},
                 nodeFilter: {{ equals: {{property: '{self._COLLECTION_PREFIX}', value: '{collection_name}'}} }}
               }}
             )
         YIELD node, score
         """
 
+        # Filter by belongs_to_set if node_name is provided
+        if node_name:
+            escaped_names = [name.replace("'", "\\'") for name in node_name]
+            name_list = ", ".join(f"'{name}'" for name in escaped_names)
+            query_string += f"""
+        WITH node, score
+        WHERE any(name IN node.belongs_to_set WHERE name IN [{name_list}])
+        """
+
         if with_vector:
             query_string += """
-        WITH node, score, id(node) as node_id 
+        WITH node, score, id(node) as node_id
         MATCH (n)
         WHERE id(n) = id(node)
         CALL neptune.algo.vectors.get(n)
@@ -319,7 +332,13 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             self._na_exception_handler(e, query_string)
 
     async def batch_search(
-        self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
+        self,
+        collection_name: str,
+        query_texts: List[str],
+        limit: int,
+        with_vectors: bool = False,
+        include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -342,7 +361,15 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         data_vectors = await self.embedding_engine.embed_text(query_texts)
         return await asyncio.gather(
             *[
-                self.search(collection_name, None, vector, limit, with_vectors)
+                self.search(
+                    collection_name,
+                    None,
+                    vector,
+                    limit,
+                    with_vectors,
+                    include_payload=include_payload,
+                    node_name=node_name,
+                )
                 for vector in data_vectors
             ]
         )
@@ -422,7 +449,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         RETURN true
         LIMIT 1;
         """
-        query_result = await self._client.query(query)
+        query_result = self._client.query(query)
         return len(query_result) == 0
 
     @staticmethod

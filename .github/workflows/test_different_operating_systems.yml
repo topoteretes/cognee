@@ -10,7 +10,7 @@ on:
         required: false
         type: string
         default: '["3.10.x", "3.12.x", "3.13.x"]'
-      os: 
+      os:
         required: false
         type: string
         default: '["ubuntu-22.04", "macos-15", "windows-latest"]'
@@ -52,7 +52,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -73,43 +73,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-
-  run-integration-tests:
-    name: Integration tests ${{ matrix.python-version }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    strategy:
-      matrix:
-        python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: ${{ fromJSON(inputs.os) }}
-      fail-fast: false
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Run integration tests
-        shell: bash
-        run: uv run pytest cognee/tests/integration/
-        env:
-          PYTHONUTF8: 1
-          LLM_PROVIDER: openai
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-
-          EMBEDDING_PROVIDER: openai
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -126,7 +90,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -146,6 +110,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -163,7 +128,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -193,7 +158,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -203,7 +168,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Path setup
-        if: ${{ matrix.os }} == 'windows-latest'
+        if: ${{ matrix.os == 'windows-latest' }}
         shell: bash
         run: |
           PATH=$(printf '%s' "$PATH" | tr ':' $'\n' | grep -vi '/git/usr/bin' | paste -sd: -)
@@ -214,14 +179,15 @@ jobs:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_delete_soft.py
+        run: uv run python ./cognee/tests/test_delete_default_graph.py
 
   run-hard-deletion-test:
-    name: Hard Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
+    name: Custom Graph Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -231,7 +197,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -240,13 +206,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run Hard Deletion Test
+      - name: Run Custom Graph Deletion Test
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_delete_hard.py
+        run: uv run python ./cognee/tests/test_delete_custom_graph.py

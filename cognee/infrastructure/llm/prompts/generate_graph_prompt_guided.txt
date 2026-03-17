@@ -22,7 +22,7 @@ You are an advanced algorithm designed to extract structured information to buil
 3. **Coreference Resolution**:
    - Maintain one consistent node ID for each real-world entity.
    - Resolve aliases, acronyms, and pronouns to the most complete form.
-   - *Example*: Always use "John Doe" even if later referred to as "Doe" or "he".
+   - *Example*: Always use full identifier even if later referred to as in a similar but slightly different way
 
 **Property & Data Guidelines**:
 

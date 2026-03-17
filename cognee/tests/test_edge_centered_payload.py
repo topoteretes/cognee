@@ -107,6 +107,9 @@ async def main():
     cognee.config.data_root_directory(data_directory_path)
     cognee.config.system_root_directory(cognee_directory_path)
 
+    # Enable triplet embedding for this test
+    os.environ["TRIPLET_EMBEDDING"] = "true"
+
     dataset_name = "tech_companies"
 
     await cognee.prune.prune_data()
@@ -137,9 +140,13 @@ async def main():
             query_text="technology", limit=None, collection_name="Triplet_text"
         )
 
-        assert len(triplets_phase2) == len(edges_phase2), (
-            f"Triplet embeddings and number of edges do not match. Vector db contains {len(triplets_phase2)} edge triplets while graph db contains {len(edges_phase2)} edges."
+        assert len(triplets_phase2) > 0, (
+            "Expected triplet embeddings to be created, but found none."
         )
+        assert len(triplets_phase2) == len(edges_phase2), (
+            f"Triplet count ({len(triplets_phase2)}) should be equal to edge count: ({len(edges_phase2)})."
+        )
+        logger.info(f"Created {len(triplets_phase2)} triplets from {len(edges_phase2)} edges")
 
         search_results_phase2 = await cognee.search(
             query_type=SearchType.TRIPLET_COMPLETION,

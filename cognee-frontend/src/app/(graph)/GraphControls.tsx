@@ -111,7 +111,7 @@ export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeCha
 
   const [isAuthShapeChangeEnabled, setIsAuthShapeChangeEnabled] = useState(true);
   const shapeChangeTimeout = useRef<number | null>(null);
-  
+
   useEffect(() => {
     onGraphShapeChange(DEFAULT_GRAPH_SHAPE);
 

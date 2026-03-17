@@ -17,6 +17,8 @@ from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunInfo,
@@ -29,6 +31,7 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
 )
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
+from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 
 logger = get_logger("api.cognify")
@@ -38,6 +41,7 @@ class CognifyPayloadDTO(InDTO):
     datasets: Optional[List[str]] = Field(default=None)
     dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
+    graph_model: Optional[dict] = Field(default=None, examples=[{}])
     custom_prompt: Optional[str] = Field(
         default="", description="Custom prompt for entity extraction and graph generation"
     )
@@ -46,12 +50,18 @@ class CognifyPayloadDTO(InDTO):
         examples=[[]],
         description="Reference to one or more previously uploaded ontologies",
     )
+    chunks_per_batch: Optional[int] = Field(
+        default=None,
+        description="Number of chunks to process per task batch in Cognify (overrides default).",
+        examples=[10, 20, 50, 100],
+    )
 
 
 def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
+    @log_usage(function_name="POST /v1/cognify", log_type="api_endpoint")
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Transform datasets into structured knowledge graphs through cognitive processing.
@@ -140,12 +150,20 @@ def get_cognify_router() -> APIRouter:
                     }
                 }
 
+            if not payload.graph_model:
+                graph_model = KnowledgeGraph
+            else:
+                # If a custom graph model is provided, convert it from dict to a Pydantic model class
+                graph_model = graph_schema_to_graph_model(payload.graph_model)
+
             cognify_run = await cognee_cognify(
                 datasets,
                 user,
+                graph_model=graph_model,
                 config=config_to_use,
                 run_in_background=payload.run_in_background,
                 custom_prompt=payload.custom_prompt,
+                chunks_per_batch=payload.chunks_per_batch,
             )
 
             # If any cognify run errored return JSONResponse with proper error status code

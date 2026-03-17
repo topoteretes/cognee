@@ -2,23 +2,30 @@ from uuid import UUID
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, UploadFile, Depends
-from typing import List, Optional, Union, Literal
+from fastapi import Form, File, UploadFile as UF, Depends
+from typing import List, Optional, Union, Literal, Annotated
+from pydantic import WithJsonSchema
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 
 logger = get_logger()
+
+# NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
+#       Once issue is resolved on Swagger side it can be removed.
+UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 
 def get_add_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
+    @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),

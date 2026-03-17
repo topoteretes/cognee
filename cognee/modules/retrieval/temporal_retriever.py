@@ -1,22 +1,15 @@
 import os
 import asyncio
-from typing import Any, Optional, List, Type
+from typing import Any, Dict, List, Optional, Type
 from datetime import datetime
 
 from operator import itemgetter
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
-from cognee.modules.retrieval.utils.session_cache import (
-    save_conversation_history,
-    get_conversation_history,
-)
-from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
-from cognee.context_global_variables import session_user
-from cognee.infrastructure.databases.cache.config import CacheConfig
 
 from cognee.tasks.temporal_graph.models import QueryInterval
 
@@ -49,6 +42,8 @@ class TemporalRetriever(GraphCompletionRetriever):
         node_name: Optional[List[str]] = None,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -58,6 +53,8 @@ class TemporalRetriever(GraphCompletionRetriever):
             node_name=node_name,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
+            session_id=session_id,
+            response_model=response_model,
         )
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
@@ -65,6 +62,12 @@ class TemporalRetriever(GraphCompletionRetriever):
         self.top_k = top_k if top_k is not None else 5
         self.node_type = node_type
         self.node_name = node_name
+
+    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        """Extract node_ids/edge_ids from temporal dict (triplets or relevant_events)."""
+        if isinstance(retrieved_objects, dict):
+            return extract_from_temporal_dict(retrieved_objects)
+        return None
 
     def descriptions_to_string(self, results):
         descs = []
@@ -98,7 +101,7 @@ class TemporalRetriever(GraphCompletionRetriever):
 
     async def filter_top_k_events(self, relevant_events, scored_results):
         # Build a score lookup from vector search results
-        score_lookup = {res.payload["id"]: res.score for res in scored_results}
+        score_lookup = {res.id: res.score for res in scored_results}
 
         events_with_scores = []
         for event in relevant_events[0]["events"]:
@@ -109,12 +112,11 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         return events_with_scores[: self.top_k]
 
-    async def get_context(self, query: str) -> Any:
-        """Retrieves context based on the query."""
-
+    async def get_retrieved_objects(self, query: str) -> dict:
         time_from, time_to = await self.extract_time_from_query(query)
 
-        graph_engine = await get_graph_engine()
+        unified = await get_unified_engine()
+        graph_engine = unified.graph
 
         if time_from and time_to:
             ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
@@ -127,7 +129,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No timestamps identified based on the query, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets)
+            return {"triplets": triplets}
 
         if ids:
             relevant_events = await graph_engine.collect_events(ids=ids)
@@ -136,83 +138,29 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets)
+            return {"triplets": triplets}
 
-        vector_engine = get_vector_engine()
+        vector_engine = unified.vector
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
         vector_search_results = await vector_engine.search(
-            collection_name="Event_name", query_vector=query_vector, limit=None
+            collection_name="Event_name", query_vector=query_vector, limit=self.top_k
         )
 
-        top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
+        return {"relevant_events": relevant_events, "vector_search_results": vector_search_results}
 
-        return self.descriptions_to_string(top_k_events)
-
-    async def get_completion(
-        self,
-        query: str,
-        context: Optional[str] = None,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
-    ) -> List[Any]:
-        """
-        Generates a response using the query and optional context.
-
-        Parameters:
-        -----------
-
-            - query (str): The query string for which a completion is generated.
-            - context (Optional[str]): Optional context to use; if None, it will be
-              retrieved based on the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
-            - response_model (Type): The Pydantic model type for structured output. (default str)
-
-        Returns:
-        --------
-
-            - List[str]: A list containing the generated completion.
-        """
-        if not context:
-            context = await self.get_context(query=query)
-
-        if context:
-            # Check if we need to generate context summary for caching
-            cache_config = CacheConfig()
-            user = session_user.get()
-            user_id = getattr(user, "id", None)
-            session_save = user_id and cache_config.caching
-
-            if session_save:
-                conversation_history = await get_conversation_history(session_id=session_id)
-
-                context_summary, completion = await asyncio.gather(
-                    summarize_text(context),
-                    generate_completion(
-                        query=query,
-                        context=context,
-                        user_prompt_path=self.user_prompt_path,
-                        system_prompt_path=self.system_prompt_path,
-                        conversation_history=conversation_history,
-                        response_model=response_model,
-                    ),
-                )
-            else:
-                completion = await generate_completion(
-                    query=query,
-                    context=context,
-                    user_prompt_path=self.user_prompt_path,
-                    system_prompt_path=self.system_prompt_path,
-                    response_model=response_model,
-                )
-
-            if session_save:
-                await save_conversation_history(
-                    query=query,
-                    context_summary=context_summary,
-                    answer=completion,
-                    session_id=session_id,
-                )
-
-        return [completion]
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any:
+        """Retrieves context based on the query."""
+        if retrieved_objects.get("relevant_events", None) and retrieved_objects.get(
+            "vector_search_results", None
+        ):
+            top_k_events = await self.filter_top_k_events(
+                retrieved_objects.get("relevant_events"),
+                retrieved_objects.get("vector_search_results", None),
+            )
+            return self.descriptions_to_string(top_k_events)
+        else:
+            # In case no events were found, fall back to triplet context
+            triplets = retrieved_objects.get("triplets", [])
+            context_text = await self.resolve_edges_to_text(triplets)
+            return context_text

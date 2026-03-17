@@ -1,7 +1,11 @@
 import asyncio
-from typing import Type, List, Optional
+import inspect
+from typing import Dict, Type, List, Optional
 from pydantic import BaseModel
 
+from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
@@ -17,6 +21,7 @@ from cognee.modules.graph.utils import (
 )
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
@@ -26,11 +31,41 @@ from cognee.tasks.graph.exceptions import (
 from cognee.modules.cognify.config import get_cognify_config
 
 
+def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
+    """Recursively stamp all reachable DataPoints with provenance info."""
+    if visited is None:
+        visited = set()
+
+    if isinstance(data, DataPoint):
+        obj_id = id(data)
+        if obj_id in visited:
+            return
+        visited.add(obj_id)
+
+        if data.source_pipeline is None:
+            data.source_pipeline = pipeline_name
+        if data.source_task is None:
+            data.source_task = task_name
+
+        for field_name in data.model_fields:
+            field_value = getattr(data, field_name, None)
+            if field_value is not None:
+                _stamp_provenance_deep(field_value, pipeline_name, task_name, visited)
+
+    elif isinstance(data, (list, tuple)):
+        for item in data:
+            _stamp_provenance_deep(item, pipeline_name, task_name, visited)
+
+
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
+    context: Dict,
+    pipeline_name: str = None,
+    task_name: str = None,
+    **kwargs,
 ) -> List[DocumentChunk]:
     """Integrate chunk graphs with ontology validation and store in databases.
 
@@ -85,17 +120,32 @@ async def integrate_chunk_graphs(
     embed_triplets = cognify_config.triplet_embedding
 
     if len(graph_nodes) > 0:
+        if pipeline_name or task_name:
+            for node in graph_nodes:
+                _stamp_provenance_deep(node, pipeline_name, task_name)
+
+        cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
+        if callable(cache_entity_embeddings):
+            callback_result = cache_entity_embeddings(graph_nodes, **kwargs)
+            if inspect.isawaitable(callback_result):
+                await callback_result
+
         await add_data_points(
-            data_points=graph_nodes, custom_edges=graph_edges, embed_triplets=embed_triplets
+            data_points=graph_nodes,
+            context=context,
+            custom_edges=graph_edges,
+            embed_triplets=embed_triplets,
         )
 
     return data_chunks
 
 
+@task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
+    context: Dict,
     graph_model: Type[BaseModel],
-    config: Config = None,
+    config: Optional[Config] = None,
     custom_prompt: Optional[str] = None,
     **kwargs,
 ) -> List[DocumentChunk]:
@@ -110,12 +160,31 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
-    chunk_graphs = await asyncio.gather(
-        *[
-            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs)
-            for chunk in data_chunks
-        ]
-    )
+    # Skip LLM extraction for DLT row chunks — their graph is built
+    # deterministically by extract_dlt_fk_edges from schema metadata.
+    from cognee.modules.data.processing.document_types import DltRowDocument
+
+    dlt_chunks = [
+        c for c in data_chunks if isinstance(getattr(c, "is_part_of", None), DltRowDocument)
+    ]
+    non_dlt_chunks = [c for c in data_chunks if c not in dlt_chunks]
+
+    if not non_dlt_chunks:
+        return data_chunks
+
+    calculate_chunk_graphs = kwargs.get("calculate_chunk_graphs")
+    if callable(calculate_chunk_graphs):
+        extracted = calculate_chunk_graphs(non_dlt_chunks, graph_model, custom_prompt, **kwargs)
+        chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
+    else:
+        chunk_graphs = await asyncio.gather(
+            *[
+                extract_content_graph(
+                    chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+                )
+                for chunk in non_dlt_chunks
+            ]
+        )
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:
@@ -147,4 +216,18 @@ async def extract_graph_from_data(
 
     ontology_resolver = config["ontology_config"]["ontology_resolver"]
 
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_resolver)
+    pipeline_name = context.get("pipeline_name") if isinstance(context, dict) else None
+    task_name = "extract_graph_from_data"
+
+    integrated = await integrate_chunk_graphs(
+        non_dlt_chunks,
+        chunk_graphs,
+        graph_model,
+        ontology_resolver,
+        context,
+        pipeline_name=pipeline_name,
+        task_name=task_name,
+        **kwargs,
+    )
+
+    return integrated + dlt_chunks

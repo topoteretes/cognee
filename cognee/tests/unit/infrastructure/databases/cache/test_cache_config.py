@@ -55,6 +55,7 @@ def test_cache_config_to_dict():
     assert config_dict == {
         "cache_backend": "fs",
         "caching": True,
+        "auto_feedback": False,
         "shared_kuzu_lock": True,
         "cache_host": "test-host",
         "cache_port": 7000,
@@ -62,6 +63,8 @@ def test_cache_config_to_dict():
         "cache_password": None,
         "agentic_lock_expire": 100,
         "agentic_lock_timeout": 200,
+        "usage_logging": False,
+        "usage_logging_ttl": 604800,
     }
 
 

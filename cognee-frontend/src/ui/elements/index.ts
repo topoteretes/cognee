@@ -10,4 +10,4 @@ export { default as NeutralButton } from "./NeutralButton";
 export { default as StatusIndicator } from "./StatusIndicator";
 export { default as StatusDot } from "./StatusDot";
 export { default as Accordion } from "./Accordion";
-export { default as Notebook } from "./Notebook"; 
+export { default as Notebook } from "./Notebook";

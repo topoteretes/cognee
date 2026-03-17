@@ -2,10 +2,16 @@ name: Load tests
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      ci-image:
+        required: false
+        type: string
+        default: ''
     secrets:
       LLM_MODEL:
         required: true
@@ -34,10 +40,11 @@ jobs:
   test-load:
     name: Test Load
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     timeout-minutes: 60
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -56,6 +63,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -66,5 +74,3 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
         run: uv run python ./cognee/tests/test_load.py
-  
-    

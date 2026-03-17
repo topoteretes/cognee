@@ -15,7 +15,7 @@ You are an advanced algorithm that extracts structured data into a knowledge gra
    - Properties are key-value pairs; do not use escaped quotes.
 
 3. **Coreference Resolution**
-   - Use a single, complete identifier for each entity (e.g., always "John Doe" not "Joe" or "he").
+   - Use a single, complete identifier for each entity
 
 4. **Relationship Labels**:
    - Use descriptive, lowercase, snake_case names for edges.

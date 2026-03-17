@@ -1,19 +1,10 @@
 name: release.yml
 on:
   workflow_dispatch:
-    inputs:
-      flavour:
-        required: true
-        default: dev
-        type: choice
-        options:
-          - dev
-          - main
-        description: Dev or Main release
 
 jobs:
   release-github:
-    name: Create GitHub Release from ${{ inputs.flavour }}
+    name: Create GitHub Release from ${{ github.ref_name }}
     outputs:
       tag: ${{ steps.create_tag.outputs.tag }}
       version: ${{ steps.create_tag.outputs.version }}
@@ -22,12 +13,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out ${{ inputs.flavour }}
-        uses: actions/checkout@v4
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.flavour }}
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0  # Fetch all history for comparison
+
+      - name: Fetch main branch for comparison
+        if: ${{ github.ref_name == 'dev' }}
+        run: git fetch origin main:main
+
+      - name: Fetch dev branch for comparison
+        if: ${{ github.ref_name == 'main' }}
+        run: git fetch origin dev:dev
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked
 
       - name: Create and push git tag
         id: create_tag
@@ -42,61 +49,76 @@ jobs:
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          
+
           git tag "${TAG}"
           git push origin "${TAG}"
-          
 
-      - name: Create GitHub Release
+      - name: Generate AI-powered release notes
+        id: generate_notes
+        env:
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL != '' && secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
+        run: |
+          # Set PYTHONPATH to include project root
+          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
+
+          # Generate release notes
+          # Compares current branch against the latest release tag automatically
+          uv run python tools/generate_release_notes.py \
+            --version "${{ steps.create_tag.outputs.version }}" \
+            --github-output
+
+      - name: Create GitHub Release with AI-generated notes
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.create_tag.outputs.tag }}
-          generate_release_notes: true
+          body: ${{ steps.generate_notes.outputs.RELEASE_NOTES }}
+          prerelease: ${{ github.ref_name == 'dev' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
-  release-pypi-package:    
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+
+  release-pypi-package:
     needs: release-github
-    name: Release PyPI Package from ${{ inputs.flavour }}
+    name: Release PyPI Package from ${{ github.ref_name }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out ${{ inputs.flavour }}
-        uses: actions/checkout@v4
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.flavour }}
-      
+          ref: ${{ github.ref_name }}
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
-      
+
       - name: Install Python
         run: uv python install
-      
+
       - name: Install dependencies
         run: uv sync --locked --all-extras
-      
+
       - name: Build distributions
         run: uv build
-      
-      - name: Publish ${{ inputs.flavour }} release to PyPI
+
+      - name: Publish ${{ github.ref_name }} release to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: uv publish
-  
-  release-docker-image:    
+
+  release-docker-image:
     needs: release-github
-    name: Release Docker Image from ${{ inputs.flavour }}
+    name: Release Docker Image from ${{ github.ref_name }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out ${{ inputs.flavour }}
-        uses: actions/checkout@v4
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.flavour }}
+          ref: ${{ github.ref_name }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -108,8 +130,8 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Dev Docker Image
-        if: ${{ inputs.flavour == 'dev' }}
-        uses: docker/build-push-action@v5
+        if: ${{ github.ref_name == 'dev' }}
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -117,22 +139,50 @@ jobs:
           tags: cognee/cognee:${{ needs.release-github.outputs.version }}
           labels: |
             version=${{ needs.release-github.outputs.version }}
-            flavour=${{ inputs.flavour }}
+            flavour=${{ github.ref_name }}
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
 
       - name: Build and push Main Docker Image
-        if: ${{ inputs.flavour == 'main' }}
-        uses: docker/build-push-action@v5
+        if: ${{ github.ref_name == 'main' }}
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: | 
+          tags: |
             cognee/cognee:${{ needs.release-github.outputs.version }}
             cognee/cognee:latest
           labels: |
             version=${{ needs.release-github.outputs.version }}
-            flavour=${{ inputs.flavour }}
+            flavour=${{ github.ref_name }}
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
+
+  trigger-docs-test-suite:
+    needs: release-pypi-package
+    if: ${{ github.ref_name == 'main' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Trigger docs tests
+        run: |
+          curl -L -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/topoteretes/cognee-docs/dispatches \
+            -d '{"event_type":"new-main-release","client_payload":{"caller_repo":"'"${GITHUB_REPOSITORY}"'"}}'
+
+  trigger-community-test-suite:
+    needs: release-pypi-package
+    if: ${{ github.ref_name == 'main' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Trigger community tests
+        run: |
+          curl -L -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/topoteretes/cognee-community/dispatches \
+            -d '{"event_type":"new-main-release","client_payload":{"caller_repo":"'"${GITHUB_REPOSITORY}"'"}}'

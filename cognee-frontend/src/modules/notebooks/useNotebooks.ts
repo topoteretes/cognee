@@ -1,20 +1,18 @@
 import { useCallback, useState } from "react";
-import { fetch, isCloudEnvironment } from "@/utils";
 import { Cell, Notebook } from "@/ui/elements/Notebook/types";
+import { CogneeInstance } from "@/modules/instances/types";
+import createNotebook from "./createNotebook";
+import deleteNotebook from "./deleteNotebook";
+import getNotebooks from "./getNotebooks";
+import runNotebookCell from "./runNotebookCell";
+import { default as persistNotebook } from "./saveNotebook";
 
-function useNotebooks() {
+function useNotebooks(instance: CogneeInstance) {
   const [notebooks, setNotebooks] = useState<Notebook[]>([]);
 
   const addNotebook = useCallback((notebookName: string) => {
-    return fetch("/v1/notebooks", {
-        body: JSON.stringify({ name: notebookName }),
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }, isCloudEnvironment())
-      .then((response) => response.json())
-      .then((notebook) => {
+    return createNotebook(notebookName, instance)
+      .then((notebook: Notebook) => {
         setNotebooks((notebooks) => [
           ...notebooks,
           notebook,
@@ -22,36 +20,29 @@ function useNotebooks() {
 
         return notebook;
       });
-  }, []);
+  }, [instance]);
 
   const removeNotebook = useCallback((notebookId: string) => {
-    return fetch(`/v1/notebooks/${notebookId}`, {
-      method: "DELETE",
-    }, isCloudEnvironment())
+    return deleteNotebook(notebookId, instance)
     .then(() => {
       setNotebooks((notebooks) =>
         notebooks.filter((notebook) => notebook.id !== notebookId)
       );
     });
-  }, []);
+  }, [instance]);
 
   const fetchNotebooks = useCallback(() => {
-    return fetch("/v1/notebooks", {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }, isCloudEnvironment())
-    .then((response) => response.json())
+    return getNotebooks(instance)
     .then((notebooks) => {
       setNotebooks(notebooks);
 
       return notebooks;
     })
     .catch((error) => {
-      console.error("Error fetching notebooks:", error);
+      console.error("Error fetching notebooks:", error.detail);
       throw error
     });
-  }, []);
+  }, [instance]);
 
   const updateNotebook = useCallback((updatedNotebook: Notebook) => {
     setNotebooks((existingNotebooks) =>
@@ -64,20 +55,13 @@ function useNotebooks() {
   }, []);
 
   const saveNotebook = useCallback((notebook: Notebook) => {
-    return fetch(`/v1/notebooks/${notebook.id}`, {
-      body: JSON.stringify({
-        name: notebook.name,
-        cells: notebook.cells,
-      }),
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }, isCloudEnvironment())
-    .then((response) => response.json())
-  }, []);
+    return persistNotebook(notebook.id, {
+      name: notebook.name,
+      cells: notebook.cells,
+    }, instance);
+  }, [instance]);
 
-  const runCell = useCallback((notebook: Notebook, cell: Cell, cogneeInstance: string) => {
+  const runCell = useCallback((notebook: Notebook, cell: Cell) => {
     setNotebooks((existingNotebooks) =>
       existingNotebooks.map((existingNotebook) =>
         existingNotebook.id === notebook.id ? {
@@ -89,20 +73,11 @@ function useNotebooks() {
               error: undefined,
             } : existingCell
           ),
-        } : notebook
+        } : existingNotebook
       )
     );
 
-    return fetch(`/v1/notebooks/${notebook.id}/${cell.id}/run`, {
-        body: JSON.stringify({
-          content: cell.content,
-        }),
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }, cogneeInstance === "cloud")
-      .then((response) => response.json())
+    return runNotebookCell(notebook.id, cell, instance)
       .then((response) => {
         setNotebooks((existingNotebooks) =>
           existingNotebooks.map((existingNotebook) =>
@@ -115,11 +90,11 @@ function useNotebooks() {
                   error: response.error,
                 } : existingCell
               ),
-            } : notebook
+            } : existingNotebook
           )
         );
       });
-  }, []);
+  }, [instance]);
 
   return {
     notebooks,
