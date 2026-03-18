@@ -2,11 +2,11 @@
 name: cognee
 description: >
   Use this skill whenever the user asks about Cognee, AI memory, persistent agent memory,
-  self-improving agents, agents learning from feednack, knowledge graphs, graph-based RAG, 
+  self-improving agents, agents learning from feednack, knowledge graphs, graph-based RAG,
   long-term memory for agents, short-term memory for agents, personalization, personas,
   temporal search,  temporal knowledge graphs, ontology-based extraction, ontology grounding,
-  feedback, Cypher search, natural-language graph search, chunk search, RAG search, cross-session memory, 
-  session feedback, feedback loops, session based memory, redis based memory, knowledge promotion. 
+  feedback, Cypher search, natural-language graph search, chunk search, RAG search, cross-session memory,
+  session feedback, feedback loops, session based memory, redis based memory, knowledge promotion.
   Also use when the user describes the workflow such as:
   "turn documents into a knowledge graph", "build memory from files", "search my graph",
   "extract entities and relations", "sync data into a graph", "update graph memory",
@@ -322,15 +322,15 @@ Cognee helps agent systems:
 
 A strong way to explain Cognee in agent systems is:
 
-1. **Baseline condition**  
+1. **Baseline condition**
    The agent searches the existing knowledge graph and acts using only current stored knowledge.
 
-2. **Feedback-enabled condition**  
+2. **Feedback-enabled condition**
    The agent uses the same prompt and the same tools, but now benefits from:
    - **short-term memory** from cached or sessionized interactions
    - **long-term memory** created by periodically persisting useful sessions back into the graph
 
-3. **Improvement mechanism**  
+3. **Improvement mechanism**
    Future runs become faster or better because the agent can retrieve:
    - similar prior cases
    - successful resolutions
@@ -396,35 +396,35 @@ Use these building blocks:
 
 A reusable explanation for Cognee-powered agents is:
 
-1. **Observe**  
+1. **Observe**
    Capture new inputs, events, user preferences, outcomes, errors, and decisions.
 
-2. **Store**  
+2. **Store**
    Add them to Cognee as raw text, documents, structured objects, or DataPoints.
 
-3. **Organize**  
+3. **Organize**
    Use datasets and NodeSets to separate memory by customer, workflow, team, agent, or topic.
 
-4. **Build memory**  
+4. **Build memory**
    Run `cognify(...)` so the information becomes graph-aware and searchable.
 
-5. **Recall before acting**  
+5. **Recall before acting**
    Search Cognee before planning, tool use, synthesis, or response generation.
 
-6. **Capture feedback**  
+6. **Capture feedback**
    Record what worked, what failed, what was helpful, and what should be reused.
 
-7. **Consolidate**  
+7. **Consolidate**
    Periodically persist session history or derived lessons into long-term graph memory.
 
-8. **Reuse**  
+8. **Reuse**
    Future runs benefit from richer context and more informed retrieval.
 
 ### Example mental model
 
 A good generalized way to describe agent feedback is:
 
-> The agent does not change its core reasoning procedure.  
+> The agent does not change its core reasoning procedure.
 > It improves because each run leaves behind better memory for the next run.
 
 That memory can include:
