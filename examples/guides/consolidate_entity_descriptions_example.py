@@ -43,6 +43,9 @@ async def main():
 
     await visualize_graph(graph_visualization_path_after_enrichment)
 
+    result = await cognee.search("In which cities did Andreas live?")
+    print(result)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
