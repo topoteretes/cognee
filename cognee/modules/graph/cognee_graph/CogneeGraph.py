@@ -346,9 +346,9 @@ class CogneeGraph(CogneeAbstractGraph):
                         f"before scoring (got {type(distances).__name__} with length "
                         f"{len(distances) if isinstance(distances, list) else 'n/a'})"
                     )
-                value = (2 - importance_weight) * distances[query_index]
+                value = distances[query_index]
                 try:
-                    distance = float(value)
+                    distance = (2 - importance_weight) * float(value)
                 except (TypeError, ValueError):
                     raise ValueError(
                         f"{label}: vector_distance[{query_index}] must be float-like, "
