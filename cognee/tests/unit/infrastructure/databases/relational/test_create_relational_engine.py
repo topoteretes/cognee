@@ -39,9 +39,7 @@ def _fake_asyncpg():
 class TestCreateRelationalEngineSpecialCharacters:
     """Verify that special characters in credentials are handled correctly by URL.create."""
 
-    @patch(
-        "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
-    )
+    @patch("cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter")
     def test_postgres_special_chars_in_username_and_password(self, mock_adapter):
         """Username and password with special characters should round-trip correctly."""
         create_relational_engine(
@@ -56,13 +54,10 @@ class TestCreateRelationalEngineSpecialCharacters:
 class TestCreateRelationalEngineConnectArgs:
     """Verify that connect_args are forwarded to the SQLAlchemyAdapter."""
 
-    @patch(
-        "cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter"
-    )
-    def test_postgres_no_connect_args_passes_none(self, mock_adapter):
-        """When no connect_args are provided, None should be forwarded to the adapter."""
+    @patch("cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter")
+    def test_postgres_no_connect_args_passes_empty_dict(self, mock_adapter):
+        """When no connect_args are provided, an empty dict should be forwarded to the adapter."""
         create_relational_engine(**POSTGRES_PARAMS)
 
         _, kwargs = mock_adapter.call_args
-        assert kwargs.get("connect_args") is None
-
+        assert kwargs.get("connect_args") == {}
