@@ -2,6 +2,7 @@ import os
 import re
 import json
 import uuid
+import logging
 from typing import Optional
 from fastapi import Depends, Request, Response
 from fastapi_users.exceptions import UserNotExists
@@ -12,6 +13,8 @@ from contextlib import asynccontextmanager
 from .models import User
 from .get_user_db import get_user_db
 from .methods.get_user_by_email import get_user_by_email
+
+logger = logging.getLogger(__name__)
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
@@ -59,17 +62,17 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             response.headers.append("Content-Type", "application/json")
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
-        print(f"User {user.id} has registered.")
+        logger.info("User %s has registered.", user.id)
 
     async def on_after_forgot_password(
         self, user: User, token: str, request: Optional[Request] = None
     ):
-        print(f"User {user.id} has forgot their password. Reset token: {token}")
+        logger.info("User %s has forgot their password. Reset token: %s", user.id, token)
 
     async def on_after_request_verify(
         self, user: User, token: str, request: Optional[Request] = None
     ):
-        print(f"Verification requested for user {user.id}. Verification token: {token}")
+        logger.info("Verification requested for user %s. Verification token: %s", user.id, token)
 
 
 async def get_user_manager(user_db: SQLAlchemyUserDatabase = Depends(get_user_db)):

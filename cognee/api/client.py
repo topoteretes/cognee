@@ -38,6 +38,7 @@ from cognee.api.v1.users.routers import (
     get_users_router,
     get_visualize_router,
     get_configuration_router,
+    get_user_id_by_email_router,
 )
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
@@ -234,6 +235,12 @@ app.include_router(get_sync_router(), prefix="/api/v1/sync", tags=["sync"])
 
 app.include_router(
     get_users_router(),
+    prefix="/api/v1/users",
+    tags=["users"],
+)
+
+app.include_router(
+    get_user_id_by_email_router(),
     prefix="/api/v1/users",
     tags=["users"],
 )

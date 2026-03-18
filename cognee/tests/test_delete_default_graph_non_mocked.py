@@ -4,13 +4,31 @@ import pathlib
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from cognee.context_global_variables import is_multi_user_support_possible
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.operations.setup import setup
+from cognee.modules.graph.methods import (
+    get_data_related_edges,
+    get_data_related_nodes,
+    get_global_data_related_edges,
+    get_global_data_related_nodes,
+)
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
+
+
+async def _exclusive_nodes_and_edges_for_data(dataset_id, data_id):
+    """Return graph nodes/edges removable with that data (not shared with other data by slug)."""
+    if is_multi_user_support_possible():
+        nodes = await get_data_related_nodes(dataset_id, data_id)
+        edges = await get_data_related_edges(dataset_id, data_id)
+    else:
+        nodes = await get_global_data_related_nodes(data_id)
+        edges = await get_global_data_related_edges(data_id)
+    return nodes, edges
 
 
 async def main():
@@ -28,9 +46,13 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     await setup()
 
-    add_result = await cognee.add(
-        "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
+    john_doc_person_name = "John"
+    john_doc_exclusive_org_name = "Food for Hungry"
+    john_document_text = (
+        f"{john_doc_person_name} works for Apple. He is also affiliated with a non-profit "
+        f"organization called '{john_doc_exclusive_org_name}'"
     )
+    add_result = await cognee.add(john_document_text)
     johns_data_id = add_result.data_ingestion_info[0]["data_id"]
 
     add_result = await cognee.add(
@@ -69,20 +91,48 @@ async def main():
             initial_nodes_by_vector_collection[collection_name] = []
         initial_nodes_by_vector_collection[collection_name].append(node)
 
-    initial_node_ids = set([node[0] for node in initial_nodes])
+    initial_node_ids = {node[0] for node in initial_nodes}
+
+    # Pre-delete: node/edge slugs removable with that data only (shared entities excluded).
+    john_nodes, john_edges = await _exclusive_nodes_and_edges_for_data(dataset_id, johns_data_id)
+    marie_nodes, _ = await _exclusive_nodes_and_edges_for_data(dataset_id, maries_data_id)
+    john_slugs = {str(n.slug) for n in john_nodes}
+    marie_slugs = {str(n.slug) for n in marie_nodes}
+    john_edge_slugs = [str(e.slug) for e in john_edges]
+
+    assert john_slugs, "John's doc must contribute at least one non-shared graph node."
+    assert marie_slugs, "Marie's doc must contribute at least one non-shared graph node."
 
     user = await get_default_user()
+
+    # --- Delete John's data only ---
     await datasets.delete_data(dataset_id, johns_data_id, user)  # type: ignore
 
+    still_john_nodes = await graph_engine.get_nodes(list(john_slugs))
+    assert len(still_john_nodes) == 0, "John-exclusive nodes should be removed from the graph."
+
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) >= 9 and len(nodes) <= 11 and len(edges) >= 10 and len(edges) <= 12, (
-        "Nodes and edges are not deleted."
+    assert not any(src in john_slugs or tgt in john_slugs for src, tgt, _, _ in edges), (
+        "No graph edge should still attach to a removed John-exclusive node."
+    )
+    if john_edge_slugs:
+        edge_vectors = await vector_engine.retrieve("EdgeType_relationship_name", john_edge_slugs)
+        assert len(edge_vectors) == 0, "John-exclusive edge embeddings should be removed."
+
+    still_marie = await graph_engine.get_nodes(list(marie_slugs))
+    assert len(still_marie) == len(marie_slugs), (
+        "Marie-exclusive nodes must remain after deleting John's data only."
+    )
+    # Marie never mentions John or that org; they should be exclusive to John's data and gone now.
+    john_only_entity_graph_names_lower = frozenset(
+        {john_doc_person_name.lower(), john_doc_exclusive_org_name.lower()}
     )
     assert not any(
-        node[1]["name"] == "john" or node[1]["name"] == "food for hungry"
-        for node in nodes
-        if "name" in node[1]
-    ), "Nodes are not deleted."
+        node[1].get("name", "").lower() in john_only_entity_graph_names_lower for node in nodes
+    ), (
+        "Graph should not still name John or his org after deleting only John's document "
+        f"({john_doc_person_name!r}, {john_doc_exclusive_org_name!r})."
+    )
 
     after_first_delete_node_ids = set([node[0] for node in nodes])
 
@@ -108,6 +158,7 @@ async def main():
             vector_items = await vector_engine.retrieve(collection_name, query_node_ids)
             assert len(vector_items) == 0, "Vector items are not deleted."
 
+    # --- Delete Marie's data; graph and vectors should be empty ---
     await datasets.delete_data(dataset_id, maries_data_id, user)  # type: ignore
 
     final_nodes, final_edges = await graph_engine.get_graph_data()

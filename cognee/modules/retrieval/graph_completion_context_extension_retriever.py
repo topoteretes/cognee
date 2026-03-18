@@ -27,6 +27,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         node_name: Optional[List[str]] = None,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        feedback_influence: float = 0.0,
         context_extension_rounds: int = 4,
         session_id: Optional[str] = None,
         response_model: Type = str,
@@ -40,6 +41,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             system_prompt=system_prompt,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
             session_id=session_id,
             response_model=response_model,
         )
