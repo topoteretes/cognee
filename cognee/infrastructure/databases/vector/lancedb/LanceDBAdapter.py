@@ -246,6 +246,7 @@ class LanceDBAdapter(VectorDBInterface):
         normalized: bool = True,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
@@ -282,9 +283,18 @@ class LanceDBAdapter(VectorDBInterface):
                     "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
                 )
 
+                if node_name_filter_operator == "AND":
+                    node_name_filter_string = (
+                        f"array_has_all(payload.belongs_to_set, {literal_node_names})"
+                    )
+                else:
+                    node_name_filter_string = (
+                        f"array_has_any(payload.belongs_to_set, {literal_node_names})"
+                    )
+
                 result_values = (
                     await collection.vector_search(query_vector)
-                    .where(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
+                    .where(node_name_filter_string)
                     .select(select_columns)
                     .limit(limit)
                     .to_list()
