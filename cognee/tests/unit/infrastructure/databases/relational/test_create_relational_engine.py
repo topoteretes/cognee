@@ -55,9 +55,9 @@ class TestCreateRelationalEngineConnectArgs:
     """Verify that connect_args are forwarded to the SQLAlchemyAdapter."""
 
     @patch("cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter")
-    def test_postgres_no_connect_args_passes_none(self, mock_adapter):
-        """When no connect_args are provided, None should be forwarded to the adapter."""
+    def test_postgres_no_connect_args_passes_empty_dict(self, mock_adapter):
+        """When no connect_args are provided, an empty dict should be forwarded to the adapter."""
         create_relational_engine(**POSTGRES_PARAMS)
 
         _, kwargs = mock_adapter.call_args
-        assert kwargs.get("connect_args") is None
+        assert kwargs.get("connect_args") == {}
