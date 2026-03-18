@@ -1482,7 +1482,7 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
         """
         Get subgraph for a set of nodes based on type and names.
@@ -1515,12 +1515,24 @@ class KuzuAdapter(GraphDBInterface):
         if not primary_ids:
             return [], []
 
-        neighbor_query = """
-            MATCH (n:Node)-[:EDGE]-(nbr:Node)
-            WHERE n.id IN $ids
-            RETURN DISTINCT nbr.id
-        """
-        nbr_rows = await self.query(neighbor_query, {"ids": primary_ids})
+        if node_name_filter_operator == "OR":
+            neighbor_query = """
+                MATCH (n:Node)-[:EDGE]-(nbr:Node)
+                WHERE n.id IN $ids
+                RETURN DISTINCT nbr.id
+            """
+            params = {"ids": primary_ids}
+        else:
+            neighbor_query = """
+                MATCH (n:Node)-[:EDGE]-(nbr:Node)
+                WHERE n.id IN $ids
+                WITH nbr.id AS nbr_id, COUNT(DISTINCT n.id) AS matched_count
+                WHERE matched_count = $primary_count
+                RETURN nbr_id
+            """
+            params = {"ids": primary_ids, "primary_count": len(primary_ids)}
+
+        nbr_rows = await self.query(neighbor_query, params)
         neighbor_ids = [row[0] for row in nbr_rows]
 
         all_ids = list({*primary_ids, *neighbor_ids})
