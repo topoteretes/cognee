@@ -97,10 +97,13 @@ class SQLAlchemyAdapter:
             if pool_args.get("pool_timeout") is None:
                 pool_args["pool_timeout"] = 280
 
+            engine_kwargs = {**pool_args}
+            if final_connect_args:
+                engine_kwargs["connect_args"] = final_connect_args
+
             self.engine = create_async_engine(
                 connection_string,
-                **pool_args,
-                connect_args=final_connect_args,
+                **engine_kwargs,
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)

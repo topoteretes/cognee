@@ -35,6 +35,7 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
@@ -128,6 +129,9 @@ async def search(
 
         node_name: Filter results to specific named entities (for targeted search).
 
+        node_name_filter_operator: Operator determining how to filter based on node names.
+                                    Possible values: AND, OR (default is OR, i.e. disjunction)
+
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
         verbose: If True, returns detailed result information including graph representation (when possible).
@@ -191,6 +195,14 @@ async def search(
         if isinstance(datasets, UUID) or isinstance(datasets, str):
             datasets = [datasets]
 
+        allowed_node_name_operators = {"AND", "OR"}
+        normalized_node_name_filter_operator = (node_name_filter_operator or "").strip().upper()
+
+        if normalized_node_name_filter_operator not in allowed_node_name_operators:
+            raise CogneeValidationError(
+                f"Invalid node_name_filter_operator: {node_name_filter_operator!r}. Must be one of {sorted(allowed_node_name_operators)}."
+            )
+
         if user is None:
             try:
                 user = await get_default_user()
@@ -224,6 +236,7 @@ async def search(
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            node_name_filter_operator=normalized_node_name_filter_operator,
             only_context=only_context,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,

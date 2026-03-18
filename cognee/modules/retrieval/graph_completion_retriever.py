@@ -42,6 +42,7 @@ class GraphCompletionRetriever(BaseRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
         feedback_influence: float = 0.0,
@@ -56,6 +57,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self.wide_search_top_k = wide_search_top_k
         self.node_type = node_type
         self.node_name = node_name
+        self.node_name_filter_operator = node_name_filter_operator
         self.triplet_distance_penalty = triplet_distance_penalty
         self.feedback_influence = feedback_influence
         # session_id (Optional[str]): Identifier for managing conversation history.
@@ -163,6 +165,7 @@ class GraphCompletionRetriever(BaseRetriever):
             collections=collections or None,
             node_type=self.node_type,
             node_name=self.node_name,
+            node_name_filter_operator=self.node_name_filter_operator,
             wide_search_top_k=self.wide_search_top_k,
             triplet_distance_penalty=self.triplet_distance_penalty,
             feedback_influence=self.feedback_influence,
