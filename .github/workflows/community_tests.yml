@@ -103,7 +103,7 @@ jobs:
             cognee/tests/unit/tasks/storage/test_add_data_points.py \
             cognee/tests/unit/eval_framework/ \
             cognee/tests/unit/shared/ \
-            -v --timeout=60 --tb=short
+            -v --tb=short
 
   cli-unit-tests:
     name: CLI Unit Tests (Mocked, No Secrets)
@@ -128,7 +128,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run CLI unit tests
-        run: uv run pytest cognee/tests/cli_tests/cli_unit_tests/ -v --timeout=60 --tb=short
+        run: uv run pytest cognee/tests/cli_tests/cli_unit_tests/ -v --tb=short
 
   telemetry-test:
     name: Telemetry Test (Mocked, No Secrets)
@@ -153,7 +153,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run telemetry test
-        run: uv run pytest cognee/tests/test_telemetry.py -v --timeout=60 --tb=short
+        run: uv run pytest cognee/tests/test_telemetry.py -v --tb=short
 
   notify:
     name: Community Tests Status
