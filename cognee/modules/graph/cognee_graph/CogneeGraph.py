@@ -339,7 +339,11 @@ class CogneeGraph(CogneeAbstractGraph):
             importances = []
             for element, label in elements:
                 distances = element.attributes.get("vector_distance")
-                importance_weight = element.attributes.get("importance_weight", 0.5)
+                importance_weight = element.attributes.get("importance_weight")
+                try:
+                    importance_weight = float(importance_weight)
+                except (TypeError, ValueError):
+                    importance_weight = 0.5
                 if not isinstance(distances, list) or query_index >= len(distances):
                     raise ValueError(
                         f"{label}: vector_distance must be a list with length > {query_index} "
