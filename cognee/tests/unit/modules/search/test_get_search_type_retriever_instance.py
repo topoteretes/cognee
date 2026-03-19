@@ -172,5 +172,7 @@ async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
         SearchType.GRAPH_SUMMARY_COMPLETION,
         SearchType.TEMPORAL,
     ]:
-        retriever_instance = await mod.get_search_type_retriever_instance(search_type, query_text="q")
+        retriever_instance = await mod.get_search_type_retriever_instance(
+            search_type, query_text="q"
+        )
         assert retriever_instance.triplet_distance_penalty == 6.5
