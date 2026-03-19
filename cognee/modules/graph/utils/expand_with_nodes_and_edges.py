@@ -194,6 +194,7 @@ def _create_entity_node(
         description=node_description,
         ontology_valid=ontology_validated,
         belongs_to_set=data_chunk.belongs_to_set,
+        # TODO add importance_weight calculation if an entity with that id already exits
         importance_weight=data_chunk.importance_weight,
     )
 
