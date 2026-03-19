@@ -26,9 +26,9 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     await cognee.add(
         [
-            "Diana and Tom were born and raised in Helsinki. Diana currently resides in Berlin, while Tom never moved.",
             "Alice moved to Paris in 2010, while Bob has always lived in New York.",
             "Andreas was born in Venice, but later settled in Lisbon.",
+            "Diana and Tom were born and raised in Helsinki. Diana currently resides in Berlin, while Tom never moved.",
         ]
     )
     await cognee.cognify(custom_prompt=custom_prompt)
@@ -38,9 +38,6 @@ async def main():
     await consolidate_entity_descriptions_pipeline()
 
     await visualize_graph(graph_visualization_path_after_enrichment)
-
-    result = await cognee.search("In which cities did Andreas live?")
-    print(result)
 
 
 if __name__ == "__main__":
