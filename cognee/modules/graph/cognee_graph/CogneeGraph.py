@@ -322,11 +322,7 @@ class CogneeGraph(CogneeAbstractGraph):
             # Only blend real cosine distances in [0, 2].
             # Fallback penalties and out-of-range values must remain unchanged so
             # missing components stay ranked below valid matches.
-            if (
-                distance >= self.triplet_distance_penalty
-                or distance < 0.0
-                or distance > 2.0
-            ):
+            if distance >= self.triplet_distance_penalty or distance < 0.0 or distance > 2.0:
                 return distance
 
             try:
