@@ -34,7 +34,9 @@ class Person(DataPoint):
     metadata: Dict[str, Any] = {"index_fields": ["name"]}
 
 
-class LightweightData(BaseModel):
+class LightweightData(DataPoint):
+    """Lightweight DataPoint model for data ingestion only."""
+
     id: UUID
     text: str
 

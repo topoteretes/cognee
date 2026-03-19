@@ -42,7 +42,9 @@ class Company(DataPoint):
     metadata: dict = {"index_fields": ["name"]}
 
 
-class LightWeightData(BaseModel):
+class LightweightData(DataPoint):
+    """Lightweight DataPoint model for data ingestion only."""
+
     id: UUID
     companies: List[Dict[str, Any]]
     people: List[Dict[str, Any]]
@@ -50,7 +52,7 @@ class LightWeightData(BaseModel):
 
 def build_lightweight_data_object(data_list):
     return [
-        LightWeightData(
+        LightweightData(
             id=uuid5(NAMESPACE_OID, str(data)), companies=data["companies"], people=data["people"]
         )
         for data in data_list
