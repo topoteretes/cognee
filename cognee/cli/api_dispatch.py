@@ -13,6 +13,15 @@ import json
 import cognee.cli.echo as fmt
 from cognee.cli.api_client import CogneeApiClient
 
+SUPPORTED_COMMANDS = {
+    "add",
+    "cognify",
+    "search",
+    "memify",
+    "datasets",
+    "delete",
+}
+
 
 def can_dispatch(args: argparse.Namespace) -> bool:
     """Return True if the command should be dispatched via HTTP."""
@@ -21,26 +30,47 @@ def can_dispatch(args: argparse.Namespace) -> bool:
 
 def dispatch(args: argparse.Namespace) -> None:
     """Execute the CLI command by forwarding it to the API server."""
-    client = CogneeApiClient(args.api_url)
     command = args.command
+    user_id = getattr(args, "user_id", None)
 
-    dispatchers = {
-        "add": _dispatch_add,
-        "cognify": _dispatch_cognify,
-        "search": _dispatch_search,
-        "memify": _dispatch_memify,
-        "datasets": _dispatch_datasets,
-        "delete": _dispatch_delete,
-    }
-
-    handler = dispatchers.get(command)
-    if handler is None:
-        raise RuntimeError(
-            f"Command '{command}' is not supported in --api-url mode. "
-            f"Supported: {', '.join(sorted(dispatchers))}."
+    # Build optional auth header so the server can identify the caller.
+    headers: dict[str, str] = {}
+    if user_id:
+        headers["X-User-Id"] = user_id
+        fmt.note(
+            f"Passing --user-id {user_id} to the API server via X-User-Id header.  "
+            f"The server must be configured to honour this header for isolation to work."
         )
 
-    handler(client, args)
+    with CogneeApiClient(args.api_url, headers=headers) as client:
+        # Health probe — fail fast with a clear message
+        try:
+            client.health()
+        except Exception:
+            raise RuntimeError(
+                f"Cannot connect to Cognee API at {args.api_url}.  "
+                f"Is the server running?  Start it with:  "
+                f"uvicorn cognee.api.client:app --port 8000"
+            )
+
+        dispatchers = {
+            "add": _dispatch_add,
+            "cognify": _dispatch_cognify,
+            "search": _dispatch_search,
+            "memify": _dispatch_memify,
+            "datasets": _dispatch_datasets,
+            "delete": _dispatch_delete,
+        }
+
+        handler = dispatchers.get(command)
+        if handler is None:
+            raise RuntimeError(
+                f"Command '{command}' is not supported in --api-url mode "
+                f"(supported: {', '.join(sorted(dispatchers))}).  "
+                f"Run without --api-url to execute it locally."
+            )
+
+        handler(client, args)
 
 
 # -- individual dispatchers -----------------------------------------------

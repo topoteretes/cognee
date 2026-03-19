@@ -70,7 +70,7 @@ class TestAddCommand:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.add.assert_awaited_once_with(data="test.txt", dataset_name="test_dataset")
+        mock_cognee.add.assert_awaited_once_with(data="test.txt", dataset_name="test_dataset", user=ANY)
 
     @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
     def test_execute_multiple_items(self, mock_asyncio_run):
@@ -87,7 +87,7 @@ class TestAddCommand:
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
         mock_cognee.add.assert_awaited_once_with(
-            data=["test1.txt", "test2.txt"], dataset_name="test_dataset"
+            data=["test1.txt", "test2.txt"], dataset_name="test_dataset", user=ANY
         )
 
     @patch("cognee.cli.commands.add_command.asyncio.run")
@@ -158,9 +158,11 @@ class TestSearchCommand:
         mock_cognee.search.assert_awaited_once_with(
             query_text="test query",
             query_type=ANY,
+            user=ANY,
             datasets=None,
             top_k=10,
             system_prompt_path="answer_simple_question.txt",
+            session_id=ANY,
         )
         # verify the enum’s name separately
         called_enum = mock_cognee.search.await_args.kwargs["query_type"]
@@ -239,6 +241,7 @@ class TestCognifyCommand:
 
         mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
+            user=ANY,
             chunk_size=None,
             ontology_file_path=None,
             chunker=TextChunker,
@@ -285,19 +288,16 @@ class TestDeleteCommand:
         # Check that arguments are added
         actions = {action.dest: action for action in parser._actions}
         assert "dataset_name" in actions
-        assert "user_id" in actions
         assert "all" in actions
         assert "force" in actions
 
-    # @patch("cognee.modules.users.methods.get_user")
-    @patch("cognee.cli.commands.delete_command.get_user")
     @patch("cognee.cli.commands.delete_command.cognee_datasets")
+    @patch("cognee.cli.commands.delete_command.get_datasets_by_name")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    # @pytest.mark.asyncio
     def test_execute_delete_dataset_with_confirmation(
-        self, mock_asyncio_run, get_deletion_counts_mock, mock_confirm, datasets_mock, get_user_mock
+        self, mock_asyncio_run, get_deletion_counts_mock, mock_confirm, get_datasets_mock, datasets_mock
     ):
         """Test execute delete dataset with user confirmation"""
         data_directory_path = os.path.join(
@@ -315,11 +315,11 @@ class TestDeleteCommand:
 
         asyncio.run(setup())
 
-        expected_user_id = uuid4()
         expected_dataset_id = uuid4()
-        expected_user = User(id=expected_user_id)
+        mock_dataset = MagicMock()
+        mock_dataset.id = expected_dataset_id
 
-        get_user_mock.return_value = expected_user
+        get_datasets_mock.return_value = [mock_dataset]
 
         get_deletion_counts_mock = AsyncMock()
         get_deletion_counts_mock.return_value = DeletionCountsPreview()
@@ -328,14 +328,14 @@ class TestDeleteCommand:
         datasets_mock.empty_dataset = delete_dataset_mock
 
         command = DeleteCommand()
-        args = argparse.Namespace(dataset_id=expected_dataset_id, user_id=expected_user_id)
+        args = argparse.Namespace(dataset_name="test_dataset", all=False, force=False)
 
         mock_confirm.return_value = True
 
         command.execute(args)
 
         delete_dataset_mock.assert_awaited_once_with(
-            dataset_id=expected_dataset_id, user=expected_user
+            dataset_id=expected_dataset_id, user=ANY
         )
 
         asyncio.run(cognee.prune.prune_data())
@@ -357,24 +357,23 @@ class TestDeleteCommand:
 
         mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
 
-    @patch("cognee.datasets.delete_all")
+    @patch("cognee.cli.commands.delete_command.cognee_datasets")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    def test_execute_delete_forced(self, mock_asyncio_run, delete_all_mock):
+    def test_execute_delete_forced(self, mock_asyncio_run, datasets_mock):
         """Test execute delete with force flag"""
+        delete_all_mock = AsyncMock()
+        datasets_mock.delete_all = delete_all_mock
+
         command = DeleteCommand()
-
-        expected_user_id = uuid4()
-
         args = argparse.Namespace(
-            dataset_name="test_dataset",
+            dataset_name=None,
             force=True,
             all=True,
-            user_id=expected_user_id,
         )
 
         command.execute(args)
 
-        delete_all_mock.assert_awaited_once_with(user_id=expected_user_id)
+        delete_all_mock.assert_awaited_once_with(user=ANY)
 
     def test_execute_no_delete_target(self):
         """Test execute when no delete target is specified"""
