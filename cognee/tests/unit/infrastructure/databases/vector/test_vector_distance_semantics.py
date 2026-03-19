@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -114,7 +113,10 @@ async def test_lancedb_search_returns_raw_distance_and_uses_cosine():
 
     item_id = str(uuid4())
     collection = _FakeLanceCollection(
-        [{"id": item_id, "payload": {"text": "x"}, "_distance": 0.42}]
+        [
+            {"id": item_id, "payload": {"text": "x"}, "_distance": 1.42},
+            {"id": str(uuid4()), "payload": {"text": "y"}, "_distance": 0.21},
+        ]
     )
     adapter.get_collection = AsyncMock(return_value=collection)
 
@@ -124,8 +126,8 @@ async def test_lancedb_search_returns_raw_distance_and_uses_cosine():
         include_payload=True,
     )
 
-    assert len(results) == 1
-    assert results[0].score == 0.42
+    assert len(results) == 2
+    assert [result.score for result in results] == [1.42, 0.21]
     assert collection.queries[0].distance_type_value == "cosine"
 
 
@@ -166,12 +168,12 @@ async def test_chromadb_search_and_batch_return_raw_distance():
             {
                 "ids": [[ids[0]]],
                 "metadatas": [[{"text": "a"}]],
-                "distances": [[0.31]],
+                "distances": [[1.31]],
             },
             {
                 "ids": [[ids[0], ids[1]], [ids[1]]],
                 "metadatas": [[{"text": "a"}, {"text": "b"}], [{"text": "c"}]],
-                "distances": [[0.7, 0.2], [0.4]],
+                "distances": [[1.7, 0.2], [1.4]],
             },
         ]
     )
@@ -188,8 +190,8 @@ async def test_chromadb_search_and_batch_return_raw_distance():
         limit=2,
     )
 
-    assert [r.score for r in single] == [0.31]
-    assert [r.score for r in batch[0]] == [0.7, 0.2]
+    assert [r.score for r in single] == [1.31]
+    assert [r.score for r in batch[0]] == [1.7, 0.2]
 
 
 @pytest.mark.asyncio
@@ -214,7 +216,7 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
     adapter.get_async_session = lambda: _AsyncContextManager(  # noqa: E731
         _FakeSession(
             [
-                SimpleNamespace(id=str(uuid4()), similarity=0.19),
+                SimpleNamespace(id=str(uuid4()), similarity=1.19),
                 SimpleNamespace(id=str(uuid4()), similarity=0.51),
             ]
         )
@@ -227,16 +229,4 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
         limit=2,
     )
 
-    assert [r.score for r in results] == [0.19, 0.51]
-
-
-def test_adapters_no_longer_reference_normalization_helper():
-    root = Path(__file__).resolve().parents[6]
-    adapter_files = [
-        root / "cognee/infrastructure/databases/vector/lancedb/LanceDBAdapter.py",
-        root / "cognee/infrastructure/databases/vector/pgvector/PGVectorAdapter.py",
-        root / "cognee/infrastructure/databases/vector/chromadb/ChromaDBAdapter.py",
-    ]
-
-    for path in adapter_files:
-        assert "normalize_distances" not in path.read_text(encoding="utf-8")
+    assert [r.score for r in results] == [1.19, 0.51]
