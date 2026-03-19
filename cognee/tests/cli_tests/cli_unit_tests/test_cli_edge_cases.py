@@ -46,7 +46,7 @@ class TestAddCommandEdgeCases:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.add.assert_awaited_once_with(data=[], dataset_name="test_dataset")
+        mock_cognee.add.assert_awaited_once_with(data=[], dataset_name="test_dataset", user=ANY)
 
     @patch("cognee.cli.commands.add_command.asyncio.run")
     def test_add_asyncio_run_exception(self, mock_asyncio_run):
@@ -112,9 +112,11 @@ class TestSearchCommandEdgeCases:
         mock_cognee.search.assert_awaited_once_with(
             query_text="nonexistent query",
             query_type=ANY,
+            user=ANY,
             datasets=None,
             top_k=10,
             system_prompt_path="answer_simple_question.txt",
+            session_id=ANY,
         )
         # verify the enum’s name separately
         called_enum = mock_cognee.search.await_args.kwargs["query_type"]
@@ -149,9 +151,11 @@ class TestSearchCommandEdgeCases:
         mock_cognee.search.assert_awaited_once_with(
             query_text="test query",
             query_type=ANY,
+            user=ANY,
             datasets=None,
             top_k=999999,
             system_prompt_path="answer_simple_question.txt",
+            session_id=ANY,
         )
         # verify the enum’s name separately
         called_enum = mock_cognee.search.await_args.kwargs["query_type"]
@@ -224,9 +228,11 @@ class TestSearchCommandEdgeCases:
         mock_cognee.search.assert_awaited_once_with(
             query_text="test query",
             query_type=ANY,
+            user=ANY,
             datasets=None,
             top_k=10,
             system_prompt_path="answer_simple_question.txt",
+            session_id=ANY,
         )
         # verify the enum’s name separately
         called_enum = mock_cognee.search.await_args.kwargs["query_type"]
@@ -263,6 +269,7 @@ class TestCognifyCommandEdgeCases:
 
         mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
+            user=ANY,
             chunk_size=-100,
             ontology_file_path=None,
             chunker=TextChunker,
@@ -297,6 +304,7 @@ class TestCognifyCommandEdgeCases:
 
         mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
+            user=ANY,
             chunk_size=None,
             ontology_file_path="/nonexistent/path/ontology.owl",
             chunker=TextChunker,
@@ -376,6 +384,7 @@ class TestCognifyCommandEdgeCases:
 
         mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
+            user=ANY,
             chunk_size=None,
             ontology_file_path=None,
             chunker=TextChunker,
@@ -388,10 +397,9 @@ class TestDeleteCommandEdgeCases:
     """Test edge cases for DeleteCommand"""
 
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    @patch("cognee.cli.commands.delete_command.cognee_datasets.delete_all")
-    @patch("cognee.cli.commands.delete_command.fmt.confirm")
-    def test_delete_all_with_user_id(self, fmt_confirm_mock, delete_all_mock, async_run_mock):
-        """Test delete command with both --all and --user-id"""
+    @patch("cognee.cli.commands.delete_command.cognee_datasets")
+    def test_delete_all_with_user_id(self, datasets_mock, async_run_mock):
+        """Test delete command with --all and --force"""
         data_directory_path = os.path.join(
             os.path.dirname(__file__), ".data_storage/test_cli_commands"
         )
@@ -407,19 +415,19 @@ class TestDeleteCommandEdgeCases:
 
         asyncio.run(setup())
 
-        fmt_confirm_mock.return_value = True
-
-        expected_user_id = uuid4()
+        delete_all_mock = AsyncMock()
+        datasets_mock.delete_all = delete_all_mock
 
         command = DeleteCommand()
         args = argparse.Namespace(
-            user_id=expected_user_id,
+            dataset_name=None,
             all=True,
+            force=True,
         )
 
         command.execute(args)
 
-        delete_all_mock.assert_called_once_with(user_id=expected_user_id)
+        delete_all_mock.assert_awaited_once_with(user=ANY)
 
         asyncio.run(cognee.prune.prune_data())
         asyncio.run(cognee.prune.prune_system(metadata=True))
