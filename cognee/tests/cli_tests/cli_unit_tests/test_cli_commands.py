@@ -70,7 +70,9 @@ class TestAddCommand:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.add.assert_awaited_once_with(data="test.txt", dataset_name="test_dataset", user=ANY)
+        mock_cognee.add.assert_awaited_once_with(
+            data="test.txt", dataset_name="test_dataset", user=ANY
+        )
 
     @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
     def test_execute_multiple_items(self, mock_asyncio_run):
@@ -297,7 +299,12 @@ class TestDeleteCommand:
     @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
     def test_execute_delete_dataset_with_confirmation(
-        self, mock_asyncio_run, get_deletion_counts_mock, mock_confirm, get_datasets_mock, datasets_mock
+        self,
+        mock_asyncio_run,
+        get_deletion_counts_mock,
+        mock_confirm,
+        get_datasets_mock,
+        datasets_mock,
     ):
         """Test execute delete dataset with user confirmation"""
         data_directory_path = os.path.join(
@@ -334,9 +341,7 @@ class TestDeleteCommand:
 
         command.execute(args)
 
-        delete_dataset_mock.assert_awaited_once_with(
-            dataset_id=expected_dataset_id, user=ANY
-        )
+        delete_dataset_mock.assert_awaited_once_with(dataset_id=expected_dataset_id, user=ANY)
 
         asyncio.run(cognee.prune.prune_data())
         asyncio.run(cognee.prune.prune_system(metadata=True))
