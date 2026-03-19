@@ -325,9 +325,13 @@ class CogneeGraph(CogneeAbstractGraph):
                 normalized_feedback_weight = 0.5
 
             normalized_feedback_weight = max(0.0, min(1.0, normalized_feedback_weight))
-            return (1.0 - active_feedback_influence) * distance + active_feedback_influence * (
-                1.0 - normalized_feedback_weight
+            # Blend in a normalized space (cosine distance in [0, 2] -> [0, 1]),
+            # then project back to distance scale so score magnitudes stay consistent.
+            normalized_distance = distance / 2.0
+            blended_normalized = (1.0 - active_feedback_influence) * normalized_distance + (
+                active_feedback_influence * (1.0 - normalized_feedback_weight)
             )
+            return blended_normalized * 2.0
 
         def score(edge: Edge) -> float:
             elements = (
