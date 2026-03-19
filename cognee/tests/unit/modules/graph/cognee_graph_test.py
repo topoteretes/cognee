@@ -997,6 +997,38 @@ async def test_missing_distance_penalty_ranks_below_max_real_triplet(setup_graph
 
 
 @pytest.mark.asyncio
+async def test_feedback_blend_does_not_reduce_fallback_penalty(setup_graph):
+    """Fallback penalty must not be blended into cosine range by feedback."""
+    graph = setup_graph
+
+    node1 = Node("1", {"feedback_weight": 1.0})
+    node2 = Node("2", {"feedback_weight": 1.0})
+    node3 = Node("3", {"feedback_weight": 1.0})
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+
+    edge_fallback = Edge(node1, node2, attributes={"feedback_weight": 1.0})
+    edge_real = Edge(node2, node3, attributes={"feedback_weight": 1.0})
+    graph.add_edge(edge_fallback)
+    graph.add_edge(edge_real)
+
+    # Fallback triplet: all components at penalty.
+    node1.add_attribute("vector_distance", [6.5])
+    node2.add_attribute("vector_distance", [6.5])
+    edge_fallback.add_attribute("vector_distance", [6.5])
+
+    # Real triplet: all components at max valid cosine distance.
+    node3.add_attribute("vector_distance", [2.0])
+    edge_real.add_attribute("vector_distance", [2.0])
+
+    results = await graph.calculate_top_triplet_importances(k=2, feedback_influence=1.0)
+
+    # If fallback were blended, it could incorrectly outrank real matches.
+    assert results == [edge_real, edge_fallback]
+
+
+@pytest.mark.asyncio
 async def test_calculate_top_triplet_importances_raises_on_short_list(setup_graph):
     """Test that scoring raises ValueError when list is too short for query_index."""
     graph = setup_graph

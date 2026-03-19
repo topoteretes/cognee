@@ -319,6 +319,16 @@ class CogneeGraph(CogneeAbstractGraph):
             if active_feedback_influence <= 0.0:
                 return distance
 
+            # Only blend real cosine distances in [0, 2].
+            # Fallback penalties and out-of-range values must remain unchanged so
+            # missing components stay ranked below valid matches.
+            if (
+                distance >= self.triplet_distance_penalty
+                or distance < 0.0
+                or distance > 2.0
+            ):
+                return distance
+
             try:
                 normalized_feedback_weight = float(feedback_weight)
             except (TypeError, ValueError):
