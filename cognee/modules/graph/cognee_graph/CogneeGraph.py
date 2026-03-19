@@ -348,12 +348,13 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                 value = distances[query_index]
                 try:
-                    distance = (2 - importance_weight) * float(value)
+                    distance = float(value)
                 except (TypeError, ValueError):
                     raise ValueError(
                         f"{label}: vector_distance[{query_index}] must be float-like, "
                         f"got {type(value).__name__}"
                     )
+                distance = (2 - importance_weight) * distance
                 feedback_weight = element.attributes.get("feedback_weight", 0.5)
                 importances.append(_effective_distance(distance, feedback_weight))
 
