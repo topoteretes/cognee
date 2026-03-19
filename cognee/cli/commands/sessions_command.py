@@ -26,8 +26,8 @@ Subcommands:
         p_get.add_argument(
             "session_id",
             nargs="?",
-            default="default_session",
-            help="Session ID (default: default_session)",
+            default=None,
+            help="Session ID (default: scoped to the current --user-id)",
         )
         p_get.add_argument(
             "-n",
@@ -57,13 +57,18 @@ Subcommands:
     def _get(self, args: argparse.Namespace) -> None:
         async def run():
             from cognee.api.v1.session import get_session
+            from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            sid = scoped_session_id(user.id, args.session_id)
 
             entries = await get_session(
-                session_id=args.session_id,
+                session_id=sid,
                 last_n=args.last_n,
+                user=user,
             )
             if not entries:
-                fmt.echo(f"No entries in session '{args.session_id}'.")
+                fmt.echo(f"No entries in session '{sid}'.")
                 return
 
             if args.output_format == "json":

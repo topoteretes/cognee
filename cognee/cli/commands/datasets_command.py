@@ -72,8 +72,10 @@ Subcommands:
     def _list(self, args: argparse.Namespace) -> None:
         async def run():
             import cognee
+            from cognee.cli.user_resolution import resolve_cli_user
 
-            ds = await cognee.datasets.list_datasets()
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            ds = await cognee.datasets.list_datasets(user=user)
             if not ds:
                 fmt.echo("No datasets found.")
                 return
@@ -86,12 +88,12 @@ Subcommands:
 
     def _create(self, args: argparse.Namespace) -> None:
         async def run():
+            from cognee.cli.user_resolution import resolve_cli_user
             from cognee.modules.data.methods import create_dataset, get_datasets_by_name
-            from cognee.modules.users.methods import get_default_user
             from cognee.infrastructure.databases.relational import get_relational_engine
             from cognee.modules.users.permissions.methods import give_permission_on_dataset
 
-            user = await get_default_user()
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             existing = await get_datasets_by_name([args.name], user.id)
             if existing:
                 fmt.echo(f"Dataset '{args.name}' already exists: {existing[0].id}")
@@ -110,9 +112,11 @@ Subcommands:
     def _data(self, args: argparse.Namespace) -> None:
         async def run():
             import cognee
+            from cognee.cli.user_resolution import resolve_cli_user
 
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             dataset_id = UUID(args.dataset_id)
-            items = await cognee.datasets.list_data(dataset_id)
+            items = await cognee.datasets.list_data(dataset_id, user=user)
             if not items:
                 fmt.echo("No data items found.")
                 return
@@ -139,10 +143,10 @@ Subcommands:
 
     def _graph(self, args: argparse.Namespace) -> None:
         async def run():
+            from cognee.cli.user_resolution import resolve_cli_user
             from cognee.modules.graph.methods import get_formatted_graph_data
-            from cognee.modules.users.methods import get_default_user
 
-            user = await get_default_user()
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             dataset_id = UUID(args.dataset_id)
             graph = await get_formatted_graph_data(dataset_id, user)
 
@@ -165,8 +169,10 @@ Subcommands:
 
         async def run():
             import cognee
+            from cognee.cli.user_resolution import resolve_cli_user
 
-            await cognee.datasets.empty_dataset(dataset_id)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            await cognee.datasets.empty_dataset(dataset_id, user=user)
             fmt.success(f"Dataset {dataset_id} deleted.")
 
         asyncio.run(run())

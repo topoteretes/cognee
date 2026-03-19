@@ -8,7 +8,6 @@ from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
-from cognee.modules.users.methods import get_default_user, get_user
 
 
 class DeleteCommand(SupportsCliCommand):
@@ -101,18 +100,18 @@ Be careful with deletion operations as they are irreversible.
             # Run the async delete function
             async def run_delete():
                 try:
+                    from cognee.cli.user_resolution import resolve_cli_user
+
+                    user = await resolve_cli_user(getattr(args, "user_id", None))
+
                     if getattr(args, "all", False):
-                        if not hasattr(args, "user_id"):
-                            raise CliCommandException(
-                                "No user ID provided for '--all' deletion. Please specify using --user-id param."
-                            )
-                        await cognee_datasets.delete_all(user_id=args.user_id)
+                        await cognee_datasets.delete_all(user=user)
                     elif hasattr(args, "dataset_name") or hasattr(args, "dataset_id"):
                         dataset_id = getattr(args, "dataset_id", None)
 
                         if hasattr(args, "dataset_name") and not hasattr(args, "dataset_id"):
                             datasets = await get_datasets_by_name(
-                                args.dataset_name, user_id=args.user_id
+                                args.dataset_name, user_id=user.id
                             )
 
                             if not datasets:
@@ -123,19 +122,9 @@ Be careful with deletion operations as they are irreversible.
                             dataset = datasets[0]
                             dataset_id = dataset.id
 
-                        if not hasattr(args, "user_id"):
-                            raise CliCommandException(
-                                "No user ID provided for deletion. Please specify using --user-id param."
-                            )
-
-                        if not args.user_id:
-                            user = await get_default_user()
-                        else:
-                            user = await get_user(args.user_id)
-
                         await cognee_datasets.empty_dataset(dataset_id=dataset_id, user=user)
                     elif hasattr(args, "dataset_id") and hasattr(args, "data_id"):
-                        await cognee_datasets.delete_data(args.dataset_id, args.data_id)
+                        await cognee_datasets.delete_data(args.dataset_id, args.data_id, user=user)
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to delete: {str(e)}") from e
 

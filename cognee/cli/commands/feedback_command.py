@@ -53,15 +53,20 @@ Subcommands:
 
         async def run():
             from cognee.api.v1.session import add_feedback
+            from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            sid = scoped_session_id(user.id, args.session_id)
 
             ok = await add_feedback(
-                session_id=args.session_id,
+                session_id=sid,
                 qa_id=args.qa_id,
                 feedback_text=args.text,
                 feedback_score=args.score,
+                user=user,
             )
             if ok:
-                fmt.success(f"Feedback added to entry {args.qa_id} in session {args.session_id}.")
+                fmt.success(f"Feedback added to entry {args.qa_id} in session {sid}.")
             else:
                 fmt.error("Failed to add feedback. Check session/qa IDs.")
 
@@ -70,15 +75,18 @@ Subcommands:
     def _delete(self, args: argparse.Namespace) -> None:
         async def run():
             from cognee.api.v1.session import delete_feedback
+            from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+
+            user = await resolve_cli_user(getattr(args, "user_id", None))
+            sid = scoped_session_id(user.id, args.session_id)
 
             ok = await delete_feedback(
-                session_id=args.session_id,
+                session_id=sid,
                 qa_id=args.qa_id,
+                user=user,
             )
             if ok:
-                fmt.success(
-                    f"Feedback cleared from entry {args.qa_id} in session {args.session_id}."
-                )
+                fmt.success(f"Feedback cleared from entry {args.qa_id} in session {sid}.")
             else:
                 fmt.error("Failed to clear feedback. Check session/qa IDs.")
 

@@ -62,6 +62,9 @@ Examples:
             async def run():
                 import cognee
                 from uuid import UUID
+                from cognee.cli.user_resolution import resolve_cli_user
+
+                user = await resolve_cli_user(getattr(args, "user_id", None))
 
                 dataset = args.dataset_name
                 if args.dataset_id:
@@ -72,6 +75,7 @@ Examples:
 
                 result = await cognee.memify(
                     dataset=dataset,
+                    user=user,
                     data=args.data,
                     node_name=args.node_name,
                     run_in_background=args.background,

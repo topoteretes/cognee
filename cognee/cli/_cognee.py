@@ -133,6 +133,11 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         action=UiAction,
         help="Start the cognee web UI interface",
     )
+    parser.add_argument(
+        "--user-id",
+        default=None,
+        help="User/agent UUID for multi-agent isolation. Each unique ID gets its own session history and permissions. Omit to use the default user.",
+    )
 
     subparsers = parser.add_subparsers(title="Available commands", dest="command")
 
