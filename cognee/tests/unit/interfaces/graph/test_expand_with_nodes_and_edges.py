@@ -12,12 +12,13 @@ def _mock_resolver():
     return resolver
 
 
-def _make_chunk():
+def _make_chunk(importance_weight=0.5):
     from unittest.mock import MagicMock as MM
 
     chunk = MM()
     chunk.contains = None
     chunk.belongs_to_set = []
+    chunk.importance_weight = importance_weight
     return chunk
 
 
@@ -91,3 +92,40 @@ def test_entity_deduplication_across_chunks():
 
     alice_nodes = [e for e in entity_nodes if e.name == "alice"]
     assert len(alice_nodes) == 1
+
+
+def test_importance_weight_propagates_to_created_nodes():
+    chunk = _make_chunk()
+    chunk.importance_weight = 0.9
+    graph = _make_graph(
+        [Node(id="n1", name="Alice", type="Person", description="A person")],
+        [],
+    )
+
+    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+
+    alice = next(node for node in entity_nodes if node.name == "alice")
+    person = next(node for node in entity_nodes if node.name == "person")
+    _, contained_entity = chunk.contains[0]
+
+    assert alice.importance_weight == 0.9
+    assert person.importance_weight == 0.9
+    assert contained_entity.importance_weight == 0.9
+
+
+def test_default_importance_weight_propagates_to_created_nodes():
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [Node(id="n1", name="Alice", type="Person", description="A person")],
+        [],
+    )
+
+    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+
+    alice = next(node for node in entity_nodes if node.name == "alice")
+    person = next(node for node in entity_nodes if node.name == "person")
+    _, contained_entity = chunk.contains[0]
+
+    assert alice.importance_weight == 0.5
+    assert person.importance_weight == 0.5
+    assert contained_entity.importance_weight == 0.5
