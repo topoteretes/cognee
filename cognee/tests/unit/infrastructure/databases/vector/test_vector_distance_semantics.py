@@ -128,6 +128,7 @@ async def test_lancedb_search_returns_raw_distance_and_uses_cosine():
 
     assert len(results) == 2
     assert [result.score for result in results] == [1.42, 0.21]
+    assert any(result.score > 1.0 for result in results)
     assert collection.queries[0].distance_type_value == "cosine"
 
 
@@ -139,17 +140,18 @@ async def test_lancedb_search_with_nodeset_filter_uses_cosine():
     )
     item_id = str(uuid4())
     collection = _FakeLanceCollection(
-        [{"id": item_id, "payload": {"belongs_to_set": ["A"]}, "_distance": 0.11}]
+        [{"id": item_id, "payload": {"belongs_to_set": ["A"]}, "_distance": 1.11}]
     )
     adapter.get_collection = AsyncMock(return_value=collection)
 
-    await adapter.search(
+    results = await adapter.search(
         collection_name="Entity_name",
         query_vector=[0.1, 0.2, 0.3],
         node_name=["A"],
         include_payload=True,
     )
 
+    assert [result.score for result in results] == [1.11]
     assert collection.queries[0].distance_type_value == "cosine"
     assert "array_has_any" in collection.queries[0].where_value
 
@@ -192,6 +194,7 @@ async def test_chromadb_search_and_batch_return_raw_distance():
 
     assert [r.score for r in single] == [1.31]
     assert [r.score for r in batch[0]] == [1.7, 0.2]
+    assert any(r.score > 1.0 for r in single + batch[0] + batch[1])
 
 
 @pytest.mark.asyncio
@@ -230,3 +233,4 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
     )
 
     assert [r.score for r in results] == [1.19, 0.51]
+    assert any(r.score > 1.0 for r in results)
