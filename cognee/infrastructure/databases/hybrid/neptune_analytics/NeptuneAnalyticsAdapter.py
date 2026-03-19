@@ -240,6 +240,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         with_vector: bool = False,
         include_payload: bool = False,  # TODO: Add support for this parameter
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -305,10 +306,17 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         if node_name:
             escaped_names = [name.replace("'", "\\'") for name in node_name]
             name_list = ", ".join(f"'{name}'" for name in escaped_names)
-            query_string += f"""
-        WITH node, score
-        WHERE any(name IN node.belongs_to_set WHERE name IN [{name_list}])
-        """
+
+            if node_name_filter_operator == "OR":
+                query_string += f"""
+                WITH node, score
+                WHERE any(name IN node.belongs_to_set WHERE name IN [{name_list}])
+                """
+            else:
+                query_string += f"""
+                WITH node, score
+                WHERE all(name IN node.belongs_to_set WHERE name IN [{name_list}])
+                """
 
         if with_vector:
             query_string += """
@@ -339,6 +347,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         with_vectors: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -369,6 +378,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                     with_vectors,
                     include_payload=include_payload,
                     node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
                 )
                 for vector in data_vectors
             ]
