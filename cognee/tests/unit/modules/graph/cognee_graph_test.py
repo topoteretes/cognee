@@ -932,6 +932,71 @@ async def test_feedback_blend_uses_cosine_distance_scale(setup_graph):
 
 
 @pytest.mark.asyncio
+async def test_feedback_blend_preserves_distance_order_when_feedback_weights_match(setup_graph):
+    """Equal feedback weights should preserve pure distance ordering on cosine scale."""
+    graph = setup_graph
+
+    node1 = Node("1", {"feedback_weight": 0.4})
+    node2 = Node("2", {"feedback_weight": 0.4})
+    node3 = Node("3", {"feedback_weight": 0.4})
+    node4 = Node("4", {"feedback_weight": 0.4})
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+    graph.add_node(node4)
+
+    edge_close = Edge(node1, node2, attributes={"feedback_weight": 0.4})
+    edge_far = Edge(node3, node4, attributes={"feedback_weight": 0.4})
+    graph.add_edge(edge_close)
+    graph.add_edge(edge_far)
+
+    node1.add_attribute("vector_distance", [0.3])
+    node2.add_attribute("vector_distance", [0.3])
+    edge_close.add_attribute("vector_distance", [0.3])
+
+    node3.add_attribute("vector_distance", [1.7])
+    node4.add_attribute("vector_distance", [1.7])
+    edge_far.add_attribute("vector_distance", [1.7])
+
+    distance_only = await graph.calculate_top_triplet_importances(k=1, feedback_influence=0.0)
+    blended = await graph.calculate_top_triplet_importances(k=1, feedback_influence=0.8)
+
+    assert distance_only == [edge_close]
+    assert blended == [edge_close]
+
+
+@pytest.mark.asyncio
+async def test_missing_distance_penalty_ranks_below_max_real_triplet(setup_graph):
+    """Fallback penalty 6.5 must rank behind any fully-matched max-cosine triplet (<= 6.0)."""
+    graph = setup_graph
+
+    node1 = Node("1")
+    node2 = Node("2")
+    node3 = Node("3")
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+
+    edge_real = Edge(node1, node2, attributes={"edge_text": "A"})
+    edge_fallback = Edge(node2, node3, attributes={"edge_text": "B"})
+    graph.add_edge(edge_real)
+    graph.add_edge(edge_fallback)
+
+    await graph.map_vector_distances_to_graph_nodes(
+        {"Entity_name": [MockScoredResult("1", 2.0), MockScoredResult("2", 2.0)]}
+    )
+    await graph.map_vector_distances_to_graph_edges(
+        [MockScoredResult(generate_edge_id("A"), 2.0, payload={"text": "A"})]
+    )
+
+    ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+
+    assert node3.attributes.get("vector_distance") == [6.5]
+    assert edge_fallback.attributes.get("vector_distance") == [6.5]
+    assert ranked == [edge_real, edge_fallback]
+
+
+@pytest.mark.asyncio
 async def test_calculate_top_triplet_importances_raises_on_short_list(setup_graph):
     """Test that scoring raises ValueError when list is too short for query_index."""
     graph = setup_graph
