@@ -7,9 +7,26 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.databases.vector.chromadb.ChromaDBAdapter import ChromaDBAdapter
-from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
-from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
+try:
+    from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+
+    HAS_LANCEDB = True
+except ModuleNotFoundError:
+    HAS_LANCEDB = False
+
+try:
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
+
+    HAS_PGVECTOR = True
+except ModuleNotFoundError:
+    HAS_PGVECTOR = False
+
+try:
+    from cognee.infrastructure.databases.vector.chromadb.ChromaDBAdapter import ChromaDBAdapter
+
+    HAS_CHROMADB = True
+except ModuleNotFoundError:
+    HAS_CHROMADB = False
 
 
 class _DummyEmbeddingEngine:
@@ -89,6 +106,7 @@ class _FakeQuery:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
 async def test_lancedb_search_returns_raw_distance_and_uses_cosine():
     adapter = LanceDBAdapter(
         url="memory://", api_key=None, embedding_engine=_DummyEmbeddingEngine()
@@ -112,6 +130,7 @@ async def test_lancedb_search_returns_raw_distance_and_uses_cosine():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
 async def test_lancedb_search_with_nodeset_filter_uses_cosine():
     adapter = LanceDBAdapter(
         url="memory://", api_key=None, embedding_engine=_DummyEmbeddingEngine()
@@ -134,6 +153,7 @@ async def test_lancedb_search_with_nodeset_filter_uses_cosine():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_CHROMADB, reason="chromadb extra is not installed")
 async def test_chromadb_search_and_batch_return_raw_distance():
     adapter = ChromaDBAdapter(
         url="http://unused", api_key=None, embedding_engine=_DummyEmbeddingEngine()
@@ -173,6 +193,7 @@ async def test_chromadb_search_and_batch_return_raw_distance():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra is not installed")
 async def test_pgvector_search_returns_raw_distance(monkeypatch):
     import cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter as pg_module
 
