@@ -897,6 +897,41 @@ async def test_calculate_top_triplet_importances_blends_distance_with_feedback_i
 
 
 @pytest.mark.asyncio
+async def test_feedback_blend_uses_cosine_distance_scale(setup_graph):
+    """At mid influence, feedback term should be weighted on cosine [0, 2] scale."""
+    graph = setup_graph
+
+    node1 = Node("1", {"feedback_weight": 1.0})
+    node2 = Node("2", {"feedback_weight": 1.0})
+    node3 = Node("3", {"feedback_weight": 0.0})
+    node4 = Node("4", {"feedback_weight": 0.0})
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+    graph.add_node(node4)
+
+    edge_high_feedback = Edge(node1, node2, attributes={"feedback_weight": 1.0})
+    edge_low_feedback = Edge(node3, node4, attributes={"feedback_weight": 0.0})
+    graph.add_edge(edge_high_feedback)
+    graph.add_edge(edge_low_feedback)
+
+    # Distance-only prefers edge_low_feedback.
+    node1.add_attribute("vector_distance", [1.8])
+    node2.add_attribute("vector_distance", [1.8])
+    edge_high_feedback.add_attribute("vector_distance", [1.8])
+
+    node3.add_attribute("vector_distance", [0.4])
+    node4.add_attribute("vector_distance", [0.4])
+    edge_low_feedback.add_attribute("vector_distance", [0.4])
+
+    distance_only = await graph.calculate_top_triplet_importances(k=1, feedback_influence=0.0)
+    blended = await graph.calculate_top_triplet_importances(k=1, feedback_influence=0.5)
+
+    assert distance_only == [edge_low_feedback]
+    assert blended == [edge_high_feedback]
+
+
+@pytest.mark.asyncio
 async def test_calculate_top_triplet_importances_raises_on_short_list(setup_graph):
     """Test that scoring raises ValueError when list is too short for query_index."""
     graph = setup_graph
