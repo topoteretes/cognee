@@ -26,12 +26,8 @@ Subcommands:
         p_add = sub.add_parser("add", help="Add feedback to a Q&A entry")
         p_add.add_argument("session_id", help="Session ID")
         p_add.add_argument("qa_id", help="Q&A entry ID")
-        p_add.add_argument(
-            "-t", "--text", default=None, help="Feedback text"
-        )
-        p_add.add_argument(
-            "-s", "--score", type=int, default=None, help="Feedback score (integer)"
-        )
+        p_add.add_argument("-t", "--text", default=None, help="Feedback text")
+        p_add.add_argument("-s", "--score", type=int, default=None, help="Feedback score (integer)")
 
         # delete
         p_del = sub.add_parser("delete", help="Clear feedback from a Q&A entry")
@@ -53,9 +49,7 @@ Subcommands:
     def _add(self, args: argparse.Namespace) -> None:
         if args.text is None and args.score is None:
             fmt.error("Provide at least --text or --score.")
-            raise CliCommandException(
-                "No feedback content provided", error_code=1
-            )
+            raise CliCommandException("No feedback content provided", error_code=1)
 
         async def run():
             from cognee.api.v1.session import add_feedback
@@ -67,9 +61,7 @@ Subcommands:
                 feedback_score=args.score,
             )
             if ok:
-                fmt.success(
-                    f"Feedback added to entry {args.qa_id} in session {args.session_id}."
-                )
+                fmt.success(f"Feedback added to entry {args.qa_id} in session {args.session_id}.")
             else:
                 fmt.error("Failed to add feedback. Check session/qa IDs.")
 

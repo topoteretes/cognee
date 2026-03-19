@@ -90,6 +90,4 @@ Examples:
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(
-                f"Memify failed: {str(e)}", error_code=1
-            ) from e
+            raise CliCommandException(f"Memify failed: {str(e)}", error_code=1) from e

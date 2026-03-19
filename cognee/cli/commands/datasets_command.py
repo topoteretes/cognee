@@ -41,23 +41,17 @@ Subcommands:
 
         # status
         p_status = sub.add_parser("status", help="Show processing status")
-        p_status.add_argument(
-            "dataset_ids", nargs="+", help="One or more dataset UUIDs"
-        )
+        p_status.add_argument("dataset_ids", nargs="+", help="One or more dataset UUIDs")
 
         # graph
         p_graph = sub.add_parser("graph", help="Export knowledge graph (JSON)")
         p_graph.add_argument("dataset_id", help="Dataset UUID")
-        p_graph.add_argument(
-            "-o", "--output", default=None, help="Output file (default: stdout)"
-        )
+        p_graph.add_argument("-o", "--output", default=None, help="Output file (default: stdout)")
 
         # delete
         p_del = sub.add_parser("delete", help="Delete a dataset by ID")
         p_del.add_argument("dataset_id", help="Dataset UUID")
-        p_del.add_argument(
-            "-f", "--force", action="store_true", help="Skip confirmation"
-        )
+        p_del.add_argument("-f", "--force", action="store_true", help="Skip confirmation")
 
     def execute(self, args: argparse.Namespace) -> None:
         action = getattr(args, "datasets_action", None)
@@ -105,9 +99,7 @@ Subcommands:
 
             db_engine = get_relational_engine()
             async with db_engine.get_async_session() as session:
-                dataset = await create_dataset(
-                    dataset_name=args.name, user=user, session=session
-                )
+                dataset = await create_dataset(dataset_name=args.name, user=user, session=session)
                 for perm in ("read", "write", "share", "delete"):
                     await give_permission_on_dataset(user, dataset.id, perm)
 
@@ -127,9 +119,7 @@ Subcommands:
             fmt.echo(f"{'ID':<38} {'Name':<30} {'Type':<15} {'Created'}")
             fmt.echo("-" * 110)
             for d in items:
-                fmt.echo(
-                    f"{str(d.id):<38} {d.name:<30} {d.mime_type:<15} {d.created_at}"
-                )
+                fmt.echo(f"{str(d.id):<38} {d.name:<30} {d.mime_type:<15} {d.created_at}")
 
         asyncio.run(run())
 
