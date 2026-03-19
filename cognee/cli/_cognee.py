@@ -138,6 +138,12 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         default=None,
         help="User/agent UUID for multi-agent isolation. Each unique ID gets its own session history and permissions. Omit to use the default user.",
     )
+    parser.add_argument(
+        "--api-url",
+        default=None,
+        help="Delegate commands to a running Cognee API server (e.g. http://localhost:8000). "
+        "Required for multi-agent / concurrent usage with file-based databases.",
+    )
 
     subparsers = parser.add_subparsers(title="Available commands", dest="command")
 
@@ -319,6 +325,21 @@ def main() -> int:
             if debug.is_debug_enabled():
                 raise ex
             return 1
+
+    # When --api-url is set, delegate to the API server instead of running
+    # in-process.  This is the correct mode for concurrent / multi-agent use
+    # with file-based databases (SQLite, KuzuDB, LanceDB).
+    from cognee.cli.api_dispatch import can_dispatch, dispatch as api_dispatch
+
+    if can_dispatch(args) and args.command:
+        try:
+            api_dispatch(args)
+        except Exception as ex:
+            fmt.error(str(ex))
+            if debug.is_debug_enabled():
+                raise ex
+            return 1
+        return 0
 
     if cmd := installed_commands.get(args.command):
         try:
