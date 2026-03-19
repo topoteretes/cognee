@@ -36,7 +36,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.edges = []
         self.edges_by_distance_key = {}
         self.directed = directed
-        self.triplet_distance_penalty = 3.5
+        self.triplet_distance_penalty = 6.5
         self.feedback_influence = 0.0
 
     def add_node(self, node: Node) -> None:
@@ -170,7 +170,7 @@ class CogneeGraph(CogneeAbstractGraph):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         relevant_ids_to_filter: Optional[List[str]] = None,
-        triplet_distance_penalty: float = 3.5,
+        triplet_distance_penalty: float = 6.5,
         feedback_influence: float = 0.0,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:

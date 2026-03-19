@@ -229,7 +229,7 @@ async def test_project_graph_from_db_stores_triplet_penalty_on_graph(mock_adapte
         edge_properties_to_project=[],
     )
 
-    assert graph2.triplet_distance_penalty == 3.5
+    assert graph2.triplet_distance_penalty == 6.5
 
 
 @pytest.mark.asyncio
@@ -319,7 +319,7 @@ async def test_map_vector_distances_partial_node_coverage(setup_graph):
 
     assert graph.get_node("1").attributes.get("vector_distance") == [0.95]
     assert graph.get_node("2").attributes.get("vector_distance") == [0.87]
-    assert graph.get_node("3").attributes.get("vector_distance") == [3.5]
+    assert graph.get_node("3").attributes.get("vector_distance") == [6.5]
 
 
 @pytest.mark.asyncio
@@ -352,7 +352,7 @@ async def test_map_vector_distances_multiple_categories(setup_graph):
     assert graph.get_node("1").attributes.get("vector_distance") == [0.95]
     assert graph.get_node("2").attributes.get("vector_distance") == [0.87]
     assert graph.get_node("3").attributes.get("vector_distance") == [0.92]
-    assert graph.get_node("4").attributes.get("vector_distance") == [3.5]
+    assert graph.get_node("4").attributes.get("vector_distance") == [6.5]
 
 
 @pytest.mark.asyncio
@@ -376,9 +376,9 @@ async def test_map_vector_distances_to_graph_nodes_multi_query(setup_graph):
 
     await graph.map_vector_distances_to_graph_nodes(node_distances, query_list_length=2)
 
-    assert graph.get_node("1").attributes.get("vector_distance") == [0.95, 3.5]
-    assert graph.get_node("2").attributes.get("vector_distance") == [3.5, 0.87]
-    assert graph.get_node("3").attributes.get("vector_distance") == [3.5, 3.5]
+    assert graph.get_node("1").attributes.get("vector_distance") == [0.95, 6.5]
+    assert graph.get_node("2").attributes.get("vector_distance") == [6.5, 0.87]
+    assert graph.get_node("3").attributes.get("vector_distance") == [6.5, 6.5]
 
 
 @pytest.mark.asyncio
@@ -432,7 +432,7 @@ async def test_map_vector_distances_partial_edge_coverage(setup_graph):
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
     assert graph.edges[0].attributes.get("vector_distance") == [0.92]
-    assert graph.edges[1].attributes.get("vector_distance") == [3.5]
+    assert graph.edges[1].attributes.get("vector_distance") == [6.5]
 
 
 @pytest.mark.asyncio
@@ -486,7 +486,7 @@ async def test_map_vector_distances_no_edge_matches(setup_graph):
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
-    assert graph.edges[0].attributes.get("vector_distance") == [3.5]
+    assert graph.edges[0].attributes.get("vector_distance") == [6.5]
 
 
 @pytest.mark.asyncio
@@ -499,7 +499,7 @@ async def test_map_vector_distances_none_returns_early(setup_graph):
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=None)
 
-    assert graph.edges[0].attributes.get("vector_distance") == [3.5]
+    assert graph.edges[0].attributes.get("vector_distance") == [6.5]
 
 
 @pytest.mark.asyncio
@@ -513,8 +513,8 @@ async def test_map_vector_distances_empty_nodes_returns_early(setup_graph):
 
     await graph.map_vector_distances_to_graph_nodes({})
 
-    assert node1.attributes.get("vector_distance") == [3.5]
-    assert node2.attributes.get("vector_distance") == [3.5]
+    assert node1.attributes.get("vector_distance") == [6.5]
+    assert node2.attributes.get("vector_distance") == [6.5]
 
 
 @pytest.mark.asyncio
@@ -549,8 +549,8 @@ async def test_map_vector_distances_to_graph_edges_multi_query(setup_graph):
         edge_distances=edge_distances, query_list_length=2
     )
 
-    assert graph.edges[0].attributes.get("vector_distance") == [0.1, 3.5]
-    assert graph.edges[1].attributes.get("vector_distance") == [3.5, 0.2]
+    assert graph.edges[0].attributes.get("vector_distance") == [0.1, 6.5]
+    assert graph.edges[1].attributes.get("vector_distance") == [6.5, 0.2]
 
 
 @pytest.mark.asyncio
@@ -582,8 +582,8 @@ async def test_map_vector_distances_to_graph_edges_preserves_unmapped_indices(se
         edge_distances=edge_distances, query_list_length=2
     )
 
-    assert graph.edges[0].attributes.get("vector_distance") == [0.1, 3.5]
-    assert graph.edges[1].attributes.get("vector_distance") == [3.5, 3.5]
+    assert graph.edges[0].attributes.get("vector_distance") == [0.1, 6.5]
+    assert graph.edges[1].attributes.get("vector_distance") == [6.5, 6.5]
 
 
 @pytest.mark.asyncio
