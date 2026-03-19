@@ -1,0 +1,29 @@
+[project]
+name = "cognee-mcp-simple"
+version = "0.1.0"
+description = "Minimal Cognee MCP server — 2 tools: remember + search_memory"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    # For local cognee repo usage remove comment below and add absolute path to cognee. Then run `uv sync --reinstall`.
+    #"cognee @ file:/path/to/cognee",
+    "cognee==0.5.4",
+    "fastmcp>=2.10.0,<3.0.0",
+    "mcp>=1.12.0,<2.0.0",
+    "httpx>=0.27.0,<1.0.0",
+]
+
+authors = [
+    { name = "Cognee Team", email = "info@topoteretes.com" },
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[project.scripts]
+cognee-memory = "src:main_mcp"
