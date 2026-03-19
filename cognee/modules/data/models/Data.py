@@ -37,7 +37,7 @@ class Data(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
     last_accessed = Column(DateTime(timezone=True), nullable=True)
-    importance_weight = Column(Float)
+    importance_weight = Column(Float, nullable=True)
 
     datasets = relationship(
         "Dataset",
