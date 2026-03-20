@@ -6,6 +6,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
+from cognee.pipelines.types import inject_context_kwargs
 from cognee.modules.observability import (
     new_span,
     COGNEE_PIPELINE_TASK_NAME,
@@ -107,25 +108,9 @@ async def handle_task(
     )
 
     sig = inspect.signature(running_task.executable)
-    kwargs = {}
-
-    # New way: Ctx[T] annotation marks the context parameter
-    ctx_param = get_ctx_param_name(sig)
-    if ctx_param is not None:
-        kwargs[ctx_param] = context
-    else:
-        # Legacy way: magic name-matching on "context" parameter
-        has_context = any(key == "context" for key in sig.parameters.keys())
-        if has_context:
-            warnings.warn(
-                f"Task '{running_task.executable.__name__}' uses implicit context injection "
-                f"via parameter name 'context'. Use Ctx annotation instead: "
-                f"from cognee.pipelines import Ctx; "
-                f"async def {running_task.executable.__name__}(data, ctx: Ctx[dict] = None)",
-                PendingDeprecationWarning,
-                stacklevel=2,
-            )
-            kwargs["context"] = context
+    # Total positional args = pipeline args + Task's default_params args
+    total_positional = len(args) + len(running_task.default_params.get("args", ()))
+    kwargs = inject_context_kwargs(sig, context, num_positional_args=total_positional)
 
     task_name = running_task.executable.__name__
 

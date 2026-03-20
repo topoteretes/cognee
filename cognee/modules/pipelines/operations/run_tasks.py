@@ -87,37 +87,51 @@ async def run_tasks(
         if incremental_loading:
             data = await resolve_data_directories(data)
 
-        # Create and gather batches of async tasks of data items that will run the pipeline for the data item
-        results = []
-        for start in range(0, len(data), data_per_batch):
-            data_batch = data[start : start + data_per_batch]
+        # Semaphore-based concurrency: all items are scheduled at once,
+        # but at most data_per_batch run concurrently at any time.
+        semaphore = asyncio.Semaphore(data_per_batch)
 
-            data_item_tasks = [
-                asyncio.create_task(
-                    run_tasks_data_item(
-                        data_item,
-                        dataset,
-                        tasks,
-                        pipeline_name,
-                        pipeline_id,
-                        pipeline_run_id,
-                        {
-                            **(context or {}),
-                            "user": user,  # Used by tasks via context["user"]
-                            "data": data_item,
-                            "dataset": dataset,
-                        },
-                        user,  # Used by pipeline framework for telemetry
-                        incremental_loading,
-                    )
+        async def _run_item(data_item):
+            async with semaphore:
+                return await run_tasks_data_item(
+                    data_item,
+                    dataset,
+                    tasks,
+                    pipeline_name,
+                    pipeline_id,
+                    pipeline_run_id,
+                    {
+                        **(context or {}),
+                        "user": user,
+                        "data": data_item,
+                        "dataset": dataset,
+                    },
+                    user,
+                    incremental_loading,
                 )
-                for data_item in data_batch
-            ]
 
-            results.extend(await asyncio.gather(*data_item_tasks))
+        gathered = await asyncio.gather(
+            *[asyncio.create_task(_run_item(item)) for item in data],
+            return_exceptions=True,
+        )
 
-        # Remove skipped data items from results
-        results = [result for result in results if result]
+        # Separate successes from unhandled exceptions
+        results = []
+        for i, result in enumerate(gathered):
+            if isinstance(result, BaseException):
+                logger.error(f"Item {i} failed: {result}", exc_info=result)
+                results.append(
+                    {
+                        "run_info": PipelineRunErrored(
+                            pipeline_run_id=pipeline_run_id,
+                            payload=repr(result),
+                            dataset_id=dataset.id,
+                            dataset_name=dataset.name,
+                        ),
+                    }
+                )
+            elif result:
+                results.append(result)
 
         # If any data item could not be processed propagate error
         errored_results = [

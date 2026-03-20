@@ -23,10 +23,8 @@ from cognee.pipelines.builder import Pipeline
 from cognee.pipelines.context import dataset, cognee_pipeline, get_current_dataset
 from cognee.pipelines.types import (
     Pipe,
-    Ctx,
     Drop,
     get_pipe_param_name,
-    get_ctx_param_name,
 )
 
 # Legacy re-exports are lazy to avoid circular imports with cognee.modules.pipelines
@@ -65,9 +63,7 @@ __all__ = [
     "get_current_dataset",
     # Type annotations
     "Pipe",
-    "Ctx",
     "Drop",
     # Introspection helpers
     "get_pipe_param_name",
-    "get_ctx_param_name",
 ]
