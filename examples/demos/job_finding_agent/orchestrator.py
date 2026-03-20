@@ -37,6 +37,11 @@ from examples.demos.job_finding_agent.tools import (
 )
 
 
+def _print_progress(message: str) -> None:
+    """Single place for concise run progress output."""
+    print(f"\n[job-finding-demo] {message}")
+
+
 def _format_action_trace_for_session(loop_result: JobAgentLoopResult) -> str:
     """Render full per-job action trace to answer text for session storage."""
     if not loop_result.action_trace:
@@ -64,9 +69,12 @@ async def run_jobs_from_json(
     session_id: str = SESSION_ID,
 ) -> dict[str, Any]:
     """Entry point for the full flow: CV init + per-job modular loop."""
+    _print_progress("Starting run...")
     jobs = read_mock_jobs(jobs_path)
+    _print_progress(f"Loaded {len(jobs)} jobs from JSON.")
 
     # Ensure a deterministic clean run for the demo lifecycle.
+    _print_progress("Pruning previous data/system and running setup.")
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await setup()
@@ -78,8 +86,10 @@ async def run_jobs_from_json(
 
     # Always reset to the initial non-updated skill at the start of a full run.
     skill_text = await reset_skill_file_from_cv(cv_text, skill_path)
+    _print_progress("Skill reset from CV complete.")
 
     # Initial ingestion is CV-only in applicant_data dataset.
+    _print_progress(f"Ingesting CV into dataset '{jobs_dataset_name}' and cognifying.")
     await cognee.add(
         cv_text,
         dataset_name=jobs_dataset_name,
@@ -101,6 +111,7 @@ async def run_jobs_from_json(
             "last_action_task_job_node": None,
             "last_skill_snapshot": None,
             "skill_snapshot_version": 0,
+            "show_progress": True,
         },
     )
 
@@ -113,6 +124,7 @@ async def run_jobs_from_json(
     results: list[dict[str, Any]] = []
     session_manager = get_session_manager()
     for job_index, job in enumerate(jobs, start=1):
+        _print_progress(f"Job {job_index}/{len(jobs)} started: {job.job_id}")
         state = JobAgentState(
             job=job,
             skill_text=context.skill_text,
@@ -195,6 +207,12 @@ async def run_jobs_from_json(
                 "feedback_text": loop_result.final_state.feedback_text,
             }
         )
+        _print_progress(
+            f"Job {job.job_id} done | decision={results[-1]['decision']} "
+            f"| iterations={results[-1]['iterations']}"
+        )
+
+    _print_progress("Run completed.")
 
     return {
         "jobs_dataset_name": jobs_dataset_name,

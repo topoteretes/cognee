@@ -19,6 +19,25 @@ from examples.demos.job_finding_agent.agent.tool_contracts import (
 logger = get_logger("job_finding_agent_loop")
 
 
+def _clip_text(value: str | None, max_len: int = 120) -> str:
+    """Trim text for concise terminal progress logs."""
+    if not value:
+        return ""
+    cleaned = " ".join(value.split())
+    if len(cleaned) <= max_len:
+        return cleaned
+    return f"{cleaned[: max_len - 3]}..."
+
+
+def _detect_stage(state: JobAgentState) -> str:
+    """Infer high-level loop stage for readable progress output."""
+    if state.recommendation is None:
+        return "PROCESS_JOB"
+    if not state.feedback_text:
+        return "REQUEST_FEEDBACK"
+    return "UPDATE_SKILL"
+
+
 async def run_job_agent_loop(
     initial_state: JobAgentState,
     tool_registry: ToolRegistry,
@@ -44,6 +63,16 @@ async def run_job_agent_loop(
             if next_step.tool_name not in allowed_tools:
                 raise ValueError(f"Unsupported tool selected: {next_step.tool_name}")
 
+            if context.runtime_data.get("show_progress", True):
+                recommendation_status = "yes" if state.recommendation is not None else "no"
+                feedback_status = "yes" if bool(state.feedback_text) else "no"
+                print(
+                    f"\n[{state.job.job_id}] Iteration {state.iteration}\n"
+                    f"  Think: {_clip_text(next_step.thought, 220)}\n"
+                    f"  State: recommendation={recommendation_status}, feedback={feedback_status}"
+                )
+                print(f"  Act: {next_step.tool_name.value} TOOL")
+
             tool = tool_registry[next_step.tool_name]
             result = await tool(state, context)
 
@@ -60,6 +89,16 @@ async def run_job_agent_loop(
                 )
             )
 
+            if context.runtime_data.get("show_progress", True):
+                print(
+                    f"  Observe: {_clip_text(result.observation, 220)}\n"
+                )
+                print(
+                    "  Stop/Repeat: "
+                    + ("stop" if result.should_end_process or not continue_loop else "repeat")
+                    + "\n"
+                )
+
             if result.should_end_process:
                 state.active = False
                 termination_reason = result.stop_reason or "TOOL_REQUESTED_TERMINATION"
@@ -71,6 +110,8 @@ async def run_job_agent_loop(
             state.active = False
             termination_reason = f"ERROR: {error}"
             logger.error("Agent loop failed on iteration %s: %s", state.iteration, error)
+            if context.runtime_data.get("show_progress", True):
+                print(f"\n[{state.job.job_id}] Iteration {state.iteration}\n  ERROR: {error}\n")
             trace.append(
                 AgentActionRecord(
                     iteration=state.iteration,
