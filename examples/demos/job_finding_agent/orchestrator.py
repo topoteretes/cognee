@@ -6,12 +6,16 @@ from pathlib import Path
 from typing import Any
 
 import cognee
+from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
+    persist_sessions_in_knowledge_graph_pipeline,
+)
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
 
 from examples.demos.job_finding_agent.agent.agent_loop import run_job_agent_loop
 from examples.demos.job_finding_agent.agent.agent_models import ToolName
-from examples.demos.job_finding_agent.agent.agent_state import JobAgentState
+from examples.demos.job_finding_agent.agent.agent_state import JobAgentLoopResult, JobAgentState
 from examples.demos.job_finding_agent.agent.tool_contracts import RunnerContext
 from examples.demos.job_finding_agent.config import (
     ACTION_DATASET_NAME,
@@ -31,6 +35,23 @@ from examples.demos.job_finding_agent.tools import (
     store_agent_action,
     update_process_job_agent_skill_tool,
 )
+
+
+def _format_action_trace_for_session(loop_result: JobAgentLoopResult) -> str:
+    """Render full per-job action trace to answer text for session storage."""
+    if not loop_result.action_trace:
+        return "No actions recorded."
+
+    lines: list[str] = []
+    for step in loop_result.action_trace:
+        lines.append(
+            (
+                f"Iteration {step.iteration} | Tool={step.tool_name.value} | "
+                f"Thought={step.thought} | Observation={step.observation} | "
+                f"Continue={step.continue_loop} | Stop={step.stop_reason or ''}"
+            )
+        )
+    return "\n".join(lines)
 
 
 async def run_jobs_from_json(
@@ -88,6 +109,7 @@ async def run_jobs_from_json(
     }
 
     results: list[dict[str, Any]] = []
+    session_manager = get_session_manager()
     for job_index, job in enumerate(jobs, start=1):
         state = JobAgentState(
             job=job,
@@ -115,6 +137,48 @@ async def run_jobs_from_json(
                 stop_reason=action.stop_reason,
                 prev_action=previous_action_dp,
             )
+
+        feedback_score = None
+        if loop_result.final_state.recommendation is not None:
+            feedback_score = (
+                5 if loop_result.final_state.recommendation.decision.value == "APPLY" else 2
+            )
+
+        recommendation_value = (
+            loop_result.final_state.recommendation.decision.value
+            if loop_result.final_state.recommendation
+            else "NONE"
+        )
+        question_text = (
+            f"Job {job.job_id} | Decision {recommendation_value} | "
+            f"Termination {loop_result.termination_reason} | Actions"
+        )
+        answer_text = (
+            f"Job Description:\n{job.job_description}\n\n"
+            f"Agent Actions:\n{_format_action_trace_for_session(loop_result)}\n\n"
+            f"Feedback:\n{loop_result.final_state.feedback_text or 'No feedback recorded.'}"
+        )
+
+        await session_manager.add_qa(
+            user_id=str(user.id),
+            session_id=session_id,
+            question=question_text,
+            context="",
+            answer=answer_text,
+            feedback_text=loop_result.final_state.feedback_text,
+            feedback_score=feedback_score,
+        )
+
+        await persist_sessions_in_knowledge_graph_pipeline(
+            user=user,
+            session_ids=[session_id],
+            dataset=jobs_dataset_name,
+            run_in_background=False,
+        )
+        await session_manager.delete_session(
+            user_id=str(user.id),
+            session_id=session_id,
+        )
 
         results.append(
             {
