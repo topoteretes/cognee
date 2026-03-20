@@ -4,8 +4,11 @@ import pytest
 import pytest_asyncio
 import cognee
 
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.low_level import setup
+from cognee.tasks.storage import add_data_points
 
 
 @pytest_asyncio.fixture
@@ -60,3 +63,73 @@ async def test_brute_force_triplet_search_end_to_end(clean_environment):
     assert all(isinstance(per_query, list) for per_query in batch_result)
     assert all(per_query for per_query in batch_result)
     assert all(isinstance(edge, Edge) for per_query in batch_result for edge in per_query)
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_feedback_influence_changes_single_query_ranking(
+    clean_environment,
+):
+    """End-to-end exercise showing feedback influence changes single-query ranking."""
+
+    await setup()
+
+    class Person(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"]}
+
+    class Company(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"]}
+
+    preferred_person = Person(name="Preferred Person", feedback_weight=0.95)
+    preferred_company = Company(name="Preferred Company", feedback_weight=0.95)
+    fallback_person = Person(name="Fallback Person", feedback_weight=0.05)
+    fallback_company = Company(name="Fallback Company", feedback_weight=0.05)
+
+    await add_data_points(
+        [
+            preferred_person,
+            preferred_company,
+            fallback_person,
+            fallback_company,
+        ],
+        custom_edges=[
+            (
+                str(preferred_person.id),
+                str(preferred_company.id),
+                "works_for_different",
+                {"relationship_name": "works_for", "feedback_weight": 0.95},
+            ),
+            (
+                str(fallback_person.id),
+                str(fallback_company.id),
+                "works_for",
+                {"relationship_name": "works_for", "feedback_weight": 0.05},
+            ),
+        ],
+    )
+
+    no_feedback_results = await brute_force_triplet_search(
+        query="works_for",
+        top_k=1,
+        collections=["EdgeType_relationship_name"],
+        feedback_influence=0.0,
+    )
+
+    full_feedback_results = await brute_force_triplet_search(
+        query="works_for",
+        top_k=1,
+        collections=["EdgeType_relationship_name"],
+        feedback_influence=1.0,
+    )
+
+    assert len(no_feedback_results) == 1
+    assert len(full_feedback_results) == 1
+
+    distance_only_edge = no_feedback_results[0]
+    assert distance_only_edge.node1.attributes["name"] == "Fallback Person"
+    assert distance_only_edge.node2.attributes["name"] == "Fallback Company"
+
+    feedback_weighted_edge = full_feedback_results[0]
+    assert feedback_weighted_edge.node1.attributes["name"] == "Preferred Person"
+    assert feedback_weighted_edge.node2.attributes["name"] == "Preferred Company"
