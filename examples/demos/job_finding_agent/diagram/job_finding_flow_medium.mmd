@@ -9,7 +9,9 @@ flowchart TD
     F --> G["Persist FormattedJob + Recommendation\n(applicant_data via run_custom_pipeline + add_data_points)"]
 
     E --> H["Tool: RequestFeedback\n(from JSON branch by decision)\n(session.add_feedback / session.get_session)"]
+    H --> I["Tool: UpdateProcessJobAgentSkill\n(LLM updates preferences, supports reversals)"]
     E --> I["Tool: UpdateProcessJobAgentSkill\n(LLM updates preferences, supports reversals)"]
+
     I --> J["Persist SkillStateSnapshot (diff + feedback)\nlinked to AgentTaskJobNode\n(job_finding_agent_actions via run_custom_pipeline + add_data_points)"]
 
     J --> K["Persist AgentAction chain\n(ActionChainRoot + AgentTaskJobNode)\n(job_finding_agent_actions via run_custom_pipeline + add_data_points)"]
