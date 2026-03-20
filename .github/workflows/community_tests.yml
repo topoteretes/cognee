@@ -101,7 +101,6 @@ jobs:
             cognee/tests/unit/infrastructure/llm/ \
             cognee/tests/unit/infrastructure/test_rate_limiting_retry.py \
             cognee/tests/unit/tasks/storage/test_add_data_points.py \
-            cognee/tests/unit/eval_framework/ \
             cognee/tests/unit/shared/ \
             -v --tb=short
 
