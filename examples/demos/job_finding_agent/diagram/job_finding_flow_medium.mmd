@@ -1,0 +1,25 @@
+flowchart TD
+    A["Init: prune + setup"] --> B["CV ingestion -> applicant_data\n(cognee.add + cognee.cognify)"]
+    B --> C["Generate initial skill.md"]
+
+    C --> D{"For each job"}
+    D --> E["Think/Act/Observe loop (max 10)"]
+
+    E --> F["Tool: ProcessJobAgent\n- format job\n- memory research\n- decide APPLY/DONT_APPLY"]
+    F --> G["Persist FormattedJob + Recommendation\n(applicant_data via run_custom_pipeline + add_data_points)"]
+
+    E --> H["Tool: RequestFeedback\n(from JSON branch by decision)\n(session.add_feedback / session.get_session)"]
+    E --> I["Tool: UpdateProcessJobAgentSkill\n(LLM updates preferences, supports reversals)"]
+    I --> J["Persist SkillStateSnapshot (diff + feedback)\nlinked to AgentTaskJobNode\n(job_finding_agent_actions via run_custom_pipeline + add_data_points)"]
+
+    J --> K["Persist AgentAction chain\n(ActionChainRoot + AgentTaskJobNode)\n(job_finding_agent_actions via run_custom_pipeline + add_data_points)"]
+
+    F --> R["Cognee research call\ncognee.search\nSearchType.GRAPH_COMPLETION\n(top_k=5, custom system_prompt)\n(research loop max_steps=1)"]
+
+    K --> L["Write session QA\nquestion: job+decision\nanswer: actions+feedback\n(session_manager.add_qa)"]
+    L --> M["Memify session -> applicant_data\n(persist_sessions_in_knowledge_graph_pipeline)"]
+    M --> N["Delete session (no carryover)\n(session_manager.delete_session)"]
+
+    N --> O{"More jobs?"}
+    O -- "Yes" --> D
+    O -- "No" --> P["Return summary"]
