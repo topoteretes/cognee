@@ -68,7 +68,7 @@ class TestAddCommand:
         # Check data argument accepts multiple values
         assert actions["data"].nargs == "+"
 
-    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: lambda: AsyncMock(return_value=_mock_user()))
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
     def test_execute_single_item(self, mock_asyncio_run, _mock_resolve):
         """Test execute with single data item"""
@@ -87,7 +87,7 @@ class TestAddCommand:
             data="test.txt", dataset_name="test_dataset", user=ANY
         )
 
-    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: lambda: AsyncMock(return_value=_mock_user()))
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
     def test_execute_multiple_items(self, mock_asyncio_run, _mock_resolve):
         """Test execute with multiple data items"""
@@ -148,7 +148,7 @@ class TestSearchCommand:
         assert actions["top_k"].default == 10
         assert actions["output_format"].default == "pretty"
 
-    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: lambda: AsyncMock(return_value=_mock_user()))
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.search_command.asyncio.run", side_effect=_mock_run)
     def test_execute_basic_search(self, mock_asyncio_run, _mock_resolve):
         """Test execute with basic search"""
@@ -233,7 +233,7 @@ class TestCognifyCommand:
         # Check default values
         assert actions["chunker"].default == "TextChunker"
 
-    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: lambda: AsyncMock(return_value=_mock_user()))
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
     def test_execute_basic_cognify(self, mock_asyncio_run, _mock_resolve):
         """Test execute with basic cognify"""
@@ -309,7 +309,7 @@ class TestDeleteCommand:
         assert "all" in actions
         assert "force" in actions
 
-    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: lambda: AsyncMock(return_value=_mock_user()))
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.delete_command.cognee_datasets")
     @patch("cognee.cli.commands.delete_command.get_datasets_by_name")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
@@ -380,7 +380,7 @@ class TestDeleteCommand:
 
         mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
 
-    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: lambda: AsyncMock(return_value=_mock_user()))
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
     @patch("cognee.cli.commands.delete_command.cognee_datasets")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
     def test_execute_delete_forced(self, mock_asyncio_run, datasets_mock, _mock_resolve):
