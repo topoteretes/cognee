@@ -1,0 +1,131 @@
+"""High-level orchestration for CV init + per-job loop execution."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import cognee
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.users.methods import get_default_user
+
+from .agent.agent_loop import run_job_agent_loop
+from .agent.agent_models import ToolName
+from .agent.agent_state import JobAgentState
+from .agent.tool_contracts import RunnerContext
+from .config import (
+    APPLICANT_DATASET_NAME,
+    CV_FILE,
+    DATA_FILE,
+    DATASET_NAME,
+    MAX_ITERATIONS,
+    SESSION_ID,
+    SKILL_FILE,
+)
+from .decision import structured_decision_fn
+from .io_utils import read_mock_jobs
+from .skill_logic import generate_skill_from_cv
+from .tools import (
+    process_job_agent_tool,
+    request_feedback_tool,
+    store_agent_action,
+    update_process_job_agent_skill_tool,
+)
+
+
+async def run_jobs_from_json(
+    cv_text: str | None = None,
+    cv_path: Path = CV_FILE,
+    jobs_path: Path = DATA_FILE,
+    skill_path: Path = SKILL_FILE,
+    dataset_name: str = DATASET_NAME,
+    session_id: str = SESSION_ID,
+) -> dict[str, Any]:
+    """Entry point for the full flow: CV init + per-job modular loop."""
+    jobs = read_mock_jobs(jobs_path)
+
+    # Ensure a deterministic clean run for the demo lifecycle.
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await setup()
+
+    user = await get_default_user()
+
+    if cv_text is None:
+        cv_text = cv_path.read_text(encoding="utf-8")
+
+    skill_text = await generate_skill_from_cv(cv_text)
+    skill_path.write_text(skill_text, encoding="utf-8")
+
+    # Initial ingestion is CV-only in applicant_data dataset.
+    await cognee.add(
+        cv_text,
+        dataset_name=APPLICANT_DATASET_NAME,
+        user=user,
+    )
+    await cognee.cognify(datasets=[APPLICANT_DATASET_NAME], user=user)
+
+    context = RunnerContext(
+        dataset_name=dataset_name,
+        session_id=session_id,
+        skill_md_path=skill_path,
+        user=user,
+        skill_text=skill_text,
+        runtime_data={"pending_feedbacks": []},
+    )
+
+    tool_registry = {
+        ToolName.PROCESS_JOB_AGENT: process_job_agent_tool,
+        ToolName.UPDATE_PROCESS_JOB_AGENT_SKILL: update_process_job_agent_skill_tool,
+        ToolName.REQUEST_FEEDBACK: request_feedback_tool,
+    }
+
+    results: list[dict[str, Any]] = []
+    for job in jobs:
+        state = JobAgentState(
+            job=job,
+            skill_text=context.skill_text,
+            pending_feedbacks=list(context.runtime_data.get("pending_feedbacks", [])),
+        )
+        loop_result = await run_job_agent_loop(
+            initial_state=state,
+            tool_registry=tool_registry,
+            decision_fn=structured_decision_fn,
+            context=context,
+            max_iterations=MAX_ITERATIONS,
+        )
+
+        for action in loop_result.action_trace:
+            await store_agent_action(
+                state=loop_result.final_state,
+                context=context,
+                thought=action.thought,
+                tool_name=action.tool_name,
+                observation=action.observation,
+                stop_reason=action.stop_reason,
+            )
+
+        await update_process_job_agent_skill_tool(loop_result.final_state, context)
+
+        results.append(
+            {
+                "job_id": job.job_id,
+                "decision": (
+                    loop_result.final_state.recommendation.decision.value
+                    if loop_result.final_state.recommendation
+                    else None
+                ),
+                "termination_reason": loop_result.termination_reason,
+                "iterations": loop_result.final_state.iteration,
+                "feedback_text": loop_result.final_state.feedback_text,
+            }
+        )
+
+    return {
+        "dataset_name": dataset_name,
+        "session_id": session_id,
+        "max_iterations": MAX_ITERATIONS,
+        "jobs_processed": len(results),
+        "results": results,
+        "skill_md_path": str(skill_path),
+    }
