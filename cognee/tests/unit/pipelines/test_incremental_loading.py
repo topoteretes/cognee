@@ -38,10 +38,12 @@ async def test_incremental_loading_skips_processed():
 
     cognify_steps = [
         counting_classify,
-        step(extract_chunks_from_documents,
-             max_chunk_size=get_max_chunk_tokens(), chunker=TextChunker),
-        step(extract_graph_from_data,
-             graph_model=KnowledgeGraph, batch_size=100),
+        step(
+            extract_chunks_from_documents,
+            max_chunk_size=get_max_chunk_tokens(),
+            chunker=TextChunker,
+        ),
+        step(extract_graph_from_data, graph_model=KnowledgeGraph, batch_size=100),
         step(summarize_text, batch_size=100),
         step(add_data_points, batch_size=100),
     ]

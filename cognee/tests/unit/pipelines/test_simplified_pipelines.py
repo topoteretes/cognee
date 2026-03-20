@@ -1,4 +1,4 @@
-"""Tests for the simplified pipeline API: run_steps(), @step, Pipeline, Ctx, Drop, FieldAnnotations."""
+"""Tests for the simplified pipeline API: run_steps(), @step, Pipeline, Drop, FieldAnnotations."""
 
 import asyncio
 from typing import Annotated
@@ -10,7 +10,7 @@ from cognee.pipelines.flow import run_steps
 from cognee.pipelines.step import step
 from cognee.pipelines.builder import Pipeline
 from cognee.pipelines.context import dataset, get_current_dataset
-from cognee.pipelines.types import Ctx, Drop, Pipe
+from cognee.pipelines.types import Drop, Pipe
 
 
 # -- Test helpers --
@@ -49,15 +49,15 @@ class TestRunSteps:
         assert result == "A B C"
 
     def test_context_passed_through(self):
-        async def check_ctx(data, ctx: Ctx[dict] = None):
-            return {"data": data, "ctx_keys": list(ctx.keys()) if ctx else []}
+        async def check_ctx(data, user=None):
+            return {"data": data, "has_user": user is not None}
 
         result = asyncio.run(run_steps(check_ctx, input="hi", context={"user": "alice"}))
-        assert "user" in result["ctx_keys"]
+        assert result["has_user"] is True
 
     def test_dataset_in_context(self):
-        async def get_ds(data, ctx: Ctx[dict] = None):
-            return ctx.get("dataset", "none") if ctx else "none"
+        async def get_ds(data, dataset=None):
+            return dataset if dataset else "none"
 
         result = asyncio.run(run_steps(get_ds, input="x", dataset="mydata"))
         assert result == "mydata"
@@ -78,8 +78,8 @@ class TestRunSteps:
         assert result == ["A", "B", "C"]
 
     def test_dataset_context_manager_integration(self):
-        async def get_ds(data, ctx: Ctx[dict] = None):
-            return ctx.get("dataset", "none") if ctx else "none"
+        async def get_ds(data, dataset=None):
+            return dataset if dataset else "none"
 
         async def run():
             async with dataset("from_ctx_manager"):
@@ -89,8 +89,8 @@ class TestRunSteps:
         assert result == "from_ctx_manager"
 
     def test_dataset_kwarg_overrides_context_manager(self):
-        async def get_ds(data, ctx: Ctx[dict] = None):
-            return ctx.get("dataset", "none") if ctx else "none"
+        async def get_ds(data, dataset=None):
+            return dataset if dataset else "none"
 
         async def run():
             async with dataset("from_ctx_manager"):
@@ -232,45 +232,44 @@ class TestPipelineBuilder:
         assert len(warnings_list) == 0
 
 
-# -- Ctx injection tests --
+# -- Named-param context injection tests --
 
 
-class TestCtxInjection:
-    def test_ctx_annotated_param_gets_context(self):
-        async def needs_ctx(data, ctx: Ctx[dict] = None):
-            return ctx is not None
+class TestContextInjection:
+    def test_named_param_gets_context_value(self):
+        async def needs_user(data, user=None):
+            return user is not None
 
-        result = asyncio.run(run_steps(needs_ctx, input="x", context={"key": "val"}))
+        result = asyncio.run(run_steps(needs_user, input="x", context={"user": "alice"}))
         assert result is True
 
-    def test_ctx_not_injected_without_annotation(self):
+    def test_no_matching_param_skips_injection(self):
         async def no_ctx(data):
             return data
 
         result = asyncio.run(run_steps(no_ctx, input="ok", context={"key": "val"}))
         assert result == "ok"
 
-    def test_ctx_with_none_context(self):
-        async def check(data, ctx: Ctx[dict] = None):
-            return ctx
+    def test_multiple_named_params_injected(self):
+        async def check(data, user=None, dataset=None):
+            return {"user": user, "dataset": dataset}
 
-        result = asyncio.run(run_steps(check, input="x"))
-        assert result == {}  # Empty dict, not None (run_steps always creates a ctx dict)
+        result = asyncio.run(run_steps(check, input="x", context={"user": "alice"}, dataset="myds"))
+        assert result["user"] == "alice"
+        assert result["dataset"] == "myds"
 
-    def test_ctx_mixed_with_regular_steps(self):
+    def test_named_params_mixed_with_regular_steps(self):
         async def step1(text):
             return text.upper()
 
-        async def step2(text, ctx: Ctx[dict] = None):
-            ds = ctx.get("dataset", "unknown") if ctx else "unknown"
-            return f"{text}|{ds}"
+        async def step2(text, dataset=None):
+            return f"{text}|{dataset or 'unknown'}"
 
         result = asyncio.run(run_steps(step1, step2, input="hi", dataset="test_ds"))
         assert result == "HI|test_ds"
 
-    def test_ctx_with_async_generator(self):
-        async def gen(text, ctx: Ctx[dict] = None):
-            prefix = ctx.get("prefix", "") if ctx else ""
+    def test_named_param_with_async_generator(self):
+        async def gen(text, prefix=""):
             for word in text.split():
                 yield f"{prefix}{word}"
 
@@ -306,11 +305,10 @@ class TestDefaultParams:
         result = asyncio.run(pipeline.execute(input=[2, 4]))
         assert result == [10, 20]
 
-    def test_default_params_with_ctx(self):
+    def test_default_params_with_context(self):
         @step(prefix=">>")
-        async def tag(text, prefix, ctx: Ctx[dict] = None):
-            ds = ctx.get("dataset", "?") if ctx else "?"
-            return f"{prefix} {text} [{ds}]"
+        async def tag(text, prefix, dataset=None):
+            return f"{prefix} {text} [{dataset or '?'}]"
 
         result = asyncio.run(run_steps(tag, input="hi", dataset="test"))
         assert result == ">> hi [test]"
@@ -416,9 +414,8 @@ class TestParallel:
         assert sorted(result) == [3, 6, 9]
 
     def test_parallel_with_context(self):
-        async def tag(x, ctx: Ctx[dict] = None):
-            ds = ctx.get("dataset", "?") if ctx else "?"
-            return f"{x}:{ds}"
+        async def tag(x, dataset=None):
+            return f"{x}:{dataset or '?'}"
 
         result = asyncio.run(run_steps(tag, input=["a", "b"], parallel=True, dataset="myds"))
         assert sorted(result) == ["a:myds", "b:myds"]
@@ -596,6 +593,143 @@ class TestFieldAnnotations:
 
         meta = WithBio.model_fields["metadata"].default
         assert meta == {"index_fields": []}
+
+
+# -- @task decorator tests --
+
+
+class TestTaskDecorator:
+    def test_task_no_args(self):
+        from cognee.modules.pipelines.tasks.task import task, Task
+
+        @task
+        async def classify(data):
+            return data
+
+        # Function is still directly callable
+        assert asyncio.run(classify("hello")) == "hello"
+        # .task attribute is a Task object
+        assert isinstance(classify.task, Task)
+
+    def test_task_with_batch_size(self):
+        from cognee.modules.pipelines.tasks.task import task
+
+        @task(batch_size=20)
+        async def extract_graph(chunks, graph_model):
+            return chunks
+
+        assert extract_graph.task.task_config["batch_size"] == 20
+        # Still callable
+        assert asyncio.run(extract_graph("data", "model")) == "data"
+
+    def test_task_with_default_params(self):
+        from cognee.modules.pipelines.tasks.task import task
+
+        @task(batch_size=10, graph_model="KnowledgeGraph")
+        async def extract(data, graph_model=None):
+            return graph_model
+
+        assert extract.task.default_params["kwargs"]["graph_model"] == "KnowledgeGraph"
+        assert extract.task.task_config["batch_size"] == 10
+
+    def test_task_with_config_override(self):
+        from cognee.modules.pipelines.tasks.task import task
+
+        @task(batch_size=20)
+        async def process(data):
+            return data
+
+        overridden = process.task.with_config(batch_size=5)
+        assert overridden.task_config["batch_size"] == 5
+        assert process.task.task_config["batch_size"] == 20  # original unchanged
+
+    def test_task_in_pipeline_list(self):
+        from cognee.modules.pipelines.tasks.task import task, Task
+
+        @task
+        async def classify(data):
+            return data
+
+        @task(batch_size=20)
+        async def extract(data, graph_model=None):
+            return data
+
+        # Build pipeline from .task attributes
+        tasks = [classify.task, extract.task, extract.task.with_config(batch_size=5)]
+        assert all(isinstance(t, Task) for t in tasks)
+        assert tasks[0].task_config["batch_size"] == 1
+        assert tasks[1].task_config["batch_size"] == 20
+        assert tasks[2].task_config["batch_size"] == 5
+
+
+# -- Task.with_config() tests --
+
+
+class TestWithConfig:
+    def test_with_config_overrides_batch_size(self):
+        from cognee.modules.pipelines.tasks.task import Task
+
+        async def process(items):
+            return [x + 1 for x in items]
+
+        base = Task(process, batch_size=20)
+        overridden = base.with_config(batch_size=5)
+        assert overridden.task_config["batch_size"] == 5
+        assert base.task_config["batch_size"] == 20  # original unchanged
+
+    def test_with_config_overrides_default_params(self):
+        from cognee.modules.pipelines.tasks.task import Task
+
+        async def extract(data, graph_model=None):
+            return graph_model
+
+        base = Task(extract, graph_model="DefaultModel")
+        overridden = base.with_config(graph_model="OverriddenModel")
+        assert overridden.default_params["kwargs"]["graph_model"] == "OverriddenModel"
+        assert base.default_params["kwargs"]["graph_model"] == "DefaultModel"
+
+    def test_with_config_preserves_positional_args(self):
+        from cognee.modules.pipelines.tasks.task import Task
+
+        async def ingest(data, dataset_name, user):
+            return (dataset_name, user)
+
+        base = Task(ingest, "my_dataset", "alice", batch_size=10)
+        overridden = base.with_config(batch_size=5)
+        assert overridden.default_params["args"] == ("my_dataset", "alice")
+        assert overridden.task_config["batch_size"] == 5
+
+    def test_with_config_enriches(self):
+        from cognee.modules.pipelines.tasks.task import Task
+
+        async def enrich(items):
+            for item in items:
+                item["tag"] = True
+
+        base = Task(enrich)
+        enriching = base.with_config(enriches=True, batch_size=5)
+        assert enriching.enriches is True
+        assert enriching.task_config["batch_size"] == 5
+        assert base.enriches is False
+
+    def test_with_config_factory_pattern(self):
+        """The thin factory pattern from the design discussion."""
+        from cognee.modules.pipelines.tasks.task import Task
+
+        async def extract_graph(data, graph_model=None):
+            return f"extracted with {graph_model}"
+
+        # Factory: reusable base task with defaults
+        extract_graph_task = Task(extract_graph, batch_size=20, graph_model="KnowledgeGraph")
+
+        # Override at call site
+        small = extract_graph_task.with_config(batch_size=10)
+        different_model = extract_graph_task.with_config(graph_model="CustomModel")
+
+        assert small.task_config["batch_size"] == 10
+        assert small.default_params["kwargs"]["graph_model"] == "KnowledgeGraph"
+        assert different_model.default_params["kwargs"]["graph_model"] == "CustomModel"
+        assert different_model.task_config["batch_size"] == 20
 
 
 # -- Legacy backward compatibility tests --

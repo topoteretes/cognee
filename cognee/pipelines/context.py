@@ -89,15 +89,14 @@ async def cognee_pipeline(dataset: str = None, user=None):
 
     # Resolve user and check permissions
     datasets_arg = [dataset_name] if dataset_name else []
-    _user, authorized_datasets = await resolve_authorized_user_datasets(
-        datasets_arg, user
-    )
+    _user, authorized_datasets = await resolve_authorized_user_datasets(datasets_arg, user)
 
     # Set up per-dataset DB isolation for the first authorized dataset
     active_dataset = authorized_datasets[0] if authorized_datasets else None
     if active_dataset:
         await set_database_global_context_variables(
-            active_dataset.id, active_dataset.owner_id  # type: ignore[arg-type]
+            active_dataset.id,
+            active_dataset.owner_id,  # type: ignore[arg-type]
         )
 
     # Set dataset in ContextVar so run_steps picks it up
@@ -107,10 +106,12 @@ async def cognee_pipeline(dataset: str = None, user=None):
         _current_dataset.set(ds_name)
 
     # Store resolved objects for run_steps context building
-    _pipeline_context.set({
-        "user": _user,
-        "dataset": active_dataset,
-    })
+    _pipeline_context.set(
+        {
+            "user": _user,
+            "dataset": active_dataset,
+        }
+    )
 
     try:
         yield active_dataset

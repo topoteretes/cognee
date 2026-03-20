@@ -23,7 +23,7 @@ from functools import wraps
 
 from cognee.pipelines.types import (
     _Drop,
-    get_ctx_param_name,
+    inject_context_kwargs,
 )
 
 
@@ -95,24 +95,24 @@ def _wrap_with_default_params(fn, default_params: dict):
     return wrapper
 
 
-def _wrap_with_ctx_injection(fn, context: dict):
-    """Wrap a function to inject context into Ctx-annotated or legacy 'context' parameters."""
+def _wrap_with_context_injection(fn, context: dict):
+    """Wrap a function to inject context values as named parameters.
+
+    Uses inject_context_kwargs to match context keys to function parameter
+    names, then wraps the function to inject those values automatically.
+    """
     sig = inspect.signature(fn)
-    ctx_param = get_ctx_param_name(sig)
+    ctx_kwargs = inject_context_kwargs(sig, context)
 
-    # Fallback: legacy tasks use a plain parameter named "context"
-    if ctx_param is None and "context" in sig.parameters:
-        ctx_param = "context"
-
-    if ctx_param is None:
+    if not ctx_kwargs:
         return fn
 
     if inspect.isasyncgenfunction(fn):
 
         @wraps(fn)
         async def async_gen_wrapper(*args, **kwargs):
-            kwargs[ctx_param] = context
-            async for item in fn(*args, **kwargs):
+            merged = {**ctx_kwargs, **kwargs}
+            async for item in fn(*args, **merged):
                 yield item
 
         return async_gen_wrapper
@@ -121,8 +121,8 @@ def _wrap_with_ctx_injection(fn, context: dict):
 
         @wraps(fn)
         async def async_wrapper(*args, **kwargs):
-            kwargs[ctx_param] = context
-            return await fn(*args, **kwargs)
+            merged = {**ctx_kwargs, **kwargs}
+            return await fn(*args, **merged)
 
         return async_wrapper
 
@@ -130,15 +130,15 @@ def _wrap_with_ctx_injection(fn, context: dict):
 
         @wraps(fn)
         def gen_wrapper(*args, **kwargs):
-            kwargs[ctx_param] = context
-            yield from fn(*args, **kwargs)
+            merged = {**ctx_kwargs, **kwargs}
+            yield from fn(*args, **merged)
 
         return gen_wrapper
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        kwargs[ctx_param] = context
-        return fn(*args, **kwargs)
+        merged = {**ctx_kwargs, **kwargs}
+        return fn(*args, **merged)
 
     return wrapper
 
@@ -177,7 +177,7 @@ def _prepare_step(step_fn, ctx):
     original = _get_original(step_fn)
     default_params = _get_default_params(step_fn)
     wrapped = _wrap_with_default_params(original, default_params)
-    wrapped = _wrap_with_ctx_injection(wrapped, ctx)
+    wrapped = _wrap_with_context_injection(wrapped, ctx)
     return wrapped
 
 
