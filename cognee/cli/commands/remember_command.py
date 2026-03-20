@@ -96,7 +96,7 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to remember: {str(e)}") from e
 
-            result = asyncio.run(run_remember())
+            asyncio.run(run_remember())
 
             if args.background:
                 fmt.success("Data ingested and cognification started in background!")

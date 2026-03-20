@@ -63,7 +63,7 @@ tasks on an existing knowledge graph to add context, rules, and connections.
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to improve: {str(e)}") from e
 
-            result = asyncio.run(run_improve())
+            asyncio.run(run_improve())
 
             if args.background:
                 fmt.success("Improvement started in background!")
