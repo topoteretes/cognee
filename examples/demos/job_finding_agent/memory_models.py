@@ -54,6 +54,7 @@ class SkillStateSnapshot(DataPoint):
     action_job_node: ActionTaskJobNode
     job_id: str
     version: int
+    feedbacks: list[str] = []
     previous_snapshot: Optional["SkillStateSnapshot"] = None
     text: str
     metadata: dict = {"index_fields": ["text"]}

@@ -8,7 +8,6 @@ import re
 import cognee
 from cognee import SearchType
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 from pydantic import BaseModel, Field
 
 from examples.demos.job_finding_agent.agent.agent_models import (
@@ -117,6 +116,7 @@ def _build_skill_change_text(
     current_skill: str,
     job_id: str,
     version: int,
+    feedbacks: list[str],
 ) -> str:
     """Build compact dynamic change-only summary between two skill states."""
     prev_lines = previous_skill.splitlines()
@@ -139,9 +139,13 @@ def _build_skill_change_text(
         and not line.startswith("---")
     ]
     diff_preview = "\n".join(change_lines[:120]) if change_lines else "No textual changes."
+    feedback_block = (
+        "\n".join(f"- {item}" for item in feedbacks if item.strip()) if feedbacks else "- (none)"
+    )
     return (
         f"Skill snapshot version {version} for {job_id}\n"
-        f"Dynamic changes only:\n{diff_preview}"
+        f"Dynamic changes only:\n{diff_preview}\n\n"
+        f"Feedback used for this update:\n{feedback_block}"
     ).strip()
 
 
@@ -294,21 +298,12 @@ async def update_process_job_agent_skill_tool(
     state: JobAgentState,
     context: RunnerContext,
 ) -> ToolExecutionResult:
-    """Apply feedback weights then update skill text."""
+    """Update skill text from pending feedback and persist snapshot."""
     if not context.runtime_data.get("pending_feedbacks"):
         return ToolExecutionResult(
             observation="No pending feedback available for skill update.",
             continue_loop=True,
         )
-
-    await apply_feedback_weights_pipeline(
-        user=context.user,
-        session_ids=[context.session_id],
-        dataset=context.dataset_name,
-        alpha=0.1,
-        batch_size=100,
-        run_in_background=False,
-    )
 
     previous_skill_text = context.skill_text
     pending_feedbacks = list(context.runtime_data.get("pending_feedbacks", []))
@@ -325,12 +320,14 @@ async def update_process_job_agent_skill_tool(
         current_skill=updated_skill,
         job_id=state.job.job_id,
         version=snapshot_version,
+        feedbacks=pending_feedbacks,
     )
     skill_snapshot = SkillStateSnapshot(
         id=build_node_id_from_text(snapshot_text),
         action_job_node=action_job_node,
         job_id=state.job.job_id,
         version=snapshot_version,
+        feedbacks=[item for item in pending_feedbacks if item.strip()],
         previous_snapshot=previous_snapshot,
         text=snapshot_text,
     )
