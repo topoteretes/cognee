@@ -12,7 +12,7 @@ class TestRelationalConfig:
             os.environ, {"DATABASE_CONNECT_ARGS": '{"timeout": 60, "sslmode": "require"}'}
         ):
             config = RelationalConfig()
-            assert config.database_connect_args == {"timeout": 60, "sslmode": "require"}
+            assert config.database_connect_args == (("sslmode", "require"), ("timeout", 60))
 
     def test_database_connect_args_empty_string(self):
         """Test that empty DATABASE_CONNECT_ARGS is handled correctly."""
@@ -44,13 +44,13 @@ class TestRelationalConfig:
             config = RelationalConfig()
             config_dict = config.to_dict()
             assert "database_connect_args" in config_dict
-            assert config_dict["database_connect_args"] == {"timeout": 60}
+            assert config_dict["database_connect_args"] == (("timeout", 60),)
 
     def test_database_connect_args_integer_value(self):
         """Test that DATABASE_CONNECT_ARGS with integer values is parsed correctly."""
         with patch.dict(os.environ, {"DATABASE_CONNECT_ARGS": '{"connect_timeout": 10}'}):
             config = RelationalConfig()
-            assert config.database_connect_args == {"connect_timeout": 10}
+            assert config.database_connect_args == (("connect_timeout", 10),)
 
     def test_database_connect_args_mixed_types(self):
         """Test that DATABASE_CONNECT_ARGS with mixed value types is parsed correctly."""
@@ -61,9 +61,9 @@ class TestRelationalConfig:
             },
         ):
             config = RelationalConfig()
-            assert config.database_connect_args == {
-                "timeout": 60,
-                "sslmode": "require",
-                "retries": 3,
-                "keepalive": True,
-            }
+            assert config.database_connect_args == (
+                ("keepalive", True),
+                ("retries", 3),
+                ("sslmode", "require"),
+                ("timeout", 60),
+            )

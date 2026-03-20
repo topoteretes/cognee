@@ -1,15 +1,15 @@
 import json
 import os
+import re
 import sys
 import argparse
 import asyncio
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from cognee.modules.data.methods import (
-    get_datasets_by_name,
-    get_last_added_data,
-)
+from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
+from cognee.modules.data.methods.get_last_added_data import get_last_added_data
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
 from cognee.shared.usage_logger import log_usage
@@ -47,6 +47,50 @@ logger = get_logger()
 
 cognee_client: Optional[CogneeClient] = None
 
+# Stores background task errors so cognify_status can report them
+_task_errors: dict[str, str] = {}
+
+
+def _is_running_in_docker() -> bool:
+    """Check if the process is running inside a Docker container."""
+    return os.path.exists("/.dockerenv") or os.path.isdir("/app")
+
+
+def _looks_like_file_path(data: str) -> bool:
+    """Check if the data string looks like a local file path."""
+    data = data.strip()
+    # Unix absolute path, Windows drive letter path, or file:// URI
+    if data.startswith("/") or re.match(r"^[A-Za-z]:\\", data) or data.startswith("file://"):
+        return True
+    return False
+
+
+def _validate_file_path(data: str) -> Optional[str]:
+    """
+    If data looks like a file path, validate it exists.
+    Returns an error message string if invalid, or None if OK.
+    """
+    if not _looks_like_file_path(data):
+        return None
+
+    path = data.strip()
+    if path.startswith("file://"):
+        path = path[7:]
+
+    if not os.path.exists(path):
+        msg = f"File not found: {path}"
+        if _is_running_in_docker():
+            msg += (
+                "\n\nIt looks like you're running inside Docker. Host file paths are not "
+                "accessible inside the container. To ingest local files, mount a volume in "
+                "docker-compose.yml:\n"
+                "  volumes:\n"
+                "    - /path/to/your/data:/data\n"
+                "Then reference the file as /data/<filename> instead."
+            )
+        return msg
+    return None
+
 
 async def run_sse_with_cors():
     """Custom SSE transport with CORS middleware."""
@@ -55,7 +99,7 @@ async def run_sse_with_cors():
         CORSMiddleware,
         allow_origins=["http://localhost:3000"],
         allow_credentials=True,
-        allow_methods=["GET"],
+        allow_methods=["*"],
         allow_headers=["*"],
     )
 
@@ -76,7 +120,7 @@ async def run_http_with_cors():
         CORSMiddleware,
         allow_origins=["http://localhost:3000"],
         allow_credentials=True,
-        allow_methods=["GET"],
+        allow_methods=["*"],
         allow_headers=["*"],
     )
 
@@ -206,6 +250,16 @@ async def cognify(
 
     """
 
+    # Validate file paths before launching background task
+    file_error = _validate_file_path(data)
+    if file_error:
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Error: {file_error}",
+            )
+        ]
+
     async def cognify_task(
         data: str,
         graph_model_file: str = None,
@@ -236,8 +290,17 @@ async def cognify(
                 logger.error("Cognify process failed.")
                 raise ValueError(f"Failed to cognify: {str(e)}")
 
+    async def cognify_task_wrapper(**kwargs):
+        """Wrapper that captures errors from the background task."""
+        try:
+            await cognify_task(**kwargs)
+        except Exception as e:
+            timestamp = datetime.now(timezone.utc).isoformat()
+            _task_errors[timestamp] = str(e)
+            logger.error(f"Background cognify task failed: {e}")
+
     asyncio.create_task(
-        cognify_task(
+        cognify_task_wrapper(
             data=data,
             graph_model_file=graph_model_file,
             graph_model_name=graph_model_name,
@@ -795,13 +858,28 @@ async def cognify_status():
             status = await cognee_client.get_pipeline_status(
                 [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
             )
-            return [types.TextContent(type="text", text=str(status))]
+
+            # Append any background task errors
+            status_text = str(status)
+            if _task_errors:
+                error_lines = ["\n\nBackground task errors:"]
+                for ts, err in sorted(_task_errors.items(), reverse=True):
+                    error_lines.append(f"  [{ts}] {err}")
+                status_text += "\n".join(error_lines)
+
+            return [types.TextContent(type="text", text=status_text)]
         except NotImplementedError:
             error_msg = "❌ Pipeline status is not available in API mode"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
             error_msg = f"❌ Failed to get cognify status: {str(e)}"
+            # Still report background errors even if pipeline status fails
+            if _task_errors:
+                error_lines = ["\n\nBackground task errors:"]
+                for ts, err in sorted(_task_errors.items(), reverse=True):
+                    error_lines.append(f"  [{ts}] {err}")
+                error_msg += "\n".join(error_lines)
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
@@ -902,35 +980,34 @@ async def main():
     cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
 
     mcp.settings.host = args.host
-    mcp.settings.port = args.port
+    mcp.settings.port = int(args.port)
 
     # Skip migrations when in API mode (the API server handles its own database)
     if not args.no_migration and not args.api_url:
         from cognee.modules.engine.operations.setup import setup
-
-        await setup()
-
-        # Run Cognee migrations
-        logger.info("Running database migrations...")
         from cognee.run_migrations import run_migrations
 
+        logger.info("Running database migrations...")
+
+        await setup()
         await run_migrations()
 
         logger.info("Database migrations done.")
-    elif args.api_url:
-        logger.info("Skipping database migrations (using API mode)")
+    elif not args.api_url:
+        logger.info("Skipping DB migrations")
 
-    logger.info(f"Starting MCP server with transport: {args.transport}")
-    if args.transport == "stdio":
-        await mcp.run_stdio_async()
-    elif args.transport == "sse":
-        logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
-        await run_sse_with_cors()
-    elif args.transport == "http":
-        logger.info(
-            f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
-        )
-        await run_http_with_cors()
+    match args.transport.lower():
+        case "sse":
+            logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
+            await run_sse_with_cors()
+        case "http":
+            logger.info(
+                f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
+            )
+            await run_http_with_cors()
+        case _:
+            logger.info("Running MCP server with stdio")
+            await mcp.run_stdio_async()
 
 
 if __name__ == "__main__":

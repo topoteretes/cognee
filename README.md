@@ -5,10 +5,10 @@
 
   <br />
 
-  Cognee - Accurate and Persistent AI Memory
+  Cognee - Build AI memory with a Knowledge Engine that learns
 
   <p align="center">
-  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
+  <a href="https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s">Demo</a>
   .
   <a href="https://docs.cognee.ai/">Docs</a>
   .
@@ -32,16 +32,12 @@
   <a href="https://github.com/sponsors/topoteretes"><img src="https://img.shields.io/badge/Sponsor-❤️-ff69b4.svg" alt="Sponsor"></a>
 
 <p>
-  <a href="https://www.producthunt.com/posts/cognee?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_souce=badge-cognee" target="_blank" style="display:inline-block; margin-right:10px;">
-    <img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=946346&theme=light&period=daily&t=1744472480704" alt="cognee - Memory&#0032;for&#0032;AI&#0032;Agents&#0032;&#0032;in&#0032;5&#0032;lines&#0032;of&#0032;code | Product Hunt" width="250" height="54" />
-  </a>
-
   <a href="https://trendshift.io/repositories/13955" target="_blank" style="display:inline-block;">
     <img src="https://trendshift.io/api/badge/repositories/13955" alt="topoteretes%2Fcognee | Trendshift" width="250" height="55" />
   </a>
 </p>
 
-Use your data to build personalized and dynamic memory for AI Agents. Cognee lets you replace RAG with scalable and modular ECL (Extract, Cognify, Load) pipelines.
+Use our knowledge engine to build personalized and dynamic memory for AI Agents.
 
   <p align="center">
   🌐 Available Languages
@@ -59,7 +55,7 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 
 <div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
 </div>
 </div>
 
@@ -68,20 +64,19 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 ## About Cognee
 
-Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships.
-Cognee offers default memory creation and search which we describe bellow. But with Cognee you can build your own!
+Cognee is an open-source knowledge engine that lets you ingest data in any format or structure and continuously learns to provide the right context for AI agents. It combines vector search, graph databases and cognitive science approaches to make your documents both searchable by meaning and connected by relationships as they change and evolve.
+
 
 
 :star: _Help us reach more developers and grow the cognee community. Star this repo!_
 
 
-### Cognee Open Source:
+### Why use Cognee:
 
-- Interconnects any type of data — including past conversations, files, images, and audio transcriptions
-- Replaces traditional RAG systems with a unified memory layer built on graphs and vectors
-- Reduces developer effort and infrastructure cost while improving quality and precision
-- Provides Pythonic data pipelines for ingestion from 30+ data sources
-- Offers high customizability through user-defined tasks, modular pipelines, and built-in search endpoints
+- Knowledge infrastructure — unified ingestion, graph/vector search, runs locally, ontology grounding, multimodal
+- Persistent and Learning Agents - learn from feedback, context management, cross-agent knowledge sharing
+- Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
+
 
 
 ## Basic Usage & Feature Guide
@@ -117,7 +112,7 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 ### Step 3: Run the Pipeline
 
-Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships.
+Cognee will take your documents, load them into the knowledge angine and search combined vector/graph relationships.
 
 Now, run a minimal pipeline:
 
@@ -131,11 +126,8 @@ async def main():
     # Add text to cognee
     await cognee.add("Cognee turns documents into AI memory.")
 
-    # Generate the knowledge graph
+    # Add to knowledge engine
     await cognee.cognify()
-
-    # Add memory algorithms to the graph
-    await cognee.memify()
 
     # Query the knowledge graph
     results = await cognee.search("What does Cognee do?")
@@ -181,15 +173,7 @@ See Cognee in action:
 
 ### Persistent Agent Memory
 
-[Cognee Memory for LangGraph Agents](https://github.com/user-attachments/assets/e113b628-7212-4a2b-b288-0be39a93a1c3)
-
-### Simple GraphRAG
-
-[Watch Demo](https://github.com/user-attachments/assets/f2186b2e-305a-42b0-9c2d-9f4473f15df8)
-
-### Cognee with Ollama
-
-[Watch Demo](https://github.com/user-attachments/assets/39672858-f774-4136-b957-1e2de67b8981)
+[![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
 
 ## Community & Support

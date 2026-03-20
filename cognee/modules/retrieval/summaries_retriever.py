@@ -1,10 +1,9 @@
 from typing import Any, Optional, List, Union
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
 logger = get_logger("SummariesRetriever")
@@ -49,15 +48,14 @@ class SummariesRetriever(BaseRetriever):
             f"Starting summary retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
 
-        vector_engine = get_vector_engine()
+        unified = await get_unified_engine()
+        vector_engine = unified.vector
 
         try:
             summaries_results = await vector_engine.search(
                 "TextSummary_text", query, limit=self.top_k, include_payload=True
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
-
-            await update_node_access_timestamps(summaries_results)
 
             return summaries_results
         except CollectionNotFoundError as error:

@@ -14,11 +14,27 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
+          fetch-depth: 0  # Fetch all history for comparison
+
+      - name: Fetch main branch for comparison
+        if: ${{ github.ref_name == 'dev' }}
+        run: git fetch origin main:main
+
+      - name: Fetch dev branch for comparison
+        if: ${{ github.ref_name == 'main' }}
+        run: git fetch origin dev:dev
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked
 
       - name: Create and push git tag
         id: create_tag
@@ -37,14 +53,29 @@ jobs:
           git tag "${TAG}"
           git push origin "${TAG}"
 
+      - name: Generate AI-powered release notes
+        id: generate_notes
+        env:
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL != '' && secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
+        run: |
+          # Set PYTHONPATH to include project root
+          export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
 
-      - name: Create GitHub Release
+          # Generate release notes
+          # Compares current branch against the latest release tag automatically
+          uv run python tools/generate_release_notes.py \
+            --version "${{ steps.create_tag.outputs.version }}" \
+            --github-output
+
+      - name: Create GitHub Release with AI-generated notes
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.create_tag.outputs.tag }}
-          generate_release_notes: true
+          body: ${{ steps.generate_notes.outputs.RELEASE_NOTES }}
+          prerelease: ${{ github.ref_name == 'dev' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 
   release-pypi-package:
     needs: release-github
@@ -55,7 +86,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
 
@@ -85,7 +116,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
 
@@ -100,7 +131,7 @@ jobs:
 
       - name: Build and push Dev Docker Image
         if: ${{ github.ref_name == 'dev' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -114,7 +145,7 @@ jobs:
 
       - name: Build and push Main Docker Image
         if: ${{ github.ref_name == 'main' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64

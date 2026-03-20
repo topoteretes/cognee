@@ -9,9 +9,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - name: Github Releases To Discord
-        uses: SethCohen/github-releases-to-discord@v1.16.2
+        uses: SethCohen/github-releases-to-discord@v1.19.0
         with:
           webhook_url: ${{ secrets.WEBHOOK_URL }}
           color: "2105893"

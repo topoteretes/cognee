@@ -1,7 +1,7 @@
 import litellm
 import instructor
 from pydantic import BaseModel
-from typing import Type, Optional
+from typing import Any, Dict, Type, Optional
 from litellm import JSONSchemaValidationError
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.shared.logging_utils import get_logger
@@ -47,6 +47,7 @@ class MistralAdapter(GenericAPIAdapter):
         transcription_model: str = None,
         image_transcribe_model: str = None,
         instructor_mode: str = None,
+        llm_args: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             api_key=api_key,
@@ -56,7 +57,9 @@ class MistralAdapter(GenericAPIAdapter):
             endpoint=endpoint,
             transcription_model=transcription_model,
             image_transcribe_model=image_transcribe_model,
+            llm_args=llm_args,
         )
+        self.llm_args = llm_args
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -71,7 +74,9 @@ class MistralAdapter(GenericAPIAdapter):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type(
+            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+        ),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -104,14 +109,15 @@ class MistralAdapter(GenericAPIAdapter):
                 from the following input: {text_input}""",
                 },
             ]
+            merged_kwargs = {**self.llm_args, **kwargs}
             try:
                 async with llm_rate_limiter_context_manager():
                     response = await self.aclient.chat.completions.create(
                         model=self.model,
-                        max_tokens=self.max_completion_tokens,
                         max_retries=2,
                         messages=messages,
                         response_model=response_model,
+                        **merged_kwargs,
                     )
                 if response.choices and response.choices[0].message.content:
                     content = response.choices[0].message.content
@@ -131,7 +137,9 @@ class MistralAdapter(GenericAPIAdapter):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type(
+            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+        ),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )

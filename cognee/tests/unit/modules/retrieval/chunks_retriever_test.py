@@ -7,6 +7,14 @@ from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 
+def _make_unified_mock(vector_engine):
+    """Create a mock UnifiedStoreEngine wrapping the given vector engine."""
+    unified = AsyncMock()
+    unified.vector = vector_engine
+    unified.graph = AsyncMock()
+    return unified
+
+
 @pytest.fixture
 def mock_vector_engine():
     """Create a mock vector engine."""
@@ -28,8 +36,8 @@ async def test_get_context_success(mock_vector_engine):
     retriever = ChunksRetriever(top_k=5)
 
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
     ):
         objects = await retriever.get_retrieved_objects("test query")
 
@@ -49,8 +57,8 @@ async def test_get_context_collection_not_found_error(mock_vector_engine):
     retriever = ChunksRetriever()
 
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
     ):
         with pytest.raises(NoDataError, match="No data found"):
             await retriever.get_retrieved_objects("test query")
@@ -64,8 +72,8 @@ async def test_get_context_empty_results(mock_vector_engine):
     retriever = ChunksRetriever()
 
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
     ):
         objects = await retriever.get_retrieved_objects("test query")
 
@@ -84,8 +92,8 @@ async def test_get_context_top_k_limit(mock_vector_engine):
     retriever = ChunksRetriever(top_k=3)
 
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
     ):
         objects = await retriever.get_retrieved_objects("test query")
 
@@ -144,8 +152,8 @@ async def test_get_context_empty_payload(mock_vector_engine):
     retriever = ChunksRetriever()
 
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
     ):
         retrieved_objects = await retriever.get_retrieved_objects("test query")
         context = await retriever.get_context_from_objects(

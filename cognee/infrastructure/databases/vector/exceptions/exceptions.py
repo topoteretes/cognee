@@ -15,7 +15,7 @@ class CollectionNotFoundError(CogneeValidationError):
         self,
         message,
         name: str = "CollectionNotFoundError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
         log=True,
         log_level="DEBUG",
     ):

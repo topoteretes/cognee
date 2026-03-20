@@ -1,11 +1,9 @@
 from typing import Any, Optional, List, Union
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
-from datetime import datetime, timezone
 
 logger = get_logger("ChunksRetriever")
 
@@ -93,14 +91,14 @@ class ChunksRetriever(BaseRetriever):
             f"Starting chunk retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
 
-        vector_engine = get_vector_engine()
+        unified = await get_unified_engine()
+        vector_engine = unified.vector
 
         try:
             found_chunks = await vector_engine.search(
                 "DocumentChunk_text", query, limit=self.top_k, include_payload=True
             )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
-            await update_node_access_timestamps(found_chunks)
 
             return found_chunks
 

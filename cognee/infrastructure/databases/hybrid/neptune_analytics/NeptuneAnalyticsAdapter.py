@@ -26,12 +26,14 @@ class IndexSchema(DataPoint):
     Attributes:
     - id: A string representing the unique identifier for the data point.
     - text: A string representing the content of the data point.
+    - belongs_to_set: A list of node names this data point belongs to, used for filtering.
     - metadata: A dictionary with default index fields for the schema, currently configured
     to include 'text'.
     """
 
     id: str
     text: str
+    belongs_to_set: List[str] = []
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -237,6 +239,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         limit: Optional[int] = None,
         with_vector: bool = False,
         include_payload: bool = False,  # TODO: Add support for this parameter
+        node_name: Optional[List[str]] = None,
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -298,6 +301,15 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         YIELD node, score
         """
 
+        # Filter by belongs_to_set if node_name is provided
+        if node_name:
+            escaped_names = [name.replace("'", "\\'") for name in node_name]
+            name_list = ", ".join(f"'{name}'" for name in escaped_names)
+            query_string += f"""
+        WITH node, score
+        WHERE any(name IN node.belongs_to_set WHERE name IN [{name_list}])
+        """
+
         if with_vector:
             query_string += """
         WITH node, score, id(node) as node_id
@@ -326,6 +338,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         limit: int,
         with_vectors: bool = False,
         include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -355,6 +368,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                     limit,
                     with_vectors,
                     include_payload=include_payload,
+                    node_name=node_name,
                 )
                 for vector in data_vectors
             ]
@@ -435,7 +449,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         RETURN true
         LIMIT 1;
         """
-        query_result = await self._client.query(query)
+        query_result = self._client.query(query)
         return len(query_result) == 0
 
     @staticmethod

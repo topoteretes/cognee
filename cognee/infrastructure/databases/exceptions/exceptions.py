@@ -150,6 +150,40 @@ class CacheConnectionError(CogneeConfigurationError):
         super().__init__(message, name, status_code)
 
 
+class SessionQAEntryValidationError(CogneeValidationError):
+    """
+    Raised when SessionQAEntry model validation fails (e.g., during update_qa_entry).
+
+    This error indicates that the merged QA entry data does not conform to the
+    SessionQAEntry schema (missing required fields, invalid feedback_score, etc.).
+    """
+
+    def __init__(
+        self,
+        message: str = "Session QA entry validation failed. Wrong SessionQAEntry is used during session CRUD operations.",
+        name: str = "SessionQAEntryValidationError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class SessionParameterValidationError(CogneeValidationError):
+    """
+    Raised when SessionManager receives invalid parameters (user_id, session_id, qa_id).
+
+    This error indicates that one or more required session parameters are empty
+    or invalid (e.g., empty string, whitespace-only).
+    """
+
+    def __init__(
+        self,
+        message: str = "Invalid session parameter. user_id, session_id, and qa_id must be non-empty strings.",
+        name: str = "SessionParameterValidationError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class SharedKuzuLockRequiresRedisError(CogneeConfigurationError):
     """
     Raised when shared Kuzu locking is requested without configuring the Redis backend.

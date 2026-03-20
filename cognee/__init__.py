@@ -30,6 +30,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )
 from .api.v1.ui import start_ui
+from .api.v1.session import session
 
 # V2 memory-oriented API
 from .api.v2 import remember, recall, improve
@@ -41,3 +42,12 @@ from .modules import pipelines
 from .pipelines import run_steps, step, Pipeline, dataset, cognee_pipeline, Pipe, Drop
 
 from cognee.run_migrations import run_migrations
+
+# Tracing / Observability
+from cognee.modules.observability.trace_context import (
+    enable_tracing,
+    disable_tracing,
+    get_last_trace,
+    get_all_traces,
+    clear_traces,
+)

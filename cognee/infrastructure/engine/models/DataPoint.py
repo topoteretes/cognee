@@ -1,8 +1,9 @@
 from uuid import UUID, NAMESPACE_OID, uuid4, uuid5
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
 from typing_extensions import NotRequired, TypedDict
-from typing import Optional, Any, Dict, List
 
 from cognee.infrastructure.engine.models.FieldAnnotations import _Embeddable, _Dedup
 
@@ -48,7 +49,12 @@ class DataPoint(BaseModel):
     topological_rank: Optional[int] = 0
     metadata: Optional[MetaData] = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
-    belongs_to_set: Optional[List["DataPoint"]] = None
+    belongs_to_set: Optional[List["DataPoint"] | List[str]] = None
+    source_pipeline: Optional[str] = None
+    source_task: Optional[str] = None
+    source_node_set: Optional[str] = None
+    source_user: Optional[str] = None
+    feedback_weight: float = 0.5
 
     def __init__(self, **data):
         if "id" not in data:
@@ -232,7 +238,7 @@ class DataPoint(BaseModel):
 
             - str: The JSON string representation of the DataPoint instance.
         """
-        return self.json()
+        return self.model_dump_json()
 
     @classmethod
     def from_json(self, json_str: str):

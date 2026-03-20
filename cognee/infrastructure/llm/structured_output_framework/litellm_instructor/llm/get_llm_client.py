@@ -69,6 +69,8 @@ def get_llm_client(raise_api_key_error: bool = True):
         else llm_config.llm_max_completion_tokens
     )
 
+    llm_args = llm_config.llm_args
+
     if provider == LLMProvider.OPENAI:
         if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
@@ -89,6 +91,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,
             fallback_model=llm_config.fallback_model,
+            llm_args=llm_args,
         )
 
     elif provider == LLMProvider.OLLAMA:
@@ -106,6 +109,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             "Ollama",
             max_completion_tokens,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
+            llm_args=llm_args,
         )
 
     elif provider == LLMProvider.ANTHROPIC:
@@ -118,6 +122,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             llm_config.llm_model,
             max_completion_tokens,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
+            llm_args=llm_args,
         )
 
     elif provider == LLMProvider.CUSTOM:
@@ -137,6 +142,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,
             fallback_model=llm_config.fallback_model,
+            llm_args=llm_args,
         )
 
     elif provider == LLMProvider.GEMINI:
@@ -154,6 +160,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
+            llm_args=llm_args,
         )
 
     elif provider == LLMProvider.MISTRAL:
@@ -170,6 +177,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
+            llm_args=llm_args,
         )
 
     elif provider == LLMProvider.BEDROCK:
@@ -186,6 +194,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             max_completion_tokens=max_completion_tokens,
             streaming=llm_config.llm_streaming,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
+            llm_args=llm_args,
         )
 
     elif provider == LLMProvider.LLAMA_CPP:
@@ -194,11 +203,10 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         # Get optional local mode parameters (will be None if not set)
-        # TODO: refactor llm_config to include these parameters, currently they cannot be defined and defaults are used
-        model_path = getattr(llm_config, "llama_cpp_model_path", None)
-        n_ctx = getattr(llm_config, "llama_cpp_n_ctx", 2048)
-        n_gpu_layers = getattr(llm_config, "llama_cpp_n_gpu_layers", 0)
-        chat_format = getattr(llm_config, "llama_cpp_chat_format", "chatml")
+        model_path = llm_config.llama_cpp_model_path
+        n_ctx = llm_config.llama_cpp_n_ctx
+        n_gpu_layers = llm_config.llama_cpp_n_gpu_layers
+        chat_format = llm_config.llama_cpp_chat_format
 
         return LlamaCppAPIAdapter(
             model=llm_config.llm_model,
@@ -210,6 +218,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             chat_format=chat_format,
+            llm_args=llm_args,
         )
     else:
         raise UnsupportedLLMProviderError(provider)

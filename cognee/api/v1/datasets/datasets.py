@@ -23,6 +23,27 @@ logger = get_logger()
 
 
 class datasets:
+    """
+    Dataset management namespace for Cognee.
+
+    All methods are static and provide operations for listing, inspecting,
+    and deleting datasets and the data items within them.
+
+    Example:
+        ```python
+        import cognee
+
+        # List all accessible datasets
+        all_datasets = await cognee.datasets.list_datasets()
+
+        # Check cognify processing status for datasets
+        status = await cognee.datasets.get_status([dataset_id])
+
+        # Delete a specific data item from a dataset
+        await cognee.datasets.delete_data(dataset_id=dataset_id, data_id=data_id)
+        ```
+    """
+
     @staticmethod
     async def list_datasets(user: Optional[User] = None):
         if user is None:
@@ -84,7 +105,7 @@ class datasets:
         # even if some fail.
         if dataset_data:
             results = await asyncio.gather(
-                *[delete_data(data) for data in dataset_data],
+                *[delete_data(data, dataset_id) for data in dataset_data],
                 return_exceptions=True,
             )
             deletion_errors = [r for r in results if isinstance(r, Exception)]
@@ -105,8 +126,9 @@ class datasets:
         data_id: UUID,
         user: Optional[User] = None,
         mode: str = "soft",  # mode is there for backwards compatibility. Don't use "hard", it is dangerous.
+        delete_dataset_if_empty: bool = False,  # if this flag is True, delete the whole dataset if it is left empty after data deletion
     ):
-        from cognee.modules.data.methods import delete_data, get_data
+        from cognee.modules.data.methods import delete_data, get_data, delete_dataset
 
         if not user:
             user = await get_default_user()
@@ -114,6 +136,9 @@ class datasets:
         try:
             dataset = await get_authorized_dataset(user, dataset_id, "delete")
         except PermissionDeniedError:
+            raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
+
+        if not dataset:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
         dataset_data = [data for data in await get_dataset_data(dataset.id) if data.id == data_id]
@@ -124,7 +149,12 @@ class datasets:
             # If data is not found in the system, user is using a custom graph model.
             await set_database_global_context_variables(dataset_id, dataset.owner_id)
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
-            return
+
+            dataset_data = await get_dataset_data(dataset.id)
+            if not dataset_data and delete_dataset_if_empty:
+                await delete_dataset(dataset)
+
+            return {"status": "success"}
 
         if not any(ds.id == dataset_id for ds in data.datasets):
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
@@ -136,7 +166,13 @@ class datasets:
         else:
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
-        await delete_data(data)
+        await delete_data(data, dataset_id)
+
+        dataset_data = await get_dataset_data(dataset.id)
+        if not dataset_data and delete_dataset_if_empty:
+            await delete_dataset(dataset)
+
+        return {"status": "success"}
 
     @staticmethod
     async def delete_all(user: Optional[User] = None):
