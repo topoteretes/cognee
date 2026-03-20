@@ -46,6 +46,11 @@ async def structured_decision_fn(
         f"- Current stage requires EXACT tool: {required_tool}\n"
         "- Return that tool in tool_name.\n"
         "- Keep continue_loop=true unless the loop should immediately stop.\n\n"
+        "THINK field quality requirements:\n"
+        "- Write 1-2 short sentences.\n"
+        "- Explicitly explain WHY this tool is correct now, using current state.\n"
+        "- Mention what this action should produce next.\n"
+        "- Be concrete, avoid generic statements.\n\n"
         "Context:\n"
         f"Job id: {state.job.job_id}\n"
         f"Current stage: {current_stage}\n"
@@ -60,7 +65,8 @@ async def structured_decision_fn(
         prompt,
         (
             "Select exactly one tool. Follow strict stage policy. "
-            "If your selected tool differs from the required stage tool, it is incorrect."
+            "If your selected tool differs from the required stage tool, it is incorrect. "
+            "In thought, explain why this tool is the right next action now and what output is expected."
         ),
         NextToolDecision,
     )

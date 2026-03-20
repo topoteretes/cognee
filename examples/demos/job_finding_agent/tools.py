@@ -291,6 +291,14 @@ async def process_job_agent_tool(
     return ToolExecutionResult(
         observation=f"Recommendation: {recommendation.decision.value}",
         continue_loop=True,
+        cognee_usage=[
+            f'cognee.search(query_type=GRAPH_COMPLETION, dataset="{context.dataset_name}", top_k=5)',
+            (
+                "cognee.run_custom_pipeline("
+                f'pipeline="{PROCESS_PIPELINE_NAME}", dataset="{context.dataset_name}", '
+                "tasks=[passthrough_data_points, add_data_points(context=None)])"
+            ),
+        ],
     )
 
 
@@ -303,6 +311,7 @@ async def update_process_job_agent_skill_tool(
         return ToolExecutionResult(
             observation="No pending feedback available for skill update.",
             continue_loop=True,
+            cognee_usage=[],
         )
 
     previous_skill_text = context.skill_text
@@ -345,6 +354,14 @@ async def update_process_job_agent_skill_tool(
         should_end_process=True,
         continue_loop=False,
         stop_reason="SKILL_UPDATED_FOR_JOB",
+        cognee_usage=[
+            (
+                "cognee.run_custom_pipeline("
+                f'pipeline="{ACTION_PIPELINE_NAME}", '
+                f'dataset="{context.runtime_data.get("action_dataset_name", context.dataset_name)}", '
+                "tasks=[passthrough_data_points, add_data_points(context=None)])"
+            )
+        ],
     )
 
 
@@ -359,6 +376,7 @@ async def request_feedback_tool(
             should_end_process=True,
             continue_loop=False,
             stop_reason="MISSING_RECOMMENDATION",
+            cognee_usage=[],
         )
 
     decision = state.recommendation.decision
@@ -370,29 +388,16 @@ async def request_feedback_tool(
     state.feedback_text = feedback_text
     context.runtime_data.setdefault("pending_feedbacks", []).append(feedback_text)
 
-    existing = await cognee.session.get_session(
-        session_id=context.session_id,
-        user=context.user,
-        last_n=1,
-    )
-    if existing:
-        latest = existing[-1]
-        qa_id = getattr(latest, "qa_id", None)
-        if qa_id:
-            score = 5 if decision == RecommendationDecision.APPLY else 2
-            await cognee.session.add_feedback(
-                session_id=context.session_id,
-                qa_id=qa_id,
-                feedback_text=feedback_text,
-                feedback_score=score,
-                user=context.user,
-            )
+    usage_lines = [
+        f'cognee.session.get_session(session_id="{context.session_id}", last_n=1)',
+    ]
 
     return ToolExecutionResult(
         observation=f"Feedback captured in session for {decision.value}.",
         should_end_process=False,
         continue_loop=True,
         stop_reason="FEEDBACK_CAPTURED",
+        cognee_usage=usage_lines,
     )
 
 

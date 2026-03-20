@@ -21,6 +21,7 @@ class AgentActionRecord:
     tool_name: ToolName
     observation: str
     continue_loop: bool
+    cognee_usage: list[str] = field(default_factory=list)
     stop_reason: Optional[str] = None
 
 

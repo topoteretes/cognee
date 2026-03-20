@@ -39,7 +39,7 @@ from examples.demos.job_finding_agent.tools import (
 
 def _print_progress(message: str) -> None:
     """Single place for concise run progress output."""
-    print(f"\n[job-finding-demo] {message}")
+    print(f"\n## [job-finding-demo] {message}")
 
 
 def _format_action_trace_for_session(loop_result: JobAgentLoopResult) -> str:
@@ -49,11 +49,12 @@ def _format_action_trace_for_session(loop_result: JobAgentLoopResult) -> str:
 
     lines: list[str] = []
     for step in loop_result.action_trace:
+        usage_text = "; ".join(step.cognee_usage) if step.cognee_usage else "none"
         lines.append(
             (
                 f"Iteration {step.iteration} | Tool={step.tool_name.value} | "
                 f"Thought={step.thought} | Observation={step.observation} | "
-                f"Continue={step.continue_loop} | Stop={step.stop_reason or ''}"
+                f"CogneeUsage={usage_text} | Continue={step.continue_loop} | Stop={step.stop_reason or ''}"
             )
         )
     return "\n".join(lines)

@@ -20,6 +20,7 @@ class ToolExecutionResult:
     should_end_process: bool = False
     continue_loop: bool = True
     stop_reason: str | None = None
+    cognee_usage: list[str] = field(default_factory=list)
 
 
 @dataclass

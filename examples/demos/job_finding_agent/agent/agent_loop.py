@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import textwrap
+
 from cognee.shared.logging_utils import get_logger
 
 from examples.demos.job_finding_agent.agent.agent_models import ToolName
@@ -19,23 +21,83 @@ from examples.demos.job_finding_agent.agent.tool_contracts import (
 logger = get_logger("job_finding_agent_loop")
 
 
-def _clip_text(value: str | None, max_len: int = 120) -> str:
-    """Trim text for concise terminal progress logs."""
+def _normalize_text(value: str | None) -> str:
+    """Normalize whitespace for readable terminal progress logs without truncation."""
     if not value:
         return ""
-    cleaned = " ".join(value.split())
-    if len(cleaned) <= max_len:
-        return cleaned
-    return f"{cleaned[: max_len - 3]}..."
+    return " ".join(value.split())
 
 
-def _detect_stage(state: JobAgentState) -> str:
-    """Infer high-level loop stage for readable progress output."""
-    if state.recommendation is None:
-        return "PROCESS_JOB"
-    if not state.feedback_text:
-        return "REQUEST_FEEDBACK"
-    return "UPDATE_SKILL"
+def _format_block_field(
+    label: str,
+    value: str,
+    content_width: int,
+) -> list[str]:
+    """Render one field as wrapped hashtag-prefixed lines."""
+    normalized = _normalize_text(value)
+    prefix = f"# {label}: "
+    continuation_prefix = "# " + (" " * (len(label) + 2))
+    line_width = max(20, content_width - len(prefix))
+    wrapped = textwrap.wrap(normalized, width=line_width) or [""]
+    lines = [f"{prefix}{wrapped[0]}"]
+    lines.extend(f"{continuation_prefix}{line}" for line in wrapped[1:])
+    return lines
+
+
+def _format_usage_lines(values: list[str], content_width: int) -> list[str]:
+    """Render usage lines as wrapped hashtag bullet lines."""
+    if not values:
+        values = ["No Cognee calls recorded by this tool."]
+    lines: list[str] = []
+    bullet_prefix = "# - "
+    continuation_prefix = "#   "
+    line_width = max(20, content_width - len(bullet_prefix))
+    for value in values:
+        wrapped = textwrap.wrap(_normalize_text(value), width=line_width) or [""]
+        lines.append(f"{bullet_prefix}{wrapped[0]}")
+        lines.extend(f"{continuation_prefix}{part}" for part in wrapped[1:])
+    return lines
+
+
+def _build_iteration_block(
+    *,
+    job_id: str,
+    iteration: int,
+    think: str,
+    recommendation_status: str,
+    feedback_status: str,
+    tool_name: str,
+    observation: str,
+    tool_usage: list[str],
+    should_stop: bool,
+) -> str:
+    """Build one large hashtag-framed block for a single iteration."""
+    border_width = 120
+    border = "#" * border_width
+    content_width = border_width - 2
+
+    lines: list[str] = [
+        border,
+        f"# ITERATION BLOCK | Job={job_id} | Iteration={iteration}",
+        border,
+    ]
+    lines.extend(_format_block_field("Think", think, content_width))
+    lines.extend(
+        _format_block_field(
+            "State",
+            f"recommendation={recommendation_status}, feedback={feedback_status}",
+            content_width,
+        )
+    )
+    lines.extend(_format_block_field("Act", f'Use the "{tool_name}" TOOL', content_width))
+    lines.append("#")
+    lines.append("# COGNEE USAGE")
+    lines.extend(_format_usage_lines(tool_usage, content_width))
+    lines.append("#")
+    lines.extend(_format_block_field("Observe", observation, content_width))
+    lines.extend(_format_block_field("Stop/Repeat", "stop" if should_stop else "repeat", content_width))
+    lines.append(border)
+    return "\n" + "\n".join(lines) + "\n"
 
 
 async def run_job_agent_loop(
@@ -62,16 +124,8 @@ async def run_job_agent_loop(
             next_step = await decision_fn(state, allowed_tools, context)
             if next_step.tool_name not in allowed_tools:
                 raise ValueError(f"Unsupported tool selected: {next_step.tool_name}")
-
-            if context.runtime_data.get("show_progress", True):
-                recommendation_status = "yes" if state.recommendation is not None else "no"
-                feedback_status = "yes" if bool(state.feedback_text) else "no"
-                print(
-                    f"\n[{state.job.job_id}] Iteration {state.iteration}\n"
-                    f"  Think: {_clip_text(next_step.thought, 220)}\n"
-                    f"  State: recommendation={recommendation_status}, feedback={feedback_status}"
-                )
-                print(f"  Act: {next_step.tool_name.value} TOOL")
+            recommendation_status_before = "yes" if state.recommendation is not None else "no"
+            feedback_status_before = "yes" if bool(state.feedback_text) else "no"
 
             tool = tool_registry[next_step.tool_name]
             result = await tool(state, context)
@@ -85,19 +139,24 @@ async def run_job_agent_loop(
                     tool_name=next_step.tool_name,
                     observation=result.observation,
                     continue_loop=continue_loop,
+                    cognee_usage=list(result.cognee_usage),
                     stop_reason=stop_reason,
                 )
             )
 
             if context.runtime_data.get("show_progress", True):
-                print(
-                    f"  Observe: {_clip_text(result.observation, 220)}\n"
+                iteration_block = _build_iteration_block(
+                    job_id=state.job.job_id,
+                    iteration=state.iteration,
+                    think=next_step.thought,
+                    recommendation_status=recommendation_status_before,
+                    feedback_status=feedback_status_before,
+                    tool_name=next_step.tool_name.value,
+                    observation=result.observation,
+                    tool_usage=list(result.cognee_usage),
+                    should_stop=bool(result.should_end_process or not continue_loop),
                 )
-                print(
-                    "  Stop/Repeat: "
-                    + ("stop" if result.should_end_process or not continue_loop else "repeat")
-                    + "\n"
-                )
+                print(iteration_block)
 
             if result.should_end_process:
                 state.active = False
@@ -111,7 +170,18 @@ async def run_job_agent_loop(
             termination_reason = f"ERROR: {error}"
             logger.error("Agent loop failed on iteration %s: %s", state.iteration, error)
             if context.runtime_data.get("show_progress", True):
-                print(f"\n[{state.job.job_id}] Iteration {state.iteration}\n  ERROR: {error}\n")
+                error_block = _build_iteration_block(
+                    job_id=state.job.job_id,
+                    iteration=state.iteration,
+                    think="Tool execution failed while running the selected action.",
+                    recommendation_status="yes" if state.recommendation is not None else "no",
+                    feedback_status="yes" if bool(state.feedback_text) else "no",
+                    tool_name=ToolName.PROCESS_JOB_AGENT.value,
+                    observation=f"ERROR: {error}",
+                    tool_usage=[],
+                    should_stop=True,
+                )
+                print(error_block)
             trace.append(
                 AgentActionRecord(
                     iteration=state.iteration,
@@ -119,6 +189,7 @@ async def run_job_agent_loop(
                     tool_name=ToolName.PROCESS_JOB_AGENT,
                     observation=str(error),
                     continue_loop=False,
+                    cognee_usage=[],
                     stop_reason="ERROR",
                 )
             )
