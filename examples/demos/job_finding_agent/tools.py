@@ -388,16 +388,12 @@ async def request_feedback_tool(
     state.feedback_text = feedback_text
     context.runtime_data.setdefault("pending_feedbacks", []).append(feedback_text)
 
-    usage_lines = [
-        f'cognee.session.get_session(session_id="{context.session_id}", last_n=1)',
-    ]
-
     return ToolExecutionResult(
         observation=f"Feedback captured in session for {decision.value}.",
         should_end_process=False,
         continue_loop=True,
         stop_reason="FEEDBACK_CAPTURED",
-        cognee_usage=usage_lines,
+        cognee_usage=[],
     )
 
 
