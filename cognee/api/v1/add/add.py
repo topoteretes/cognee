@@ -9,6 +9,7 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
 from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
     reset_dataset_pipeline_run_status,
 )
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
@@ -37,6 +38,7 @@ async def add(
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
+    run_in_background: bool = False,
     **kwargs,
 ):
     """
@@ -94,6 +96,8 @@ async def add(
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
+        run_in_background: If True, starts ingestion asynchronously and returns immediately.
+                          If False (default), waits for completion before returning.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -216,9 +220,10 @@ async def add(
         authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
     )
 
-    pipeline_run_info = None
+    pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-    async for run_info in run_pipeline(
+    return await pipeline_executor_func(
+        pipeline=run_pipeline,
         tasks=tasks,
         datasets=[authorized_dataset.id],
         data=data,
@@ -229,7 +234,4 @@ async def add(
         use_pipeline_cache=True,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
-    ):
-        pipeline_run_info = run_info
-
-    return pipeline_run_info
+    )
