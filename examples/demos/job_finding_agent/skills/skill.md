@@ -12,37 +12,42 @@ Evaluate incoming jobs against the candidate profile and return APPLY/DONT_APPLY
 Senior Machine Learning Engineer and Applied AI Lead with 9+ years of experience building retrieval-heavy, production-grade AI systems across SaaS, fintech, and health-tech domains. Deep background in NLP, search relevance, knowledge graphs, evaluation frameworks, and LLM application reliability. Strong record of turning research prototypes into measurable product impact in real production environments.
 
 ## Core Strengths
-- NLP expertise
-- Strong experience in AI product systems
-- Proven ability in improving model performance
-- Cross-functional collaboration skills
-- Mentorship and leadership capabilities
+- NLP
+- search relevance
+- knowledge graphs
+- evaluation frameworks
+- LLM application reliability
+- cross-functional collaboration
+- mentoring engineers
+- robust evaluation loops
+- production quality
+- observability
 
 ## Decision Heuristics
-- Look for roles that emphasize production-quality AI systems
-- Prioritize positions related to NLP and retrieval systems
-- Seek opportunities with a focus on model evaluation and monitoring
-- Consider teams valuing cross-functional collaboration and mentorship
-- Evaluate companies that encourage hands-on engineering and technical leadership
+- Focus on roles that emphasize end-to-end AI product systems
+- Opportunities to lead initiatives in improving model quality and retrieval correctness
+- Preference for positions allowing hands-on technical ownership and collaboration across departments
+- Roles with a strong emphasis on production quality and iterative evaluation
+- Mentoring and shaping technical standards should be part of the job scope
 
 ## Decision Output Contract
 - Decision: APPLY or DONT_APPLY
 - Rationale: concise and evidence-based
 
 ## Feedback Updates
-- Prefer hands-on roles with direct production ownership
-- Focus on RAG/NLP domains
-- Seek measurable quality targets in projects
-- Value positions that allow technical leadership and mentorship
-- Emphasize roles that involve building and evaluating production-grade AI systems
-- Prefer backend and ML product work over frontend execution
-- Emphasize roles focused on production-grade AI systems
-- Value positions that allow for technical leadership and mentorship
-- Seek opportunities that involve building and evaluating ML models
-- Prioritize work styles that emphasize cross-functional collaboration and mentorship
-- Focus on RAG/NLP domains with tangible quality targets
-- Value roles that emphasize production ML platform scope and operational excellence
-- Prefer roles that match current seniority level
-- Emphasize ownership of AI systems in roles
-- Focus on system-level responsibilities and leadership
-- Seek opportunities with direct production impact
+- Preference for hands-on roles in Retrieval-Augmented Generation (RAG) and Natural Language Processing (NLP) domains.
+- Desire for direct production ownership over projects.
+- Focus on measurable quality targets in job roles.
+- Preference for backend/ML product work over frontend execution.
+- Desire for hands-on roles in Retrieval-Augmented Generation (RAG) and Natural Language Processing (NLP) domains.
+- Preference for direct production ownership over projects.
+- Preference for roles emphasizing production ML platform scope and operational excellence.
+- Preference for roles matching current seniority (senior roles)
+- Desire for system ownership in projects
+- Focus on roles that emphasize direct production ownership
+- Preference for hands-on technical roles in RAG and NLP
+- Strong preference for measurable quality targets in job roles
+- Interest in backend/ML product work over frontend
+- Emphasis on production ML platform scope and operational excellence
+- Preference for roles that involve applied retrieval and evaluation work rather than pure reporting roles.
+- Preference for roles matching current seniority (senior roles).

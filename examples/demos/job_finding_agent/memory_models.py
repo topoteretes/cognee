@@ -48,6 +48,17 @@ class ActionTaskJobNode(DataPoint):
     metadata: dict = {"index_fields": ["text"]}
 
 
+class SkillStateSnapshot(DataPoint):
+    """Historical snapshot of skill state connected to an action task job node."""
+
+    action_job_node: ActionTaskJobNode
+    job_id: str
+    version: int
+    previous_snapshot: Optional["SkillStateSnapshot"] = None
+    text: str
+    metadata: dict = {"index_fields": ["text"]}
+
+
 def build_node_id_from_text(text: str):
     """Create deterministic UUID5 id from text."""
     return generate_node_id(text.strip())

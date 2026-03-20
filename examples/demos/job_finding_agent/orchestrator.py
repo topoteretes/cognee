@@ -99,6 +99,8 @@ async def run_jobs_from_json(
             "action_dataset_name": action_dataset_name,
             "last_job_sequence_node": None,
             "last_action_task_job_node": None,
+            "last_skill_snapshot": None,
+            "skill_snapshot_version": 0,
         },
     )
 
