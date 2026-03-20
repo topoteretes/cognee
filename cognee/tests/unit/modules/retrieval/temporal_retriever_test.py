@@ -16,17 +16,20 @@ def test_init_defaults_and_overrides():
     assert tr.user_prompt_path == "graph_context_for_question.txt"
     assert tr.system_prompt_path == "answer_simple_question.txt"
     assert tr.time_extraction_prompt_path == "extract_query_time.txt"
+    assert tr.feedback_influence == 0.0
 
     tr2 = TemporalRetriever(
         top_k=3,
         user_prompt_path="u.txt",
         system_prompt_path="s.txt",
         time_extraction_prompt_path="t.txt",
+        feedback_influence=0.35,
     )
     assert tr2.top_k == 3
     assert tr2.user_prompt_path == "u.txt"
     assert tr2.system_prompt_path == "s.txt"
     assert tr2.time_extraction_prompt_path == "t.txt"
+    assert tr2.feedback_influence == 0.35
 
 
 # Test descriptions_to_string with basic and empty results
@@ -483,6 +486,8 @@ async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine
     assert len(completion) == 1
     assert completion[0] == "Generated answer"
     mock_sm.generate_completion_with_session.assert_awaited_once()
+    call_kw = mock_sm.generate_completion_with_session.call_args.kwargs
+    assert call_kw.get("used_graph_element_ids") == {"node_ids": ["e1"]}
 
 
 @pytest.mark.asyncio

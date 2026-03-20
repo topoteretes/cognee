@@ -50,6 +50,10 @@ async def relational_db_migration():
     graph_engine = await get_graph_engine()
     await migrate_relational_database(graph_engine, schema=schema)
 
+    # Create the dataset so search can find it by name
+    user = await get_default_user()
+    await create_authorized_dataset(TEST_DATASET_NAME, user)
+
     # 1. Search the graph
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
