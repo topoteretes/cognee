@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .agent_models import JobFeedbackTriplet, RecommendationOutput, ToolName
+from examples.demos.job_finding_agent.agent.agent_models import (
+    JobFeedbackTriplet,
+    RecommendationOutput,
+    ToolName,
+)
 
 
 @dataclass
@@ -42,4 +46,3 @@ class JobAgentLoopResult:
     final_state: JobAgentState
     action_trace: list[AgentActionRecord]
     termination_reason: str
-

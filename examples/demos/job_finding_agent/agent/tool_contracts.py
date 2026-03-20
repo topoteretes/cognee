@@ -8,8 +8,8 @@ from typing import Awaitable, Callable, Protocol
 
 from cognee.modules.users.models import User
 
-from .agent_models import ToolName
-from .agent_state import JobAgentState
+from examples.demos.job_finding_agent.agent.agent_models import ToolName
+from examples.demos.job_finding_agent.agent.agent_state import JobAgentState
 
 
 @dataclass
@@ -46,4 +46,3 @@ class AgentTool(Protocol):
 
 DecisionFunction = Callable[[JobAgentState, list[ToolName], RunnerContext], Awaitable]
 ToolRegistry = dict[ToolName, AgentTool]
-

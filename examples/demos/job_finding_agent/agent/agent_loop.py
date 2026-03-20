@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from cognee.shared.logging_utils import get_logger
 
-from .agent_models import ToolName
-from .agent_state import AgentActionRecord, JobAgentLoopResult, JobAgentState
-from .tool_contracts import DecisionFunction, RunnerContext, ToolRegistry
+from examples.demos.job_finding_agent.agent.agent_models import ToolName
+from examples.demos.job_finding_agent.agent.agent_state import (
+    AgentActionRecord,
+    JobAgentLoopResult,
+    JobAgentState,
+)
+from examples.demos.job_finding_agent.agent.tool_contracts import (
+    DecisionFunction,
+    RunnerContext,
+    ToolRegistry,
+)
 
 logger = get_logger("job_finding_agent_loop")
 
@@ -52,9 +60,9 @@ async def run_job_agent_loop(
                 )
             )
 
-            if result.should_end_process or next_step.tool_name == ToolName.REQUEST_FEEDBACK:
+            if result.should_end_process:
                 state.active = False
-                termination_reason = "REQUEST_FEEDBACK_COMPLETED"
+                termination_reason = result.stop_reason or "TOOL_REQUESTED_TERMINATION"
             elif not continue_loop:
                 state.active = False
                 termination_reason = stop_reason or "DECISION_STOPPED_LOOP"
@@ -86,4 +94,3 @@ async def run_job_agent_loop(
         action_trace=trace,
         termination_reason=termination_reason,
     )
-

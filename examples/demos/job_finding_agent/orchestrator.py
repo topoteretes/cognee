@@ -9,11 +9,11 @@ import cognee
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
 
-from .agent.agent_loop import run_job_agent_loop
-from .agent.agent_models import ToolName
-from .agent.agent_state import JobAgentState
-from .agent.tool_contracts import RunnerContext
-from .config import (
+from examples.demos.job_finding_agent.agent.agent_loop import run_job_agent_loop
+from examples.demos.job_finding_agent.agent.agent_models import ToolName
+from examples.demos.job_finding_agent.agent.agent_state import JobAgentState
+from examples.demos.job_finding_agent.agent.tool_contracts import RunnerContext
+from examples.demos.job_finding_agent.config import (
     APPLICANT_DATASET_NAME,
     CV_FILE,
     DATA_FILE,
@@ -22,10 +22,10 @@ from .config import (
     SESSION_ID,
     SKILL_FILE,
 )
-from .decision import structured_decision_fn
-from .io_utils import read_mock_jobs
-from .skill_logic import generate_skill_from_cv
-from .tools import (
+from examples.demos.job_finding_agent.decision import structured_decision_fn
+from examples.demos.job_finding_agent.io_utils import read_mock_jobs
+from examples.demos.job_finding_agent.skill_logic import reset_skill_file_from_cv
+from examples.demos.job_finding_agent.tools import (
     process_job_agent_tool,
     request_feedback_tool,
     store_agent_action,
@@ -54,8 +54,8 @@ async def run_jobs_from_json(
     if cv_text is None:
         cv_text = cv_path.read_text(encoding="utf-8")
 
-    skill_text = await generate_skill_from_cv(cv_text)
-    skill_path.write_text(skill_text, encoding="utf-8")
+    # Always reset to the initial non-updated skill at the start of a full run.
+    skill_text = await reset_skill_file_from_cv(cv_text, skill_path)
 
     # Initial ingestion is CV-only in applicant_data dataset.
     await cognee.add(
@@ -71,7 +71,7 @@ async def run_jobs_from_json(
         skill_md_path=skill_path,
         user=user,
         skill_text=skill_text,
-        runtime_data={"pending_feedbacks": []},
+        runtime_data={"pending_feedbacks": [], "max_iterations": MAX_ITERATIONS},
     )
 
     tool_registry = {
@@ -104,8 +104,6 @@ async def run_jobs_from_json(
                 observation=action.observation,
                 stop_reason=action.stop_reason,
             )
-
-        await update_process_job_agent_skill_tool(loop_result.final_state, context)
 
         results.append(
             {

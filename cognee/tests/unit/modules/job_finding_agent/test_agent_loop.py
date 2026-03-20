@@ -57,10 +57,10 @@ async def test_loop_stops_at_max_iterations():
 
 
 @pytest.mark.asyncio
-async def test_request_feedback_terminates_process():
+async def test_tool_requested_termination_stops_process():
     async def choose_feedback(_state, _tools, _context):
         return NextToolDecision(
-            thought="We already have recommendation, request feedback.",
+            thought="Tool asks for termination.",
             tool_name=ToolName.REQUEST_FEEDBACK,
             continue_loop=False,
             stop_reason="end current job",
@@ -71,7 +71,7 @@ async def test_request_feedback_terminates_process():
             observation="feedback saved",
             should_end_process=True,
             continue_loop=False,
-            stop_reason="REQUEST_FEEDBACK_COMPLETED",
+            stop_reason="TOOL_DONE",
         )
 
     state = JobAgentState(
@@ -96,7 +96,7 @@ async def test_request_feedback_terminates_process():
         max_iterations=10,
     )
 
-    assert result.termination_reason == "REQUEST_FEEDBACK_COMPLETED"
+    assert result.termination_reason == "TOOL_DONE"
     assert result.final_state.iteration == 1
     assert len(result.action_trace) == 1
     assert result.action_trace[0].tool_name == ToolName.REQUEST_FEEDBACK

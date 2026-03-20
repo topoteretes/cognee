@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .agent.agent_models import JobFeedbackTriplet
+from examples.demos.job_finding_agent.agent.agent_models import JobFeedbackTriplet
 
 
 def read_mock_jobs(path: Path) -> list[JobFeedbackTriplet]:
@@ -14,4 +14,3 @@ def read_mock_jobs(path: Path) -> list[JobFeedbackTriplet]:
     if not isinstance(payload, list):
         raise ValueError("mock_jobs.json must be a list")
     return [JobFeedbackTriplet.model_validate(item) for item in payload]
-
