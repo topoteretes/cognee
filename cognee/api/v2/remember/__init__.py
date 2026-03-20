@@ -1,1 +1,1 @@
-from .remember import remember
+from .remember import remember, RememberKwargs
