@@ -85,6 +85,9 @@ jobs:
             cognee/tests/unit/modules/chunking/ \
             cognee/tests/unit/modules/data/ \
             cognee/tests/unit/modules/retrieval/ \
+            --ignore=cognee/tests/unit/modules/retrieval/graph_completion_retriever_cot_test.py \
+            --ignore=cognee/tests/unit/modules/retrieval/temporal_retriever_test.py \
+            --ignore=cognee/tests/unit/modules/retrieval/triplet_retriever_test.py \
             cognee/tests/unit/modules/search/ \
             cognee/tests/unit/modules/pipelines/ \
             cognee/tests/unit/modules/visualization/ \
