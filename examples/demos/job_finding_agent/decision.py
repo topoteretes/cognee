@@ -24,23 +24,28 @@ async def structured_decision_fn(
         if state.recommendation is None
         else ("REQUEST_FEEDBACK" if not has_feedback_for_job else "DONE")
     )
+    required_tool_by_stage = {
+        "PROCESS_JOB": ToolName.PROCESS_JOB_AGENT.value,
+        "REQUEST_FEEDBACK": ToolName.REQUEST_FEEDBACK.value,
+        "DONE": ToolName.UPDATE_PROCESS_JOB_AGENT_SKILL.value,
+    }
+    required_tool = required_tool_by_stage[current_stage]
 
     prompt = (
-        "You are the controller for one job-level agent loop.\n\n"
-        "What we are doing:\n"
-        "1) Process this job and produce APPLY/DONT_APPLY recommendation.\n"
-        "2) Request feedback for that recommendation.\n"
-        "3) Update the job evaluation skill from latest feedback.\n"
-        "4) End the current job process.\n\n"
-        "Tool meanings:\n"
-        "- ProcessJobAgent: structure job + create recommendation.\n"
-        "- RequestFeedback: capture feedback for current recommendation.\n"
-        "- UpdateProcessJobAgentSkill: refresh skill from accumulated feedback memory and finish this job.\n\n"
-        "Decision rules:\n"
-        "- If recommendation is missing: choose ProcessJobAgent.\n"
-        "- If recommendation exists and feedback for this job is missing: choose RequestFeedback.\n"
-        "- If recommendation and feedback both exist: choose UpdateProcessJobAgentSkill.\n"
-        "- If this job is already complete: set continue_loop=false with stop_reason.\n\n"
+        "You are the controller for ONE job-level agent loop.\n\n"
+        "STRICT TRANSITION POLICY (no exceptions):\n"
+        "Stage PROCESS_JOB -> ONLY ProcessJobAgent is valid.\n"
+        "Stage REQUEST_FEEDBACK -> ONLY RequestFeedback is valid.\n"
+        "Stage DONE -> ONLY UpdateProcessJobAgentSkill is valid.\n\n"
+        "Forbidden behavior:\n"
+        "- Never call ProcessJobAgent after a recommendation already exists.\n"
+        "- Never call RequestFeedback before a recommendation exists.\n"
+        "- Never skip UpdateProcessJobAgentSkill once feedback exists.\n"
+        "- Never repeat a finished stage.\n\n"
+        "Execution goal for this step:\n"
+        f"- Current stage requires EXACT tool: {required_tool}\n"
+        "- Return that tool in tool_name.\n"
+        "- Keep continue_loop=true unless the loop should immediately stop.\n\n"
         "Context:\n"
         f"Job id: {state.job.job_id}\n"
         f"Current stage: {current_stage}\n"
@@ -54,8 +59,8 @@ async def structured_decision_fn(
     result = await LLMGateway.acreate_structured_output(
         prompt,
         (
-            "You are a job-finding agent controller. "
-            "Select exactly one allowed tool and set continue_loop accordingly."
+            "Select exactly one tool. Follow strict stage policy. "
+            "If your selected tool differs from the required stage tool, it is incorrect."
         ),
         NextToolDecision,
     )

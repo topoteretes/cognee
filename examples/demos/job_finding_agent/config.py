@@ -8,6 +8,6 @@ SKILL_FILE = ROOT_DIR / "skills" / "skill.md"
 CV_FILE = ROOT_DIR / "data" / "cv.md"
 
 APPLICANT_DATASET_NAME = "applicant_data"
-DATASET_NAME = "job_finding_agent_demo"
+ACTION_DATASET_NAME = "job_finding_agent_actions"
 SESSION_ID = "job_finding_session"
 MAX_ITERATIONS = 10

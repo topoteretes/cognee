@@ -14,10 +14,10 @@ from examples.demos.job_finding_agent.agent.agent_models import ToolName
 from examples.demos.job_finding_agent.agent.agent_state import JobAgentState
 from examples.demos.job_finding_agent.agent.tool_contracts import RunnerContext
 from examples.demos.job_finding_agent.config import (
+    ACTION_DATASET_NAME,
     APPLICANT_DATASET_NAME,
     CV_FILE,
     DATA_FILE,
-    DATASET_NAME,
     MAX_ITERATIONS,
     SESSION_ID,
     SKILL_FILE,
@@ -38,7 +38,8 @@ async def run_jobs_from_json(
     cv_path: Path = CV_FILE,
     jobs_path: Path = DATA_FILE,
     skill_path: Path = SKILL_FILE,
-    dataset_name: str = DATASET_NAME,
+    jobs_dataset_name: str = APPLICANT_DATASET_NAME,
+    action_dataset_name: str = ACTION_DATASET_NAME,
     session_id: str = SESSION_ID,
 ) -> dict[str, Any]:
     """Entry point for the full flow: CV init + per-job modular loop."""
@@ -66,12 +67,18 @@ async def run_jobs_from_json(
     await cognee.cognify(datasets=[APPLICANT_DATASET_NAME], user=user)
 
     context = RunnerContext(
-        dataset_name=dataset_name,
+        dataset_name=jobs_dataset_name,
         session_id=session_id,
         skill_md_path=skill_path,
         user=user,
         skill_text=skill_text,
-        runtime_data={"pending_feedbacks": [], "max_iterations": MAX_ITERATIONS},
+        runtime_data={
+            "pending_feedbacks": [],
+            "max_iterations": MAX_ITERATIONS,
+            "action_dataset_name": action_dataset_name,
+            "last_job_sequence_node": None,
+            "last_action_task_job_node": None,
+        },
     )
 
     tool_registry = {
@@ -81,11 +88,12 @@ async def run_jobs_from_json(
     }
 
     results: list[dict[str, Any]] = []
-    for job in jobs:
+    for job_index, job in enumerate(jobs, start=1):
         state = JobAgentState(
             job=job,
             skill_text=context.skill_text,
             pending_feedbacks=list(context.runtime_data.get("pending_feedbacks", [])),
+            metadata={"job_sequence_index": job_index},
         )
         loop_result = await run_job_agent_loop(
             initial_state=state,
@@ -95,14 +103,17 @@ async def run_jobs_from_json(
             max_iterations=MAX_ITERATIONS,
         )
 
+        previous_action_dp = None
         for action in loop_result.action_trace:
-            await store_agent_action(
+            previous_action_dp = await store_agent_action(
                 state=loop_result.final_state,
                 context=context,
+                iteration=action.iteration,
                 thought=action.thought,
                 tool_name=action.tool_name,
                 observation=action.observation,
                 stop_reason=action.stop_reason,
+                prev_action=previous_action_dp,
             )
 
         results.append(
@@ -120,7 +131,8 @@ async def run_jobs_from_json(
         )
 
     return {
-        "dataset_name": dataset_name,
+        "jobs_dataset_name": jobs_dataset_name,
+        "action_dataset_name": action_dataset_name,
         "session_id": session_id,
         "max_iterations": MAX_ITERATIONS,
         "jobs_processed": len(results),

@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+from cognee.low_level import DataPoint
 
 
 class ToolName(str, Enum):
@@ -32,23 +33,23 @@ class JobFeedbackTriplet(BaseModel):
     feedback_if_not_recommended: str = Field(min_length=1)
 
 
-class FormattedJobOutput(BaseModel):
+class FormattedJobOutput(DataPoint):
     """Structured extraction for job text."""
 
-    role_title: str = ""
-    seniority: str = ""
-    required_skills: list[str] = []
-    preferred_skills: list[str] = []
-    responsibilities: list[str] = []
-    location_or_remote: str = ""
+    role_title: str = Field(min_length=1)
+    job_sequence: Optional[DataPoint] = None
+    recommendation: Optional["RecommendationOutput"] = None
+    text: str = ""
+    metadata: dict = {"index_fields": ["text"]}
 
 
-class RecommendationOutput(BaseModel):
+class RecommendationOutput(DataPoint):
     """Structured recommendation produced by the job processor."""
 
     decision: RecommendationDecision
     rationale: str = Field(min_length=1)
-    confidence: float = Field(ge=0.0, le=1.0)
+    text: str = ""
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class NextToolDecision(BaseModel):
@@ -66,4 +67,3 @@ class SkillProfileOutput(BaseModel):
     profile_summary: str
     core_strengths: list[str] = []
     heuristics: list[str] = []
-

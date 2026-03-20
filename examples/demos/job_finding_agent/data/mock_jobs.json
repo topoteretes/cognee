@@ -2,73 +2,73 @@
   {
     "job_id": "job_001",
     "job_description": "Senior NLP Engineer needed for production RAG systems. Requires Python, vector databases, and LLM evaluation experience.",
-    "feedback_if_recommended": "Great recommendation. The profile strongly matches RAG and NLP production requirements.",
-    "feedback_if_not_recommended": "This should likely have been recommended because the CV aligns with core NLP and RAG requirements."
+    "feedback_if_recommended": "Good fit for me. I prefer hands-on RAG/NLP roles with direct production ownership and measurable quality targets.",
+    "feedback_if_not_recommended": "I would have preferred this to be recommended. I prioritize production RAG/NLP work over general software roles."
   },
   {
     "job_id": "job_002",
     "job_description": "Frontend-only UI role focused on animation-heavy React websites with minimal backend exposure.",
-    "feedback_if_recommended": "Recommendation is too optimistic. Candidate background is backend and NLP, not frontend-heavy UI.",
-    "feedback_if_not_recommended": "Good rejection. This role does not align with the candidate's strengths."
+    "feedback_if_recommended": "Too broad for my goals. I do not prefer frontend-only positions and I want AI-heavy backend ownership.",
+    "feedback_if_not_recommended": "Correct for me. I prefer backend/ML product work, not animation-focused frontend execution."
   },
   {
     "job_id": "job_003",
     "job_description": "Machine Learning Platform Engineer. Build model deployment tooling, experiment tracking, CI/CD for ML, and feature-store integrations. Strong Python, Docker, Kubernetes, and observability required.",
-    "feedback_if_recommended": "Strong call. Platform, production ML, and reliability are all directly aligned with this candidate.",
-    "feedback_if_not_recommended": "This should have been recommended. The role matches the candidate's MLOps and production background."
+    "feedback_if_recommended": "Strong fit for me. I prefer platform roles when they include reliability ownership and model delivery impact.",
+    "feedback_if_not_recommended": "I would have preferred this to be recommended. I value production ML platform scope and operational excellence."
   },
   {
     "job_id": "job_004",
     "job_description": "Junior Data Analyst internship. Mostly spreadsheet reporting and dashboard maintenance. Little coding and no machine learning production ownership.",
-    "feedback_if_recommended": "Likely overleveled recommendation. Candidate is too senior and technical for this scope.",
-    "feedback_if_not_recommended": "Correct rejection. Seniority and skill depth do not fit this junior role."
+    "feedback_if_recommended": "Not preferred for me. I avoid low-ownership junior roles and seek senior-level technical responsibility.",
+    "feedback_if_not_recommended": "Good rejection for me. I prefer roles matching my current seniority and system ownership."
   },
   {
     "job_id": "job_005",
     "job_description": "Applied Scientist for multimodal retrieval systems in healthcare. Requires evaluation rigor, retrieval pipelines, and collaboration with compliance/legal teams.",
-    "feedback_if_recommended": "Good recommendation. Retrieval and evaluation depth plus cross-functional experience are relevant here.",
-    "feedback_if_not_recommended": "Missed opportunity. Candidate has applied retrieval and evaluation experience that fits this role."
+    "feedback_if_recommended": "Good fit for me. I prefer retrieval-plus-evaluation roles with meaningful product impact and cross-functional collaboration.",
+    "feedback_if_not_recommended": "I would have preferred this to be recommended. I prefer applied retrieval and eval work over pure reporting roles."
   },
   {
     "job_id": "job_006",
     "job_description": "Sales Account Executive for enterprise SaaS. Main responsibilities include outbound outreach, quota ownership, and contract negotiations.",
-    "feedback_if_recommended": "Recommendation should be reconsidered. This profile is technical, not quota-carrying sales.",
-    "feedback_if_not_recommended": "Good rejection. Core responsibilities are outside the candidate's background."
+    "feedback_if_recommended": "Not aligned for me. I avoid quota-carrying sales roles and prefer technical build ownership.",
+    "feedback_if_not_recommended": "Correct for me. My preference is engineering execution, not commercial sales ownership."
   },
   {
     "job_id": "job_007",
     "job_description": "Staff AI Engineer for conversational assistants. Own long-context memory, response quality metrics, prompt strategies, and safe deployment practices.",
-    "feedback_if_recommended": "Excellent recommendation. The role is tightly aligned with production conversational AI and quality measurement.",
-    "feedback_if_not_recommended": "This likely should have been recommended due to strong conversational AI and reliability experience."
+    "feedback_if_recommended": "Excellent fit for me. I prefer conversational AI roles with quality metrics, memory systems, and safety-minded deployment.",
+    "feedback_if_not_recommended": "I would have preferred this to be recommended. This is exactly the kind of AI quality and memory ownership I want."
   },
   {
     "job_id": "job_008",
     "job_description": "Backend Engineer (Go). Build high-throughput APIs and distributed services. Nice-to-have ML experience, but role is primarily Go microservices and low-latency systems.",
-    "feedback_if_recommended": "Reasonable recommendation if backend systems strength is sufficient despite language preference mismatch.",
-    "feedback_if_not_recommended": "Also defensible. If Go depth is essential, the candidate may not be the best fit."
+    "feedback_if_recommended": "Conditional fit for me. I can accept backend-heavy roles when AI scope is present and language ramp-up is acceptable.",
+    "feedback_if_not_recommended": "Also valid for me. I generally prefer AI-centric ownership over pure language-specific backend tracks."
   },
   {
     "job_id": "job_009",
     "job_description": "Research Scientist in reinforcement learning for robotics simulation. Heavy focus on academic publishing and novel algorithm development.",
-    "feedback_if_recommended": "Potentially weak recommendation unless strong RL publication record is demonstrated.",
-    "feedback_if_not_recommended": "Reasonable rejection if the role is publication-first and robotics-focused."
+    "feedback_if_recommended": "Weak preference match for me unless the role includes strong productization. I do not prioritize publication-first tracks.",
+    "feedback_if_not_recommended": "Good rejection for me. I prefer applied production impact over pure research publication goals."
   },
   {
     "job_id": "job_010",
     "job_description": "AI Product Engineer. Build user-facing AI features end-to-end: retrieval, orchestration, evals, latency optimization, and experimentation loops with PM/design.",
-    "feedback_if_recommended": "Great recommendation. End-to-end AI product delivery closely matches this profile.",
-    "feedback_if_not_recommended": "This seems like a missed fit because the candidate has strong end-to-end AI feature experience."
+    "feedback_if_recommended": "Great fit for me. I strongly prefer end-to-end AI product roles with measurable user impact and iteration loops.",
+    "feedback_if_not_recommended": "I would have preferred this to be recommended. This matches my preference for owning AI features from prototype to production."
   },
   {
     "job_id": "job_011",
     "job_description": "Data Governance Specialist. Focus on policy documentation, data lineage audits, and regulatory reporting with minimal model development.",
-    "feedback_if_recommended": "Recommendation may be too optimistic if technical model-building work is expected by the candidate.",
-    "feedback_if_not_recommended": "Good rejection if preference is for hands-on model and system engineering."
+    "feedback_if_recommended": "Likely not preferred for me unless technical scope is expanded. I prefer hands-on model/system engineering.",
+    "feedback_if_not_recommended": "Correct for me. My preference is build-focused AI/ML engineering rather than policy-heavy governance."
   },
   {
     "job_id": "job_012",
     "job_description": "Principal Retrieval Engineer for enterprise knowledge systems. Requires graph-based retrieval, vector indexing, quality benchmarking, and mentoring engineers.",
-    "feedback_if_recommended": "Excellent recommendation. Retrieval depth, graph workflows, and mentoring history fit very well.",
-    "feedback_if_not_recommended": "This appears to be a strong mismatch in decision; role requirements align directly with candidate strengths."
+    "feedback_if_recommended": "Excellent fit for me. I prefer retrieval/graph leadership roles with mentoring responsibility and quality ownership.",
+    "feedback_if_not_recommended": "I would have preferred this to be recommended. This role matches my preference for high-impact retrieval leadership work."
   }
 ]

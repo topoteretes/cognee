@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import cognee
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
@@ -18,14 +20,43 @@ from examples.demos.job_finding_agent.agent.tool_contracts import (
     ToolExecutionResult,
 )
 from examples.demos.job_finding_agent.memory_models import (
+    ActionTaskJobNode,
+    ActionChainRoot,
     AgentAction,
-    FeedbackRecord,
-    FormattedJob,
-    JobRecommendation,
+    JobSequenceNode,
     build_node_id_from_text,
-    persist_data_points,
+    persist_with_low_level_pipeline,
 )
 from examples.demos.job_finding_agent.skill_logic import update_skill_with_feedback
+
+PROCESS_PIPELINE_NAME = "job_find_process_pipeline"
+ACTION_PIPELINE_NAME = "job_find_agent_action_pipeline"
+
+
+def _fallback_role_title(job_description: str) -> str:
+    """Best-effort local fallback so role_title is always present."""
+    lines = [line.strip(" -*\t") for line in job_description.splitlines() if line.strip()]
+    for line in lines[:12]:
+        lower = line.lower()
+        if lower.startswith("title:") or lower.startswith("role:"):
+            return line.split(":", 1)[1].strip() or "Unspecified Role"
+
+    title_keywords = (
+        "engineer",
+        "developer",
+        "scientist",
+        "manager",
+        "architect",
+        "specialist",
+        "analyst",
+        "lead",
+        "director",
+    )
+    for line in lines[:12]:
+        if any(keyword in line.lower() for keyword in title_keywords):
+            return re.sub(r"\s+", " ", line).strip()[:120]
+
+    return "Unspecified Role"
 
 
 async def process_job_agent_tool(
@@ -33,17 +64,31 @@ async def process_job_agent_tool(
     context: RunnerContext,
 ) -> ToolExecutionResult:
     """Process one job into structured format + recommendation and persist it."""
-    formatted = await LLMGateway.acreate_structured_output(
+    job_sequence_index = int(state.metadata.get("job_sequence_index", 0))
+    sequence_text = f"Job{job_sequence_index}"
+    previous_job_sequence_node = context.runtime_data.get("last_job_sequence_node")
+    job_sequence_node = JobSequenceNode(
+        id=build_node_id_from_text(sequence_text),
+        position=job_sequence_index,
+        previous=previous_job_sequence_node,
+        text=sequence_text,
+    )
+    context.runtime_data["last_job_sequence_node"] = job_sequence_node
+
+    formatted: FormattedJobOutput = await LLMGateway.acreate_structured_output(
         state.job.job_description,
         (
-            "Extract structured job information. Keep values concise and literal. "
-            "If unknown, return empty strings/lists."
+            "Extract a concise normalized job summary. "
+            "role_title is mandatory and must never be empty. "
+            "Put the retrieval-ready summary in the `text` field."
         ),
         FormattedJobOutput,
     )
+    if not formatted.role_title.strip():
+        formatted.role_title = _fallback_role_title(state.job.job_description)
     state.formatted_job = formatted.model_dump()
 
-    recommendation = await LLMGateway.acreate_structured_output(
+    recommendation: RecommendationOutput = await LLMGateway.acreate_structured_output(
         (
             f"skill.md:\n{context.skill_text}\n\n"
             f"job_description:\n{state.job.job_description}\n\n"
@@ -51,56 +96,36 @@ async def process_job_agent_tool(
         ),
         (
             "Decide if the candidate should APPLY or DONT_APPLY. "
-            "Provide short rationale and confidence between 0 and 1."
+            "Provide short rationale. Put a retrieval-ready summary in `text`."
         ),
         RecommendationOutput,
     )
     state.recommendation = recommendation
 
-    job_text = (
-        f"Job {state.job.job_id}\n"
-        f"Title: {formatted.role_title}\n"
-        f"Seniority: {formatted.seniority}\n"
-        f"Required skills: {', '.join(formatted.required_skills)}\n"
-        f"Preferred skills: {', '.join(formatted.preferred_skills)}\n"
-        f"Responsibilities: {'; '.join(formatted.responsibilities)}\n"
-        f"Location: {formatted.location_or_remote}\n"
-        f"Raw: {state.job.job_description}"
-    ).strip()
+    if not formatted.text.strip():
+        formatted.text = state.job.job_description.strip()
+    formatted.id = build_node_id_from_text(formatted.text)
 
-    formatted_dp = FormattedJob(
-        id=build_node_id_from_text(job_text),
-        job_id=state.job.job_id,
-        role_title=formatted.role_title,
-        seniority=formatted.seniority,
-        text=job_text,
-    )
-    recommendation_text = (
-        f"Job {state.job.job_id} recommendation: {recommendation.decision.value}. "
-        f"Confidence: {recommendation.confidence:.2f}. "
-        f"Rationale: {recommendation.rationale}"
-    ).strip()
-    recommendation_dp = JobRecommendation(
-        id=build_node_id_from_text(recommendation_text),
-        job_id=state.job.job_id,
-        decision=recommendation.decision.value,
-        confidence=recommendation.confidence,
-        text=recommendation_text,
-    )
-    edges = [
-        (
-            str(formatted_dp.id),
-            str(recommendation_dp.id),
-            "HAS_RECOMMENDATION",
-            {"edge_text": "job has recommendation"},
-        )
-    ]
-    await persist_data_points(
-        data_points=[formatted_dp, recommendation_dp],
-        edges=edges,
+    if not recommendation.text.strip():
+        recommendation.text = (
+            f"Recommendation: {recommendation.decision.value}. "
+            f"Rationale: {recommendation.rationale}"
+        ).strip()
+    if recommendation.text.strip() == formatted.text.strip():
+        recommendation.text = (
+            f"Recommendation: {recommendation.decision.value}. "
+            f"Rationale: {recommendation.rationale}"
+        ).strip()
+    recommendation.id = build_node_id_from_text(recommendation.text)
+    formatted.job_sequence = job_sequence_node
+    # Keep explicit relation in the datapoint model
+    formatted.recommendation = recommendation
+    state.metadata["job_sequence_node"] = job_sequence_node
+    await persist_with_low_level_pipeline(
+        data_points=[formatted],
         dataset_name=context.dataset_name,
         user=context.user,
-        pipeline_name="job_find_process_pipeline",
+        pipeline_name=PROCESS_PIPELINE_NAME,
     )
 
     return ToolExecutionResult(
@@ -129,8 +154,8 @@ async def update_process_job_agent_skill_tool(
         run_in_background=False,
     )
 
-    last_feedback = context.runtime_data["pending_feedbacks"][-1]
-    updated_skill = update_skill_with_feedback(context.skill_text, last_feedback)
+    pending_feedbacks = list(context.runtime_data.get("pending_feedbacks", []))
+    updated_skill = await update_skill_with_feedback(context.skill_text, pending_feedbacks)
     context.skill_text = updated_skill
     context.skill_md_path.write_text(updated_skill, encoding="utf-8")
     context.runtime_data["pending_feedbacks"] = []
@@ -183,38 +208,8 @@ async def request_feedback_tool(
                 user=context.user,
             )
 
-    feedback_record_text = (
-        f"Job {state.job.job_id} feedback for decision {decision.value}: {feedback_text}"
-    ).strip()
-    feedback_dp = FeedbackRecord(
-        id=build_node_id_from_text(feedback_record_text),
-        job_id=state.job.job_id,
-        text=feedback_record_text,
-    )
-    recommendation_text = (
-        f"Job {state.job.job_id} recommendation: {decision.value}. "
-        f"Confidence: {state.recommendation.confidence:.2f}. "
-        f"Rationale: {state.recommendation.rationale}"
-    ).strip()
-    recommendation_id = build_node_id_from_text(recommendation_text)
-    edges = [
-        (
-            str(recommendation_id),
-            str(feedback_dp.id),
-            "HAS_FEEDBACK",
-            {"edge_text": "recommendation has feedback"},
-        )
-    ]
-    await persist_data_points(
-        data_points=[feedback_dp],
-        edges=edges,
-        dataset_name=context.dataset_name,
-        user=context.user,
-        pipeline_name="job_find_feedback_pipeline",
-    )
-
     return ToolExecutionResult(
-        observation=f"Feedback captured for {decision.value}.",
+        observation=f"Feedback captured in session for {decision.value}.",
         should_end_process=False,
         continue_loop=True,
         stop_reason="FEEDBACK_CAPTURED",
@@ -224,48 +219,50 @@ async def request_feedback_tool(
 async def store_agent_action(
     state: JobAgentState,
     context: RunnerContext,
+    iteration: int,
     thought: str,
     tool_name: ToolName,
     observation: str,
     stop_reason: str | None,
-) -> None:
+    prev_action: AgentAction | None = None,
+) -> AgentAction:
     """Persist one loop action trace element."""
     action_text = (
-        f"Job {state.job.job_id} | Iteration {state.iteration} | Tool {tool_name.value} | "
+        f"Job {state.job.job_id} | Iteration {iteration} | Tool {tool_name.value} | "
         f"Thought: {thought} | Observation: {observation} | Stop: {stop_reason or ''}"
     ).strip()
+    chain_root_text = f"Agent action chain root for job {state.job.job_id}"
+    action_job_node = state.metadata.get("action_job_node")
+    if action_job_node is None:
+        job_sequence_index = int(state.metadata.get("job_sequence_index", 0))
+        action_sequence_text = f"Agent Task Job{job_sequence_index}"
+        previous_action_job_node = context.runtime_data.get("last_action_task_job_node")
+        action_job_node = ActionTaskJobNode(
+            id=build_node_id_from_text(action_sequence_text),
+            position=job_sequence_index,
+            previous=previous_action_job_node,
+            text=action_sequence_text,
+        )
+        context.runtime_data["last_action_task_job_node"] = action_job_node
+        state.metadata["action_job_node"] = action_job_node
+
+    chain_root_dp = ActionChainRoot(
+        id=build_node_id_from_text(chain_root_text),
+        action_job_node=action_job_node,
+        job_id=state.job.job_id,
+        text=chain_root_text,
+    )
     action_dp = AgentAction(
         id=build_node_id_from_text(action_text),
-        job_id=state.job.job_id,
-        iteration=state.iteration,
-        thought=thought,
-        tool_name=tool_name.value,
+        chain_root=chain_root_dp,
+        iteration=iteration,
+        prev_action=prev_action,
         text=action_text,
     )
-    job_id = build_node_id_from_text(
-        (
-            f"Job {state.job.job_id}\n"
-            f"Title: {(state.formatted_job or {}).get('role_title', '')}\n"
-            f"Seniority: {(state.formatted_job or {}).get('seniority', '')}\n"
-            f"Required skills: {', '.join((state.formatted_job or {}).get('required_skills', []))}\n"
-            f"Preferred skills: {', '.join((state.formatted_job or {}).get('preferred_skills', []))}\n"
-            f"Responsibilities: {'; '.join((state.formatted_job or {}).get('responsibilities', []))}\n"
-            f"Location: {(state.formatted_job or {}).get('location_or_remote', '')}\n"
-            f"Raw: {state.job.job_description}"
-        ).strip()
-    )
-    edges = [
-        (
-            str(job_id),
-            str(action_dp.id),
-            "HAS_ACTION",
-            {"edge_text": "job has action"},
-        )
-    ]
-    await persist_data_points(
+    await persist_with_low_level_pipeline(
         data_points=[action_dp],
-        edges=edges,
-        dataset_name=context.dataset_name,
+        dataset_name=context.runtime_data.get("action_dataset_name", context.dataset_name),
         user=context.user,
-        pipeline_name="job_find_agent_action_pipeline",
+        pipeline_name=ACTION_PIPELINE_NAME,
     )
+    return action_dp
