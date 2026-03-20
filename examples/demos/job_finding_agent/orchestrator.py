@@ -82,10 +82,10 @@ async def run_jobs_from_json(
     # Initial ingestion is CV-only in applicant_data dataset.
     await cognee.add(
         cv_text,
-        dataset_name=APPLICANT_DATASET_NAME,
+        dataset_name=jobs_dataset_name,
         user=user,
     )
-    await cognee.cognify(datasets=[APPLICANT_DATASET_NAME], user=user)
+    await cognee.cognify(datasets=[jobs_dataset_name], user=user)
 
     context = RunnerContext(
         dataset_name=jobs_dataset_name,
