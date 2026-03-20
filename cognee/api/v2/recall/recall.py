@@ -1,37 +1,50 @@
 from uuid import UUID
 from typing import Optional
 
+try:
+    from typing import Unpack
+except ImportError:
+    from typing_extensions import Unpack
+
+from typing_extensions import TypedDict
+
+
+class RecallKwargs(TypedDict, total=False):
+    """Power-user overrides for recall(). Most users never need these."""
+
+    dataset_ids: list[UUID]
+    system_prompt: str
+    system_prompt_path: str
+    node_name: list[str]
+    only_context: bool
+    session_id: str
+    wide_search_top_k: int
+    triplet_distance_penalty: float
+    verbose: bool
+    retriever_specific_config: dict
+    user: object  # User context (resolved internally when None)
+
 
 async def recall(
     query_text: str,
     query_type=None,
+    *,
     datasets: Optional[list[str]] = None,
-    dataset_ids: Optional[list[UUID]] = None,
-    user=None,
-    system_prompt: Optional[str] = None,
-    system_prompt_path: Optional[str] = None,
-    node_name: Optional[list[str]] = None,
     top_k: int = 10,
-    verbose: bool = False,
-    only_context: bool = False,
-):
+    **kwargs: Unpack[RecallKwargs],
+) -> list:
     """Search the knowledge graph for relevant information.
 
-    This is a memory-oriented alias for ``cognee.search()``.  All arguments
-    are forwarded unchanged.
+    This is a memory-oriented alias for ``cognee.search()``.  The most common
+    parameters are explicit keyword arguments; power-user options can be passed
+    via ``RecallKwargs`` (see class definition for available keys).
 
     Args:
         query_text: Natural-language query.
         query_type: Search strategy (default ``SearchType.GRAPH_COMPLETION``).
         datasets: Dataset names to search within.
-        dataset_ids: Dataset UUIDs to search within.
-        user: User context for permissions.
-        system_prompt: Custom system prompt text.
-        system_prompt_path: Path to a system prompt file.
-        node_name: Filter results to specific node sets.
         top_k: Maximum results to return (default *10*).
-        verbose: Return verbose output.
-        only_context: Return only the context that would be sent to the LLM.
+        **kwargs: Additional options — see ``RecallKwargs``.
 
     Returns:
         Search results (same as ``cognee.search()``).
@@ -47,12 +60,6 @@ async def recall(
         query_text=query_text,
         query_type=query_type,
         datasets=datasets,
-        dataset_ids=dataset_ids,
-        user=user,
-        system_prompt=system_prompt,
-        system_prompt_path=system_prompt_path,
-        node_name=node_name,
         top_k=top_k,
-        verbose=verbose,
-        only_context=only_context,
+        **kwargs,
     )

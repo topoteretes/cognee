@@ -222,7 +222,7 @@ async def add(
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-    return await pipeline_executor_func(
+    result = await pipeline_executor_func(
         pipeline=run_pipeline,
         tasks=tasks,
         datasets=[authorized_dataset.id],
@@ -235,3 +235,10 @@ async def add(
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
     )
+
+    # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
+    # expect a single PipelineRunInfo (add always processes one dataset).
+    if isinstance(result, dict) and len(result) == 1:
+        return next(iter(result.values()))
+
+    return result

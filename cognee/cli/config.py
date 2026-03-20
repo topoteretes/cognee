@@ -13,6 +13,9 @@ COMMAND_DESCRIPTIONS = {
     "cognify": "Transform ingested data into a structured knowledge graph",
     "delete": "Delete data from cognee knowledge base",
     "config": "Manage cognee configuration settings",
+    "remember": "Ingest data and build the knowledge graph in a single call",
+    "recall": "Search the knowledge graph for relevant information",
+    "improve": "Enrich an existing knowledge graph with additional context and rules",
 }
 
 # Search type choices
