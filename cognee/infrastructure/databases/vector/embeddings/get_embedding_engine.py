@@ -101,6 +101,18 @@ def create_embedding_engine(
             batch_size=embedding_batch_size,
         )
 
+    if embedding_provider == "openai_compatible":
+        from .OpenAICompatibleEmbeddingEngine import OpenAICompatibleEmbeddingEngine
+
+        return OpenAICompatibleEmbeddingEngine(
+            model=embedding_model,
+            dimensions=embedding_dimensions,
+            endpoint=embedding_endpoint,
+            api_key=embedding_api_key or llm_api_key,
+            max_completion_tokens=embedding_max_completion_tokens,
+            batch_size=embedding_batch_size,
+        )
+
     from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
 
     return LiteLLMEmbeddingEngine(
