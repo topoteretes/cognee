@@ -72,8 +72,8 @@ def run_graphiti_benchmark(config_params: dict, dir_suffix: str):
 async def launch_neo4j_and_run_benchmark(config_params: dict, dir_suffix: str):
     """Launches Neo4j and then triggers the Graphiti benchmark."""
     print("Starting Neo4j server process...")
-    _, sep, password = neo4j_env_dict["NEO4J_AUTH"].partition("/")
-    if not sep:
+    user, sep, password = neo4j_env_dict["NEO4J_AUTH"].partition("/")
+    if not sep or not user or not password:
         raise ValueError("NEO4J_AUTH must be in the format 'username/password'")
     try:
         subprocess.run(

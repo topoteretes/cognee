@@ -24,8 +24,8 @@ async def start_neo4j_server():
     print("Starting Neo4j server process...")
 
     # Set initial password
-    _, sep, password = neo4j_env_dict["NEO4J_AUTH"].partition("/")
-    if not sep:
+    user, sep, password = neo4j_env_dict["NEO4J_AUTH"].partition("/")
+    if not sep or not user or not password:
         raise ValueError("NEO4J_AUTH must be in the format 'username/password'")
     try:
         subprocess.run(
