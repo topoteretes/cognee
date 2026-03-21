@@ -38,10 +38,14 @@ async def main():
 
         dataset_name = "cs_explanations"
 
+        node_set_a = ["NLP"]
+        node_set_b = ["Quantum", "Computers"]
+        node_set_c = ["Quantum"]
+
         explanation_file_path_nlp = os.path.join(
             pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
         )
-        await cognee.add([explanation_file_path_nlp], dataset_name)
+        await cognee.add([explanation_file_path_nlp], dataset_name, node_set=node_set_a)
 
         explanation_file_path_quantum = os.path.join(
             pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
@@ -55,7 +59,11 @@ async def main():
 
         assert is_empty, "Kuzu graph database is not empty"
 
-        await cognee.add([explanation_file_path_quantum], dataset_name)
+        await cognee.add([explanation_file_path_quantum], dataset_name, node_set=node_set_b)
+
+        await cognee.add(
+            "Alice is an expert in Quantum Mechanics", dataset_name, node_set=node_set_c
+        )
 
         is_empty = await graph_engine.is_empty()
 
@@ -134,6 +142,43 @@ async def main():
         assert context_empty == "", (
             f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
         )
+
+        results = await graph_engine.get_nodeset_subgraph(
+            NodeSet, node_set_b, node_name_filter_operator="OR"
+        )
+        nodes = results[0]
+        assert any("alice" in node[1]["name"].lower() for node in nodes if "name" in node[1]), (
+            "Alice is a part of the Quantum nodeset, so it should be included in results"
+        )
+
+        results = await graph_engine.get_nodeset_subgraph(
+            NodeSet, node_set_b, node_name_filter_operator="AND"
+        )
+        nodes = results[0]
+        assert all("Alice" not in node[1]["name"] for node in nodes if "name" in node[1]), (
+            "Alice is ONLY a part of the Quantum nodeset, therefore she should NOT be included in results"
+        )
+
+        query_text = "Tell me about Quantum computers"
+        graph_retriever = GraphCompletionRetriever(
+            node_type=NodeSet, node_name=node_set_b, node_name_filter_operator="OR", top_k=250
+        )
+        objects = await graph_retriever.get_retrieved_objects(query_text)
+        context = await graph_retriever.get_context_from_objects(
+            query=query_text, retrieved_objects=objects
+        )
+
+        assert "Alice" in context
+
+        graph_retriever = GraphCompletionRetriever(
+            node_type=NodeSet, node_name=node_set_b, node_name_filter_operator="AND", top_k=250
+        )
+        objects = await graph_retriever.get_retrieved_objects(query_text)
+        context = await graph_retriever.get_context_from_objects(
+            query=query_text, retrieved_objects=objects
+        )
+
+        assert "Alice" not in context
 
         await cognee.prune.prune_data()
         data_root_directory = get_storage_config()["data_root_directory"]
