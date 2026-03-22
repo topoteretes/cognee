@@ -92,3 +92,10 @@ class TestOpenAICompatibleEmbeddingEngine:
 
         # Both should produce equivalent normalized URLs
         assert str(engine._client._base_url) == str(engine2._client._base_url)
+
+    def test_endpoint_normalization_strips_embeddings_suffix(self):
+        """Endpoint with /v1/embeddings should not produce /v1/embeddings/v1."""
+        engine = self._make_engine(endpoint="http://localhost:8099/v1/embeddings")
+        base_url = str(engine._client._base_url).rstrip("/")
+        assert base_url.endswith("/v1")
+        assert "/embeddings" not in base_url

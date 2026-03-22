@@ -97,6 +97,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # Normalise the base URL: the openai SDK appends /embeddings automatically,
         # so we need the URL to end with /v1 (not /v1/embeddings).
         base = self.endpoint.rstrip("/")
+        if base.endswith("/v1/embeddings"):
+            base = base[:-len("/embeddings")]
         if not base.endswith("/v1"):
             base = base + "/v1"
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=base)
