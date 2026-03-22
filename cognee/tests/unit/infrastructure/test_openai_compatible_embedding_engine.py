@@ -85,7 +85,10 @@ class TestOpenAICompatibleEmbeddingEngine:
     def test_endpoint_normalization(self):
         """Endpoint without /v1 gets /v1 appended for the SDK base_url."""
         engine = self._make_engine(endpoint="http://localhost:8099")
-        assert engine._client._base_url is not None  # client was created
+        assert str(engine._client._base_url).rstrip("/").endswith("/v1")
 
         engine2 = self._make_engine(endpoint="http://localhost:8099/v1")
-        assert engine2._client._base_url is not None
+        assert str(engine2._client._base_url).rstrip("/").endswith("/v1")
+
+        # Both should produce equivalent normalized URLs
+        assert str(engine._client._base_url) == str(engine2._client._base_url)
