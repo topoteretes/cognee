@@ -33,8 +33,9 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger("OpenAICompatibleEmbeddingEngine")
+logger = get_logger("OpenAICompatibleEmbeddingEngine")
 
 
 class EmbeddingException(Exception):
@@ -90,9 +91,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self.max_completion_tokens = max_completion_tokens
         self.batch_size = batch_size
 
-        enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
-        if isinstance(enable_mocking, bool):
-            enable_mocking = str(enable_mocking).lower()
+        enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
         # Normalise the base URL: the openai SDK appends /embeddings automatically,
@@ -145,7 +144,15 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             error_str = str(error).lower()
 
             # Handle context window exceeded by splitting input
-            if "context" in error_str or "too long" in error_str or "maximum context" in error_str or "maximum token" in error_str:
+            context_error_patterns = (
+                "context length",
+                "context window",
+                "too long",
+                "maximum context",
+                "maximum tokens",
+                "max tokens",
+            )
+            if any(pattern in error_str for pattern in context_error_patterns):
                 if isinstance(text, list) and len(text) > 1:
                     mid = math.ceil(len(text) / 2)
                     left_vecs, right_vecs = await asyncio.gather(

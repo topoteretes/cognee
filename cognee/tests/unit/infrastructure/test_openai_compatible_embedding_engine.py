@@ -7,8 +7,6 @@ Verifies that the engine:
 - Reports correct vector size and batch size
 """
 
-import asyncio
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -34,23 +32,20 @@ class TestOpenAICompatibleEmbeddingEngine:
 
         return OpenAICompatibleEmbeddingEngine(**defaults)
 
-    def test_mock_embedding(self):
+    @pytest.mark.asyncio
+    async def test_mock_embedding(self, monkeypatch):
         """When MOCK_EMBEDDING=true, embed_text returns zero vectors of correct dimensions."""
-        os.environ["MOCK_EMBEDDING"] = "true"
-        try:
-            engine = self._make_engine(dimensions=4096)
-            result = asyncio.get_event_loop().run_until_complete(
-                engine.embed_text(["hello", "world"])
-            )
-            assert len(result) == 2
-            assert len(result[0]) == 4096
-            assert all(v == 0.0 for v in result[0])
-        finally:
-            os.environ.pop("MOCK_EMBEDDING", None)
+        monkeypatch.setenv("MOCK_EMBEDDING", "true")
+        engine = self._make_engine(dimensions=4096)
+        result = await engine.embed_text(["hello", "world"])
+        assert len(result) == 2
+        assert len(result[0]) == 4096
+        assert all(v == 0.0 for v in result[0])
 
-    def test_embed_text_calls_openai_with_encoding_format_float(self):
+    @pytest.mark.asyncio
+    async def test_embed_text_calls_openai_with_encoding_format_float(self, monkeypatch):
         """embed_text must call OpenAI SDK with encoding_format='float'."""
-        os.environ.pop("MOCK_EMBEDDING", None)
+        monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
 
         engine = self._make_engine()
 
@@ -65,9 +60,7 @@ class TestOpenAICompatibleEmbeddingEngine:
         engine._client = MagicMock()
         engine._client.embeddings.create = AsyncMock(return_value=mock_response)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            engine.embed_text(["test text"])
-        )
+        result = await engine.embed_text(["test text"])
 
         # Verify create was called with encoding_format="float"
         engine._client.embeddings.create.assert_called_once_with(
