@@ -191,9 +191,14 @@ class CogneeClient:
             from cognee.modules.search.types import SearchType
 
             with redirect_stdout(sys.stderr):
-                results = await self.cognee.search(
-                    query_type=SearchType[query_type.upper()], query_text=query_text, top_k=top_k
-                )
+                search_kwargs = {
+                    'query_type': SearchType[query_type.upper()],
+                    'query_text': query_text,
+                    'top_k': top_k,
+                }
+                if datasets:
+                    search_kwargs['datasets'] = datasets
+                results = await self.cognee.search(**search_kwargs)
                 return results
 
     async def delete(self, data_id: UUID, dataset_id: UUID, mode: str = "soft") -> Dict[str, Any]:

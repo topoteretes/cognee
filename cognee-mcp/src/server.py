@@ -142,7 +142,7 @@ async def health_check(request):
 @mcp.tool()
 @log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
-    data: str, graph_model_file: str = None, graph_model_name: str = None, custom_prompt: str = None
+    data: str, dataset_name: str = "main_dataset", graph_model_file: str = None, graph_model_name: str = None, custom_prompt: str = None
 ) -> list:
     """
     Transform ingested data into a structured knowledge graph.
@@ -262,6 +262,7 @@ async def cognify(
 
     async def cognify_task(
         data: str,
+        dataset_name: str = "main_dataset",
         graph_model_file: str = None,
         graph_model_name: str = None,
         custom_prompt: str = None,
@@ -281,10 +282,10 @@ async def cognify(
 
                     graph_model = load_class(graph_model_file, graph_model_name)
 
-            await cognee_client.add(data)
+            await cognee_client.add(data, dataset_name=dataset_name)
 
             try:
-                await cognee_client.cognify(custom_prompt=custom_prompt, graph_model=graph_model)
+                await cognee_client.cognify(datasets=[dataset_name], custom_prompt=custom_prompt, graph_model=graph_model)
                 logger.info("Cognify process finished.")
             except Exception as e:
                 logger.error("Cognify process failed.")
@@ -302,6 +303,7 @@ async def cognify(
     asyncio.create_task(
         cognify_task_wrapper(
             data=data,
+            dataset_name=dataset_name,
             graph_model_file=graph_model_file,
             graph_model_name=graph_model_name,
             custom_prompt=custom_prompt,
@@ -401,7 +403,7 @@ async def save_interaction(data: str) -> list:
 
 @mcp.tool()
 @log_usage(function_name="MCP search", log_type="mcp_tool")
-async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
+async def search(search_query: str, search_type: str, top_k: int = 10, datasets: str = None) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -517,7 +519,7 @@ async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
 
     """
 
-    async def search_task(search_query: str, search_type: str, top_k: int) -> str:
+    async def search_task(search_query: str, search_type: str, top_k: int, datasets_list: list = None) -> str:
         """
         Internal task to execute knowledge graph search with result formatting.
 
@@ -542,7 +544,8 @@ async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
             search_results = await cognee_client.search(
-                query_text=search_query, query_type=search_type, top_k=top_k
+                query_text=search_query, query_type=search_type, top_k=top_k,
+                datasets=datasets_list,
             )
 
             # Handle different result formats based on API vs direct mode
@@ -576,7 +579,9 @@ async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
                 else:
                     return str(search_results)
 
-    search_results = await search_task(search_query, search_type, top_k)
+    # Parse comma-separated datasets into list
+    datasets_list = [d.strip() for d in datasets.split(',')] if datasets else None
+    search_results = await search_task(search_query, search_type, top_k, datasets_list)
     return [types.TextContent(type="text", text=search_results)]
 
 
@@ -710,6 +715,48 @@ async def list_data(dataset_id: str = None) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP delete_dataset", log_type="mcp_tool")
+async def delete_dataset(dataset_name: str) -> list:
+    """
+    Delete an entire dataset and all its data from the knowledge graph.
+
+    This removes the dataset completely: graph data, vector indices,
+    and metadata in the relational database. This operation cannot be undone.
+
+    Parameters
+    ----------
+    dataset_name : str
+        The name of the dataset to delete (e.g. 'main_dataset').
+
+    Returns
+    -------
+    list
+        A list containing a TextContent with deletion status.
+    """
+    with redirect_stdout(sys.stderr):
+        try:
+            from cognee.modules.users.methods import get_default_user
+            from cognee.modules.data.methods import delete_dataset as _delete_dataset
+            from cognee.modules.data.methods import get_datasets
+
+            user = await get_default_user()
+            datasets = await get_datasets(user.id)
+            target = None
+            for ds in datasets:
+                if ds.name == dataset_name:
+                    target = ds
+                    break
+
+            if not target:
+                return [types.TextContent(type="text", text=f"Dataset '{dataset_name}' not found.")]
+
+            await _delete_dataset(target)
+            return [types.TextContent(type="text", text=f"Dataset '{dataset_name}' deleted successfully. Graph, vectors, and metadata removed.")]
+        except Exception as e:
+            return [types.TextContent(type="text", text=f"Error deleting dataset: {str(e)}")]
+
+
+@mcp.tool()
 @log_usage(function_name="MCP delete", log_type="mcp_tool")
 async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
     """
@@ -828,7 +875,7 @@ async def prune():
 
 @mcp.tool()
 @log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
-async def cognify_status():
+async def cognify_status(dataset_name: str = "main_dataset") -> list:
     """
     Get the current status of the cognify pipeline.
 
@@ -856,7 +903,7 @@ async def cognify_status():
 
             user = await get_default_user()
             status = await cognee_client.get_pipeline_status(
-                [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
+                [await get_unique_dataset_id(dataset_name, user)], "cognify_pipeline"
             )
 
             # Append any background task errors
