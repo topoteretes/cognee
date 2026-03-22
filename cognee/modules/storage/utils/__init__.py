@@ -11,9 +11,8 @@ from cognee.infrastructure.engine import DataPoint
 class JSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
-            return obj.isoformat()  # Convert datetime to ISO 8601 string
+            return obj.isoformat()
         elif isinstance(obj, UUID):
-            # if the obj is uuid, we simply return the value of uuid
             return str(obj)
         elif isinstance(obj, Decimal):
             return float(obj)
@@ -21,29 +20,49 @@ class JSONEncoder(json.JSONEncoder):
 
 
 def copy_model(
-    model: DataPoint, include_fields: dict | None = None, exclude_fields: list | None = None
+    model: DataPoint, include_fields: list | None = None, exclude_fields: list | None = None
 ):
     if include_fields is None:
-        include_fields = {}
+        include_fields = []
     if exclude_fields is None:
         exclude_fields = []
-    fields = {
-        name: (field.annotation, field.default if field.default is not None else PydanticUndefined)
-        for name, field in model.model_fields.items()
+
+    all_field_names = list(type(model).model_fields.keys())
+
+    # Determine which fields to keep
+    fields_to_copy = [
+        name for name in all_field_names
         if name not in exclude_fields
+        and (not include_fields or name in include_fields)
+    ]
+
+    # Build field definitions for create_model
+    fields = {
+        name: (
+            type(model).model_fields[name].annotation,
+            type(model).model_fields[name].default
+            if type(model).model_fields[name].default is not None
+            else PydanticUndefined
+        )
+        for name in fields_to_copy
     }
 
-    final_fields = {**fields, **include_fields}
-
-    # Create a base class with the same configuration as DataPoint
     class ConfiguredBase(BaseModel):
         model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    # Create the model inheriting from the configured base
-    new_model = create_model(model.__name__, __base__=ConfiguredBase, **final_fields)
+    new_model_class = create_model(
+        type(model).__name__, __base__=ConfiguredBase, **fields)
+    new_model_class.model_rebuild()
 
-    new_model.model_rebuild()
-    return new_model
+    # Use model's actual object values (not serialized dicts) to preserve nested models
+    instance_data = {
+        name: getattr(model, name)
+        for name in fields_to_copy
+        if hasattr(model, name)
+    }
+
+    # skip re-validation
+    return new_model_class.model_construct(**instance_data)
 
 
 def get_own_properties(data_point: DataPoint):
