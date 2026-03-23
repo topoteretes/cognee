@@ -10,10 +10,7 @@ class TestRunMigrations(unittest.TestCase):
 
     @patch("cognee.run_migrations.subprocess.run")
     @patch("cognee.run_migrations.os.path.exists", return_value=True)
-    @patch(
-        "cognee.run_migrations.pkg_resources.files",
-        return_value=MagicMock(__str__=lambda self: "/fake/package"),
-    )
+    @patch("cognee.run_migrations.pkg_resources.files", return_value="/fake/package")
     def test_uses_sys_executable(self, mock_files, mock_exists, mock_run):
         """subprocess.run must be called with sys.executable, not 'python'.
 
@@ -23,9 +20,6 @@ class TestRunMigrations(unittest.TestCase):
         """
         import asyncio
         from cognee.run_migrations import run_migrations
-
-        # Make files() return a string-like path
-        mock_files.return_value = "/fake/package"
 
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
 
