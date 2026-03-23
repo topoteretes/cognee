@@ -47,8 +47,8 @@ logger = get_logger()
 
 cognee_client: Optional[CogneeClient] = None
 
-# Stores background task errors so cognify_status can report them
-_task_errors: dict[str, str] = {}
+# Stores background task errors keyed by dataset_name so cognify_status can report them
+_task_errors: dict[str, list[tuple[str, str]]] = {}
 
 
 def _is_running_in_docker() -> bool:
@@ -296,9 +296,10 @@ async def cognify(
         try:
             await cognify_task(**kwargs)
         except Exception as e:
+            dataset = kwargs.get('dataset_name', 'main_dataset')
             timestamp = datetime.now(timezone.utc).isoformat()
-            _task_errors[timestamp] = str(e)
-            logger.error(f"Background cognify task failed: {e}")
+            _task_errors.setdefault(dataset, []).append((timestamp, str(e)))
+            logger.error(f"Background cognify task failed for dataset '{dataset}': {e}")
 
     asyncio.create_task(
         cognify_task_wrapper(
@@ -580,7 +581,8 @@ async def search(search_query: str, search_type: str, top_k: int = 10, datasets:
                     return str(search_results)
 
     # Parse comma-separated datasets into list
-    datasets_list = [d.strip() for d in datasets.split(',')] if datasets else None
+    datasets_list = [d.strip() for d in datasets.split(',') if d.strip()] if datasets else None
+    datasets_list = datasets_list or None  # collapse empty list to None
     search_results = await search_task(search_query, search_type, top_k, datasets_list)
     return [types.TextContent(type="text", text=search_results)]
 
@@ -735,22 +737,31 @@ async def delete_dataset(dataset_name: str) -> list:
     """
     with redirect_stdout(sys.stderr):
         try:
+            if cognee_client.use_api:
+                return [types.TextContent(
+                    type="text",
+                    text="❌ delete_dataset is not available in API mode. Use the API directly.",
+                )]
+
             from cognee.modules.users.methods import get_default_user
             from cognee.modules.data.methods import delete_dataset as _delete_dataset
             from cognee.modules.data.methods import get_datasets
 
             user = await get_default_user()
             datasets = await get_datasets(user.id)
-            target = None
-            for ds in datasets:
-                if ds.name == dataset_name:
-                    target = ds
-                    break
+            matching = [ds for ds in datasets if ds.name == dataset_name]
 
-            if not target:
+            if not matching:
                 return [types.TextContent(type="text", text=f"Dataset '{dataset_name}' not found.")]
 
-            await _delete_dataset(target)
+            if len(matching) > 1:
+                ids = ', '.join(str(ds.id) for ds in matching)
+                return [types.TextContent(
+                    type="text",
+                    text=f"Multiple datasets named '{dataset_name}' found (IDs: {ids}). Please delete by ID instead.",
+                )]
+
+            await _delete_dataset(matching[0])
             return [types.TextContent(type="text", text=f"Dataset '{dataset_name}' deleted successfully. Graph, vectors, and metadata removed.")]
         except Exception as e:
             return [types.TextContent(type="text", text=f"Error deleting dataset: {str(e)}")]
@@ -908,9 +919,10 @@ async def cognify_status(dataset_name: str = "main_dataset") -> list:
 
             # Append any background task errors
             status_text = str(status)
-            if _task_errors:
+            dataset_errors = _task_errors.get(dataset_name, [])
+            if dataset_errors:
                 error_lines = ["\n\nBackground task errors:"]
-                for ts, err in sorted(_task_errors.items(), reverse=True):
+                for ts, err in sorted(dataset_errors, reverse=True):
                     error_lines.append(f"  [{ts}] {err}")
                 status_text += "\n".join(error_lines)
 
@@ -922,9 +934,10 @@ async def cognify_status(dataset_name: str = "main_dataset") -> list:
         except Exception as e:
             error_msg = f"❌ Failed to get cognify status: {str(e)}"
             # Still report background errors even if pipeline status fails
-            if _task_errors:
+            dataset_errors = _task_errors.get(dataset_name, [])
+            if dataset_errors:
                 error_lines = ["\n\nBackground task errors:"]
-                for ts, err in sorted(_task_errors.items(), reverse=True):
+                for ts, err in sorted(dataset_errors, reverse=True):
                     error_lines.append(f"  [{ts}] {err}")
                 error_msg += "\n".join(error_lines)
             logger.error(error_msg)

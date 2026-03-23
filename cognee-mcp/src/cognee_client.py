@@ -198,6 +198,8 @@ class CogneeClient:
                 }
                 if datasets:
                     search_kwargs['datasets'] = datasets
+                if system_prompt:
+                    search_kwargs['system_prompt'] = system_prompt
                 results = await self.cognee.search(**search_kwargs)
                 return results
 
