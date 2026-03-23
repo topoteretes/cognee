@@ -31,6 +31,7 @@ async def recall(
     *,
     datasets: Optional[list[str]] = None,
     top_k: int = 10,
+    recency_weight: float = 0.0,
     **kwargs: Unpack[RecallKwargs],
 ) -> list:
     """Search the knowledge graph for relevant information.
@@ -44,6 +45,11 @@ async def recall(
         query_type: Search strategy (default ``SearchType.GRAPH_COMPLETION``).
         datasets: Dataset names to search within.
         top_k: Maximum results to return (default *10*).
+        recency_weight: Blend factor between semantic relevance and freshness.
+            ``0.0`` (default) uses pure semantic ranking; ``1.0`` ranks by
+            recency only.  Only affects ``ScoredResult``-based search types
+            (CHUNKS, RAG_COMPLETION, SUMMARIES, TRIPLET_COMPLETION).
+            Graph-based search types (GRAPH_COMPLETION) are unaffected.
         **kwargs: Additional options — see ``RecallKwargs``.
 
     Returns:
@@ -55,6 +61,12 @@ async def recall(
         from cognee.modules.search.types import SearchType
 
         query_type = SearchType.GRAPH_COMPLETION
+
+    # Inject recency_weight into retriever_specific_config without mutating caller's dict
+    if recency_weight > 0.0:
+        rsc = dict(kwargs.get("retriever_specific_config") or {})
+        rsc["recency_weight"] = recency_weight
+        kwargs["retriever_specific_config"] = rsc
 
     return await search(
         query_text=query_text,
