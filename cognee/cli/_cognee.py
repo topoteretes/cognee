@@ -1,6 +1,5 @@
 import sys
 import os
-import json
 import argparse
 import signal
 import subprocess
@@ -52,29 +51,6 @@ class DebugAction(argparse.Action):
         # Enable debug mode for stack traces
         debug.enable_debug()
         fmt.note("Debug mode enabled. Full stack traces will be shown.")
-
-
-class JsonAction(argparse.Action):
-    def __init__(
-        self,
-        option_strings: Sequence[str],
-        dest: Any = argparse.SUPPRESS,
-        default: Any = argparse.SUPPRESS,
-        help: str = None,
-    ) -> None:
-        super(JsonAction, self).__init__(
-            option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
-        )
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: Any,
-        option_string: str = None,
-    ) -> None:
-        fmt.enable_json_mode()
-        namespace.json_mode = True
 
 
 class UiAction(argparse.Action):
@@ -152,33 +128,6 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         help="Enable debug mode to show full stack traces on exceptions",
     )
     parser.add_argument(
-        "--json",
-        action=JsonAction,
-        help="Output a single JSON object to stdout (for agent/programmatic use)",
-    )
-    parser.add_argument(
-        "-p",
-        "--prompt",
-        type=str,
-        metavar="QUERY",
-        help="One-shot query: search the knowledge graph and print the result",
-    )
-    parser.add_argument(
-        "-i",
-        "--interactive",
-        action="store_true",
-        default=False,
-        help="Start interactive REPL for querying the knowledge graph",
-    )
-    parser.add_argument(
-        "-c",
-        "--continue",
-        dest="continue_session",
-        action="store_true",
-        default=False,
-        help="Resume last interactive session (dataset and query type)",
-    )
-    parser.add_argument(
         "-ui",
         action=UiAction,
         help="Start the cognee web UI interface",
@@ -225,69 +174,6 @@ def main() -> int:
     """Main CLI entry point"""
     parser, installed_commands = _create_parser()
     args = parser.parse_args()
-
-    # Auto-detect non-TTY (piped) output and enable JSON mode
-    # Skip auto-detect for interactive/continue modes (they need a TTY anyway)
-    if (
-        not sys.stdout.isatty()
-        and not getattr(args, "json_mode", False)
-        and not args.interactive
-        and not args.continue_session
-    ):
-        fmt.enable_json_mode()
-        args.json_mode = True
-
-    json_mode = getattr(args, "json_mode", False)
-
-    # Handle one-shot prompt mode: -p "query"
-    if args.prompt:
-        global ACTION_EXECUTED
-        ACTION_EXECUTED = True
-        try:
-            from cognee.cli.session import load_session
-            from cognee.cli.repl import run_prompt
-
-            session = load_session()
-            result = run_prompt(args.prompt, session)
-            if json_mode:
-                payload = {"status": "ok"}
-                payload.update(result)
-                click.echo(json.dumps(payload, default=str))
-            return 0
-        except Exception as ex:
-            if json_mode:
-                click.echo(
-                    json.dumps(
-                        {"status": "error", "message": str(ex), "error_code": 1},
-                        default=str,
-                    )
-                )
-            else:
-                fmt.error(str(ex))
-            if debug.is_debug_enabled():
-                raise ex
-            return 1
-
-    # Handle interactive REPL: -i or -c
-    if args.interactive or args.continue_session:
-        ACTION_EXECUTED = True
-        if json_mode:
-            click.echo(
-                json.dumps(
-                    {
-                        "status": "error",
-                        "message": "Interactive mode is not compatible with --json",
-                        "error_code": 2,
-                    },
-                    default=str,
-                )
-            )
-            return 2
-        from cognee.cli.session import load_session
-        from cognee.cli.repl import run_interactive
-
-        session = load_session() if args.continue_session else {}
-        return run_interactive(session)
 
     # Handle UI flag
     if hasattr(args, "start_ui") and args.start_ui:
@@ -430,14 +316,7 @@ def main() -> int:
 
     if cmd := installed_commands.get(args.command):
         try:
-            result = cmd.execute(args)
-            if json_mode:
-                payload = {"status": "ok"}
-                if isinstance(result, dict):
-                    payload.update(result)
-                elif result is not None:
-                    payload["result"] = result
-                click.echo(json.dumps(payload, default=str))
+            cmd.execute(args)
         except Exception as ex:
             docs_url = cmd.docs_url if hasattr(cmd, "docs_url") else DEFAULT_DOCS_URL
             error_code = -1
@@ -449,38 +328,18 @@ def main() -> int:
                 docs_url = ex.docs_url or docs_url
                 raiseable_exception = ex.raiseable_exception
 
-            if json_mode:
-                click.echo(
-                    json.dumps(
-                        {
-                            "status": "error",
-                            "message": str(ex),
-                            "error_code": error_code,
-                        },
-                        default=str,
-                    )
-                )
-            else:
-                # Print exception
-                if raiseable_exception:
-                    fmt.error(str(ex))
+            # Print exception
+            if raiseable_exception:
+                fmt.error(str(ex))
 
-                fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
+            fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
 
             if debug.is_debug_enabled() and raiseable_exception:
                 raise raiseable_exception
 
             return error_code
     else:
-        if json_mode:
-            click.echo(
-                json.dumps(
-                    {"status": "error", "message": "No command specified", "error_code": -1},
-                    default=str,
-                )
-            )
-        else:
-            print_help(parser)
+        print_help(parser)
         return -1
 
     return 0

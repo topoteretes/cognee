@@ -50,7 +50,7 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
             help="Dataset name to organize your data (default: main_dataset)",
         )
 
-    def execute(self, args: argparse.Namespace) -> Optional[dict]:
+    def execute(self, args: argparse.Namespace) -> None:
         try:
             # Import cognee here to avoid circular imports
             import cognee
@@ -73,10 +73,6 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
                     raise CliCommandInnerException(f"Failed to add data: {str(e)}") from e
 
             asyncio.run(run_add())
-            return {
-                "message": f"Added {len(args.data)} item(s)",
-                "dataset_name": args.dataset_name,
-            }
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

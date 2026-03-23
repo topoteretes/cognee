@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import json
-from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
@@ -55,7 +54,7 @@ options are supported.
             help="Output format (default: pretty)",
         )
 
-    def execute(self, args: argparse.Namespace) -> Optional[dict]:
+    def execute(self, args: argparse.Namespace) -> None:
         try:
             import cognee
             from cognee.modules.search.types import SearchType
@@ -81,14 +80,6 @@ options are supported.
                     raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
 
             results = asyncio.run(run_recall())
-
-            # In JSON mode, return structured data and skip display logic
-            if fmt.is_json_mode():
-                return {
-                    "results": results,
-                    "query_type": args.query_type,
-                    "count": len(results) if results else 0,
-                }
 
             if args.output_format == "json":
                 fmt.echo(json.dumps(results, indent=2, default=str))

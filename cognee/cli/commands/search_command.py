@@ -78,7 +78,7 @@ Search Types & Use Cases:
             help="Output format (default: pretty)",
         )
 
-    def execute(self, args: argparse.Namespace) -> Optional[dict]:
+    def execute(self, args: argparse.Namespace) -> None:
         try:
             # Import cognee here to avoid circular imports
             import cognee
@@ -107,14 +107,6 @@ Search Types & Use Cases:
                     raise CliCommandInnerException(f"Failed to search: {str(e)}") from e
 
             results = asyncio.run(run_search())
-
-            # In JSON mode, return structured data and skip display logic
-            if fmt.is_json_mode():
-                return {
-                    "results": results,
-                    "query_type": args.query_type,
-                    "count": len(results) if results else 0,
-                }
 
             # Format and display results
             if args.output_format == "json":
