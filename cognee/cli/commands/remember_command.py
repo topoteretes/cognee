@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
@@ -56,7 +57,7 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
             help="Number of chunks to process per task batch",
         )
 
-    def execute(self, args: argparse.Namespace) -> None:
+    def execute(self, args: argparse.Namespace) -> Optional[dict]:
         try:
             import cognee
 
@@ -102,6 +103,8 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                 fmt.success("Data ingested and cognification started in background!")
             else:
                 fmt.success("Data ingested and knowledge graph built successfully!")
+
+            return {"message": "Remembered.", "dataset_name": args.dataset_name}
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

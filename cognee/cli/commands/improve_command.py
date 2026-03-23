@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
@@ -41,7 +42,7 @@ tasks on an existing knowledge graph to add context, rules, and connections.
             help="Run processing in background",
         )
 
-    def execute(self, args: argparse.Namespace) -> None:
+    def execute(self, args: argparse.Namespace) -> Optional[dict]:
         try:
             import cognee
 
@@ -69,6 +70,8 @@ tasks on an existing knowledge graph to add context, rules, and connections.
                 fmt.success("Improvement started in background!")
             else:
                 fmt.success("Knowledge graph improved successfully!")
+
+            return {"message": "Knowledge graph improved."}
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
