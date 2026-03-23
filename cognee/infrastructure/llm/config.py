@@ -63,9 +63,11 @@ class LLMConfig(BaseSettings):
     llm_rate_limit_enabled: bool = False
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
+    llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
     embedding_rate_limit_enabled: bool = False
     embedding_rate_limit_requests: int = 60
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
+    embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
 
     llama_cpp_model_path: Optional[str] = None
     llama_cpp_n_ctx: int = 2048

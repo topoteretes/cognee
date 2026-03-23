@@ -23,7 +23,6 @@ from cognee.context_global_variables import backend_access_control_enabled
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..utils import normalize_distances
 from ..models.ScoredResult import ScoredResult
 from ..exceptions import CollectionNotFoundError
 from ..vector_db_interface import VectorDBInterface
@@ -319,6 +318,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -351,6 +351,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             if node_name:
+                if node_name_filter_operator == "AND":
+                    filter_operator = "?&"
+                else:
+                    filter_operator = "?|"
+
                 from sqlalchemy import cast, bindparam
                 from sqlalchemy.dialects.postgresql import JSONB, ARRAY, TEXT
 
@@ -365,7 +370,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     .where(
                         cast(PGVectorDataPoint.c.payload, JSONB)
                         .op("->")("belongs_to_set")
-                        .op("?|")(target)
+                        .op(filter_operator)(target)
                     )
                     .order_by("similarity")
                 )
@@ -396,10 +401,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if len(vector_list) == 0:
             return []
 
-        # Normalize vector distance and add this as score information to vector_list
-        normalized_values = normalize_distances(vector_list)
-        for i in range(0, len(normalized_values)):
-            vector_list[i]["score"] = normalized_values[i]
+        # Return backend raw cosine distance as score (lower is better)
+        for i in range(0, len(vector_list)):
+            vector_list[i]["score"] = float(vector_list[i]["_distance"])
 
         # Create and return ScoredResult objects
         return [

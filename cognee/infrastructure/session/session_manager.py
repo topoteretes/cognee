@@ -372,13 +372,19 @@ class SessionManager:
         Add or update feedback for a QA entry.
 
         Convenience method that updates only feedback fields.
+        Resets feedback-weight memify status so updated feedback can be re-applied.
         Returns True if updated, False if not found or cache unavailable.
         """
+        from cognee.tasks.memify.feedback_weights_constants import (
+            MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+        )
+
         return await self.update_qa(
             user_id=user_id,
             qa_id=qa_id,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False},
             session_id=session_id,
         )
 
