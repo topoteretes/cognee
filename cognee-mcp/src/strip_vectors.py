@@ -9,8 +9,10 @@ This module provides a recursive filter that strips `text_vector` from any resul
 structure (dict, list, Pydantic model, or plain object) before MCP serialization.
 """
 
+from typing import Any
 
-def strip_vectors(obj):
+
+def strip_vectors(obj: Any) -> Any:
     """Recursively remove text_vector fields from search results."""
     if isinstance(obj, dict):
         return {k: strip_vectors(v) for k, v in obj.items()
