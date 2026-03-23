@@ -23,7 +23,7 @@ class TestCliCore:
         assert len(commands) > 0
 
         parser, installed = _create_parser()
-        for name in ["add", "search", "cognify", "delete", "config"]:
+        for name in ["add", "search", "cognify", "delete", "config", "status", "datasets"]:
             assert name in installed
 
     @patch("cognee.cli._cognee._create_parser")
@@ -186,3 +186,57 @@ class TestInteractiveAndSession:
 
         assert run_interactive({"dataset": "ds", "query_type": "CHUNKS"}) == 0
         mock_query.assert_called_once_with("test query", "CHUNKS", "ds")
+
+
+class TestStatusCommand:
+    """The status preflight check"""
+
+    def setup_method(self):
+        import cognee.cli.echo as fmt
+
+        fmt._JSON_MODE = False
+
+    def teardown_method(self):
+        import cognee.cli.echo as fmt
+
+        fmt._JSON_MODE = False
+
+    @patch("cognee.cli._cognee._create_parser")
+    def test_status_returns_ready_flag(self, mock_create_parser, capsys):
+        cmd = MagicMock()
+        cmd.execute.return_value = {"ready": True, "llm": {"api_key_set": True}}
+        mock_parser = MagicMock()
+        mock_parser.parse_args.return_value = _base_args(command="status", json_mode=True)
+        mock_create_parser.return_value = (mock_parser, {"status": cmd})
+
+        assert main() == 0
+        output = json.loads(capsys.readouterr().out)
+        assert output["status"] == "ok"
+        assert output["ready"] is True
+
+
+class TestDatasetsCommand:
+    """The datasets list command"""
+
+    def setup_method(self):
+        import cognee.cli.echo as fmt
+
+        fmt._JSON_MODE = False
+
+    def teardown_method(self):
+        import cognee.cli.echo as fmt
+
+        fmt._JSON_MODE = False
+
+    @patch("cognee.cli._cognee._create_parser")
+    def test_datasets_list_returns_count(self, mock_create_parser, capsys):
+        cmd = MagicMock()
+        cmd.execute.return_value = {"datasets": [{"name": "test_ds"}], "count": 1}
+        mock_parser = MagicMock()
+        mock_parser.parse_args.return_value = _base_args(command="datasets", json_mode=True)
+        mock_create_parser.return_value = (mock_parser, {"datasets": cmd})
+
+        assert main() == 0
+        output = json.loads(capsys.readouterr().out)
+        assert output["status"] == "ok"
+        assert output["count"] == 1
