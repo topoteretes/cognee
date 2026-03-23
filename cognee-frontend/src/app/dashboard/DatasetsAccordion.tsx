@@ -11,6 +11,7 @@ import addData from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import { DataFile } from "@/modules/ingestion/useData";
 import { LoadingIndicator } from "@/ui/App";
+import DocumentDetailModal from "./DocumentDetailModal";
 
 interface DatasetsChangePayload {
   datasets: Dataset[]
@@ -20,6 +21,28 @@ interface DatasetsChangePayload {
 export interface DatasetsAccordionProps extends Omit<AccordionProps, "isOpen" | "openAccordion" | "closeAccordion" | "children"> {
   onDatasetsChange?: (payload: DatasetsChangePayload) => void;
   useCloud?: boolean;
+}
+
+function getDocStatus(
+  pipeline_status?: Record<string, Record<string, string>>
+): "completed" | "processing" | "pending" {
+  if (!pipeline_status || Object.keys(pipeline_status).length === 0)
+    return "pending";
+  const values = Object.values(pipeline_status).flatMap((v) => Object.values(v));
+  if (values.every((s) => s === "DATA_ITEM_PROCESSING_COMPLETED")) return "completed";
+  return "processing";
+}
+
+function formatSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / 1048576).toFixed(1) + " MB";
+}
+
+function formatTokens(count?: number): string {
+  if (count === undefined || count === null || count < 0) return "";
+  return count.toLocaleString() + " tok";
 }
 
 export default function DatasetsAccordion({
@@ -200,7 +223,6 @@ export default function DatasetsAccordion({
 
   const handleDataRemove = (data: DataFile) => {
     setDataToRemove(data);
-
     openRemoveDataModal();
   };
   const handleDataRemoveCancel = () => {
@@ -218,7 +240,10 @@ export default function DatasetsAccordion({
           refreshDatasetsAndData();
         });
     }
-  }
+  };
+
+  // Document detail modal state
+  const [selectedDoc, setSelectedDoc] = useState<{ data: DataFile; datasetId: string } | null>(null);
 
   return (
     <>
@@ -277,20 +302,74 @@ export default function DatasetsAccordion({
                       <span>No data in a dataset, add by clicking &quot;add data&quot; in a dropdown menu</span>
                     </div>
                   )}
-                  {dataset.data?.map((data) => (
-                    <div key={data.id} className="flex flex-row gap-2 items-center justify-between py-1.5 pl-6 last:pb-2.5">
-                      <span className="text-xs">{data.name}</span>
-                      <div>
-                        <IconButton onClick={() => handleDataRemove(data)}><MinusIcon /></IconButton>
+                  {dataset.data?.map((data) => {
+                    const docStatus = getDocStatus(data.pipeline_status);
+                    const sizeStr = formatSize(data.data_size);
+                    const tokStr = formatTokens(data.token_count);
+
+                    return (
+                      <div key={data.id} className="flex flex-row gap-2 items-center justify-between py-1.5 pl-6 last:pb-2.5">
+                        {/* Status dot */}
+                        <span
+                          className={`flex-shrink-0 text-xs leading-none ${
+                            docStatus === "completed"
+                              ? "text-green-500"
+                              : docStatus === "processing"
+                              ? "text-orange-400"
+                              : "text-gray-300"
+                          }`}
+                          title={docStatus}
+                        >
+                          ●
+                        </span>
+
+                        {/* Clickable document name */}
+                        <button
+                          className="text-xs text-left truncate flex-1 hover:text-indigo-600 hover:underline transition-colors cursor-pointer"
+                          onClick={() => setSelectedDoc({ data, datasetId: dataset.id })}
+                          title={data.name}
+                        >
+                          {data.name}
+                        </button>
+
+                        {/* Size */}
+                        {sizeStr && (
+                          <span className="text-xs text-gray-400 flex-shrink-0 hidden sm:inline">
+                            {sizeStr}
+                          </span>
+                        )}
+
+                        {/* Token count */}
+                        {tokStr && (
+                          <span className="text-xs text-gray-400 flex-shrink-0 hidden sm:inline">
+                            {tokStr}
+                          </span>
+                        )}
+
+                        {/* Delete button */}
+                        <div className="flex-shrink-0">
+                          <IconButton onClick={() => handleDataRemove(data)}><MinusIcon /></IconButton>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </>
               </Accordion>
             );
           })}
         </div>
       </Accordion>
+
+      {/* Document detail modal */}
+      {selectedDoc && (
+        <DocumentDetailModal
+          isOpen={!!selectedDoc}
+          onClose={() => setSelectedDoc(null)}
+          dataFile={selectedDoc.data}
+          datasetId={selectedDoc.datasetId}
+          useCloud={useCloud}
+        />
+      )}
 
       <Modal isOpen={isNewDatasetModalOpen}>
         <div className="w-full max-w-2xl">

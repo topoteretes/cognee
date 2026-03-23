@@ -53,6 +53,9 @@ class DataDTO(OutDTO):
     mime_type: str
     raw_data_location: str
     dataset_id: UUID
+    pipeline_status: Optional[dict] = None
+    token_count: Optional[int] = None
+    data_size: Optional[int] = None
 
 
 class GraphNodeDTO(OutDTO):
@@ -67,6 +70,22 @@ class GraphEdgeDTO(OutDTO):
     target: UUID
     label: str
 
+class DocumentNodeDTO(OutDTO):
+    id: UUID
+    type: str
+    label: Optional[str] = None
+    text: Optional[str] = None
+    chunk_index: Optional[int] = None
+    chunk_size: Optional[int] = None
+    cut_type: Optional[str] = None
+
+
+class DocumentNodesDTO(OutDTO):
+    data_id: UUID
+    data_name: str
+    chunks: List[DocumentNodeDTO]
+    entities: List[DocumentNodeDTO]
+    summaries: List[DocumentNodeDTO]
 
 class GraphDTO(OutDTO):
     nodes: List[GraphNodeDTO]
@@ -514,4 +533,94 @@ def get_datasets_router() -> APIRouter:
             detail=f"Storage scheme '{parsed_uri.scheme}' not supported for direct download.",
         )
 
+    @router.get(
+        "/{dataset_id}/document-nodes/{data_id}",
+        response_model=DocumentNodesDTO,
+    )
+    async def get_document_nodes(
+        dataset_id: UUID,
+        data_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get chunks, entities and summaries for a specific document.
+
+        Returns processed nodes grouped by type for a given data item
+        within a dataset. Useful for inspecting what the cognify pipeline
+        extracted from a document.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The dataset containing the document
+        - **data_id** (UUID): The document to inspect
+
+        ## Response
+        Returns an object containing:
+        - **data_id**: The document ID
+        - **data_name**: The document name
+        - **chunks**: List of DocumentChunk nodes with text content
+        - **entities**: List of extracted Entity nodes
+        - **summaries**: List of TextSummary nodes
+        """
+        from sqlalchemy import text as sql_text
+
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+        if dataset is None:
+            raise HTTPException(status_code=404, detail="Dataset not found.")
+
+        ds_id = dataset[0].id
+        db_engine = get_relational_engine()
+
+        async with db_engine.get_async_session() as session:
+            data_result = await session.execute(
+                sql_text("SELECT name FROM data WHERE id = :data_id"),
+                {"data_id": str(data_id)},
+            )
+            data_row = data_result.fetchone()
+            data_name = data_row[0] if data_row else "unknown"
+
+            nodes_result = await session.execute(
+                sql_text(
+                    "SELECT id, type, label, attributes"
+                    " FROM nodes"
+                    " WHERE dataset_id = :dataset_id AND data_id = :data_id"
+                    " ORDER BY type, label"
+                ),
+                {"dataset_id": str(ds_id), "data_id": str(data_id)},
+            )
+            node_rows = nodes_result.fetchall()
+
+        chunks: List[DocumentNodeDTO] = []
+        entities: List[DocumentNodeDTO] = []
+        summaries: List[DocumentNodeDTO] = []
+
+        for row in node_rows:
+            node_id, node_type, label, attrs = row
+            attrs = attrs or {}
+
+            node = DocumentNodeDTO(
+                id=node_id,
+                type=node_type,
+                label=label,
+                text=attrs.get("text"),
+                chunk_index=attrs.get("chunk_index"),
+                chunk_size=attrs.get("chunk_size"),
+                cut_type=attrs.get("cut_type"),
+            )
+
+            if node_type == "DocumentChunk":
+                chunks.append(node)
+            elif node_type == "Entity":
+                entities.append(node)
+            elif node_type == "TextSummary":
+                summaries.append(node)
+
+        chunks.sort(key=lambda c: c.chunk_index or 0)
+
+        return DocumentNodesDTO(
+            data_id=data_id,
+            data_name=data_name,
+            chunks=chunks,
+            entities=entities,
+            summaries=summaries,
+        )
     return router

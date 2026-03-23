@@ -13,48 +13,6 @@ export interface Dataset {
 
 function useDatasets(useCloud = false) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  // const statusTimeout = useRef<any>(null);
-
-  // const fetchDatasetStatuses = useCallback((datasets: Dataset[]) => {
-  //   fetch(
-  //     `/v1/datasets/status?dataset=${datasets.map(d => d.id).join('&dataset=')}`,
-  //     {
-  //       headers: {
-  //         "Content-Type": "application/json",
-  //       },
-  //     },
-  //     useCloud,
-  //   )
-  //     .then((response) => response.json())
-  //     .then((statuses) => setDatasets(
-  //       (datasets) => (
-  //         datasets.map((dataset) => ({
-  //           ...dataset,
-  //           status: statuses[dataset.id]
-  //         }))
-  //     )));
-  // }, [useCloud]);
-
-  // const checkDatasetStatuses = useCallback((datasets: Dataset[]) => {
-  //   fetchDatasetStatuses(datasets);
-
-  //   if (statusTimeout.current !== null) {
-  //     clearTimeout(statusTimeout.current);
-  //   }
-
-  //   statusTimeout.current = setTimeout(() => {
-  //     checkDatasetStatuses(datasets);
-  //   }, 50000);
-  // }, [fetchDatasetStatuses]);
-
-  // useEffect(() => {
-  //   return () => {
-  //     if (statusTimeout.current !== null) {
-  //       clearTimeout(statusTimeout.current);
-  //       statusTimeout.current = null;
-  //     }
-  //   };
-  // }, []);
 
   const addDataset = useCallback((datasetName: string) => {
     return createDataset({ name: datasetName  }, useCloud)
@@ -86,11 +44,6 @@ function useDatasets(useCloud = false) {
       .then((response) => response.json())
       .then((datasets) => {
         setDatasets(datasets);
-
-        // if (datasets.length > 0) {
-        //   checkDatasetStatuses(datasets);
-        // }
-
         return datasets;
       })
       .catch((error) => {

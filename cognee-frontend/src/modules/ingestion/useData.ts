@@ -6,6 +6,11 @@ export interface DataFile {
   name: string;
   file: File;
   datasetId: string;
+  pipeline_status?: Record<string, Record<string, string>>;
+  token_count?: number;
+  data_size?: number;
+  created_at?: string;
+  extension?: string;
 }
 
 const useData = () => {
