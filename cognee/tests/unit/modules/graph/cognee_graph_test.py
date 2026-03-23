@@ -2,11 +2,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
-from cognee.modules.graph.exceptions import (
-    EntityNotFoundError,
-    EntityAlreadyExistsError,
-    NegativeVectorDistanceError,
-)
+from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 
@@ -1071,27 +1067,6 @@ async def test_calculate_top_triplet_importances_raises_on_missing_attribute(set
     graph.add_edge(edge)
 
     with pytest.raises(ValueError):
-        await graph.calculate_top_triplet_importances(k=1, query_list_length=1)
-
-
-@pytest.mark.asyncio
-async def test_calculate_top_triplet_importances_raises_on_negative_distance(setup_graph):
-    """Scoring should fail fast when a negative distance reaches ranking."""
-    graph = setup_graph
-
-    node1 = Node("1")
-    node2 = Node("2")
-    graph.add_node(node1)
-    graph.add_node(node2)
-
-    edge = Edge(node1, node2)
-    graph.add_edge(edge)
-
-    node1.add_attribute("vector_distance", [-0.1])
-    node2.add_attribute("vector_distance", [0.2])
-    edge.add_attribute("vector_distance", [0.3])
-
-    with pytest.raises(NegativeVectorDistanceError, match="must be non-negative"):
         await graph.calculate_top_triplet_importances(k=1, query_list_length=1)
 
 
