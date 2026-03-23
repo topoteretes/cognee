@@ -22,21 +22,32 @@ class JSONEncoder(json.JSONEncoder):
 def copy_model(
     model: DataPoint, include_fields: list | None = None, exclude_fields: list | None = None
 ):
-    if include_fields is None:
-        include_fields = []
+    """
+    Create a new model instance from an existing DataPoint, optionally
+    filtering fields via include_fields or exclude_fields.
+
+    Args:
+        model: The source DataPoint instance to copy.
+        include_fields: If provided, only these fields are included in the copy.
+        exclude_fields: Fields to exclude from the copy. Ignored if also in include_fields.
+
+    Returns:
+        A new model instance with the selected fields populated.
+    """
     if exclude_fields is None:
         exclude_fields = []
 
     all_field_names = list(type(model).model_fields.keys())
+    include_filter = set(
+        include_fields) if include_fields is not None else None
+    exclude_filter = set(exclude_fields)
 
-    # Determine which fields to keep
     fields_to_copy = [
         name for name in all_field_names
-        if name not in exclude_fields
-        and (not include_fields or name in include_fields)
+        if name not in exclude_filter
+        and (include_filter is None or name in include_filter)
     ]
 
-    # Build field definitions for create_model
     fields = {
         name: (
             type(model).model_fields[name].annotation,
@@ -54,18 +65,26 @@ def copy_model(
         type(model).__name__, __base__=ConfiguredBase, **fields)
     new_model_class.model_rebuild()
 
-    # Use model's actual object values (not serialized dicts) to preserve nested models
     instance_data = {
         name: getattr(model, name)
         for name in fields_to_copy
         if hasattr(model, name)
     }
 
-    # skip re-validation
     return new_model_class.model_construct(**instance_data)
 
 
 def get_own_properties(data_point: DataPoint):
+    """
+    Extract scalar properties from a DataPoint, excluding metadata,
+    dicts, nested DataPoints, and lists of DataPoints.
+
+    Args:
+        data_point: The DataPoint instance to extract properties from.
+
+    Returns:
+        A dict of field names to their scalar values.
+    """
     properties = {}
 
     for field_name, field_value in data_point:

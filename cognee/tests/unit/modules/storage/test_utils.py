@@ -1,4 +1,3 @@
-# cognee/tests/unit/modules/storage/test_utils.py
 import uuid
 import pytest
 from cognee.infrastructure.engine import DataPoint
@@ -23,6 +22,8 @@ def test_copy_model_basic():
     """copy_model returns a new instance with all fields preserved."""
     point = SimplePoint(id=uuid.uuid4(), name="test", value=42)
     result = copy_model(point)
+    assert result.id == point.id
+    assert result.type == point.type
     assert result.name == "test"
     assert result.value == 42
 
@@ -68,6 +69,7 @@ def test_copy_model_nested_object():
     assert result.label == "parent"
     assert result.child.name == "child"
     assert result.child.value == 1
+    assert result.child is parent.child
 
 
 def test_copy_model_returns_new_instance():
