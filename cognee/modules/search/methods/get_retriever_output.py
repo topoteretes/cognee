@@ -23,6 +23,13 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
     if is_empty:
         logger.warning("Search attempt on an empty knowledge graph")
 
+    # Recency-aware retrieval: over-fetch so reranking has headroom
+    rsc = kwargs.get("retriever_specific_config") or {}
+    recency_weight = rsc.get("recency_weight", 0.0)
+    original_top_k = kwargs.get("top_k", 10)
+    if recency_weight > 0:
+        kwargs["top_k"] = original_top_k * 3
+
     retriever_instance = await get_search_type_retriever_instance(
         query_type=query_type, query_text=query_text, **kwargs
     )
@@ -39,6 +46,12 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
         span.set_attribute(
             COGNEE_RESULT_SUMMARY,
             f"{retriever_class} retrieved {obj_count} object(s)",
+        )
+
+    # Recency reranking: blend distance scores with content freshness
+    if recency_weight > 0 and isinstance(retrieved_objects, list) and len(retrieved_objects) > 1:
+        retrieved_objects = _apply_recency_reranking(
+            retrieved_objects, recency_weight, original_top_k
         )
 
     # Centralized access tracking for all retriever types
@@ -87,3 +100,44 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
     )
 
     return search_result
+
+
+def _apply_recency_reranking(results: list, recency_weight: float, top_k: int) -> list:
+    """Rerank ScoredResult objects by blending distance score with recency.
+
+    Only affects ScoredResult objects whose payload contains ``updated_at``.
+    Non-ScoredResult objects (e.g. Edge from graph retrievers) pass through unchanged.
+
+    Args:
+        results: Retrieved objects from a retriever.
+        recency_weight: Blend factor (0.0 = pure relevance, 1.0 = pure recency).
+        top_k: Final number of results to return.
+    """
+    from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+
+    scored = [
+        r
+        for r in results
+        if isinstance(r, ScoredResult) and r.payload and "updated_at" in r.payload
+    ]
+    non_scored = [r for r in results if r not in scored]
+
+    if len(scored) < 2:
+        return results[:top_k]
+
+    timestamps = [r.payload["updated_at"] for r in scored]
+    newest, oldest = max(timestamps), min(timestamps)
+    time_range = newest - oldest
+
+    if time_range == 0:
+        # All items have the same timestamp — recency can't differentiate
+        return results[:top_k]
+
+    reranked = []
+    for r in scored:
+        age_penalty = (newest - r.payload["updated_at"]) / time_range  # 0=newest, 1=oldest
+        blended = (1 - recency_weight) * r.score + recency_weight * age_penalty
+        reranked.append((blended, r))
+
+    reranked.sort(key=lambda x: x[0])
+    return [r for _, r in reranked[:top_k]] + non_scored
