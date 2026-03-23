@@ -52,7 +52,7 @@ async def get_memory_fragment(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     relevant_ids_to_filter: Optional[List[str]] = None,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     graph_engine=None,
 ) -> CogneeGraph:
@@ -161,7 +161,7 @@ async def brute_force_triplet_search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     unified_engine: Optional[UnifiedStoreEngine] = None,
 ) -> Union[List[Edge], List[List[Edge]]]:
