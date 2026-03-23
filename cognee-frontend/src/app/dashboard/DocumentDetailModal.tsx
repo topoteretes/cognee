@@ -5,6 +5,7 @@ import { fetch } from "@/utils";
 import { Modal, IconButton, GhostButton } from "@/ui/elements";
 import { CloseIcon } from "@/ui/Icons";
 import { DataFile } from "@/modules/ingestion/useData";
+import { getDocStatus, formatSize, formatTokens } from "@/utils/documentHelpers";
 
 interface DocumentNode {
   id: string;
@@ -35,18 +36,6 @@ interface DocumentDetailModalProps {
 
 type Tab = "overview" | "chunks" | "entities";
 
-function formatSize(bytes?: number): string {
-  if (!bytes || bytes <= 0) return "—";
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / 1048576).toFixed(1) + " MB";
-}
-
-function formatTokens(count?: number): string {
-  if (count === undefined || count === null || count < 0) return "—";
-  return count.toLocaleString() + " tok";
-}
-
 function formatDate(iso?: string): string {
   if (!iso) return "—";
   try {
@@ -54,19 +43,6 @@ function formatDate(iso?: string): string {
   } catch {
     return iso;
   }
-}
-
-function getDocStatus(
-  pipeline_status?: Record<string, Record<string, string>>
-): "completed" | "processing" | "pending" {
-  if (!pipeline_status || Object.keys(pipeline_status).length === 0)
-    return "pending";
-  const values = Object.values(pipeline_status).flatMap((v) =>
-    Object.values(v)
-  );
-  if (values.every((s) => s === "DATA_ITEM_PROCESSING_COMPLETED"))
-    return "completed";
-  return "processing";
 }
 
 export default function DocumentDetailModal({
@@ -99,7 +75,12 @@ export default function DocumentDetailModal({
       {},
       useCloud
     )
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        return res.json();
+      })
       .then((data: DocumentNodes) => {
         setNodes(data);
       })
@@ -168,11 +149,15 @@ export default function DocumentDetailModal({
         </div>
 
         {/* Tabs */}
-        <div className="flex flex-row border-b border-gray-100 px-6">
+        <div className="flex flex-row border-b border-gray-100 px-6" role="tablist">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              aria-controls={`tabpanel-${tab.id}`}
+              id={`tab-${tab.id}`}
               className={`py-3 px-4 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.id
                   ? "border-indigo-600 text-indigo-600"
@@ -190,7 +175,7 @@ export default function DocumentDetailModal({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4" role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
           {loading && (
             <div className="flex items-center justify-center py-12 text-gray-400 text-sm">
               Loading...

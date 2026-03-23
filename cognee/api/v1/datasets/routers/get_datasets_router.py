@@ -572,11 +572,20 @@ def get_datasets_router() -> APIRouter:
 
         async with db_engine.get_async_session() as session:
             data_result = await session.execute(
-                sql_text("SELECT name FROM data WHERE id = :data_id"),
-                {"data_id": str(data_id)},
+                sql_text(
+                    "SELECT d.name FROM data d"
+                    " JOIN dataset_data dd ON dd.data_id = d.id"
+                    " WHERE d.id = :data_id AND dd.dataset_id = :dataset_id"
+                ),
+                {"data_id": str(data_id), "dataset_id": str(ds_id)},
             )
             data_row = data_result.fetchone()
-            data_name = data_row[0] if data_row else "unknown"
+            if not data_row:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document ({data_id}) not found in dataset ({dataset_id})."
+                )
+            data_name = data_row[0]
 
             nodes_result = await session.execute(
                 sql_text(

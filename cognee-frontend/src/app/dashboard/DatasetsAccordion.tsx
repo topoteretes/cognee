@@ -11,6 +11,7 @@ import addData from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import { DataFile } from "@/modules/ingestion/useData";
 import { LoadingIndicator } from "@/ui/App";
+import { getDocStatus, formatSize, formatTokens } from "@/utils/documentHelpers";
 import DocumentDetailModal from "./DocumentDetailModal";
 
 interface DatasetsChangePayload {
@@ -23,27 +24,6 @@ export interface DatasetsAccordionProps extends Omit<AccordionProps, "isOpen" | 
   useCloud?: boolean;
 }
 
-function getDocStatus(
-  pipeline_status?: Record<string, Record<string, string>>
-): "completed" | "processing" | "pending" {
-  if (!pipeline_status || Object.keys(pipeline_status).length === 0)
-    return "pending";
-  const values = Object.values(pipeline_status).flatMap((v) => Object.values(v));
-  if (values.every((s) => s === "DATA_ITEM_PROCESSING_COMPLETED")) return "completed";
-  return "processing";
-}
-
-function formatSize(bytes?: number): string {
-  if (!bytes || bytes <= 0) return "";
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / 1048576).toFixed(1) + " MB";
-}
-
-function formatTokens(count?: number): string {
-  if (count === undefined || count === null || count < 0) return "";
-  return count.toLocaleString() + " tok";
-}
 
 export default function DatasetsAccordion({
   title,
