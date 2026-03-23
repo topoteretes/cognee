@@ -45,9 +45,7 @@ dependencies = [
     "python-multipart>=0.0.22,<1.0.0",
     "fastapi-users[sqlalchemy]>=15.0.2",
     "structlog>=25.2.0,<26",
-    "pympler>=1.1,<2.0.0",
     "onnxruntime<=1.22.1",
-    "pylance>=0.22.0,<=0.36.0",
     "kuzu (==0.11.3)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "fastembed<=0.6.0",
@@ -62,7 +60,6 @@ dependencies = [
     "urllib3>=2.6.0",
     "cbor2>=5.8.0",
     "langdetect>=1.0.9",
-    "datamodel-code-generator>=0.54.0",
 ]
 
 [project.optional-dependencies]
@@ -154,6 +151,9 @@ dev = [
     "mkdocs-material>=9.5.42,<10",
     "mkdocs-minify-plugin>=0.8.0,<0.9",
     "mkdocstrings[python]>=0.26.2,<0.27",
+    "pympler>=1.1,<2.0.0",
+    "pylance>=0.22.0,<=0.36.0",
+    "datamodel-code-generator>=0.54.0",
 ]
 debug = ["debugpy>=1.8.9,<2.0.0"]
 redis = ["redis>=5.0.3,<6.0.0"]
