@@ -44,8 +44,10 @@ def copy_model(
 
     fields_to_copy = [
         name for name in all_field_names
-        if name not in exclude_filter
-        and (include_filter is None or name in include_filter)
+        # explicitly included = always kept
+        if (include_filter is not None and name in include_filter)
+        # no include filter = exclude applies
+        or (include_filter is None and name not in exclude_filter)
     ]
 
     fields = {
@@ -76,14 +78,15 @@ def copy_model(
 
 def get_own_properties(data_point: DataPoint):
     """
-    Extract scalar properties from a DataPoint, excluding metadata,
-    dicts, nested DataPoints, and lists of DataPoints.
+    Extract non-metadata fields from a DataPoint, omitting nested DataPoint
+    objects, dicts, and lists whose first element is a DataPoint instance.
+    Primitive containers such as lists of non-DataPoint values may still be included.
 
     Args:
         data_point: The DataPoint instance to extract properties from.
 
     Returns:
-        A dict of field names to their scalar values.
+        A dict of field names to their non-DataPoint field values.
     """
     properties = {}
 

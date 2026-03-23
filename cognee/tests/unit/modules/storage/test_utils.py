@@ -45,12 +45,12 @@ def test_copy_model_exclude_fields():
 
 
 def test_copy_model_include_and_exclude():
-    """copy_model with both include and exclude respects both constraints."""
+    """Include wins over exclude when a field appears in both lists."""
     point = SimplePoint(id=uuid.uuid4(), name="test", value=42)
     result = copy_model(point, include_fields=[
                         "name", "value"], exclude_fields=["value"])
     assert result.name == "test"
-    assert not hasattr(result, "value") or result.value is None
+    assert result.value == 42
 
 
 def test_copy_model_empty_fields():
