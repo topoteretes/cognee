@@ -54,7 +54,7 @@ def copy_model(
         name: (
             type(model).model_fields[name].annotation,
             type(model).model_fields[name].default
-            if type(model).model_fields[name].default is not None
+            if type(model).model_fields[name].default is not PydanticUndefined
             else PydanticUndefined
         )
         for name in fields_to_copy
