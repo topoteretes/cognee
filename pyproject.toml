@@ -20,6 +20,7 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
 ]
 dependencies = [
+    "datamodel-code-generator>=0.54.0",
     "openai>=1.80.1",
     "python-dotenv>=1.0.1,<2.0.0",
     "pydantic>=2.10.5",
@@ -153,7 +154,6 @@ dev = [
     "mkdocstrings[python]>=0.26.2,<0.27",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
-    "datamodel-code-generator>=0.54.0",
 ]
 debug = ["debugpy>=1.8.9,<2.0.0"]
 redis = ["redis>=5.0.3,<6.0.0"]
