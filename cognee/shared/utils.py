@@ -94,7 +94,7 @@ async def _send_telemetry_request(payload: dict) -> None:
         logger.debug("Telemetry request failed: %s", e)
 
 
-def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = {}):
+def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = None):
     if additional_properties is None:
         additional_properties = {}
     if os.getenv("TELEMETRY_DISABLED"):

@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.5.5.dev0"
+version = "0.5.5"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -46,11 +46,9 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=15.0.2",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
-    "onnxruntime<=1.22.1",
     "pylance>=0.22.0,<=0.36.0",
     "kuzu (==0.11.3)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
-    "fastembed<=0.6.0",
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
@@ -80,6 +78,11 @@ scraping = [
     "lxml>=5,<6 ; python_version >= '3.13'",
     "protego>=0.1",
     "APScheduler>=3.10.0,<=3.11.0"
+]
+
+fastembed = [
+    "fastembed<=0.6.0",
+    "onnxruntime<=1.22.1",
 ]
 
 neo4j = ["neo4j>=5.28.0,<6"]

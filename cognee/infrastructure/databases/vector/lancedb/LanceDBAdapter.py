@@ -15,7 +15,6 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
-from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
 from cognee.modules.observability import new_span
@@ -243,9 +242,9 @@ class LanceDBAdapter(VectorDBInterface):
         query_vector: List[float] = None,
         limit: Optional[int] = 15,
         with_vector: bool = False,
-        normalized: bool = True,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
@@ -282,9 +281,19 @@ class LanceDBAdapter(VectorDBInterface):
                     "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
                 )
 
+                if node_name_filter_operator == "AND":
+                    node_name_filter_string = (
+                        f"array_has_all(payload.belongs_to_set, {literal_node_names})"
+                    )
+                else:
+                    node_name_filter_string = (
+                        f"array_has_any(payload.belongs_to_set, {literal_node_names})"
+                    )
+
                 result_values = (
                     await collection.vector_search(query_vector)
-                    .where(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
+                    .distance_type("cosine")
+                    .where(node_name_filter_string)
                     .select(select_columns)
                     .limit(limit)
                     .to_list()
@@ -292,6 +301,7 @@ class LanceDBAdapter(VectorDBInterface):
             else:
                 result_values = (
                     await collection.vector_search(query_vector)
+                    .distance_type("cosine")
                     .select(select_columns)
                     .limit(limit)
                     .to_list()
@@ -301,15 +311,13 @@ class LanceDBAdapter(VectorDBInterface):
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
-            normalized_values = normalize_distances(result_values)
-
             results = [
                 ScoredResult(
                     id=parse_id(result["id"]),
                     payload=result["payload"] if include_payload else None,
-                    score=normalized_values[value_index],
+                    score=float(result["_distance"]),
                 )
-                for value_index, result in enumerate(result_values)
+                for result in result_values
             ]
 
             otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, len(results))
