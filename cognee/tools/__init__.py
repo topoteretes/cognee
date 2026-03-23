@@ -1,26 +1,31 @@
 """Cognee memory tools for agent integration.
 
 Usage:
-    # Direct use (Tier 2)
-    from cognee.tools import remember, search_memory
+    # Direct use
+    from cognee.tools import remember, recall
     await remember("user prefers dark mode")
-    result = await search_memory("preferences")
+    result = await recall("preferences")
 
-    # Framework serializers (Tier 3)
+    # Framework serializers
     from cognee.tools import for_openai, for_anthropic, handle_tool_call
     tools = for_openai()
+
+    # LangChain / CrewAI (requires those packages installed)
+    from cognee.tools import for_langchain, for_crewai
 """
 
-from .definitions import remember, search_memory, TOOLS
+from .definitions import remember, recall, TOOLS
 from .handler import handle_tool_call
-from .serializers import for_openai, for_anthropic, for_generic
+from .serializers import for_openai, for_anthropic, for_generic, for_langchain, for_crewai
 
 __all__ = [
     "remember",
-    "search_memory",
+    "recall",
     "handle_tool_call",
     "for_openai",
     "for_anthropic",
     "for_generic",
+    "for_langchain",
+    "for_crewai",
     "TOOLS",
 ]

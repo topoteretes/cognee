@@ -32,18 +32,20 @@ def for_openai() -> list:
                 required.append(name)
             properties[name] = prop
 
-        result.append({
-            "type": "function",
-            "function": {
-                "name": fn.__name__,
-                "description": inspect.getdoc(fn) or "",
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
+        result.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": fn.__name__,
+                    "description": inspect.getdoc(fn) or "",
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
                 },
-            },
-        })
+            }
+        )
     return result
 
 

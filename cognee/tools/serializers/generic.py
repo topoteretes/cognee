@@ -34,15 +34,17 @@ def for_generic() -> list:
                 required.append(name)
             properties[name] = prop
 
-        result.append({
-            "name": fn.__name__,
-            "description": inspect.getdoc(fn) or "",
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-            },
-        })
+        result.append(
+            {
+                "name": fn.__name__,
+                "description": inspect.getdoc(fn) or "",
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            }
+        )
     return result
 
 

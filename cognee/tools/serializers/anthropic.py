@@ -32,15 +32,17 @@ def for_anthropic() -> list:
                 required.append(name)
             properties[name] = prop
 
-        result.append({
-            "name": fn.__name__,
-            "description": inspect.getdoc(fn) or "",
-            "input_schema": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-            },
-        })
+        result.append(
+            {
+                "name": fn.__name__,
+                "description": inspect.getdoc(fn) or "",
+                "input_schema": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            }
+        )
     return result
 
 

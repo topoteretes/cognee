@@ -1,14 +1,12 @@
-"""Canonical tool definitions for Cognee memory.
+"""Tool definitions for agent integration.
 
-These are plain async functions that wrap existing Cognee APIs.
-They are used directly (Tier 2) and by serializers (Tier 3).
+These are thin, LLM-friendly wrappers around Cognee's V2 API.
+They present simple (str -> str) signatures that serializers can
+convert to JSON Schema for any framework.
 """
 
-import asyncio
-from typing import Optional
-
-import cognee
-from cognee.modules.search.types import SearchType
+from cognee.api.v2 import remember as v2_remember
+from cognee.api.v2 import recall as v2_recall
 
 
 async def remember(content: str, dataset_name: str = "main_dataset") -> str:
@@ -31,12 +29,11 @@ async def remember(content: str, dataset_name: str = "main_dataset") -> str:
     str
         Confirmation message.
     """
-    await cognee.add(content, dataset_name=dataset_name)
-    asyncio.create_task(_background_cognify())
+    await v2_remember(data=content, dataset_name=dataset_name)
     return "Remembered."
 
 
-async def search_memory(query: str, top_k: int = 5) -> str:
+async def recall(query: str, top_k: int = 5) -> str:
     """Search memory for relevant information.
 
     Use this when the user asks a question that might be answered by
@@ -56,11 +53,7 @@ async def search_memory(query: str, top_k: int = 5) -> str:
         Search results as a string the agent can use directly.
     """
     try:
-        results = await cognee.search(
-            query_text=query,
-            query_type=SearchType.GRAPH_COMPLETION,
-            top_k=top_k,
-        )
+        results = await v2_recall(query_text=query, top_k=top_k)
         if results and isinstance(results, list) and len(results) > 0:
             return str(results[0])
         return "No relevant memories found."
@@ -68,16 +61,5 @@ async def search_memory(query: str, top_k: int = 5) -> str:
         return f"Memory search failed: {e}"
 
 
-async def _background_cognify():
-    """Run cognify in the background. Errors are logged, not raised."""
-    from cognee.shared.logging_utils import get_logger
-
-    logger = get_logger()
-    try:
-        await cognee.cognify()
-    except Exception as e:
-        logger.warning(f"Background cognify failed: {e}")
-
-
 # Registry of all tools — used by serializers and handler
-TOOLS = [remember, search_memory]
+TOOLS = [remember, recall]
