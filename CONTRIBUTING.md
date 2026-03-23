@@ -1,57 +1,179 @@
-# Contributing Guide
+> [!IMPORTANT]
+> **Note for contributors:** When branching out, create a new branch from the `dev` branch.
 
-Thank you for considering contributing to this project!
+# 🎉 Welcome to **cognee**!
 
-## How to Fork and Clone
-1. Click on the "Fork" button on GitHub
-2. Clone your forked repository:
-   git clone <your-repo-link>
-3. Navigate into the project folder:
-   cd cognee
+We're excited that you're interested in contributing to our project!
+We want to ensure that every user and contributor feels welcome, included and supported to participate in cognee community.
+This guide will help you get started and ensure your contributions can be efficiently integrated into the project.
 
-## Branching Strategy
-- Create a new branch for your changes:
-  git checkout -b feature/your-feature-name
+## 🌟 Quick Links
 
-## Commit Message Style
-- Write clear and meaningful commit messages
-- Example:
-  "Fix: moved dev dependencies to correct section"
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Discord Community](https://discord.gg/bcy8xFAtfd)
+- [Issue Tracker](https://github.com/topoteretes/cognee/issues)
+- [Cognee Docs](https://docs.cognee.ai)
 
-## Pull Request Process
-1. Push your changes to your fork
-2. Open a Pull Request
-3. Describe your changes clearly
-4. Wait for review and make changes if requested
+## 1. 🚀 Ways to Contribute
 
-## Setup Instructions
+You can contribute to **cognee** in many ways:
 
-1. Fork the repository and clone it:
-   git clone <your-repo-link>
+- 📝 Submitting bug reports or feature requests
+- 💡 Improving documentation
+- 🔍 Reviewing pull requests
+- 🛠️ Contributing code or tests
+- 🌐 Helping other users
 
-2. Navigate into the project folder:
-   cd cognee
+## 📫 Get in Touch
 
-3. Install dependencies:
-   pip install -r requirements.txt
+There are several ways to connect with the **cognee** team and community:
 
-4. Run the project locally to ensure everything is working
+### GitHub Collaboration
+- [Open an issue](https://github.com/topoteretes/cognee/issues) for bug reports, feature requests, or discussions
+- Submit pull requests to contribute code or documentation
+- Join ongoing discussions in existing issues and PRs
 
-## Running Tests
+### Community Channels
+- Join our [Discord community](https://discord.gg/bcy8xFAtfd) for real-time discussions
+- Participate in community events and discussions
+- Get help from other community members
 
-- Before submitting a PR, make sure your changes do not break existing functionality
-- Run tests if available
-- If no tests are present, manually verify your changes
+### Direct Contact
+- Email: vasilije@cognee.ai
+- For business inquiries or sensitive matters, please reach out via email
+- For general questions, prefer public channels like GitHub issues or Discord
 
-## Code Style
+We aim to respond to all communications within 2 business days. For faster responses, consider using our Discord channel where the whole community can help!
 
-- Follow the existing code style in the project
-- Keep code clean and readable
-- Use meaningful variable and function names
+## Issue Labels
 
-## Pull Request Checklist
+To help you find the most appropriate issues to work on, we use the following labels:
 
-- Ensure your changes are minimal and focused
-- Test your changes before submitting
-- Write clear commit messages
-- Describe your changes properly in the PR
+- `good first issue` - Perfect for newcomers to the project
+- `bug` - Something isn't working as expected
+- `documentation` - Improvements or additions to documentation
+- `enhancement` - New features or improvements
+- `help wanted` - Extra attention or assistance needed
+- `question` - Further information is requested
+- `wontfix` - This will not be worked on
+
+Looking for a place to start? Try filtering for [good first issues](https://github.com/topoteretes/cognee/labels/good%20first%20issue)!
+
+
+## 2. 🛠️ Development Setup
+
+### Required tools
+* [Python](https://www.python.org/downloads/)
+* [uv](https://docs.astral.sh/uv/getting-started/installation/)
+* pre-commit: `uv run pip install pre-commit && pre-commit install`
+
+### Fork and Clone
+
+1. Fork the [**cognee**](https://github.com/topoteretes/cognee) repository
+2. Clone your fork:
+```shell
+git clone https://github.com/<your-github-username>/cognee.git
+cd cognee
+```
+In case you are working on Vector and Graph Adapters
+1. Fork the [**cognee-community**](https://github.com/topoteretes/cognee-community) repository
+2. Clone your fork:
+```shell
+git clone https://github.com/<your-github-username>/cognee-community.git
+cd cognee-community
+```
+
+### Create a Branch
+
+Create a new branch for your work:
+```shell
+git checkout -b feature/your-feature-name
+```
+
+## 3. 🎯 Making Changes
+
+1. **Code Style**: Follow the project's coding standards
+2. **Documentation**: Update relevant documentation
+3. **Tests**: Add tests for new features
+4. **Commits**: Write clear commit messages
+
+### Running Tests
+
+Rename `.env.example` into `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
+
+```shell
+uv run python cognee/tests/test_library.py
+```
+
+### Running Simple Example
+
+Rename `.env.example` into `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
+
+Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
+
+```shell
+python examples/python/simple_example.py
+```
+or
+
+```shell
+uv run python examples/python/simple_example.py
+```
+
+### Running Simple Example
+
+Change .env.example into .env and provide your OPENAI_API_KEY as LLM_API_KEY
+
+Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
+
+```shell
+python cognee/cognee/examples/python/simple_example.py
+```
+or
+
+```shell
+uv run python cognee/cognee/examples/python/simple_example.py
+```
+
+## 4. 📤 Submitting Changes
+
+1. Make sure that `pre-commit` and hooks are installed. See `Required tools` section for more information. Try executing `pre-commit run` if you are not sure.
+3. Push your changes:
+```shell
+git add .
+git commit -s -m "Description of your changes"
+git push origin feature/your-feature-name
+```
+
+2. Create a Pull Request:
+   - Go to the [**cognee** repository](https://github.com/topoteretes/cognee) or [cognee community repository](https://github.com/topoteretes/cognee-community)
+   - Click "Compare & Pull Request" and open a PR against dev branch
+   - Fill in the PR template with details about your changes
+   - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
+
+## 5. 📜 Developer Certificate of Origin (DCO)
+
+All contributions must be signed-off to indicate agreement with our DCO:
+
+```shell
+git config alias.cos "commit -s"  # Create alias for signed commits
+```
+
+When your PR is ready, please include:
+> "I affirm that all code in every commit of this pull request conforms to the terms of the Topoteretes Developer Certificate of Origin"
+
+## 6. 🤝 Community Guidelines
+
+- Be respectful and inclusive
+- Help others learn and grow
+- Follow our [Code of Conduct](CODE_OF_CONDUCT.md)
+- Provide constructive feedback
+- Ask questions when unsure
+
+## 7. 📫 Getting Help
+
+- Open an [issue](https://github.com/topoteretes/cognee/issues)
+- Join our Discord community
+- Check existing documentation
+
+Thank you for contributing to **cognee**! 🌟
