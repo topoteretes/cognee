@@ -134,10 +134,12 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return GenericAPIAdapter(
-            llm_config.llm_api_key,
-            llm_config.llm_model,
-            max_completion_tokens,
-            "Custom",
+            api_key=llm_config.llm_api_key,
+            model=llm_config.llm_model,
+            max_completion_tokens=max_completion_tokens,
+            name="Custom",
+            endpoint=llm_config.llm_endpoint,
+            api_version=llm_config.llm_api_version,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,

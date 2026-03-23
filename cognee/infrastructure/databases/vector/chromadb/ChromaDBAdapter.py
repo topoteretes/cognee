@@ -11,7 +11,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
-from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError, EmbeddingException
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..vector_db_interface import VectorDBInterface
@@ -389,7 +389,12 @@ class ChromaDBAdapter(VectorDBInterface):
             raise MissingQueryParameterError()
 
         if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+            query_embeddings = await self.embedding_engine.embed_text([query_text])
+            if not query_embeddings:
+                raise EmbeddingException(
+                    "Embedding provider returned no vectors for query text."
+                )
+            query_vector = query_embeddings[0]
 
         try:
             collection = await self.get_collection(collection_name)

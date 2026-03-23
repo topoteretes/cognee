@@ -54,6 +54,22 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     MAX_RETRIES = 5
 
+    @staticmethod
+    def _extract_embeddings(response) -> List[List[float]]:
+        data = getattr(response, "data", None)
+        if data is None:
+            return []
+
+        embeddings = []
+        for item in data:
+            if isinstance(item, dict):
+                embedding = item.get("embedding")
+            else:
+                embedding = getattr(item, "embedding", None)
+            if embedding is not None:
+                embeddings.append(embedding)
+        return embeddings
+
     def __init__(
         self,
         model: Optional[str] = "openai/text-embedding-3-large",
@@ -100,7 +116,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((litellm.exceptions.NotFoundError)),
+        retry=retry_if_not_exception_type((litellm.exceptions.NotFoundError, EmbeddingException)),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -141,12 +157,47 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         embedding_kwargs["dimensions"] = self.dimensions
 
                     # Ensure each attempt does not hang indefinitely
-                    response = await asyncio.wait_for(
-                        litellm.aembedding(**embedding_kwargs),
-                        timeout=30.0,
-                    )
+                    litellm.drop_params=True
+                    try:
+                        response = await asyncio.wait_for(
+                            litellm.aembedding(**embedding_kwargs),
+                            timeout=30.0,
+                        )
+                    except litellm.exceptions.UnsupportedParamsError as error:
+                        if "dimensions" not in embedding_kwargs:
+                            raise
+                        fallback_kwargs = dict(embedding_kwargs)
+                        fallback_kwargs.pop("dimensions", None)
+                        logger.warning(
+                            "Embedding provider does not support dimensions. Retrying without dimensions for model '%s'.",
+                            self.model,
+                        )
+                        response = await asyncio.wait_for(
+                            litellm.aembedding(**fallback_kwargs),
+                            timeout=30.0,
+                        )
 
-                return [data["embedding"] for data in response.data]
+                    embeddings = self._extract_embeddings(response)
+                    if not embeddings and "dimensions" in embedding_kwargs:
+                        fallback_kwargs = dict(embedding_kwargs)
+                        fallback_kwargs.pop("dimensions", None)
+                        logger.warning(
+                            "Embedding provider returned empty vectors with dimensions for model '%s'. Retrying without dimensions.",
+                            self.model,
+                        )
+                        response = await asyncio.wait_for(
+                            litellm.aembedding(**fallback_kwargs),
+                            timeout=30.0,
+                        )
+                        embeddings = self._extract_embeddings(response)
+
+                    if not embeddings:
+                        raise EmbeddingException(
+                            "Embedding provider returned no vectors for the input. "
+                            "Check EMBEDDING_MODEL/EMBEDDING_ENDPOINT compatibility."
+                        )
+
+                    return embeddings
 
         except litellm.exceptions.ContextWindowExceededError as error:
             if isinstance(text, list) and len(text) > 1:
@@ -208,6 +259,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         ) as e:
             logger.error(f"Embedding error with model {self.model}: {str(e)}")
             raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
+
+        except EmbeddingException:
+            raise
 
         except Exception as error:
             # Fall back to a clear, actionable message for connectivity/misconfiguration issues

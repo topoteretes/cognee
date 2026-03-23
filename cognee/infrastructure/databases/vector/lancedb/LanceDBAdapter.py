@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
 from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
-from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError, EmbeddingException
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
@@ -255,7 +255,12 @@ class LanceDBAdapter(VectorDBInterface):
                 raise MissingQueryParameterError()
 
             if query_text and not query_vector:
-                query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+                query_embeddings = await self.embedding_engine.embed_text([query_text])
+                if not query_embeddings:
+                    raise EmbeddingException(
+                        "Embedding provider returned no vectors for query text."
+                    )
+                query_vector = query_embeddings[0]
 
             collection = await self.get_collection(collection_name)
 
