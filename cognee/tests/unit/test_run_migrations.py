@@ -2,16 +2,14 @@
 
 import sys
 import unittest
+import importlib
 from unittest.mock import patch, MagicMock
 
 
 class TestRunMigrations(unittest.TestCase):
     """Verify run_migrations() invokes alembic via sys.executable, not bare 'python'."""
 
-    @patch("cognee.run_migrations.subprocess.run")
-    @patch("cognee.run_migrations.os.path.exists", return_value=True)
-    @patch("cognee.run_migrations.pkg_resources.files", return_value="/fake/package")
-    def test_uses_sys_executable(self, mock_files, mock_exists, mock_run):
+    def test_uses_sys_executable(self):
         """subprocess.run must be called with sys.executable, not 'python'.
 
         On Windows with uv-managed Python, bare 'python' can resolve to a
@@ -19,11 +17,16 @@ class TestRunMigrations(unittest.TestCase):
         (see GitHub issue #2466).
         """
         import asyncio
-        from cognee.run_migrations import run_migrations
 
-        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        module = importlib.import_module("cognee.run_migrations")
 
-        asyncio.run(run_migrations())
+        with (
+            patch.object(module.pkg_resources, "files", return_value="/fake/package"),
+            patch.object(module.os.path, "exists", return_value=True),
+            patch.object(module.subprocess, "run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+            asyncio.run(module.run_migrations())
 
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
