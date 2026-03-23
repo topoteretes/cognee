@@ -109,7 +109,6 @@ def create_embedding_engine(
             dimensions=embedding_dimensions,
             endpoint=embedding_endpoint,
             api_key=embedding_api_key or llm_api_key,
-            max_completion_tokens=embedding_max_completion_tokens,
             batch_size=embedding_batch_size,
         )
 

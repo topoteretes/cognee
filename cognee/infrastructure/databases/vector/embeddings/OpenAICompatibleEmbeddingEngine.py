@@ -81,14 +81,12 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         dimensions: int = 3072,
         endpoint: Optional[str] = "http://localhost:8080",
         api_key: Optional[str] = "no-key-required",
-        max_completion_tokens: int = 512,
         batch_size: int = 36,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
-        self.max_completion_tokens = max_completion_tokens
         self.batch_size = batch_size
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
