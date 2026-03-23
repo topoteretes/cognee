@@ -49,7 +49,7 @@ async def search(
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
@@ -141,7 +141,7 @@ async def authorized_search(
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     retriever_specific_config: Optional[dict] = None,
 ) -> List[Tuple[Any, Union[List[Edge], str], List[Dataset]]]:
@@ -189,7 +189,7 @@ async def search_in_datasets_context(
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     retriever_specific_config: Optional[dict] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
@@ -211,7 +211,7 @@ async def search_in_datasets_context(
         only_context: bool = False,
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 3.5,
+        triplet_distance_penalty: Optional[float] = 6.5,
         feedback_influence: float = 0.0,
         retriever_specific_config: Optional[dict] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:

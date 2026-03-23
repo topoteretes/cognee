@@ -1099,6 +1099,6 @@ async def test_cognee_graph_mapping_batch_shapes():
         edge_distances=edge_distances_batch, query_list_length=2
     )
 
-    assert node1.attributes.get("vector_distance") == [0.95, 3.5]
-    assert node2.attributes.get("vector_distance") == [3.5, 0.87]
+    assert node1.attributes.get("vector_distance") == [0.95, 6.5]
+    assert node2.attributes.get("vector_distance") == [6.5, 0.87]
     assert edge.attributes.get("vector_distance") == [0.92, 0.88]
