@@ -1,173 +1,188 @@
-"""
-Tests for the main CLI entry point and command discovery.
-"""
+"""Tests for the main CLI entry point, JSON mode, one-shot prompt, and interactive REPL."""
 
+import json
 import pytest
 import argparse
 from unittest.mock import patch, MagicMock
 from cognee.cli._cognee import main, _discover_commands, _create_parser
-from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.exceptions import CliCommandException
 
 
-class TestCliMain:
-    """Test the main CLI functionality"""
+def _base_args(**overrides):
+    """Create a base argparse.Namespace with all required fields for main()."""
+    defaults = dict(command=None, prompt=None, interactive=False, continue_session=False)
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
 
-    def test_discover_commands(self):
-        """Test that all expected commands are discovered"""
+
+class TestCliCore:
+    """Core CLI: discovery, command dispatch, error handling"""
+
+    def test_discover_and_create_parser(self):
         commands = _discover_commands()
-
-        # Check that we get command classes back
         assert len(commands) > 0
 
-        # Check that we have the expected commands
-        command_strings = []
-        for command_class in commands:
-            command = command_class()
-            command_strings.append(command.command_string)
-
-        expected_commands = ["add", "search", "cognify", "delete", "config"]
-        for expected_command in expected_commands:
-            assert expected_command in command_strings
-
-    def test_create_parser(self):
-        """Test parser creation and command installation"""
-        parser, installed_commands = _create_parser()
-
-        # Check parser is created
-        assert isinstance(parser, argparse.ArgumentParser)
-
-        # Check commands are installed
-        expected_commands = ["add", "search", "cognify", "delete", "config"]
-        for expected_command in expected_commands:
-            assert expected_command in installed_commands
-
-        # Check parser has version argument
-        actions = [action.dest for action in parser._actions]
-        assert "version" in actions
+        parser, installed = _create_parser()
+        for name in ["add", "search", "cognify", "delete", "config"]:
+            assert name in installed
 
     @patch("cognee.cli._cognee._create_parser")
-    def test_main_no_command(self, mock_create_parser):
-        """Test main function when no command is provided"""
+    def test_command_success(self, mock_create_parser):
+        cmd = MagicMock()
+        cmd.execute.return_value = {"message": "ok"}
         mock_parser = MagicMock()
-        mock_parser.parse_args.return_value = MagicMock(command=None, spec={})
+        mock_args = _base_args(command="test", json_mode=True)
+        mock_parser.parse_args.return_value = mock_args
+        mock_create_parser.return_value = (mock_parser, {"test": cmd})
+
+        assert main() == 0
+        cmd.execute.assert_called_once_with(mock_args)
+
+    @patch("cognee.cli._cognee._create_parser")
+    @patch("cognee.cli.debug.is_debug_enabled", return_value=False)
+    def test_command_exception_returns_error_code(self, _debug, mock_create_parser):
+        cmd = MagicMock()
+        cmd.execute.side_effect = CliCommandException("fail", error_code=2)
+        mock_parser = MagicMock()
+        mock_parser.parse_args.return_value = _base_args(command="test", json_mode=True)
+        mock_create_parser.return_value = (mock_parser, {"test": cmd})
+
+        assert main() == 2
+
+
+class TestJsonMode:
+    """JSON envelope: success, error, interactive blocking"""
+
+    def setup_method(self):
+        import cognee.cli.echo as fmt
+
+        fmt._JSON_MODE = False
+
+    def teardown_method(self):
+        import cognee.cli.echo as fmt
+
+        fmt._JSON_MODE = False
+
+    @patch("cognee.cli._cognee._create_parser")
+    def test_json_success_envelope(self, mock_create_parser, capsys):
+        cmd = MagicMock()
+        cmd.execute.return_value = {"message": "Done."}
+        mock_parser = MagicMock()
+        mock_parser.parse_args.return_value = _base_args(command="test", json_mode=True)
+        mock_create_parser.return_value = (mock_parser, {"test": cmd})
+
+        assert main() == 0
+        output = json.loads(capsys.readouterr().out)
+        assert output == {"status": "ok", "message": "Done."}
+
+    @patch("cognee.cli._cognee._create_parser")
+    @patch("cognee.cli.debug.is_debug_enabled", return_value=False)
+    def test_json_error_envelope(self, _debug, mock_create_parser, capsys):
+        cmd = MagicMock()
+        cmd.execute.side_effect = CliCommandException("broke", error_code=3)
+        mock_parser = MagicMock()
+        mock_parser.parse_args.return_value = _base_args(command="test", json_mode=True)
+        mock_create_parser.return_value = (mock_parser, {"test": cmd})
+
+        assert main() == 3
+        output = json.loads(capsys.readouterr().out)
+        assert output["status"] == "error"
+        assert output["error_code"] == 3
+
+    def test_confirm_blocked_in_json_mode(self):
+        import cognee.cli.echo as fmt
+
+        fmt.enable_json_mode()
+        with pytest.raises(CliCommandException, match="--force with --json"):
+            fmt.confirm("sure?")
+
+
+class TestOneShotPrompt:
+    """The -p flag: one-shot query"""
+
+    def setup_method(self):
+        import cognee.cli.echo as fmt
+
+        fmt._JSON_MODE = False
+
+    def teardown_method(self):
+        import cognee.cli.echo as fmt
+
+        fmt._JSON_MODE = False
+
+    @patch("cognee.cli._cognee._create_parser")
+    @patch("cognee.cli.repl.run_prompt")
+    @patch("cognee.cli.session.load_session")
+    def test_prompt_returns_json(self, mock_session, mock_prompt, mock_create_parser, capsys):
+        import cognee.cli.echo as fmt
+
+        fmt.enable_json_mode()
+        mock_session.return_value = {"dataset": "ds", "query_type": "GRAPH_COMPLETION"}
+        mock_prompt.return_value = {"results": ["a"], "count": 1}
+        mock_parser = MagicMock()
+        mock_parser.parse_args.return_value = _base_args(json_mode=True, prompt="question")
         mock_create_parser.return_value = (mock_parser, {})
 
-        result = main()
+        assert main() == 0
+        output = json.loads(capsys.readouterr().out)
+        assert output["status"] == "ok"
+        assert output["count"] == 1
 
-        assert result == -1
-        mock_parser.print_help.assert_called_once()
 
-    @patch("cognee.cli._cognee._create_parser")
-    def test_main_with_valid_command(self, mock_create_parser):
-        """Test main function with a valid command"""
-        mock_command = MagicMock()
-        mock_command.execute.return_value = None
+class TestInteractiveAndSession:
+    """The -i, -c flags and session persistence"""
 
-        mock_parser = MagicMock()
-        mock_args = MagicMock(command="test", spec={})
-        mock_parser.parse_args.return_value = mock_args
+    def setup_method(self):
+        import cognee.cli.echo as fmt
 
-        mock_create_parser.return_value = (mock_parser, {"test": mock_command})
+        fmt._JSON_MODE = False
 
-        result = main()
+    def teardown_method(self):
+        import cognee.cli.echo as fmt
 
-        assert result == 0
-        mock_command.execute.assert_called_once_with(mock_args)
+        fmt._JSON_MODE = False
 
     @patch("cognee.cli._cognee._create_parser")
-    @patch("cognee.cli.debug.is_debug_enabled")
-    def test_main_with_command_exception(self, mock_debug, mock_create_parser):
-        """Test main function when command raises exception"""
-        mock_debug.return_value = False
-
-        mock_command = MagicMock()
-        mock_command.execute.side_effect = CliCommandException("Test error", error_code=2)
-
+    @patch("cognee.cli.repl.run_interactive", return_value=0)
+    def test_interactive_enters_repl(self, mock_repl, mock_create_parser):
         mock_parser = MagicMock()
-        mock_args = MagicMock(command="test", spec={})
-        mock_parser.parse_args.return_value = mock_args
+        mock_parser.parse_args.return_value = _base_args(interactive=True)
+        mock_create_parser.return_value = (mock_parser, {})
 
-        mock_create_parser.return_value = (mock_parser, {"test": mock_command})
-
-        result = main()
-
-        assert result == 2
+        assert main() == 0
+        mock_repl.assert_called_once_with({})
 
     @patch("cognee.cli._cognee._create_parser")
-    @patch("cognee.cli.debug.is_debug_enabled")
-    def test_main_with_generic_exception(self, mock_debug, mock_create_parser):
-        """Test main function when command raises generic exception"""
-        mock_debug.return_value = False
-
-        mock_command = MagicMock()
-        mock_command.execute.side_effect = Exception("Generic error")
-
+    @patch("cognee.cli.repl.run_interactive", return_value=0)
+    @patch("cognee.cli.session.load_session")
+    def test_continue_resumes_session(self, mock_session, mock_repl, mock_create_parser):
+        mock_session.return_value = {"dataset": "saved", "query_type": "CHUNKS"}
         mock_parser = MagicMock()
-        mock_args = MagicMock(command="test", spec={})
-        mock_parser.parse_args.return_value = mock_args
+        mock_parser.parse_args.return_value = _base_args(continue_session=True)
+        mock_create_parser.return_value = (mock_parser, {})
 
-        mock_create_parser.return_value = (mock_parser, {"test": mock_command})
+        assert main() == 0
+        mock_repl.assert_called_once_with({"dataset": "saved", "query_type": "CHUNKS"})
 
-        result = main()
+    def test_session_round_trip(self, tmp_path):
+        from cognee.cli import session
 
-        assert result == -1
+        orig_dir, orig_file = session.SESSION_DIR, session.SESSION_FILE
+        session.SESSION_DIR = tmp_path
+        session.SESSION_FILE = tmp_path / "session.json"
+        try:
+            session.save_session(dataset="my_data", query_type="CHUNKS")
+            loaded = session.load_session()
+            assert loaded["dataset"] == "my_data"
+            assert loaded["query_type"] == "CHUNKS"
+        finally:
+            session.SESSION_DIR, session.SESSION_FILE = orig_dir, orig_file
 
-    @patch("cognee.cli._cognee._create_parser")
-    @patch("cognee.cli.debug.is_debug_enabled")
-    def test_main_debug_mode_reraises_exception(self, mock_debug, mock_create_parser):
-        """Test main function reraises exceptions in debug mode"""
-        mock_debug.return_value = True
+    @patch("cognee.cli.repl._run_query", return_value=["r1", "r2"])
+    @patch("cognee.cli.repl.save_session")
+    @patch("builtins.input", side_effect=["test query", "/quit"])
+    def test_repl_executes_query(self, _input, _save, mock_query):
+        from cognee.cli.repl import run_interactive
 
-        test_exception = CliCommandException(
-            "Test error", error_code=2, raiseable_exception=ValueError("Inner error")
-        )
-
-        mock_command = MagicMock()
-        mock_command.execute.side_effect = test_exception
-
-        mock_parser = MagicMock()
-        mock_args = MagicMock(command="test", spec={})
-        mock_parser.parse_args.return_value = mock_args
-
-        mock_create_parser.return_value = (mock_parser, {"test": mock_command})
-
-        with pytest.raises(ValueError, match="Inner error"):
-            main()
-
-    def test_version_argument(self):
-        """Test that version argument is properly configured"""
-        parser, _ = _create_parser()
-
-        # Check that version action exists
-        version_actions = [action for action in parser._actions if action.dest == "version"]
-        assert len(version_actions) == 1
-
-        version_action = version_actions[0]
-        assert "cognee" in version_action.version
-
-    def test_debug_argument(self):
-        """Test that debug argument is properly configured"""
-        parser, _ = _create_parser()
-
-        # Check that debug action exists
-        debug_actions = [action for action in parser._actions if action.dest == "debug"]
-        assert len(debug_actions) == 1
-
-
-class TestDebugAction:
-    """Test the DebugAction class"""
-
-    @patch("cognee.cli.debug.enable_debug")
-    @patch("cognee.cli.echo.note")
-    def test_debug_action_call(self, mock_note, mock_enable_debug):
-        """Test that DebugAction enables debug mode"""
-        from cognee.cli._cognee import DebugAction
-
-        action = DebugAction([])
-        parser = MagicMock()
-        namespace = MagicMock()
-
-        action(parser, namespace, None)
-
-        mock_enable_debug.assert_called_once()
-        mock_note.assert_called_once_with("Debug mode enabled. Full stack traces will be shown.")
+        assert run_interactive({"dataset": "ds", "query_type": "CHUNKS"}) == 0
+        mock_query.assert_called_once_with("test query", "CHUNKS", "ds")

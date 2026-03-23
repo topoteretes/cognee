@@ -68,7 +68,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             help="Number of chunks to process per task batch (try 50 for large single documents).",
         )
 
-    def execute(self, args: argparse.Namespace) -> None:
+    def execute(self, args: argparse.Namespace) -> Optional[dict]:
         try:
             # Import cognee here to avoid circular imports
             import cognee
@@ -134,6 +134,8 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                 fmt.success("Cognification completed successfully!")
                 if args.verbose and result:
                     fmt.echo(f"Processing results: {result}")
+
+            return {"message": "Cognification complete."}
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

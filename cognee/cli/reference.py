@@ -21,6 +21,7 @@ class SupportsCliCommand(Protocol):
         ...
 
     @abstractmethod
-    def execute(self, args: argparse.Namespace) -> None:
-        """Executes the command with the given arguments"""
+    def execute(self, args: argparse.Namespace) -> Optional[dict]:
+        """Executes the command with the given arguments.
+        Returns an optional dict consumed in --json mode as the response payload."""
         ...

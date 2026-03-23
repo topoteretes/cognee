@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
@@ -34,7 +35,7 @@ Be careful with deletion operations as they are irreversible.
         )
         parser.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompts")
 
-    def execute(self, args: argparse.Namespace) -> None:
+    def execute(self, args: argparse.Namespace) -> Optional[dict]:
         try:
             # Validate arguments
             if not any(
@@ -142,7 +143,10 @@ Be careful with deletion operations as they are irreversible.
             asyncio.run(run_delete())
             # This success message may be inaccurate due to the underlying bug, but we leave it for now.
             fmt.success(f"Successfully deleted {operation}")
+            return {"message": "Deleted.", "operation": operation}
 
+        except CliCommandException:
+            raise
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
