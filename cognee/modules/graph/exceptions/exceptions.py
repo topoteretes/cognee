@@ -46,3 +46,18 @@ class DimensionOutOfRangeError(CogneeValidationError):
     ):
         message = f"Dimension {dimension} is out of range. Valid range is 0 to {max_index}."
         super().__init__(message, name, status_code)
+
+
+class NegativeVectorDistanceError(CogneeValidationError):
+    def __init__(
+        self,
+        score: float,
+        entity_type: str,
+        name: str = "NegativeVectorDistanceError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        message = (
+            f"Vector distance for {entity_type} must be non-negative, but got {score}. "
+            "This likely indicates an upstream distance-calculation bug."
+        )
+        super().__init__(message, name, status_code)

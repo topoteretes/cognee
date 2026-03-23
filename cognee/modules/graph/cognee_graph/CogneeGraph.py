@@ -7,6 +7,7 @@ from cognee.modules.graph.exceptions import (
     EntityNotFoundError,
     EntityAlreadyExistsError,
     InvalidDimensionsError,
+    NegativeVectorDistanceError,
 )
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
@@ -363,6 +364,8 @@ class CogneeGraph(CogneeAbstractGraph):
                         f"{label}: vector_distance[{query_index}] must be float-like, "
                         f"got {type(value).__name__}"
                     )
+                if distance < 0.0:
+                    raise NegativeVectorDistanceError(score=distance, entity_type=label)
                 feedback_weight = element.attributes.get("feedback_weight", 0.5)
                 importances.append(_effective_distance(distance, feedback_weight))
 

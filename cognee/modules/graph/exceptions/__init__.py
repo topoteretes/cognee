@@ -9,4 +9,5 @@ from .exceptions import (
     EntityAlreadyExistsError,
     InvalidDimensionsError,
     DimensionOutOfRangeError,
+    NegativeVectorDistanceError,
 )
