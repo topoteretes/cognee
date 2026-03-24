@@ -6,6 +6,9 @@ import inspect
 from typing import Any, Callable, Optional
 
 from .prompt_trace_context import AgentContextTrace
+from examples.demos.simple_agent_v2.agentic_trace_persistance import (
+    persist_agent_trace_default_pipeline,
+)
 
 _agent_context_trace_var: contextvars.ContextVar[Optional[AgentContextTrace]] = (
     contextvars.ContextVar("agent_context_trace", default=None)
@@ -16,7 +19,9 @@ def get_current_agent_context_trace() -> Optional[AgentContextTrace]:
     return _agent_context_trace_var.get()
 
 
-def agentic_trace_root(*, with_memory: bool = False, task_query: str = "") -> Callable[
+def agentic_trace_root(
+    *, with_memory: bool = False, save_traces: bool = False, task_query: str = ""
+) -> Callable[
     [Callable[..., Any]], Callable[..., Any]
 ]:
     """Decorate an async root coroutine so AgentContextTrace is available via ContextVar."""
@@ -32,16 +37,24 @@ def agentic_trace_root(*, with_memory: bool = False, task_query: str = "") -> Ca
             trace = AgentContextTrace(
                 origin_function=fn.__qualname__,
                 with_memory=with_memory,
+                save_traces=save_traces,
                 task_query=task_query,
             )
             # TODO: Later we can add a decorator parameter to control which method params are persisted, it is safer like that.
             trace.method_params = dict(bound_args.arguments)
+            trace.method_params["decorator_params"] = {
+                "with_memory": with_memory,
+                "save_traces": save_traces,
+                "task_query": task_query,
+            }
             token = _agent_context_trace_var.set(trace)
             try:
                 if with_memory:
                     await trace.get_memory_context(trace.task_query or "")
                 result = await fn(*args, **kwargs)
                 trace.method_return_value = result
+                if save_traces:
+                    await persist_agent_trace_default_pipeline(trace)
                 return result
             finally:
                 _agent_context_trace_var.reset(token)

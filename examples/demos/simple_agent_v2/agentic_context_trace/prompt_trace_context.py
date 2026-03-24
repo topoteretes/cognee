@@ -11,6 +11,7 @@ class AgentContextTrace(DataPoint):
 
     origin_function: str = ""
     with_memory: bool = False
+    save_traces: bool = False
     task_query: str = ""
     memory_context: str = ""
     method_params: dict[str, Any] = Field(default_factory=dict)
