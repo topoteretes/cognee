@@ -66,10 +66,10 @@ async def test_brute_force_triplet_search_end_to_end(clean_environment):
 
 
 @pytest.mark.asyncio
-async def test_brute_force_triplet_search_feedback_influence_changes_single_query_ranking(
+async def test_brute_force_triplet_search_feedback_does_not_override_missing_component_penalties(
     clean_environment,
 ):
-    """End-to-end exercise showing feedback influence changes single-query ranking."""
+    """With edge-only retrieval, feedback must not collapse node fallback penalties."""
 
     await setup()
 
@@ -131,5 +131,5 @@ async def test_brute_force_triplet_search_feedback_influence_changes_single_quer
     assert distance_only_edge.node2.attributes["name"] == "Fallback Company"
 
     feedback_weighted_edge = full_feedback_results[0]
-    assert feedback_weighted_edge.node1.attributes["name"] == "Preferred Person"
-    assert feedback_weighted_edge.node2.attributes["name"] == "Preferred Company"
+    assert feedback_weighted_edge.node1.attributes["name"] == "Fallback Person"
+    assert feedback_weighted_edge.node2.attributes["name"] == "Fallback Company"

@@ -5,13 +5,13 @@ from pydantic import BaseModel
 
 class ScoredResult(BaseModel):
     """
-    Represents the result of a scoring operation with an identification and associated data.
+    Represents a vector retrieval result with an identification and associated data.
 
     Attributes:
 
     - id (UUID): Unique identifier for the scored result.
-    - score (float): The score associated with the result, where a lower score indicates a
-    better outcome.
+    - score (float): Raw backend distance score (cosine distance for built-in adapters), where a
+    lower score indicates a better match.
     - payload (Optional[Dict[str, Any]]): Additional information related to the score, stored as
     key-value pairs in a dictionary.
     """

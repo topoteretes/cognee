@@ -44,7 +44,7 @@ class GraphCompletionRetriever(BaseRetriever):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 3.5,
+        triplet_distance_penalty: Optional[float] = 6.5,
         feedback_influence: float = 0.0,
         session_id: Optional[str] = None,
         response_model: Type = str,
