@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID, uuid4
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
@@ -71,13 +72,18 @@ class TestExplicitIdOverride:
         assert p_explicit.id != p_generated.id
 
 
-class TestMissingIdentityFieldFallback:
-    def test_missing_field_falls_back_to_uuid4(self):
-        """When identity_fields references a field not in the data, fall back to UUID4."""
+class TestDefaultFieldsIncludedInIdentity:
+    def test_default_field_included_in_identity(self):
+        """Fields with defaults are available via model_dump() and produce deterministic IDs."""
         p1 = PartialIdentity(name="John")
         p2 = PartialIdentity(name="John")
-        # age has a default so it IS in data; both should match
         assert p1.id == p2.id
+        assert p1.id.version == 5
+
+    def test_different_default_override_produces_different_id(self):
+        p1 = PartialIdentity(name="John", age=25)
+        p2 = PartialIdentity(name="John", age=30)
+        assert p1.id != p2.id
 
     def test_truly_missing_field(self):
         """A class where identity_fields references a non-existent field."""
@@ -91,7 +97,7 @@ class TestMissingIdentityFieldFallback:
 
         b1 = BadIdentity(name="John")
         b2 = BadIdentity(name="John")
-        # nonexistent is not in data, so falls back to UUID4 - different each time
+        # nonexistent is not in model_dump(), so falls back to UUID4 - different each time
         assert b1.id != b2.id
 
 
@@ -153,6 +159,25 @@ class TestIdIsUUID5:
         n = NoIdentityFields(name="Test")
         assert isinstance(n.id, UUID)
         assert n.id.version == 4
+
+
+class TestInheritanceWarning:
+    def test_subclass_dropping_identity_fields_logs_warning(self, caplog):
+        """Subclass that overrides metadata without identity_fields triggers a warning."""
+
+        class Parent(DataPoint):
+            name: str
+            metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+        class Child(Parent):
+            name: str
+            metadata: dict = {"index_fields": ["name"]}  # forgot identity_fields
+
+        with caplog.at_level(logging.WARNING):
+            c = Child(name="Test")
+        assert "drops identity_fields" in caplog.text
+        # Should fall back to UUID4 since no identity_fields on Child
+        assert c.id.version == 4
 
 
 class TestTypeFieldPreserved:

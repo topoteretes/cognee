@@ -1,9 +1,12 @@
+import logging
 from uuid import UUID, NAMESPACE_OID, uuid4, uuid5
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from typing_extensions import NotRequired, TypedDict
+
+logger = logging.getLogger(__name__)
 
 
 # Define metadata type
@@ -54,25 +57,43 @@ class DataPoint(BaseModel):
     source_user: Optional[str] = None
     feedback_weight: float = 0.5
 
-    def __init__(self, **data):
-        if "id" not in data:
+    def __init__(self, **data: Any) -> None:
+        explicit_id = "id" in data
+        super().__init__(**data)
+        object.__setattr__(self, "type", self.__class__.__name__)
+        if not explicit_id:
             identity_fields = self.__class__._get_identity_fields()
             if identity_fields:
                 identity_id = self.__class__._generate_identity_id(
-                    identity_fields, data, self.__class__.__name__
+                    identity_fields, self.model_dump(), self.__class__.__name__
                 )
                 if identity_id is not None:
-                    data["id"] = identity_id
-
-        super().__init__(**data)
-        object.__setattr__(self, "type", self.__class__.__name__)
+                    object.__setattr__(self, "id", identity_id)
 
     @classmethod
     def _get_identity_fields(cls) -> Optional[list[str]]:
-        """Get identity_fields from the class's metadata field default, if defined."""
+        """Get identity_fields from the class's metadata field default, if defined.
+
+        Walks the MRO to detect if a parent class defined identity_fields that a
+        subclass accidentally dropped when overriding metadata.
+        """
         metadata_field = cls.model_fields.get("metadata")
         if metadata_field is not None and metadata_field.default is not None:
-            return metadata_field.default.get("identity_fields")
+            identity = metadata_field.default.get("identity_fields")
+            if identity is None:
+                for parent in cls.__mro__[1:]:
+                    parent_meta = getattr(parent, "model_fields", {}).get("metadata")
+                    if parent_meta is not None and parent_meta.default is not None:
+                        parent_identity = parent_meta.default.get("identity_fields")
+                        if parent_identity is not None:
+                            logger.warning(
+                                "%s overrides metadata but drops identity_fields "
+                                "defined in parent %s",
+                                cls.__name__,
+                                parent.__name__,
+                            )
+                            break
+            return identity
         return None
 
     @staticmethod
@@ -87,16 +108,20 @@ class DataPoint(BaseModel):
         parts = []
         for field_name in identity_fields:
             if field_name not in data:
+                logger.warning(
+                    "identity_fields references missing field '%s' on %s; falling back to UUID4",
+                    field_name,
+                    class_name,
+                )
                 return None
             value = data[field_name]
-            if isinstance(value, str):
-                value = value.lower().replace(" ", "_").replace("'", "")
-            else:
-                value = str(value)
-            parts.append(value)
+            parts.append(str(value) if not isinstance(value, str) else value)
         joined = "|".join(parts)
         identity_string = f"{class_name}:{joined}"
-        return uuid5(NAMESPACE_OID, identity_string)
+        # Same normalization as cognee.modules.engine.utils.generate_node_id
+        # (inlined to avoid circular import)
+        normalized = identity_string.lower().replace(" ", "_").replace("'", "")
+        return uuid5(NAMESPACE_OID, normalized)
 
     @classmethod
     def get_embeddable_data(self, data_point: "DataPoint"):
