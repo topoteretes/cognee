@@ -9,7 +9,7 @@ from examples.demos.simple_agent_v2.agentic_context_trace.prompt_trace_context i
     AgentContextTrace,
 )
 
-TRACE_DATASET_NAME = "agentic_traces"
+TRACE_DATASET_NAME = "main_dataset"
 
 
 async def persist_agent_trace_default_pipeline(trace: AgentContextTrace) -> None:
