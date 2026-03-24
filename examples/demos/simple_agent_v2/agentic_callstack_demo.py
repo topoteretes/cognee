@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from agentic_trace_context import (
+from agentic_context_trace import (
     agentic_trace_root,
     get_current_agent_context_trace,
 )

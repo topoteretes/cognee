@@ -15,7 +15,7 @@ class LLMGateway:
     ) -> Coroutine:
         llm_config = get_llm_config()
 
-        from examples.demos.simple_agent_v2.agentic_trace_context import get_current_agent_context_trace
+        from examples.demos.simple_agent_v2.agentic_context_trace import get_current_agent_context_trace
         context_trace = get_current_agent_context_trace()
         if context_trace is not None and context_trace.with_memory:
             memory_context = context_trace.memory_context
