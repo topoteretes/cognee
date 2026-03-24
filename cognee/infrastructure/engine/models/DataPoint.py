@@ -1,10 +1,12 @@
 import logging
-from uuid import UUID, NAMESPACE_OID, uuid4, uuid5
+from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from typing_extensions import NotRequired, TypedDict
+
+from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 
 logger = logging.getLogger(__name__)
 
@@ -118,10 +120,7 @@ class DataPoint(BaseModel):
             parts.append(str(value) if not isinstance(value, str) else value)
         joined = "|".join(parts)
         identity_string = f"{class_name}:{joined}"
-        # Same normalization as cognee.modules.engine.utils.generate_node_id
-        # (inlined to avoid circular import)
-        normalized = identity_string.lower().replace(" ", "_").replace("'", "")
-        return uuid5(NAMESPACE_OID, normalized)
+        return generate_node_id(identity_string)
 
     @classmethod
     def get_embeddable_data(self, data_point: "DataPoint"):

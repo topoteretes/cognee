@@ -1,5 +1,5 @@
-from uuid import NAMESPACE_OID, UUID, uuid5
+# Canonical implementation moved to cognee.infrastructure.engine.utils.generate_node_id
+# Re-exported here for backward compatibility.
+from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 
-
-def generate_node_id(node_id: str) -> UUID:
-    return uuid5(NAMESPACE_OID, node_id.lower().replace(" ", "_").replace("'", ""))
+__all__ = ["generate_node_id"]
