@@ -24,14 +24,10 @@ def llm_gateway(prompt: str) -> str:
 
 def build_answer(user_question: str) -> str:
     """Another downstream method in the call stack."""
-    ctx = get_current_agent_context_trace()
-    if ctx is not None:
-        ctx.task_query = "Explain in 2 short bullet points."
-
     return llm_gateway(prompt=user_question)
 
 
-@agentic_trace_root(with_memory=True)
+@agentic_trace_root(with_memory=True, task_query="Explain in 2 short bullet points.")
 def run_agent_flow(user_question: str) -> str:
     """Top-level entrypoint creating the context object."""
     return build_answer(user_question)
@@ -42,7 +38,7 @@ if __name__ == "__main__":
     created_at_iso = datetime.fromtimestamp(ctx.created_at / 1000, tz=timezone.utc).isoformat()
 
     print(result)
-    print(f"origin={ctx.trace_metadata.get('origin_function')}")
+    print(f"origin={ctx.origin_function}")
     print(f"created_at={created_at_iso}")
     print(f"task_query={ctx.task_query}")
-    print(f"with_memory={ctx.trace_metadata.get('with_memory')}")
+    print(f"with_memory={ctx.with_memory}")

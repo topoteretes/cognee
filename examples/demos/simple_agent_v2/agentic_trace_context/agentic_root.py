@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextvars import ContextVar
 from functools import wraps
 import inspect
@@ -19,19 +20,20 @@ def get_current_agent_context_trace() -> AgentContextTrace | None:
     return _current_agent_context_trace.get()
 
 
-def _start_agent_context_trace(origin_function: str, with_memory: bool) -> tuple[AgentContextTrace, object]:
+def _start_agent_context_trace(
+    origin_function: str, with_memory: bool, task_query: str
+) -> tuple[AgentContextTrace, object]:
     context_trace = AgentContextTrace(
-        trace_metadata={
-            "origin_function": origin_function,
-            "with_memory": with_memory,
-        }
+        origin_function=origin_function,
+        with_memory=with_memory,
+        task_query=task_query,
     )
     token = _current_agent_context_trace.set(context_trace)
     return context_trace, token
 
 
 def _decorate_agentic_root(
-    func: Callable[..., T], *, with_memory: bool
+    func: Callable[..., T], *, with_memory: bool, task_query: str
 ) -> Callable[..., tuple[T, AgentContextTrace]]:
     """Wrap a function with AgentContextTrace lifecycle management."""
 
@@ -41,9 +43,11 @@ def _decorate_agentic_root(
         @wraps(async_func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> tuple[T, AgentContextTrace]:
             context_trace, token = _start_agent_context_trace(
-                async_func.__name__, with_memory=with_memory
+                async_func.__name__, with_memory=with_memory, task_query=task_query
             )
             try:
+                if context_trace.with_memory and context_trace.task_query:
+                    await context_trace.get_memory_context(context_trace.task_query)
                 result = await async_func(*args, **kwargs)
                 return result, context_trace
             finally:
@@ -53,8 +57,12 @@ def _decorate_agentic_root(
 
     @wraps(func)
     def sync_wrapper(*args: Any, **kwargs: Any) -> tuple[T, AgentContextTrace]:
-        context_trace, token = _start_agent_context_trace(func.__name__, with_memory=with_memory)
+        context_trace, token = _start_agent_context_trace(
+            func.__name__, with_memory=with_memory, task_query=task_query
+        )
         try:
+            if context_trace.with_memory and context_trace.task_query:
+                asyncio.run(context_trace.get_memory_context(context_trace.task_query))
             result = func(*args, **kwargs)
             return result, context_trace
         finally:
@@ -64,7 +72,7 @@ def _decorate_agentic_root(
 
 
 def agentic_trace_root(
-    func: Callable[..., T] | None = None, *, with_memory: bool = False
+    func: Callable[..., T] | None = None, *, with_memory: bool = False, task_query: str = ""
 ) -> (
     Callable[..., tuple[T, AgentContextTrace]]
     | Callable[[Callable[..., T]], Callable[..., tuple[T, AgentContextTrace]]]
@@ -73,8 +81,10 @@ def agentic_trace_root(
 
     Supports both:
     - `@agentic_trace_root`
-    - `@agentic_trace_root(with_memory=True)`
+    - `@agentic_trace_root(with_memory=True, task_query="...")`
     """
     if func is None:
-        return lambda inner: _decorate_agentic_root(inner, with_memory=with_memory)
-    return _decorate_agentic_root(func, with_memory=with_memory)
+        return lambda inner: _decorate_agentic_root(
+            inner, with_memory=with_memory, task_query=task_query
+        )
+    return _decorate_agentic_root(func, with_memory=with_memory, task_query=task_query)
