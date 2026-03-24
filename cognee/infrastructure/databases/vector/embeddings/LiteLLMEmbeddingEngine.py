@@ -124,14 +124,25 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             - List[List[float]]: A list of vectors representing the embedded texts.
         """
         try:
+            # Filter out empty/whitespace-only strings — OpenAI rejects them with 422
+            original_indices = []
+            filtered_text = []
+            for i, t in enumerate(text):
+                if t and t.strip():
+                    original_indices.append(i)
+                    filtered_text.append(t)
+
+            if not filtered_text:
+                return [[0.0] * self.dimensions for _ in text]
+
             if self.mock:
-                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
-                return [data["embedding"] for data in response["data"]]
+                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in filtered_text]}
+                filtered_embeddings = [data["embedding"] for data in response["data"]]
             else:
                 async with embedding_rate_limiter_context_manager():
                     embedding_kwargs = {
                         "model": self.model,
-                        "input": text,
+                        "input": filtered_text,
                         "api_key": self.api_key,
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
@@ -146,7 +157,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=30.0,
                     )
 
-                return [data["embedding"] for data in response.data]
+                filtered_embeddings = [data["embedding"] for data in response.data]
+
+            # Reconstruct full result list, inserting zero vectors for empty inputs
+            if len(filtered_text) == len(text):
+                return filtered_embeddings
+            result = [[0.0] * self.dimensions for _ in text]
+            for idx, emb in zip(original_indices, filtered_embeddings):
+                result[idx] = emb
+            return result
 
         except litellm.exceptions.ContextWindowExceededError as error:
             if isinstance(text, list) and len(text) > 1:
