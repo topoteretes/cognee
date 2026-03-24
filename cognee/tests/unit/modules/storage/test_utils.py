@@ -6,7 +6,6 @@ from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID, uuid4
 
-import pytest
 from pydantic import Field
 
 from cognee.infrastructure.engine import DataPoint
