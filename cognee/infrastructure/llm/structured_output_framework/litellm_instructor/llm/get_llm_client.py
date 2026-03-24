@@ -25,6 +25,7 @@ class LLMProvider(Enum):
     - GEMINI: Represents the Gemini provider.
     - MISTRAL: Represents the Mistral AI provider.
     - BEDROCK: Represents the AWS Bedrock provider.
+    - NOVITA: Represents the Novita AI provider.
     """
 
     OPENAI = "openai"
@@ -35,6 +36,7 @@ class LLMProvider(Enum):
     MISTRAL = "mistral"
     BEDROCK = "bedrock"
     LLAMA_CPP = "llama_cpp"
+    NOVITA = "novita"
 
 
 def get_llm_client(raise_api_key_error: bool = True):
@@ -220,5 +222,28 @@ def get_llm_client(raise_api_key_error: bool = True):
             chat_format=chat_format,
             llm_args=llm_args,
         )
+
+    elif provider == LLMProvider.NOVITA:
+        if llm_config.llm_api_key is None and raise_api_key_error:
+            raise LLMAPIKeyNotSetError()
+
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.novita.adapter import (
+            NovitaAdapter,
+        )
+
+        return NovitaAdapter(
+            api_key=llm_config.llm_api_key,
+            model=llm_config.llm_model,
+            max_completion_tokens=max_completion_tokens,
+            endpoint=llm_config.llm_endpoint,
+            api_version=llm_config.llm_api_version,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
+            streaming=llm_config.llm_streaming,
+            fallback_api_key=llm_config.fallback_api_key,
+            fallback_endpoint=llm_config.fallback_endpoint,
+            fallback_model=llm_config.fallback_model,
+            llm_args=llm_args,
+        )
+
     else:
         raise UnsupportedLLMProviderError(provider)

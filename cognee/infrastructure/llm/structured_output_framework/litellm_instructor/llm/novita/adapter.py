@@ -1,0 +1,164 @@
+"""Novita AI LLM Provider Adapter.
+
+Novita AI provides OpenAI-compatible API endpoints for various LLM models.
+This adapter integrates Novita's API into cognee's LLM infrastructure.
+
+API Documentation: https://novita.ai/docs
+"""
+
+import litellm
+import instructor
+from typing import Any, Dict, Optional
+from pydantic import BaseModel
+
+import logging
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
+
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
+    GenericAPIAdapter,
+)
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
+observe = get_observe()
+
+# Novita AI OpenAI-compatible endpoint
+NOVITA_DEFAULT_ENDPOINT = "https://api.novita.ai/openai"
+# Default model: moonshotai/kimi-k2.5 (supports function_calling, structured_output, reasoning, vision)
+NOVITA_DEFAULT_MODEL = "moonshotai/kimi-k2.5"
+
+
+class NovitaAdapter(GenericAPIAdapter):
+    """
+    Adapter for Novita AI's OpenAI-compatible API.
+
+    Novita AI provides access to various LLM models through an OpenAI-compatible
+    interface. This adapter enables cognee to use Novita's models for structured
+    output generation.
+
+    Supported models include:
+    - moonshotai/kimi-k2.5 (default) - MoE, function calling, structured output, reasoning, vision
+    - zai-org/glm-5 - MoE, function calling, structured output, reasoning
+    - minimax/minimax-m2.5 - MoE, function calling, structured output, reasoning
+
+    Public methods:
+    - acreate_structured_output: Generate structured output asynchronously
+    - create_transcript: Generate audio transcript
+    - transcribe_image: Generate image transcription
+
+    Instance variables:
+    - name: Provider name ("Novita")
+    - model: Model identifier
+    - api_key: API key for authentication
+    - endpoint: API endpoint URL
+    """
+
+    default_instructor_mode = "json_schema_mode"
+    MAX_RETRIES = 5
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        max_completion_tokens: int,
+        endpoint: Optional[str] = None,
+        api_version: Optional[str] = None,
+        transcription_model: Optional[str] = None,
+        instructor_mode: Optional[str] = None,
+        streaming: bool = False,
+        fallback_model: Optional[str] = None,
+        fallback_api_key: Optional[str] = None,
+        fallback_endpoint: Optional[str] = None,
+        llm_args: Optional[Dict[str, Any]] = None,
+    ):
+        # Use Novita's OpenAI-compatible endpoint if not specified
+        if endpoint is None or endpoint == "":
+            endpoint = NOVITA_DEFAULT_ENDPOINT
+
+        super().__init__(
+            api_key=api_key,
+            model=model,
+            max_completion_tokens=max_completion_tokens,
+            name="Novita",
+            endpoint=endpoint,
+            api_version=api_version,
+            transcription_model=transcription_model,
+            fallback_model=fallback_model,
+            fallback_api_key=fallback_api_key,
+            fallback_endpoint=fallback_endpoint,
+            llm_args=llm_args,
+        )
+
+        self.llm_args = llm_args if llm_args else {}
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+        self.streaming = streaming
+
+        # Initialize instructor client with litellm for OpenAI-compatible API
+        self.aclient = instructor.from_litellm(
+            litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
+        )
+        self.client = instructor.from_litellm(
+            litellm.completion, mode=instructor.Mode(self.instructor_mode)
+        )
+
+    @observe(as_type="generation")
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(8, 128),
+        retry=retry_if_not_exception_type(
+            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+        ),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
+    async def acreate_structured_output(
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs
+    ) -> BaseModel:
+        """
+        Generate a structured response from Novita AI's LLM.
+
+        This method asynchronously creates structured output by sending a request
+        to the Novita AI API using the OpenAI-compatible interface.
+
+        Parameters:
+        -----------
+            - text_input (str): The input text provided by the user for generating a response.
+            - system_prompt (str): The system's prompt to guide the model's response.
+            - response_model (Type[BaseModel]): The expected model type for the response.
+
+        Returns:
+        --------
+            - BaseModel: A structured output generated by the model, returned as an instance
+              of BaseModel.
+        """
+        merged_kwargs = {**self.llm_args, **kwargs}
+
+        async with llm_rate_limiter_context_manager():
+            return await self.aclient.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": text_input,
+                    },
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                ],
+                api_key=self.api_key,
+                api_base=self.endpoint,
+                api_version=self.api_version,
+                response_model=response_model,
+                max_retries=self.MAX_RETRIES,
+                **merged_kwargs,
+            )
