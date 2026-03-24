@@ -22,7 +22,6 @@ def get_current_agent_context_trace() -> Optional[AgentContextTrace]:
 
 def _trace_text_payload(trace: AgentContextTrace) -> str:
     payload = {
-        "method_params": trace.method_params,
         "method_return_value": trace.method_return_value,
     }
     return json.dumps(payload, default=str, ensure_ascii=False)

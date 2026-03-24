@@ -9,8 +9,8 @@ from common import check_eligibility, propose_offer, run_stream_impl, setup_runt
 
 @agentic_trace_root(
     with_memory=True,
-    save_traces=True,
-    task_query="Past eligibility rejections",
+    save_traces=False,
+    task_query="List ALL method return values where from the context, Focus on the feedbacks only.",
 )
 async def _subagent_propose_offer(payload: dict) -> dict:
     return await propose_offer(payload)

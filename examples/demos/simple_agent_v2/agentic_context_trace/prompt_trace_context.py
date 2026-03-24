@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.models import NodeSet
 from pydantic import Field
 
 
@@ -18,6 +20,10 @@ class AgentContextTrace(DataPoint):
     method_return_value: Any = None
     # JSON string of method_params + method_return_value; indexed for embedding/search.
     text: str = ""
+    belongs_to_set: list[NodeSet] = NodeSet(
+            id=uuid5(NAMESPACE_OID, "NodeSet:agentic_traces"),
+            name="agentic_traces",
+        )
     metadata: dict = {"index_fields": ["text"]}
 
     async def get_memory_context(self, query_text: str) -> None:
@@ -32,10 +38,8 @@ class AgentContextTrace(DataPoint):
             memory_results = await search(
                 query_text=memory_query,
                 query_type=SearchType.GRAPH_COMPLETION,
-                system_prompt=(
-                    "Summarize Agentic traces and agent behaviors focusing on "
-                    "method_return_values and how agent reacted to different inputs"
-                ),
+                system_prompt='Answer the query, in a case of empty context return empty string.',
+                top_k=20
             )
             self.memory_context = str(memory_results)
         except NoDataError:

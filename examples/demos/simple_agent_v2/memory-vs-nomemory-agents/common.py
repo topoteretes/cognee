@@ -29,9 +29,7 @@ class ProposalOutput(BaseModel):
 
 class EligibilityOutput(BaseModel):
     decision: Literal["YES", "NO"]
-    feedback: str = Field(
-        pattern=r"^(Allowed for students in Berlin\.|This is not allowed for students in Berlin\.)$"
-    )
+    feedback: str
 
 
 RootFn = Callable[[dict], Awaitable[dict]]
@@ -66,6 +64,7 @@ async def propose_offer(payload: dict) -> dict:
             "You are Agent A (offer proposer).\n"
             "Propose exactly one package for the user: OFFER_FREE, OFFER_STARTER,"
             " OFFER_PLUS, OFFER_PRO, OFFER_TEAM, or OFFER_ENTERPRISE.\n"
+            "If you have access to memory related information use it to make a decision which package to offer\n"
             "Never propose an package that already appears in Rejected packages.\n"
             "Rationale must be short (one sentence)."
         ),
@@ -88,8 +87,9 @@ async def check_eligibility(payload: dict) -> dict:
             "- YES only if proposed action is OFFER_FREE.\n"
             "- NO for every other proposed action.\n"
             "Return structured output only.\n"
-            "If YES, feedback must be exactly: Allowed for students in Berlin.\n"
-            "If NO, feedback must be exactly: This is not allowed for students in Berlin."
+            "Feedback must be an original one-sentence explanation for this specific proposal."
+            " Do not mention what is available if it is not proposed\n"
+            "Do not use fixed canned phrases."
         ),
         response_model=EligibilityOutput,
     )
@@ -230,7 +230,8 @@ async def run_stream_impl(
                 eid = email["email_id"]
                 print(
                     f"[{eid}] STATE user={user} location={loc} "
-                    f"offer={offer} decision={current_check.decision}"
+                    f"offer={offer} decision={current_check.decision} "
+                    f"feedback={current_check.feedback}"
                 )
 
             elif next_step.tool_name == ToolName.RETRY_OR_FINISH:
@@ -251,4 +252,8 @@ async def run_stream_impl(
         user = prop.user_category if prop else "none"
         loc = prop.location if prop else "none"
         eid = email["email_id"]
-        print(f"[{eid}] FINAL user={user} location={loc} {final_offer} - {final_decision}")
+        final_feedback = current_check.feedback if current_check else "none"
+        print(
+            f"[{eid}] FINAL user={user} location={loc} {final_offer} - {final_decision} "
+            f"feedback={final_feedback}"
+        )
