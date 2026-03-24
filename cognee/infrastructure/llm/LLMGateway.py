@@ -19,7 +19,7 @@ class LLMGateway:
         context_trace = get_current_agent_context_trace()
         if context_trace is not None and context_trace.with_memory:
             memory_context = context_trace.memory_context
-            text_input = f"Memory_context: {memory_context}\n\n{text_input}"
+            text_input = f"Additional Memory Context: {memory_context} Original input: \n\n{text_input}"
 
         if llm_config.structured_output_framework.upper() == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
