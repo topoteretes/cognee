@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from cognee.infrastructure.engine import DataPoint
+from pydantic import Field
 
 
 class AgentContextTrace(DataPoint):
@@ -10,6 +13,8 @@ class AgentContextTrace(DataPoint):
     with_memory: bool = False
     task_query: str = ""
     memory_context: str = ""
+    method_params: dict[str, Any] = Field(default_factory=dict)
+    method_return_value: Any = None
 
     async def get_memory_context(self, query_text: str) -> None:
         if not self.with_memory:

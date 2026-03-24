@@ -40,13 +40,13 @@ async def downstream_acreate_call(question: str) -> str:
     with_memory=True,
     task_query="How are agents related to Cognee",
 )
-async def with_memory_method() -> str:
-    return await downstream_acreate_call("What does cognee do?")
+async def with_memory_method(query="What does cognee do?") -> str:
+    return await downstream_acreate_call(question=query)
 
 
 @agentic_trace_root(with_memory=False)
-async def without_memory_method() -> str:
-    return await downstream_acreate_call("What does cognee do?")
+async def without_memory_method(query='What does cognee do?') -> str:
+    return await downstream_acreate_call(question=query)
 
 async def main() -> None:
     await setup_memory()

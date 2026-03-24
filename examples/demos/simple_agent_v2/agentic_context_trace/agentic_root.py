@@ -27,16 +27,22 @@ def agentic_trace_root(*, with_memory: bool = False, task_query: str = "") -> Ca
 
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            bound_args = inspect.signature(fn).bind_partial(*args, **kwargs)
+            bound_args.apply_defaults()
             trace = AgentContextTrace(
                 origin_function=fn.__qualname__,
                 with_memory=with_memory,
                 task_query=task_query,
             )
+            # TODO: Later we can add a decorator parameter to control which method params are persisted, it is safer like that.
+            trace.method_params = dict(bound_args.arguments)
             token = _agent_context_trace_var.set(trace)
             try:
                 if with_memory:
                     await trace.get_memory_context(trace.task_query or "")
-                return await fn(*args, **kwargs)
+                result = await fn(*args, **kwargs)
+                trace.method_return_value = result
+                return result
             finally:
                 _agent_context_trace_var.reset(token)
 
