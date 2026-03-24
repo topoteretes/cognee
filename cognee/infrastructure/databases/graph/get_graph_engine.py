@@ -117,6 +117,15 @@ def _create_graph_engine(
             graph_database_name=graph_database_name or None,
         )
 
+    elif graph_database_provider == "postgres":
+        from .postgres.adapter import PostgresAdapter
+        from cognee.infrastructure.databases.relational.get_relational_engine import (
+            get_relational_engine,
+        )
+
+        relational_engine = get_relational_engine()
+        return PostgresAdapter(relational_engine=relational_engine)
+
     elif graph_database_provider == "kuzu":
         if not graph_file_path:
             raise EnvironmentError("Missing required Kuzu database path.")
@@ -195,5 +204,5 @@ def _create_graph_engine(
 
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'postgres', 'neptune', 'neptune_analytics'])}"
     )
