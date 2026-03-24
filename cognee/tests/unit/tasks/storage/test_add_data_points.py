@@ -4,6 +4,7 @@ import sys
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models import Triplet
+from cognee.modules.graph.utils import ensure_default_edge_properties
 from cognee.tasks.storage.add_data_points import (
     add_data_points,
     InvalidDataPointsInAddDataPointsError,
@@ -62,8 +63,12 @@ async def test_add_data_points_indexes_nodes_and_edges(
     graph_engine.add_nodes.assert_awaited_once()
     mock_index_nodes.assert_awaited_once()
     assert graph_engine.add_edges.await_count == 2
-    assert edge1 in graph_engine.add_edges.await_args_list[0].args[0]
-    assert graph_engine.add_edges.await_args_list[1].args[0] == custom_edges
+    expected_main_edges = ensure_default_edge_properties([edge1])
+    expected_custom_edges = ensure_default_edge_properties(custom_edges)
+    first_call_edges = graph_engine.add_edges.await_args_list[0].args[0]
+    assert expected_main_edges[0] in first_call_edges
+    assert expected_custom_edges[0] in first_call_edges
+    assert graph_engine.add_edges.await_args_list[1].args[0] == expected_custom_edges
     assert mock_index_edges.await_count == 2
 
 
@@ -137,6 +142,17 @@ async def test_add_data_points_with_single_datapoint(
     assert result == [dp]
     mock_get_graph.assert_called_once()
     mock_index_nodes.assert_awaited_once()
+
+
+def test_entity_description_not_in_index_fields():
+    from cognee.modules.engine.models import Entity, EntityType
+
+    entity_type = EntityType(name="Person", description="A human being")
+    entity = Entity(name="Alice", description="A software engineer", is_a=entity_type)
+    text = _extract_embeddable_text_from_datapoint(entity)
+    # description is stored but not indexed — only name is embedded
+    assert "Alice" in text
+    assert "A software engineer" not in text
 
 
 def test_extract_embeddable_text_from_datapoint():

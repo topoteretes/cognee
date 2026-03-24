@@ -98,7 +98,7 @@ async def main():
 
     # Visualize the graph
     graph_visualization_path = path.join(
-        path.dirname(__file__), "dunder_mifflin_company_graph.html"
+        path.dirname(__file__), ".artifacts", "dunder_mifflin_company_graph.html"
     )
     await visualize_graph(graph_visualization_path)
 

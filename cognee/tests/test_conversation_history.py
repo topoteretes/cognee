@@ -22,6 +22,25 @@ from collections import Counter
 logger = get_logger()
 
 
+def _assert_used_graph_element_ids_shape(entry: dict, expect_none: bool = False) -> None:
+    """Assert entry has used_graph_element_ids key and valid shape (or None for Triplet)."""
+    assert "used_graph_element_ids" in entry, "QA entry should have used_graph_element_ids key"
+    ids = entry["used_graph_element_ids"]
+    if expect_none:
+        assert ids is None, "Triplet retriever should store used_graph_element_ids as None"
+        return
+    if ids is None:
+        return
+    assert isinstance(ids, dict), "used_graph_element_ids must be dict or None"
+    assert set(ids.keys()) <= {"node_ids", "edge_ids"}, (
+        "used_graph_element_ids may only have node_ids and edge_ids"
+    )
+    for key in ("node_ids", "edge_ids"):
+        if key in ids:
+            assert isinstance(ids[key], list), f"{key} must be a list"
+            assert all(isinstance(x, str) for x in ids[key]), f"{key} must be list of str"
+
+
 async def main():
     ######BEGIN: OLD SESSION FUNCTIONALITY (to be updated/removed in COG-3881; prefer pytest) ######
     data_directory_path = str(
@@ -83,6 +102,7 @@ async def main():
     assert "answer" in our_qa[0] and "context" in our_qa[0], (
         "Q&A should contain answer and context fields"
     )
+    _assert_used_graph_element_ids_shape(our_qa[0])
 
     result2 = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
@@ -147,6 +167,7 @@ async def main():
     history_rag = await cache_engine.get_latest_qa(str(user.id), session_id_rag, last_n=10)
     our_qa_rag = [h for h in history_rag if h["question"] == "What companies are mentioned?"]
     assert len(our_qa_rag) == 1, "Should find RAG question in history"
+    _assert_used_graph_element_ids_shape(our_qa_rag[0])
 
     session_id_cot = "test_session_cot"
 
@@ -163,6 +184,7 @@ async def main():
     history_cot = await cache_engine.get_latest_qa(str(user.id), session_id_cot, last_n=10)
     our_qa_cot = [h for h in history_cot if h["question"] == "What do you know about TechCorp?"]
     assert len(our_qa_cot) == 1, "Should find CoT question in history"
+    _assert_used_graph_element_ids_shape(our_qa_cot[0])
 
     session_id_ext = "test_session_ext"
 
@@ -179,6 +201,7 @@ async def main():
     history_ext = await cache_engine.get_latest_qa(str(user.id), session_id_ext, last_n=10)
     our_qa_ext = [h for h in history_ext if h["question"] == "Tell me about DataCo"]
     assert len(our_qa_ext) == 1, "Should find Context Extension question in history"
+    _assert_used_graph_element_ids_shape(our_qa_ext[0])
 
     session_id_summary = "test_session_summary"
 
@@ -197,6 +220,7 @@ async def main():
         h for h in history_summary if h["question"] == "What are the key points about TechCorp?"
     ]
     assert len(our_qa_summary) == 1, "Should find Summary question in history"
+    _assert_used_graph_element_ids_shape(our_qa_summary[0])
 
     session_id_temporal = "test_session_temporal"
 
@@ -217,6 +241,7 @@ async def main():
         h for h in history_temporal if h["question"] == "Tell me about the companies"
     ]
     assert len(our_qa_temporal) == 1, "Should find Temporal question in history"
+    _assert_used_graph_element_ids_shape(our_qa_temporal[0])
 
     session_id_triplet = "test_session_triplet"
 
@@ -235,6 +260,7 @@ async def main():
         h for h in history_triplet if h["question"] == "What companies are mentioned?"
     ]
     assert len(our_qa_triplet) == 1, "Should find Triplet question in history"
+    _assert_used_graph_element_ids_shape(our_qa_triplet[0], expect_none=True)
 
     # Session history via new session SDK (replaces legacy get_conversation_history)
     entries = await cognee.session.get_session(session_id=session_id_1, user=user, last_n=10)

@@ -51,6 +51,7 @@ async def test_init_custom_params():
         node_name=["node1"],
         wide_search_top_k=200,
         triplet_distance_penalty=5.0,
+        feedback_influence=0.2,
     )
 
     assert retriever.top_k == 10
@@ -61,6 +62,7 @@ async def test_init_custom_params():
     assert retriever.node_name == ["node1"]
     assert retriever.wide_search_top_k == 200
     assert retriever.triplet_distance_penalty == 5.0
+    assert retriever.feedback_influence == 0.2
 
 
 @pytest.mark.asyncio

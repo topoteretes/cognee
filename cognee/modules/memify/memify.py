@@ -60,9 +60,33 @@ async def memify(
                           If False, waits for completion before returning.
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
+
+    Returns:
+        Union[dict, list[PipelineRunInfo]]:
+            - **Blocking mode**: Dictionary mapping dataset_id -> PipelineRunInfo with:
+                * Processing status (completed/failed/in_progress)
+                * Processing duration and resource usage
+                * Error details if any failures occurred
+            - **Background mode**: List of PipelineRunInfo objects for tracking progress
+                * Use pipeline_run_id from return value to monitor status
+
+    Example:
+        ```python
+        import cognee
+
+        # Add and process data first
+        await cognee.add("Your document content")
+        await cognee.cognify()
+
+        # Enrich the existing knowledge graph with the default memify pipeline
+        await cognee.memify()
+
+        # Search the enriched graph
+        results = await cognee.search("What insights can you find?")
+        ```
     """
 
-    # Use default coding rules tasks if no tasks were provided
+    # Use default triplet embedding tasks if no tasks were provided
     if not extraction_tasks:
         extraction_tasks = get_default_memify_extraction_tasks()
     if not enrichment_tasks:
