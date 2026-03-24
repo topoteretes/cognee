@@ -39,7 +39,7 @@ async def search(
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,

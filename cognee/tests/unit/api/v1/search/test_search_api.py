@@ -56,3 +56,32 @@ async def test_api_graph_search_passes_feedback_influence_to_search_function(
     )
 
     assert out == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_api_graph_search_uses_updated_default_triplet_penalty(monkeypatch, api_search_mod):
+    user = _make_user()
+    dataset = _make_dataset()
+
+    async def dummy_set_session_user_context_variable(_user):
+        return None
+
+    async def dummy_search_function(**kwargs):
+        assert kwargs["triplet_distance_penalty"] == 6.5
+        return ["ok"]
+
+    monkeypatch.setattr(
+        api_search_mod,
+        "set_session_user_context_variable",
+        dummy_set_session_user_context_variable,
+    )
+    monkeypatch.setattr(api_search_mod, "search_function", dummy_search_function)
+
+    out = await api_search_mod.search(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        user=user,
+        dataset_ids=[dataset.id],
+    )
+
+    assert out == ["ok"]
