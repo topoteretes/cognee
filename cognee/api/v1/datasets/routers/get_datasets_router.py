@@ -357,7 +357,7 @@ def get_datasets_router() -> APIRouter:
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-        if dataset is None:
+        if not dataset:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
@@ -466,7 +466,7 @@ def get_datasets_router() -> APIRouter:
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-        if dataset is None:
+        if not dataset:
             return JSONResponse(
                 status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
             )
@@ -564,7 +564,7 @@ def get_datasets_router() -> APIRouter:
         from sqlalchemy import text as sql_text
 
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
-        if dataset is None:
+        if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found.")
 
         ds_id = dataset[0].id

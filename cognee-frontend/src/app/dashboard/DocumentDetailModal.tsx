@@ -56,7 +56,7 @@ export default function DocumentDetailModal({
   const [nodes, setNodes] = useState<DocumentNodes | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedChunks, setExpandedChunks] = useState<Set<number>>(new Set());
+  const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!isOpen) {
@@ -92,13 +92,13 @@ export default function DocumentDetailModal({
       .finally(() => setLoading(false));
   }, [isOpen, datasetId, dataFile.id, useCloud]);
 
-  const toggleChunk = (index: number) => {
+  const toggleChunk = (chunkId: string) => {
     setExpandedChunks((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
+      if (next.has(chunkId)) {
+        next.delete(chunkId);
       } else {
-        next.add(index);
+        next.add(chunkId);
       }
       return next;
     });
@@ -262,14 +262,14 @@ export default function DocumentDetailModal({
                   .slice()
                   .sort((a, b) => (a.chunk_index ?? 0) - (b.chunk_index ?? 0))
                   .map((chunk, idx) => {
-                    const isExpanded = expandedChunks.has(idx);
+                    const isExpanded = expandedChunks.has(chunk.id);
                     return (
                       <div
                         key={chunk.id}
                         className="border border-gray-200 rounded-lg overflow-hidden"
                       >
                         <button
-                          onClick={() => toggleChunk(idx)}
+                          onClick={() => toggleChunk(chunk.id)}
                           className="w-full flex flex-row items-center justify-between px-4 py-2.5 text-left hover:bg-gray-50 transition-colors"
                         >
                           <div className="flex flex-row items-center gap-3">
@@ -313,9 +313,6 @@ export default function DocumentDetailModal({
                       className="flex flex-row items-center gap-1.5 border border-indigo-200 rounded-full px-3 py-1.5 bg-indigo-50"
                     >
                       <span className="text-xs text-indigo-700 font-medium">{entity.label}</span>
-                      {entity.type && (
-                        <span className="text-xs text-indigo-400">· {entity.type}</span>
-                      )}
                     </div>
                   ))}
                 </div>
