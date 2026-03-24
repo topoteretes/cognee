@@ -138,8 +138,11 @@ async def run_tasks(
             result for result in results if isinstance(result["run_info"], PipelineRunErrored)
         ]
         if errored_results:
+            error_details = "; ".join(
+                f"item {i}: {r['run_info'].payload}" for i, r in enumerate(errored_results)
+            )
             raise PipelineRunFailedError(
-                message="Pipeline run failed. Data item could not be processed."
+                message=f"Pipeline run failed ({len(errored_results)} item(s)): {error_details}"
             )
 
         await log_pipeline_run_complete(

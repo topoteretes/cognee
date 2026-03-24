@@ -36,6 +36,10 @@ def run_interactive(session: dict) -> int:
     except ImportError:
         pass
 
+    # Track the last successfully used dataset/query_type for session save
+    last_good_dataset = dataset
+    last_good_query_type = query_type
+
     while True:
         try:
             line = input("cognee> ").strip()
@@ -84,6 +88,10 @@ def run_interactive(session: dict) -> int:
         try:
             results = _run_query(line, query_type, dataset)
 
+            # Query succeeded — update last-known-good state
+            last_good_dataset = dataset
+            last_good_query_type = query_type
+
             if not results:
                 fmt.warning("No results found.")
             elif query_type in ("GRAPH_COMPLETION", "RAG_COMPLETION"):
@@ -96,8 +104,8 @@ def run_interactive(session: dict) -> int:
         except Exception as e:
             fmt.error(f"Query failed: {e}")
 
-    # Save session on exit
-    save_session(dataset=dataset, query_type=query_type)
+    # Only save the last successfully used settings
+    save_session(dataset=last_good_dataset, query_type=last_good_query_type)
     fmt.note("Session saved. Use 'cognee-cli -c' to resume.")
     return 0
 
@@ -132,7 +140,11 @@ def run_prompt(prompt: str, session: dict) -> dict:
 
 
 def _run_query(query_text: str, query_type_str: str, dataset: str = None) -> list:
-    """Execute a search query synchronously."""
+    """Execute a search query synchronously.
+
+    Uses asyncio.run() when no loop is running (normal CLI usage).
+    Falls back to loop.run_until_complete() if called from an existing loop.
+    """
     import cognee
     from cognee.modules.search.types import SearchType
 
@@ -145,4 +157,14 @@ def _run_query(query_text: str, query_type_str: str, dataset: str = None) -> lis
             datasets=[dataset] if dataset else None,
         )
 
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None and loop.is_running():
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _search()).result()
     return asyncio.run(_search())

@@ -285,7 +285,11 @@ async def _filter_processed_items(items, pipeline_name, dataset_id):
 
 
 async def _mark_items_processed(items, pipeline_name, dataset_id):
-    """Mark Data items as processed for this pipeline+dataset."""
+    """Mark Data items as processed for this pipeline+dataset.
+
+    Uses SELECT ... FOR UPDATE to prevent concurrent sessions from
+    overwriting each other's status updates on the same rows.
+    """
     from sqlalchemy import select
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
@@ -299,13 +303,14 @@ async def _mark_items_processed(items, pipeline_name, dataset_id):
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        result = await session.execute(select(Data).filter(Data.id.in_(data_ids)))
+        result = await session.execute(select(Data).filter(Data.id.in_(data_ids)).with_for_update())
         for data_point in result.scalars().all():
             if not data_point.pipeline_status:
                 data_point.pipeline_status = {}
             status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
             status_for_pipeline[dataset_id_str] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-            await session.merge(data_point)
+            session.add(data_point)
+        await session.flush()
         await session.commit()
 
 

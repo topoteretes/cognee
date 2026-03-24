@@ -98,7 +98,7 @@ options are supported.
             else:
                 if not results:
                     fmt.warning("No results found for your query.")
-                    return
+                    return {"results": [], "count": 0, "query_type": args.query_type}
 
                 fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
                 fmt.echo("=" * 60)

@@ -53,7 +53,14 @@ tasks on an existing knowledge graph to add context, rules, and connections.
                 try:
                     from uuid import UUID
 
-                    dataset_arg = UUID(args.dataset_id) if args.dataset_id else args.dataset_name
+                    dataset_arg = args.dataset_name
+                    if args.dataset_id:
+                        try:
+                            dataset_arg = UUID(args.dataset_id)
+                        except ValueError:
+                            raise CliCommandInnerException(
+                                f"Invalid UUID format for --dataset-id: '{args.dataset_id}'"
+                            )
 
                     result = await cognee.improve(
                         dataset=dataset_arg,
@@ -61,6 +68,8 @@ tasks on an existing knowledge graph to add context, rules, and connections.
                         run_in_background=args.background,
                     )
                     return result
+                except CliCommandInnerException:
+                    raise
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to improve: {str(e)}") from e
 

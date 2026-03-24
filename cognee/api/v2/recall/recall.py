@@ -62,6 +62,10 @@ async def recall(
 
         query_type = SearchType.GRAPH_COMPLETION
 
+    # Treat empty list the same as None (search all datasets)
+    if datasets is not None and len(datasets) == 0:
+        datasets = None
+
     # Inject recency_weight into retriever_specific_config without mutating caller's dict
     if recency_weight > 0.0:
         rsc = dict(kwargs.get("retriever_specific_config") or {})

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -143,7 +143,11 @@ async def status(
                 cognify_pipeline_status=cognify_status.value if cognify_status else None,
                 dataset_created_at=ds.created_at,
                 dataset_updated_at=ds.updated_at,
-                last_data_updated_at=bucket["last_updated"],
+                last_data_updated_at=(
+                    datetime.fromtimestamp(bucket["last_updated"] / 1000, tz=timezone.utc)
+                    if bucket["last_updated"] is not None
+                    else None
+                ),
                 version=version_map.get(did, 0),
             )
         )

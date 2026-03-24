@@ -145,7 +145,15 @@ async def remember(
             except Exception:
                 logger.exception("Background remember failed")
 
-        asyncio.create_task(_remember_background())
+        try:
+            asyncio.get_running_loop()
+            asyncio.create_task(_remember_background())
+        except RuntimeError:
+            logger.warning(
+                "No running event loop; falling back to synchronous execution "
+                "instead of background mode"
+            )
+            return await _run()
 
         return {
             "status": "started",
