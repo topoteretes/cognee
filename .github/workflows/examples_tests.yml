@@ -370,6 +370,11 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: 'docling'
 
+      - name: Cognee Setup Only Docling
+        run: |
+          uv pip uninstall cognee
+          uv sync --extra docling
+
       - name: Run Docling Test
         env:
           ENV: 'dev'
