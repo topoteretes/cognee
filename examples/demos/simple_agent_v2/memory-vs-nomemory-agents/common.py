@@ -223,6 +223,15 @@ async def run_stream_impl(
                 )
                 current_check = EligibilityOutput.model_validate(check_payload)
                 feedback_history.append(current_check.feedback)
+                prop = current_proposal
+                offer = prop.proposed_action if prop else "none"
+                user = prop.user_category if prop else "none"
+                loc = prop.location if prop else "none"
+                eid = email["email_id"]
+                print(
+                    f"[{eid}] STATE user={user} location={loc} "
+                    f"offer={offer} decision={current_check.decision}"
+                )
 
             elif next_step.tool_name == ToolName.RETRY_OR_FINISH:
                 if current_check is not None and current_check.decision == "NO":
@@ -235,3 +244,11 @@ async def run_stream_impl(
 
             if not next_step.continue_loop:
                 break
+
+        prop = current_proposal
+        final_offer = prop.proposed_action if prop else "none"
+        final_decision = current_check.decision if current_check else "none"
+        user = prop.user_category if prop else "none"
+        loc = prop.location if prop else "none"
+        eid = email["email_id"]
+        print(f"[{eid}] FINAL user={user} location={loc} {final_offer} - {final_decision}")

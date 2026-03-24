@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextvars
 import functools
 import inspect
+import json
 from typing import Any, Callable, Optional
 
 from .prompt_trace_context import AgentContextTrace
@@ -17,6 +18,14 @@ _agent_context_trace_var: contextvars.ContextVar[Optional[AgentContextTrace]] = 
 
 def get_current_agent_context_trace() -> Optional[AgentContextTrace]:
     return _agent_context_trace_var.get()
+
+
+def _trace_text_payload(trace: AgentContextTrace) -> str:
+    payload = {
+        "method_params": trace.method_params,
+        "method_return_value": trace.method_return_value,
+    }
+    return json.dumps(payload, default=str, ensure_ascii=False)
 
 
 def agentic_trace_root(
@@ -53,6 +62,7 @@ def agentic_trace_root(
                     await trace.get_memory_context(trace.task_query or "")
                 result = await fn(*args, **kwargs)
                 trace.method_return_value = result
+                trace.text = _trace_text_payload(trace)
                 if save_traces:
                     await persist_agent_trace_default_pipeline(trace)
                 return result
