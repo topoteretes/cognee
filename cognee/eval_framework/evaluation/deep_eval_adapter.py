@@ -17,18 +17,26 @@ logger = get_logger()
 class DeepEvalAdapter(BaseEvalAdapter):
     def __init__(self):
         self.n_retries = 5
-        self.g_eval_metrics = {
-            "correctness": self.g_eval_correctness(),
-            "EM": ExactMatchMetric(),
-            "f1": F1ScoreMetric(),
-            "contextual_relevancy": ContextualRelevancyMetric(),
-            "context_coverage": ContextCoverageMetric(),
-            "rubric": RubricMetric(),
+        # Metrics are built lazily in _get_metric() to avoid eager API-key
+        # validation for metrics that are not actually requested.
+        self._metric_factories = {
+            "correctness": self.g_eval_correctness,
+            "EM": ExactMatchMetric,
+            "f1": F1ScoreMetric,
+            "contextual_relevancy": ContextualRelevancyMetric,
+            "context_coverage": ContextCoverageMetric,
+            "rubric": RubricMetric,
         }
+        self.g_eval_metrics: Dict[str, Any] = {}
+
+    def _get_metric(self, metric: str):
+        if metric not in self.g_eval_metrics:
+            self.g_eval_metrics[metric] = self._metric_factories[metric]()
+        return self.g_eval_metrics[metric]
 
     def _calculate_metric(self, metric: str, test_case: LLMTestCase) -> Dict[str, Any]:
         """Calculate a single metric for a test case with retry logic."""
-        metric_to_calculate = self.g_eval_metrics[metric]
+        metric_to_calculate = self._get_metric(metric)
 
         for attempt in range(self.n_retries):
             try:
@@ -58,7 +66,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
     ) -> List[Dict[str, Any]]:
         # evaluator_metrics contains all the necessary metrics that are gonna be evaluated dynamically
         for metric in evaluator_metrics:
-            if metric not in self.g_eval_metrics:
+            if metric not in self._metric_factories:
                 raise ValueError(f"Unsupported metric: {metric}")
 
         results = []

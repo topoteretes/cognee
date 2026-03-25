@@ -21,14 +21,15 @@ logger = get_logger()
 eval_params = EvalConfig(
     benchmark="BEAM",
     building_corpus_from_scratch=True,
-    number_of_samples_in_corpus=1,
+    number_of_samples_in_corpus=20,
     qa_engine="beam_router",
     answering_questions=True,
     evaluating_answers=True,
     evaluating_contexts=False,
     evaluation_engine="DeepEval",
-    evaluation_metrics=["rubric", "f1"],
+    evaluation_metrics=["rubric", "f1", "EM"],
     task_getter_type="Default",
+    chunks_per_batch=10,
     calculate_metrics=True,
     dashboard=True,
     questions_path="beam_questions.json",
@@ -40,7 +41,7 @@ eval_params = EvalConfig(
 
 # Use max_batches=1 to truncate the conversation to ~1 session for faster local runs.
 # Remove or increase this for full evaluation.
-BEAM_MAX_BATCHES = 1
+BEAM_MAX_BATCHES = None  # None = use all sessions
 
 
 async def main():

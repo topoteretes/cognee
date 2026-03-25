@@ -18,7 +18,9 @@ logger = get_logger()
 
 
 def _get_llm_client():
-    from cognee.infrastructure.llm.get_llm_client import get_llm_client
+    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
+        get_llm_client,
+    )
 
     return get_llm_client()
 

@@ -3,6 +3,7 @@ import inspect
 from typing import Dict, Type, List, Optional
 from pydantic import BaseModel
 
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.ontology.ontology_config import Config
@@ -25,6 +26,8 @@ from cognee.tasks.graph.exceptions import (
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
+
+logger = get_logger(__name__)
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -157,18 +160,30 @@ async def extract_graph_from_data(
     if not non_dlt_chunks:
         return data_chunks
 
+    from cognee.shared.concurrent_utils import gather_with_concurrency
+    from cognee.infrastructure.llm.config import get_llm_config
+
+    llm_config = get_llm_config()
+    max_concurrent = kwargs.pop("max_concurrent", llm_config.llm_max_concurrent)
+
     calculate_chunk_graphs = kwargs.get("calculate_chunk_graphs")
     if callable(calculate_chunk_graphs):
         extracted = calculate_chunk_graphs(non_dlt_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
-        chunk_graphs = await asyncio.gather(
-            *[
-                extract_content_graph(
-                    chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
-                )
-                for chunk in non_dlt_chunks
-            ]
+        total = len(non_dlt_chunks)
+        logger.info("Extracting graphs from %d chunks (max_concurrent=%d)", total, max_concurrent)
+
+        async def _extract_one(index: int, chunk: "DocumentChunk"):
+            result = await extract_content_graph(
+                chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+            )
+            logger.info("Graph extraction: completed chunk %d/%d", index + 1, total)
+            return result
+
+        chunk_graphs = await gather_with_concurrency(
+            max_concurrent,
+            *[_extract_one(i, chunk) for i, chunk in enumerate(non_dlt_chunks)],
         )
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
     if callable(cache_entity_embeddings):

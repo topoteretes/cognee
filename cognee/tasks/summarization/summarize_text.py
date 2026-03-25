@@ -65,8 +65,15 @@ async def summarize_text(
         cognee_config = get_cognify_config()
         summarization_model = cognee_config.summarization_model
 
-    chunk_summaries = await asyncio.gather(
-        *[extract_summary(chunk.text, summarization_model) for chunk in non_dlt_chunks]
+    from cognee.shared.concurrent_utils import gather_with_concurrency
+    from cognee.infrastructure.llm.config import get_llm_config
+
+    llm_config = get_llm_config()
+    max_concurrent = llm_config.llm_max_concurrent
+
+    chunk_summaries = await gather_with_concurrency(
+        max_concurrent,
+        *[extract_summary(chunk.text, summarization_model) for chunk in non_dlt_chunks],
     )
 
     summaries = [

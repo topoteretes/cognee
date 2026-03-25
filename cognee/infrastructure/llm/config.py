@@ -69,6 +69,10 @@ class LLMConfig(BaseSettings):
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
 
+    llm_max_concurrent: int = (
+        5  # Max concurrent LLM calls in batch operations (e.g. graph extraction)
+    )
+
     llama_cpp_model_path: Optional[str] = None
     llama_cpp_n_ctx: int = 2048
     llama_cpp_n_gpu_layers: int = 0

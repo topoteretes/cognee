@@ -47,20 +47,28 @@ class CorpusBuilderExecutor:
         chunker=TextChunker,
         load_golden_context: bool = False,
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+        chunks_per_batch: Optional[int] = None,
     ) -> List[str]:
         self.load_corpus(
             limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
         )
-        await self.run_cognee(chunk_size=chunk_size, chunker=chunker)
+        await self.run_cognee(
+            chunk_size=chunk_size, chunker=chunker, chunks_per_batch=chunks_per_batch
+        )
         return self.questions
 
-    async def run_cognee(self, chunk_size=1024, chunker=TextChunker) -> None:
+    async def run_cognee(
+        self, chunk_size=1024, chunker=TextChunker, chunks_per_batch: Optional[int] = None
+    ) -> None:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 
         await cognee.add(self.raw_corpus)
 
-        tasks = await self.task_getter(chunk_size=chunk_size, chunker=chunker)
+        task_kwargs = {"chunk_size": chunk_size, "chunker": chunker}
+        if chunks_per_batch is not None:
+            task_kwargs["chunks_per_batch"] = chunks_per_batch
+        tasks = await self.task_getter(**task_kwargs)
         pipeline_run = run_pipeline(tasks=tasks)
 
         async for run_info in pipeline_run:

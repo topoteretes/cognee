@@ -110,13 +110,12 @@ class BEAMRouter:
 
     def _get_retriever(self, question_type: str) -> BaseRetriever:
         """Get or create a retriever instance for the given question type."""
-        retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
-        cls_name = retriever_cls.__name__
+        if question_type not in self._retriever_cache:
+            retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
+            system_prompt = self.get_system_prompt(question_type)
+            self._retriever_cache[question_type] = retriever_cls(system_prompt=system_prompt)
 
-        if cls_name not in self._retriever_cache:
-            self._retriever_cache[cls_name] = retriever_cls()
-
-        return self._retriever_cache[cls_name]
+        return self._retriever_cache[question_type]
 
     @staticmethod
     def get_system_prompt(question_type: str) -> str:
@@ -141,7 +140,6 @@ class BEAMRouter:
             golden_answer = instance["answer"]
 
             retriever = self._get_retriever(question_type)
-            system_prompt = self.get_system_prompt(question_type)
 
             try:
                 retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
@@ -152,7 +150,6 @@ class BEAMRouter:
                     query=query_text,
                     retrieved_objects=retrieved_objects,
                     context=retrieval_context,
-                    system_prompt=system_prompt,
                 )
 
                 if isinstance(search_results, str):

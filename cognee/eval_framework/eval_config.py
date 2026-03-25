@@ -11,6 +11,7 @@ class EvalConfig(BaseSettings):
     task_getter_type: str = (
         "Default"  # Options: 'Default', 'CascadeGraph', 'NoSummaries', 'JustChunks'
     )
+    chunks_per_batch: Optional[int] = None  # Override chunks_per_batch for the cognify pipeline
 
     # Question answering params
     answering_questions: bool = True
@@ -65,6 +66,7 @@ class EvalConfig(BaseSettings):
             "dashboard_path": self.dashboard_path,
             "deepeval_model": self.deepeval_model,
             "task_getter_type": self.task_getter_type,
+            "chunks_per_batch": self.chunks_per_batch,
             "direct_llm_system_prompt": self.direct_llm_system_prompt,
             "direct_llm_eval_prompt": self.direct_llm_eval_prompt,
             "instance_filter": self.instance_filter,
