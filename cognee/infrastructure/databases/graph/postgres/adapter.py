@@ -72,6 +72,13 @@ class PostgresAdapter(GraphDBInterface):
                 await session.execute(text(ddl))
             await session.commit()
 
+    async def _ensure_initialized(self) -> None:
+        """Re-run initialize() if tables were dropped (e.g. by prune_system).
+
+        Uses CREATE IF NOT EXISTS, so this is cheap and idempotent.
+        """
+        await self.initialize()
+
     @asynccontextmanager
     async def _session(self):
         """Yield an async session from the underlying engine."""
@@ -126,6 +133,7 @@ class PostgresAdapter(GraphDBInterface):
     # ------------------------------------------------------------------
 
     async def is_empty(self) -> bool:
+        await self._ensure_initialized()
         async with self._session() as session:
             result = await session.execute(
                 text("SELECT EXISTS(SELECT 1 FROM graph_node LIMIT 1)")
@@ -166,7 +174,7 @@ class PostgresAdapter(GraphDBInterface):
                 await session.execute(
                     text("""
                         INSERT INTO graph_node (id, name, type, properties, created_at, updated_at)
-                        VALUES (:id, :name, :type, :properties::jsonb, :now, :now)
+                        VALUES (:id, :name, :type, CAST(:properties AS jsonb), :now, :now)
                         ON CONFLICT (id) DO UPDATE SET
                             name = EXCLUDED.name,
                             type = EXCLUDED.type,
@@ -237,7 +245,7 @@ class PostgresAdapter(GraphDBInterface):
                     text("""
                         INSERT INTO graph_edge
                             (source_id, target_id, relationship_name, properties, created_at, updated_at)
-                        VALUES (:src, :tgt, :rel, :props::jsonb, :now, :now)
+                        VALUES (:src, :tgt, :rel, CAST(:props AS jsonb), :now, :now)
                         ON CONFLICT (source_id, target_id, relationship_name) DO UPDATE SET
                             properties = EXCLUDED.properties,
                             updated_at = EXCLUDED.updated_at
@@ -583,6 +591,7 @@ class PostgresAdapter(GraphDBInterface):
     # ------------------------------------------------------------------
 
     async def delete_graph(self) -> None:
+        await self._ensure_initialized()
         async with self._session() as session:
             await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
