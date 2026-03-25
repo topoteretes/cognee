@@ -52,6 +52,7 @@ async def run_graph_db_test(provider: str):
         quantum_path = str(TEST_DATA_DIR / "Quantum_computers.txt")
 
         from cognee.infrastructure.databases.graph import get_graph_engine
+
         graph_engine = await get_graph_engine()
 
         # Graph should be empty before cognify
@@ -71,6 +72,7 @@ async def run_graph_db_test(provider: str):
 
         # Search via vector to get a node name for graph queries
         from cognee.infrastructure.databases.vector import get_vector_engine
+
         vector_engine = get_vector_engine()
         random_node = (
             await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
@@ -106,18 +108,14 @@ async def run_graph_db_test(provider: str):
         await cognee.cognify([dataset_name])
 
         # Existing nodeset should return results
-        graph_retriever = GraphCompletionRetriever(
-            node_type=NodeSet, node_name=["first"]
-        )
+        graph_retriever = GraphCompletionRetriever(node_type=NodeSet, node_name=["first"])
         objects = await graph_retriever.get_retrieved_objects("What is in the context?")
         context_nonempty = await graph_retriever.get_context_from_objects(
             query="What is in the context?", retrieved_objects=objects
         )
 
         # Nonexistent nodeset should return empty
-        graph_retriever = GraphCompletionRetriever(
-            node_type=NodeSet, node_name=["nonexistent"]
-        )
+        graph_retriever = GraphCompletionRetriever(node_type=NodeSet, node_name=["nonexistent"])
         objects = await graph_retriever.get_retrieved_objects("What is in the context?")
         context_empty = await graph_retriever.get_context_from_objects(
             query="What is in the context?", retrieved_objects=objects

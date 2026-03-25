@@ -13,11 +13,14 @@ import pytest
 import pytest_asyncio
 
 from sqlalchemy import URL
-from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    SQLAlchemyAdapter,
+)
 from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
 
 
 # -- Fixture: real Postgres via SQLAlchemyAdapter --
+
 
 @pytest_asyncio.fixture
 async def adapter():
@@ -51,6 +54,7 @@ async def adapter():
 
 # -- Helpers --
 
+
 class _FakeDataPoint:
     """Minimal DataPoint-like object for testing."""
 
@@ -62,6 +66,7 @@ class _FakeDataPoint:
 
 
 # -- Tests: node operations --
+
 
 @pytest.mark.asyncio
 async def test_is_empty_on_fresh_db(adapter):
@@ -142,12 +147,15 @@ async def test_get_nodes_empty_ids(adapter):
 
 # -- Tests: edge operations --
 
+
 @pytest.mark.asyncio
 async def test_add_and_has_edge(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="e1", name="A", type="T"),
-        _FakeDataPoint(id="e2", name="B", type="T"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="e1", name="A", type="T"),
+            _FakeDataPoint(id="e2", name="B", type="T"),
+        ]
+    )
     await adapter.add_edge("e1", "e2", "KNOWS", {"since": 2020})
 
     assert await adapter.has_edge("e1", "e2", "KNOWS") is True
@@ -167,21 +175,25 @@ async def test_add_edges_batch(adapter):
     ]
     await adapter.add_edges(edges)
 
-    existing = await adapter.has_edges([
-        ("be0", "be1", "R1"),
-        ("be1", "be2", "R2"),
-        ("be0", "be2", "R3"),
-        ("be2", "be0", "R1"),  # does not exist
-    ])
+    existing = await adapter.has_edges(
+        [
+            ("be0", "be1", "R1"),
+            ("be1", "be2", "R2"),
+            ("be0", "be2", "R3"),
+            ("be2", "be0", "R1"),  # does not exist
+        ]
+    )
     assert len(existing) == 3
 
 
 @pytest.mark.asyncio
 async def test_add_edges_upsert(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="eu1", name="A", type="T"),
-        _FakeDataPoint(id="eu2", name="B", type="T"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="eu1", name="A", type="T"),
+            _FakeDataPoint(id="eu2", name="B", type="T"),
+        ]
+    )
     await adapter.add_edges([("eu1", "eu2", "R", {"v": 1})])
     await adapter.add_edges([("eu1", "eu2", "R", {"v": 2})])
 
@@ -192,10 +204,12 @@ async def test_add_edges_upsert(adapter):
 
 @pytest.mark.asyncio
 async def test_get_edges(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="ge1", name="A", type="T"),
-        _FakeDataPoint(id="ge2", name="B", type="T"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="ge1", name="A", type="T"),
+            _FakeDataPoint(id="ge2", name="B", type="T"),
+        ]
+    )
     await adapter.add_edge("ge1", "ge2", "LINKS")
 
     edges = await adapter.get_edges("ge1")
@@ -205,10 +219,12 @@ async def test_get_edges(adapter):
 @pytest.mark.asyncio
 async def test_cascade_delete(adapter):
     """Deleting a node should cascade-delete its edges."""
-    await adapter.add_nodes([
-        _FakeDataPoint(id="cd1", name="A", type="T"),
-        _FakeDataPoint(id="cd2", name="B", type="T"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="cd1", name="A", type="T"),
+            _FakeDataPoint(id="cd2", name="B", type="T"),
+        ]
+    )
     await adapter.add_edge("cd1", "cd2", "R")
     await adapter.delete_node("cd1")
 
@@ -217,17 +233,22 @@ async def test_cascade_delete(adapter):
 
 # -- Tests: neighbor and connection queries --
 
+
 @pytest.mark.asyncio
 async def test_get_neighbors(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="nb1", name="Center", type="T"),
-        _FakeDataPoint(id="nb2", name="Left", type="T"),
-        _FakeDataPoint(id="nb3", name="Right", type="T"),
-    ])
-    await adapter.add_edges([
-        ("nb1", "nb2", "R1", {}),
-        ("nb3", "nb1", "R2", {}),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="nb1", name="Center", type="T"),
+            _FakeDataPoint(id="nb2", name="Left", type="T"),
+            _FakeDataPoint(id="nb3", name="Right", type="T"),
+        ]
+    )
+    await adapter.add_edges(
+        [
+            ("nb1", "nb2", "R1", {}),
+            ("nb3", "nb1", "R2", {}),
+        ]
+    )
 
     neighbors = await adapter.get_neighbors("nb1")
     neighbor_ids = {n["id"] for n in neighbors}
@@ -236,10 +257,12 @@ async def test_get_neighbors(adapter):
 
 @pytest.mark.asyncio
 async def test_get_connections(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="cn1", name="A", type="T"),
-        _FakeDataPoint(id="cn2", name="B", type="T"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="cn1", name="A", type="T"),
+            _FakeDataPoint(id="cn2", name="B", type="T"),
+        ]
+    )
     await adapter.add_edge("cn1", "cn2", "LINKED")
 
     connections = await adapter.get_connections("cn1")
@@ -250,12 +273,15 @@ async def test_get_connections(adapter):
 
 # -- Tests: graph-wide reads --
 
+
 @pytest.mark.asyncio
 async def test_get_graph_data(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="gd1", name="A", type="T"),
-        _FakeDataPoint(id="gd2", name="B", type="T"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="gd1", name="A", type="T"),
+            _FakeDataPoint(id="gd2", name="B", type="T"),
+        ]
+    )
     await adapter.add_edge("gd1", "gd2", "R")
 
     nodes, edges = await adapter.get_graph_data()
@@ -273,15 +299,19 @@ async def test_get_graph_data_empty(adapter):
 
 @pytest.mark.asyncio
 async def test_get_nodeset_subgraph(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="ns1", name="Alpha", type="Entity"),
-        _FakeDataPoint(id="ns2", name="Beta", type="Entity"),
-        _FakeDataPoint(id="ns3", name="Gamma", type="Other"),
-    ])
-    await adapter.add_edges([
-        ("ns1", "ns2", "R", {}),
-        ("ns1", "ns3", "R", {}),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="ns1", name="Alpha", type="Entity"),
+            _FakeDataPoint(id="ns2", name="Beta", type="Entity"),
+            _FakeDataPoint(id="ns3", name="Gamma", type="Other"),
+        ]
+    )
+    await adapter.add_edges(
+        [
+            ("ns1", "ns2", "R", {}),
+            ("ns1", "ns3", "R", {}),
+        ]
+    )
 
     # Create a fake type with __name__ == "Entity"
     class Entity:
@@ -297,11 +327,13 @@ async def test_get_nodeset_subgraph(adapter):
 
 @pytest.mark.asyncio
 async def test_get_filtered_graph_data(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="fg1", name="A", type="X"),
-        _FakeDataPoint(id="fg2", name="B", type="Y"),
-        _FakeDataPoint(id="fg3", name="C", type="X"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="fg1", name="A", type="X"),
+            _FakeDataPoint(id="fg2", name="B", type="Y"),
+            _FakeDataPoint(id="fg3", name="C", type="X"),
+        ]
+    )
     await adapter.add_edge("fg1", "fg3", "R")
 
     nodes, edges = await adapter.get_filtered_graph_data([{"type": ["X"]}])
@@ -312,12 +344,15 @@ async def test_get_filtered_graph_data(adapter):
 
 # -- Tests: metrics --
 
+
 @pytest.mark.asyncio
 async def test_get_graph_metrics_basic(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="m1", name="A", type="T"),
-        _FakeDataPoint(id="m2", name="B", type="T"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="m1", name="A", type="T"),
+            _FakeDataPoint(id="m2", name="B", type="T"),
+        ]
+    )
     await adapter.add_edge("m1", "m2", "R")
 
     metrics = await adapter.get_graph_metrics()
@@ -326,6 +361,7 @@ async def test_get_graph_metrics_basic(adapter):
 
 
 # -- Tests: delete_graph --
+
 
 @pytest.mark.asyncio
 async def test_delete_graph(adapter):
@@ -339,12 +375,15 @@ async def test_delete_graph(adapter):
 
 # -- Tests: triplets --
 
+
 @pytest.mark.asyncio
 async def test_get_triplets_batch(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="t1", name="Start", type="T"),
-        _FakeDataPoint(id="t2", name="End", type="T"),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="t1", name="Start", type="T"),
+            _FakeDataPoint(id="t2", name="End", type="T"),
+        ]
+    )
     await adapter.add_edge("t1", "t2", "CONNECTS")
 
     triplets = await adapter.get_triplets_batch(offset=0, limit=10)
@@ -356,15 +395,19 @@ async def test_get_triplets_batch(adapter):
 
 @pytest.mark.asyncio
 async def test_get_triplets_batch_offset(adapter):
-    await adapter.add_nodes([
-        _FakeDataPoint(id="to1", name="A", type="T"),
-        _FakeDataPoint(id="to2", name="B", type="T"),
-        _FakeDataPoint(id="to3", name="C", type="T"),
-    ])
-    await adapter.add_edges([
-        ("to1", "to2", "R1", {}),
-        ("to1", "to3", "R2", {}),
-    ])
+    await adapter.add_nodes(
+        [
+            _FakeDataPoint(id="to1", name="A", type="T"),
+            _FakeDataPoint(id="to2", name="B", type="T"),
+            _FakeDataPoint(id="to3", name="C", type="T"),
+        ]
+    )
+    await adapter.add_edges(
+        [
+            ("to1", "to2", "R1", {}),
+            ("to1", "to3", "R2", {}),
+        ]
+    )
 
     all_triplets = await adapter.get_triplets_batch(offset=0, limit=10)
     assert len(all_triplets) == 2
@@ -382,6 +425,7 @@ async def test_get_triplets_batch_validation(adapter):
 
 
 # -- Tests: query raises --
+
 
 @pytest.mark.asyncio
 async def test_query_raises_not_implemented(adapter):

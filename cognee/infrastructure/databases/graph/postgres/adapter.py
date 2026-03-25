@@ -107,7 +107,9 @@ class PostgresAdapter(GraphDBInterface):
         """Convert a (id, name, type, properties) row to a merged dict."""
         data = {"id": row.id, "name": row.name, "type": row.type}
         if row.properties:
-            props = row.properties if isinstance(row.properties, dict) else json.loads(row.properties)
+            props = (
+                row.properties if isinstance(row.properties, dict) else json.loads(row.properties)
+            )
             data.update(props)
         return data
 
@@ -135,12 +137,12 @@ class PostgresAdapter(GraphDBInterface):
     async def is_empty(self) -> bool:
         await self._ensure_initialized()
         async with self._session() as session:
-            result = await session.execute(
-                text("SELECT EXISTS(SELECT 1 FROM graph_node LIMIT 1)")
-            )
+            result = await session.execute(text("SELECT EXISTS(SELECT 1 FROM graph_node LIMIT 1)"))
             return not result.scalar()
 
-    async def add_node(self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None) -> None:
+    async def add_node(
+        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Wrapper: add a single node via add_nodes."""
         if isinstance(node, str):
             props = properties or {}
@@ -225,7 +227,9 @@ class PostgresAdapter(GraphDBInterface):
         properties: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Wrapper: add a single edge via add_edges."""
-        await self.add_edges([(str(source_id), str(target_id), relationship_name, properties or {})])
+        await self.add_edges(
+            [(str(source_id), str(target_id), relationship_name, properties or {})]
+        )
 
     async def add_edges(
         self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
@@ -250,8 +254,13 @@ class PostgresAdapter(GraphDBInterface):
                             properties = EXCLUDED.properties,
                             updated_at = EXCLUDED.updated_at
                     """),
-                    {"src": source_id, "tgt": target_id, "rel": rel_name,
-                     "props": props_json, "now": now},
+                    {
+                        "src": source_id,
+                        "tgt": target_id,
+                        "rel": rel_name,
+                        "props": props_json,
+                        "now": now,
+                    },
                 )
             await session.commit()
 
@@ -532,7 +541,8 @@ class PostgresAdapter(GraphDBInterface):
             edge_density = num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0
 
             # Connected components via recursive CTE
-            comp_result = await session.execute(text("""
+            comp_result = await session.execute(
+                text("""
                 WITH RECURSIVE component AS (
                     SELECT id AS node_id, id AS comp_root
                     FROM graph_node
@@ -552,7 +562,8 @@ class PostgresAdapter(GraphDBInterface):
                 FROM node_comp
                 GROUP BY comp_id
                 ORDER BY sz DESC
-            """))
+            """)
+            )
             comp_rows = comp_result.fetchall()
             num_components = len(comp_rows)
             component_sizes = [row[1] for row in comp_rows]
@@ -640,9 +651,11 @@ class PostgresAdapter(GraphDBInterface):
                 if row[9]:
                     end_node.update(row[9] if isinstance(row[9], dict) else json.loads(row[9]))
 
-                triplets.append({
-                    "start_node": start_node,
-                    "relationship_properties": rel,
-                    "end_node": end_node,
-                })
+                triplets.append(
+                    {
+                        "start_node": start_node,
+                        "relationship_properties": rel,
+                        "end_node": end_node,
+                    }
+                )
             return triplets
