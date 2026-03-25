@@ -4,35 +4,146 @@ import inspect
 from cognee.pipelines.types import _Drop
 
 
+class BoundTask:
+    """A Task with pre-bound keyword arguments, ready for pipeline chaining.
+
+    Created by calling a TaskSpec. The first positional argument (pipeline data)
+    is supplied at execution time by run_pipeline; all other kwargs are captured
+    at definition time.
+
+    Example::
+
+        extract = task(extract_graph, batch_size=20)
+        bound = extract(graph_model=KnowledgeGraph)
+        # bound.task has batch_size=20
+        # bound.kwargs has {"graph_model": KnowledgeGraph}
+        # When the pipeline runs: extract_graph(pipeline_data, graph_model=KnowledgeGraph)
+    """
+
+    def __init__(self, inner_task: "Task", **kwargs):
+        self.task = inner_task
+        self.kwargs = kwargs
+
+    def __repr__(self):
+        name = self.task.executable.__name__
+        params = ", ".join(f"{k}={v!r}" for k, v in self.kwargs.items())
+        bs = self.task.task_config.get("batch_size", 1)
+        return f"BoundTask({name}({params}), batch_size={bs})"
+
+
+class TaskSpec:
+    """Callable wrapper returned by @task.
+
+    Calling a TaskSpec does NOT execute the function — it returns a BoundTask
+    that captures kwargs for later execution by run_pipeline.
+
+    Supports three usage patterns::
+
+        # As a decorator
+        @task(batch_size=20)
+        async def extract_graph(chunks, graph_model=None): ...
+
+        # As a functional wrapper
+        extract_graph_task = task(extract_graph_existing, batch_size=20)
+
+        # Both produce a TaskSpec. Calling it creates a BoundTask:
+        bound = extract_graph_task(graph_model=KnowledgeGraph)
+        bound = extract_graph_task(graph_model=KnowledgeGraph, batch_size=5)
+
+        # Use in a pipeline:
+        await run_pipeline([
+            classify_task(),
+            extract_graph_task(graph_model=KnowledgeGraph),
+        ], data=raw_input, dataset="main")
+
+    To call the underlying function directly (for testing), use .direct()::
+
+        result = await extract_graph_task.direct(chunks, graph_model=KnowledgeGraph)
+    """
+
+    def __init__(self, fn, batch_size=None, enriches=False, **default_params):
+        self._fn = fn
+        self._batch_size = batch_size
+        self._enriches = enriches
+        self._default_params = default_params
+
+        # Pre-build the base Task
+        self._base_task = Task(fn, batch_size=batch_size, enriches=enriches, **default_params)
+
+        # Copy function metadata for introspection
+        self.__name__ = fn.__name__
+        self.__doc__ = fn.__doc__
+        self.__module__ = getattr(fn, "__module__", None)
+        self.__wrapped__ = fn
+
+    def __call__(self, **kwargs) -> BoundTask:
+        """Create a BoundTask with pre-bound kwargs.
+
+        Special kwargs:
+            batch_size: Override the Task's batch_size for this pipeline step.
+            enriches: Override the enriches flag for this pipeline step.
+
+        All other kwargs are passed to the underlying function at execution time.
+        """
+        batch_size = kwargs.pop("batch_size", None)
+        enriches = kwargs.pop("enriches", None)
+
+        if batch_size is not None or enriches is not None:
+            inner = self._base_task.with_config(
+                **({"batch_size": batch_size} if batch_size is not None else {}),
+                **({"enriches": enriches} if enriches is not None else {}),
+            )
+        else:
+            inner = self._base_task
+
+        return BoundTask(inner, **kwargs)
+
+    @property
+    def task(self) -> "Task":
+        """Access the underlying Task directly (backward compat)."""
+        return self._base_task
+
+    def direct(self, *args, **kwargs):
+        """Call the underlying function directly (for testing/one-off use).
+
+        Returns the raw coroutine/generator/value — not a BoundTask.
+        """
+        merged = {**self._default_params, **kwargs}
+        return self._fn(*args, **merged)
+
+    def __repr__(self):
+        bs = self._batch_size
+        return f"TaskSpec({self.__name__}, batch_size={bs})"
+
+
 def task(fn=None, *, batch_size=None, enriches=False, **default_params):
-    """Decorator that wraps a function into a Task.
+    """Create a TaskSpec from a function.
 
-    The decorated function stays directly callable — no deferred execution.
-    The Task is attached as a `.task` attribute so pipeline code can use it.
+    Can be used as a decorator or as a functional wrapper::
 
-    Can be used with or without arguments:
-
+        # Decorator (with or without arguments)
         @task
-        async def classify_documents(data):
-            ...
+        async def classify(data): ...
 
         @task(batch_size=20)
-        async def extract_graph(chunks, graph_model):
-            ...
+        async def extract(chunks, graph_model=None): ...
 
-    Then build pipelines with the .task attribute:
+        # Functional wrapper (for functions you don't own)
+        extract_task = task(extract_graph_existing, batch_size=20)
 
-        tasks = [classify_documents.task, extract_graph.task]
+    Calling the result returns a BoundTask for use in run_pipeline::
 
-    Or override config at the call site:
+        await run_pipeline([
+            classify(),                              # no extra kwargs
+            extract(graph_model=KnowledgeGraph),     # bind config
+            extract(graph_model=KG, batch_size=5),   # override batch_size
+        ], data=input_data)
 
-        tasks = [extract_graph.task.with_config(batch_size=10)]
+    To call the function directly (testing): extract.direct(chunks, graph_model=KG)
     """
 
     def decorator(func):
-        t = Task(func, batch_size=batch_size, enriches=enriches, **default_params)
-        func.task = t
-        return func
+        return TaskSpec(func, batch_size=batch_size, enriches=enriches, **default_params)
 
     if fn is not None:
         return decorator(fn)

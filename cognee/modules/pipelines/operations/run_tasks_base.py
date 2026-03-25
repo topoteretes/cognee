@@ -14,7 +14,6 @@ from cognee.modules.observability import (
     COGNEE_RESULT_COUNT,
 )
 from cognee.infrastructure.engine import DataPoint
-from cognee.pipelines.types import get_ctx_param_name  # Direct import to avoid circular
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
