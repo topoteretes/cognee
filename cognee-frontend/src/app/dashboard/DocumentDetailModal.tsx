@@ -258,6 +258,7 @@ export default function DocumentDetailModal({
               {!nodes?.chunks || nodes.chunks.length === 0 ? (
                 <div className="text-gray-400 text-sm py-4">No chunks available.</div>
               ) : (
+                // Defensive sort — backend sorts by chunk_index, but we ensure order client-side
                 nodes.chunks
                   .slice()
                   .sort((a, b) => (a.chunk_index ?? 0) - (b.chunk_index ?? 0))

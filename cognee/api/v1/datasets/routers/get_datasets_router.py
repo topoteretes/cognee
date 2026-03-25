@@ -536,6 +536,7 @@ def get_datasets_router() -> APIRouter:
     @router.get(
         "/{dataset_id}/document-nodes/{data_id}",
         response_model=DocumentNodesDTO,
+        responses={404: {"model": ErrorResponseDTO}},
     )
     async def get_document_nodes(
         dataset_id: UUID,
@@ -561,6 +562,17 @@ def get_datasets_router() -> APIRouter:
         - **entities**: List of extracted Entity nodes
         - **summaries**: List of TextSummary nodes
         """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/document-nodes/{str(data_id)}",
+                "dataset_id": str(dataset_id),
+                "data_id": str(data_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
         from sqlalchemy import text as sql_text
 
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
