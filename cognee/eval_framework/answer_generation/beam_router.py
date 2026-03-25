@@ -9,10 +9,10 @@ from typing import Any, Dict, List, Optional
 
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
-from cognee.modules.retrieval.graph_summary_completion_retriever import (
-    GraphSummaryCompletionRetriever,
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
 )
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -73,20 +73,25 @@ _TYPE_PROMPTS: Dict[str, str] = {
     ),
 }
 
-# Map question types to retriever classes
+# Map question types to retriever classes.
+# Retriever choice rationale:
+#   GraphCompletionRetriever      – direct triplet lookup, best for factual queries
+#   GraphCompletionContextExtensionRetriever – iteratively widens evidence window
+#   CompletionRetriever           – RAG over raw chunks, better coverage for summaries
 _TYPE_RETRIEVERS: Dict[str, type] = {
+    # Direct factual lookup
     "information_extraction": GraphCompletionRetriever,
-    "temporal_reasoning": GraphCompletionRetriever,
-    "event_ordering": GraphCompletionRetriever,
-    "knowledge_update": GraphCompletionRetriever,
     "abstention": GraphCompletionRetriever,
     "preference_following": GraphCompletionRetriever,
-    "instruction_following": GraphCompletionRetriever,
-    # These require multi-step reasoning
-    "multi_session_reasoning": GraphCompletionCotRetriever,
-    "contradiction_resolution": GraphCompletionCotRetriever,
-    # Summarization benefits from pre-computed summaries
-    "summarization": GraphSummaryCompletionRetriever,
+    # Wider context to find evidence across sessions and resolve ambiguity
+    "temporal_reasoning": GraphCompletionContextExtensionRetriever,
+    "event_ordering": GraphCompletionContextExtensionRetriever,
+    "knowledge_update": GraphCompletionContextExtensionRetriever,
+    "multi_session_reasoning": GraphCompletionContextExtensionRetriever,
+    "contradiction_resolution": GraphCompletionContextExtensionRetriever,
+    "instruction_following": GraphCompletionContextExtensionRetriever,
+    # RAG over raw chunks — better detail coverage than graph summaries
+    "summarization": CompletionRetriever,
 }
 
 _DEFAULT_PROMPT = (
@@ -113,7 +118,13 @@ class BEAMRouter:
         if question_type not in self._retriever_cache:
             retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
             system_prompt = self.get_system_prompt(question_type)
-            self._retriever_cache[question_type] = retriever_cls(system_prompt=system_prompt)
+            kwargs: Dict[str, Any] = {"system_prompt": system_prompt}
+
+            # CompletionRetriever (RAG) benefits from more chunks for summarization
+            if retriever_cls is CompletionRetriever:
+                kwargs["top_k"] = 10
+
+            self._retriever_cache[question_type] = retriever_cls(**kwargs)
 
         return self._retriever_cache[question_type]
 

@@ -50,10 +50,16 @@ async def run_corpus_builder(
         # Allow passing a pre-configured adapter instance (e.g., BEAM with max_batches)
         benchmark_arg = params["benchmark"]
         beam_max_batches = params.get("_beam_max_batches")
-        if benchmark_arg == "BEAM" and beam_max_batches is not None:
+        beam_conv_index = params.get("_beam_conversation_index")
+        if benchmark_arg == "BEAM" and (
+            beam_max_batches is not None or beam_conv_index is not None
+        ):
             from cognee.eval_framework.benchmark_adapters.beam_adapter import BEAMAdapter
 
-            benchmark_arg = BEAMAdapter(max_batches=beam_max_batches)
+            benchmark_arg = BEAMAdapter(
+                max_batches=beam_max_batches,
+                conversation_index=beam_conv_index or 0,
+            )
 
         corpus_builder = CorpusBuilderExecutor(
             benchmark=benchmark_arg,
