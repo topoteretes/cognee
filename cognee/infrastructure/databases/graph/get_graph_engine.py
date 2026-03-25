@@ -4,7 +4,7 @@ import inspect
 import os
 from numbers import Number
 
-from functools import lru_cache
+from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from .config import get_graph_context_config
@@ -116,7 +116,7 @@ def create_graph_engine(
     )
 
 
-@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_graph_engine(
     graph_database_provider,
     graph_file_path,

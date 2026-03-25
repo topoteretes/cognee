@@ -24,6 +24,7 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.infrastructure.databases.utils.idle_connection_manager import IdleConnectionManager
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
@@ -53,7 +54,6 @@ class KuzuAdapter(GraphDBInterface):
     def __init__(self, db_path: str):
         """Initialize Kuzu database connection and schema."""
         self.open_connections = 0
-        self._is_closed = False
         self.db_path = db_path  # Path for the database directory
         self.db: Optional[Database] = None
         self.connection: Optional[Connection] = None
@@ -66,6 +66,8 @@ class KuzuAdapter(GraphDBInterface):
             self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
         self._connection_change_lock = asyncio.Lock()
+        self._connection_lock = asyncio.Lock()
+        self._idle_manager = IdleConnectionManager(self)
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -235,80 +237,92 @@ class KuzuAdapter(GraphDBInterface):
 
             - List[Tuple]: A list of tuples representing the query results.
         """
-        with new_span("cognee.db.graph.query") as otel_span:
-            otel_span.set_attribute(COGNEE_DB_SYSTEM, "kuzu")
-            otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
+        async with self._idle_manager.using():
+            with new_span("cognee.db.graph.query") as otel_span:
+                otel_span.set_attribute(COGNEE_DB_SYSTEM, "kuzu")
+                otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
 
-            loop = asyncio.get_running_loop()
-            params = params or {}
+                loop = asyncio.get_running_loop()
+                params = params or {}
 
-            def blocking_query():
-                lock_acquired = False
-                try:
-                    if cache_config.shared_kuzu_lock:
-                        self.redis_lock.acquire_lock()
-                        lock_acquired = True
-                    if not self.connection:
-                        logger.info("Reconnecting to Kuzu database...")
-                        self._initialize_connection()
+                def blocking_query(connection):
+                    lock_acquired = False
+                    try:
+                        if cache_config.shared_kuzu_lock:
+                            self.redis_lock.acquire_lock()
+                            lock_acquired = True
 
-                    result = self.connection.execute(query, params)
-                    rows = []
+                        result = connection.execute(query, params)
+                        rows = []
 
-                    while result.has_next():
-                        row = result.get_next()
-                        processed_rows = []
-                        for val in row:
-                            if hasattr(val, "as_py"):
-                                val = val.as_py()
-                            processed_rows.append(val)
-                        rows.append(tuple(processed_rows))
+                        while result.has_next():
+                            row = result.get_next()
+                            processed_rows = []
+                            for val in row:
+                                if hasattr(val, "as_py"):
+                                    val = val.as_py()
+                                processed_rows.append(val)
+                            rows.append(tuple(processed_rows))
 
-                    return rows
-                except Exception as e:
-                    logger.error(f"Query execution failed: {str(e)}")
-                    raise
-                finally:
-                    if cache_config.shared_kuzu_lock and lock_acquired:
-                        try:
-                            self.close()
-                        finally:
+                        return rows
+                    except Exception as e:
+                        logger.error(f"Query execution failed: {str(e)}")
+                        raise
+                    finally:
+                        if cache_config.shared_kuzu_lock and lock_acquired:
                             self.redis_lock.release_lock()
 
-            try:
-                if cache_config.shared_kuzu_lock:
-                    async with self._connection_change_lock:
+                try:
+                    # Hold _connection_lock only for initialization, not for
+                    # the full query execution — allows concurrent queries
+                    # while the idle manager's active_count prevents close().
+                    async with self._connection_lock:
+                        connection = self.get_or_init_connection()
+
+                    if cache_config.shared_kuzu_lock:
                         self.open_connections += 1
                         logger.info(f"Open connections after open: {self.open_connections}")
                         try:
-                            result = blocking_query()
+                            result = blocking_query(connection)
                         finally:
                             self.open_connections -= 1
                             logger.info(f"Open connections after close: {self.open_connections}")
-                else:
-                    result = await loop.run_in_executor(self.executor, blocking_query)
+                            await self.close()
+                    else:
+                        result = await loop.run_in_executor(
+                            self.executor, blocking_query, connection
+                        )
 
-                otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
-                return result
-            except Exception as e:
-                otel_span.set_status(StatusCode.ERROR, str(e))
-                otel_span.record_exception(e)
+                    otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
+                    return result
+                except Exception as e:
+                    otel_span.set_status(StatusCode.ERROR, str(e))
+                    otel_span.record_exception(e)
 
-    def close(self):
-        if self.connection:
-            del self.connection
-            self.connection = None
-        if self.db:
-            del self.db
-            self.db = None
-        self._is_closed = True
-        logger.info("Kuzu database closed successfully")
+    def get_or_init_connection(self) -> Connection:
+        """Return the current connection, initializing it first if needed.
 
-    def reopen(self):
-        if self._is_closed:
-            self._is_closed = False
+        Callers must hold ``_connection_lock`` to prevent races with
+        ``close()`` being called from the idle manager's background task.
+        """
+        if not self.connection:
             self._initialize_connection()
-            logger.info("Kuzu database re-opened successfully")
+        return self.connection
+
+    async def close(self):
+        """Close the database and connection, releasing native resources.
+
+        Holds ``_connection_lock`` to prevent closing while a query is
+        initializing or using the connection.
+        """
+        async with self._connection_lock:
+            if self.connection:
+                self.connection.close()
+                self.connection = None
+            if self.db:
+                self.db.close()
+                self.db = None
+        logger.info("Kuzu database closed successfully")
 
     @asynccontextmanager
     async def get_session(self):
@@ -2026,12 +2040,7 @@ class KuzuAdapter(GraphDBInterface):
         It raises exceptions for failures occurring during deletion processes.
         """
         try:
-            if self.connection:
-                self.connection.close()
-                self.connection = None
-            if self.db:
-                self.db.close()
-                self.db = None
+            await self.close()
 
             db_dir = os.path.dirname(self.db_path)
             db_name = os.path.basename(self.db_path)
