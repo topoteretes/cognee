@@ -293,13 +293,16 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
-def _serialize_graph_object(obj):
+def _serialize_graph_object(obj: Any) -> Any:
     """Serialize Edge/Node objects into JSON-safe dicts.
 
     Edge and Node are plain Python classes with circular references
     (Edge.node1 → Node.skeleton_edges → [Edge, ...]) and numpy arrays
     (Node.status). jsonable_encoder() cannot handle these, so we convert
     them into flat dicts before they reach the serialization layer.
+
+    The function recursively normalizes nested structures (dicts, lists,
+    tuples) so that all values under ``attributes`` become JSON-safe.
     """
     import numpy as np
 
@@ -307,21 +310,17 @@ def _serialize_graph_object(obj):
         return {
             "node1": _serialize_graph_object(obj.node1),
             "node2": _serialize_graph_object(obj.node2),
-            "attributes": {
-                k: v.tolist() if isinstance(v, np.ndarray) else v
-                for k, v in obj.attributes.items()
-            },
+            "attributes": _serialize_graph_object(obj.attributes),
             "directed": obj.directed,
         }
     if isinstance(obj, Node):
         return {
             "id": obj.id,
-            "attributes": {
-                k: v.tolist() if isinstance(v, np.ndarray) else v
-                for k, v in obj.attributes.items()
-            },
+            "attributes": _serialize_graph_object(obj.attributes),
         }
-    if isinstance(obj, list):
+    if isinstance(obj, dict):
+        return {k: _serialize_graph_object(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
         return [_serialize_graph_object(item) for item in obj]
     if hasattr(obj, "tolist"):  # numpy arrays
         return obj.tolist()
