@@ -35,6 +35,8 @@ from cognee.modules.observability.tracing import (
 
 logger = get_logger()
 
+DEFAULT_BUFFER_POOL_SIZE = 100 * 1024 * 1024  # 100 MB
+DEFAULT_MAX_DB_SIZE = 4096 * 1024 * 1024  # 4 GB
 
 cache_config = get_cache_config()
 if cache_config.shared_kuzu_lock:
@@ -83,8 +85,8 @@ class KuzuAdapter(GraphDBInterface):
                     temp_graph_file = temp_file.name
                     tmp_db = Database(
                         temp_graph_file,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                        buffer_pool_size=DEFAULT_BUFFER_POOL_SIZE,
+                        max_db_size=DEFAULT_MAX_DB_SIZE,
                     )
                     tmp_db.init_database()
                     connection = Connection(tmp_db)
@@ -103,8 +105,8 @@ class KuzuAdapter(GraphDBInterface):
 
                 self.db = Database(
                     self.temp_graph_file,
-                    buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                    max_db_size=4096 * 1024 * 1024,
+                    buffer_pool_size=DEFAULT_BUFFER_POOL_SIZE,
+                    max_db_size=DEFAULT_MAX_DB_SIZE,
                 )
             else:
                 # Ensure the parent directory exists before creating the database
@@ -124,8 +126,8 @@ class KuzuAdapter(GraphDBInterface):
                 try:
                     self.db = Database(
                         self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                        buffer_pool_size=DEFAULT_BUFFER_POOL_SIZE,
+                        max_db_size=DEFAULT_MAX_DB_SIZE,
                     )
                 except RuntimeError:
                     from .kuzu_migrate import read_kuzu_storage_version
@@ -148,8 +150,8 @@ class KuzuAdapter(GraphDBInterface):
 
                     self.db = Database(
                         self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                        buffer_pool_size=DEFAULT_BUFFER_POOL_SIZE,
+                        max_db_size=DEFAULT_MAX_DB_SIZE,
                     )
 
             self.db.init_database()
