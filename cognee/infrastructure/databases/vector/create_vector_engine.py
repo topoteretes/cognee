@@ -181,6 +181,13 @@ def _create_vector_engine(
             embedding_engine=embedding_engine,
         )
 
+    elif vector_db_provider.lower() == "pghybrid":
+        raise EnvironmentError(
+            "The 'pghybrid' provider is a hybrid graph+vector backend and cannot be "
+            "created through get_vector_engine(). Use get_unified_engine() instead, "
+            "which returns a UnifiedStoreEngine with both .graph and .vector access."
+        )
+
     elif vector_db_provider.lower() == "lancedb":
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 

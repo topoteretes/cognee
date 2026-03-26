@@ -126,6 +126,13 @@ def _create_graph_engine(
         relational_engine = get_relational_engine()
         return PostgresAdapter(relational_engine=relational_engine)
 
+    elif graph_database_provider == "pghybrid":
+        raise EnvironmentError(
+            "The 'pghybrid' provider is a hybrid graph+vector backend and cannot be "
+            "created through get_graph_engine(). Use get_unified_engine() instead, "
+            "which returns a UnifiedStoreEngine with both .graph and .vector access."
+        )
+
     elif graph_database_provider == "kuzu":
         if not graph_file_path:
             raise EnvironmentError("Missing required Kuzu database path.")
@@ -204,5 +211,5 @@ def _create_graph_engine(
 
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'postgres', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'postgres', 'pghybrid', 'neptune', 'neptune_analytics'])}"
     )
