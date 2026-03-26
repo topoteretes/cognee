@@ -80,7 +80,7 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 - Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
 
 <div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_products.png" alt="Cognee Products" width="80%" />
+  <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
 </div>
 
 
