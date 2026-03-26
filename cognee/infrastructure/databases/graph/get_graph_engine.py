@@ -95,11 +95,14 @@ def _create_graph_engine(
     if graph_database_provider in supported_databases:
         adapter = supported_databases[graph_database_provider]
 
+        # Coerce empty/None port to None so adapters can apply their own defaults
+        port = graph_database_port if graph_database_port not in ("", None) else None
+
         return adapter(
             graph_database_url=graph_database_url,
             graph_database_username=graph_database_username,
             graph_database_password=graph_database_password,
-            graph_database_port=graph_database_port,
+            graph_database_port=port,
             graph_database_key=graph_database_key,
             database_name=graph_database_name,
         )
