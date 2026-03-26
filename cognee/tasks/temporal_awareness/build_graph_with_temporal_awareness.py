@@ -1,6 +1,6 @@
 import os
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
@@ -32,7 +32,7 @@ async def build_graph_with_temporal_awareness(data: List[Data]):
             episode_body=text,
             source=EpisodeType.text,
             source_description="input",
-            reference_time=datetime.now(),
+            reference_time=datetime.now(timezone.utc),
         )
         print(f"Added text: {text[:35]}...")
 
