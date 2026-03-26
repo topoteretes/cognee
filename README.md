@@ -88,12 +88,17 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 ### Examples
 
 ```python
-Use Case 1: Customer Support Agent
-Goal: Resolve customer issues using their personal data across finance, support, and product history.
+Use Case 1:
+  Customer Support Agent
 
-User: "My invoice looks wrong and the issue is still not resolved."
+Goal:
+  Resolve customer issues using their personal data across finance, support, and product history.
 
-Cognee tracks: past interactions, failed actions, resolved cases, product history
+User:
+  "My invoice looks wrong and the issue is still not resolved."
+
+Cognee tracks:
+  past interactions, failed actions, resolved cases, product history
 
 # Agent response:
 Agent: "I found 2 similar billing cases resolved last month.
