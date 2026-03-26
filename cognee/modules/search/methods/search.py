@@ -293,45 +293,6 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
-def _serialize_result_objects(objects: Any) -> Any:
-    """Serialize objects_result, converting Edge objects to JSON-safe dicts.
-
-    Edge and Node objects in CogneeGraphElements have circular references
-    (Edge.node1 → Node.skeleton_edges → [Edge, ...]) which cause
-    ``jsonable_encoder`` to raise ``RecursionError``.  This helper breaks
-    the cycle by extracting only the essential fields.
-    """
-    if not objects:
-        return objects
-
-    # Handle a single Edge object (result_object is typed as Any)
-    if isinstance(objects, Edge):
-        return {
-            "source_node_id": objects.node1.id,
-            "target_node_id": objects.node2.id,
-            "source_node_attributes": objects.node1.attributes,
-            "target_node_attributes": objects.node2.attributes,
-            "edge_attributes": objects.attributes,
-        }
-
-    if not isinstance(objects, list):
-        return objects
-
-    serialized = []
-    for obj in objects:
-        if isinstance(obj, Edge):
-            serialized.append({
-                "source_node_id": obj.node1.id,
-                "target_node_id": obj.node2.id,
-                "source_node_attributes": obj.node1.attributes,
-                "target_node_attributes": obj.node2.attributes,
-                "edge_attributes": obj.attributes,
-            })
-        else:
-            serialized.append(obj)
-    return serialized
-
-
 def _backwards_compatible_search_results(search_results, verbose: bool):
     """
     Prepares search results in a format compatible with previous versions of the API.
@@ -350,9 +311,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 # Include all different types of results only in verbose mode
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
-                search_result_dict["objects_result"] = _serialize_result_objects(
-                    search_result.result_object
-                )
+                search_result_dict["objects_result"] = search_result.result_object
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -367,9 +326,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict = {
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
-                    "objects_result": _serialize_result_objects(
-                        search_result.result_object
-                    ),
+                    "objects_result": search_result.result_object,
                 }
                 return_value.append(search_result_dict)
             return return_value
