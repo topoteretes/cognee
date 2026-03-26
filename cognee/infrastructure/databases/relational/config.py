@@ -41,7 +41,9 @@ class RelationalConfig(BaseSettings):
                 #       It is later returned to a dictionary format
                 self.database_connect_args = tuple(sorted(parsed_args.items()))
             else:
-                self.database_connect_args = {}
+                raise ValueError(
+                    "DATABASE_CONNECT_ARGS must be a JSON string representing a dictionary"
+                )
 
         # Parse pool_args if provided as JSON string
         if self.pool_args and isinstance(self.pool_args, str):
@@ -51,7 +53,7 @@ class RelationalConfig(BaseSettings):
                 #       It is later returned to a dictionary format
                 self.pool_args = tuple(sorted(parsed_args.items()))
             else:
-                self.pool_args = {}
+                raise ValueError("POOL_ARGS must be a JSON string representing a dictionary")
 
         return self
 
