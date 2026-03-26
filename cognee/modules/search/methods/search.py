@@ -13,7 +13,7 @@ from cognee.context_global_variables import (
 )
 
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.search.types import (
     SearchResult,
     SearchType,
@@ -293,6 +293,41 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
+def _serialize_graph_object(obj):
+    """Serialize Edge/Node objects into JSON-safe dicts.
+
+    Edge and Node are plain Python classes with circular references
+    (Edge.node1 → Node.skeleton_edges → [Edge, ...]) and numpy arrays
+    (Node.status). jsonable_encoder() cannot handle these, so we convert
+    them into flat dicts before they reach the serialization layer.
+    """
+    import numpy as np
+
+    if isinstance(obj, Edge):
+        return {
+            "node1": _serialize_graph_object(obj.node1),
+            "node2": _serialize_graph_object(obj.node2),
+            "attributes": {
+                k: v.tolist() if isinstance(v, np.ndarray) else v
+                for k, v in obj.attributes.items()
+            },
+            "directed": obj.directed,
+        }
+    if isinstance(obj, Node):
+        return {
+            "id": obj.id,
+            "attributes": {
+                k: v.tolist() if isinstance(v, np.ndarray) else v
+                for k, v in obj.attributes.items()
+            },
+        }
+    if isinstance(obj, list):
+        return [_serialize_graph_object(item) for item in obj]
+    if hasattr(obj, "tolist"):  # numpy arrays
+        return obj.tolist()
+    return obj
+
+
 def _backwards_compatible_search_results(search_results, verbose: bool):
     """
     Prepares search results in a format compatible with previous versions of the API.
@@ -311,7 +346,9 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 # Include all different types of results only in verbose mode
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
-                search_result_dict["objects_result"] = search_result.result_object
+                search_result_dict["objects_result"] = _serialize_graph_object(
+                    search_result.result_object
+                )
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -326,7 +363,9 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict = {
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
-                    "objects_result": search_result.result_object,
+                    "objects_result": _serialize_graph_object(
+                        search_result.result_object
+                    ),
                 }
                 return_value.append(search_result_dict)
             return return_value
