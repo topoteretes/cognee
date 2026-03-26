@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from fastapi.encoders import jsonable_encoder
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
@@ -201,3 +202,18 @@ def test_edge_hash_undirected():
     node2 = Node("node2")
     edge = Edge(node1, node2, directed=False)
     assert hash(edge) == hash(frozenset({node1, node2}))
+
+
+def test_edge_jsonable_encoder_serialization():
+    """Test that Edge can be serialized with jsonable_encoder."""
+    node1 = Node("node1", {"label": "A"})
+    node2 = Node("node2", {"label": "B"})
+    edge = Edge(node1, node2, {"weight": 0.7}, directed=True, dimension=2)
+
+    encoded = jsonable_encoder(edge)
+
+    assert encoded["node1"]["node_id"] == "node1"
+    assert encoded["node2"]["node_id"] == "node2"
+    assert encoded["status"] == [1, 1]
+    assert encoded["attributes"]["weight"] == 0.7
+    assert encoded["attributes"]["vector_distance"] is None
