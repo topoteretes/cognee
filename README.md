@@ -109,6 +109,28 @@ Agent: "I found 2 similar billing cases resolved last month.
 - Updates memory after execution so the agent never repeats the same mistake
 ```
 
+```python
+Use Case 2: Expert Knowledge Distillation (SQL Copilot)
+
+Goal: Help junior analysts solve tasks by reusing expert-level queries, patterns, and reasoning.
+
+User: "How do I calculate customer retention for this dataset?"
+
+Cognee tracks: expert SQL queries, workflow patterns, schema structures, successful implementations
+
+# Agent response:
+Agent: "Here's how senior analysts solved a similar retention query.
+        Cognee matched your schema to a known structure and adapted
+        the expert's logic to fit your dataset."
+
+# What happens under the hood:
+- Extracts and stores patterns from expert SQL queries and workflows
+- Maps the current schema to previously seen structures
+- Retrieves similar tasks and their successful implementations
+- Adapts expert reasoning to the current context
+- Updates memory with new successful patterns so junior analysts perform at near-expert level
+```
+
 
 ## Basic Usage & Feature Guide
 
