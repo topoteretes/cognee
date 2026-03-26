@@ -222,9 +222,9 @@ To open the local UI, run:
 cognee-cli -ui
 ```
 
-## Demos & Examples
+## Examples
 
-See Cognee in action:
+Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations.
 
 ### Persistent Agent Memory
 
