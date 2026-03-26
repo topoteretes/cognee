@@ -5,7 +5,6 @@ from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable,
 
 from cognee.modules.graph.exceptions import (
     EntityNotFoundError,
-    EntityAlreadyExistsError,
     InvalidDimensionsError,
 )
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
