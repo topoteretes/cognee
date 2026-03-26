@@ -85,9 +85,9 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
   <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
 </p>
 
-### Examples
+### Use Cases
 
-#### Use Case 1: Customer Support Agent
+#### Customer Support Agent
 
 ```python
 Goal: Resolve customer issues using their personal data across finance, support, and product history.
@@ -111,7 +111,7 @@ Agent: "I found 2 similar billing cases resolved last month.
 
 ---
 
-#### Use Case 2: Expert Knowledge Distillation (SQL Copilot)
+#### Expert Knowledge Distillation (SQL Copilot)
 
 ```python
 Goal: Help junior analysts solve tasks by reusing expert-level queries, patterns, and reasoning.
