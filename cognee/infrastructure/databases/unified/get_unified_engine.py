@@ -10,20 +10,24 @@ HYBRID_PROVIDERS = {"neptune_analytics"}
 
 
 def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
-    graph_provider = graph_config.get("graph_database_provider", "")
-    vector_provider = vector_config.get("vector_db_provider", "")
+    import os
 
-    # pghybrid is hybrid by definition (single setting controls both)
-    if graph_provider == "pghybrid":
+    # USE_UNIFIED_PROVIDER flag overrides both graph and vector providers
+    if os.environ.get("USE_UNIFIED_PROVIDER", ""):
         return True
 
     # Original logic for neptune and future paired providers
+    graph_provider = graph_config.get("graph_database_provider", "")
+    vector_provider = vector_config.get("vector_db_provider", "")
     return graph_provider in HYBRID_PROVIDERS and graph_provider == vector_provider
 
 
 async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
     """Create a single adapter instance for a hybrid backend."""
-    provider = graph_config["graph_database_provider"]
+    import os
+
+    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    provider = unified_provider or graph_config["graph_database_provider"]
 
     if provider == "neptune_analytics":
         from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (

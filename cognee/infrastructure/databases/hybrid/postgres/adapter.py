@@ -52,6 +52,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     def __init__(self, graph_adapter, vector_adapter):
         self._graph = graph_adapter
         self._vector = vector_adapter
+        # Expose embedding_engine for callers that access it directly
+        # (e.g. index_data_points checks vector_engine.embedding_engine)
+        self.embedding_engine = vector_adapter.embedding_engine
 
     # ------------------------------------------------------------------
     # Lifecycle
