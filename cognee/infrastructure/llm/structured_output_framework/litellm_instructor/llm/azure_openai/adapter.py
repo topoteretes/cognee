@@ -4,7 +4,11 @@ import litellm
 import instructor
 from typing import Any, Dict, Type, Optional
 from pydantic import BaseModel
-from openai import AzureOpenAI as AzureOpenAIClient, AsyncAzureOpenAI, ContentFilterFinishReasonError
+from openai import (
+    AzureOpenAI as AzureOpenAIClient,
+    AsyncAzureOpenAI,
+    ContentFilterFinishReasonError,
+)
 from litellm.exceptions import ContentPolicyViolationError
 from instructor.core import InstructorRetryException
 
@@ -137,9 +141,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         self.llm_args = llm_args or {}
         self.streaming = streaming
 
-        self.instructor_mode = (
-            instructor_mode if instructor_mode else self.default_instructor_mode
-        )
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         # Create native Azure OpenAI clients with managed identity token provider
         azure_endpoint = endpoint.rstrip("/")
