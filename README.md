@@ -72,6 +72,8 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 
 :books: _Check our detailed [documentation](https://docs.cognee.ai/getting-started/installation#environment-configuration) for setup and configuration._
 
+:crab: _Available as a plugin for your OpenClaw — [cognee-openclaw](https://www.npmjs.com/package/@cognee/cognee-openclaw)_
+
 
 ### Why use Cognee:
 
