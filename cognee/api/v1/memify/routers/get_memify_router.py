@@ -114,7 +114,7 @@ def get_memify_router() -> APIRouter:
                 detail = getattr(memify_run, "error", None) or str(memify_run)
 
                 return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     content=ErrorResponse(
                         error="Pipeline run errored",
                         detail=detail,

@@ -97,7 +97,7 @@ def get_update_router() -> APIRouter:
                     detail = str(first_err) if first_err else "Pipeline run errored"
 
                 return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     content=ErrorResponse(
                         error="Pipeline run errored",
                         detail=detail,

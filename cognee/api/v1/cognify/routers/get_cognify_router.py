@@ -187,7 +187,7 @@ def get_cognify_router() -> APIRouter:
                     detail = getattr(first_err, "error", None) or str(first_err)
 
                 return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     content=ErrorResponse(
                         error="Pipeline run errored",
                         detail=detail,
