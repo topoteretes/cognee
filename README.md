@@ -178,6 +178,18 @@ cognee-cli -ui
 
 See Cognee in action:
 
+```
+Use Case 1: Customer Support Agent
+Goal: Resolve customer issues using their personal data across finance, support, and product history.
+
+Cognee:
+  - Unifies data sources from various company channels
+  - Reconstructs the interaction timeline and tracks outcomes
+  - Retrieves similar resolved cases
+  - Maps to the best resolution strategy
+  - Updates memory after execution so the agent never repeats the same mistake
+```
+
 ### Persistent Agent Memory
 
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
