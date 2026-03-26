@@ -226,7 +226,7 @@ cognee-cli -ui
 
 Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations.
 
-### Persistent Agent Memory
+### Latest News
 
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
