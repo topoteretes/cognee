@@ -1,12 +1,15 @@
+import json
+import pathlib
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -16,53 +19,77 @@ from cognee.shared.utils import send_telemetry
 logger = get_logger("api.llm")
 
 
-class GenericOutput(BaseModel):
-    output: Any
-
-
-class LLMPayloadDTO(InDTO):
-    text_input: str = Field(..., description="Input text sent to LLM")
-    system_prompt: str = Field(..., description="System prompt sent to LLM")
+class CustomPromptGenerationPayloadDTO(InDTO):
+    graph_model: Dict[str, Any] = Field(..., description="Graph model schema as JSON object.")
+    text_input: str = Field(
+        default="Generate the extraction prompt now.",
+        description="Text input sent to the LLM.",
+    )
     parameters: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Arbitrary parameters forwarded to LLMGateway as kwargs.",
+        description="Additional kwargs forwarded to LLMGateway.",
     )
 
 
-class LLMResponseDTO(OutDTO):
-    output: Any
+class CustomPromptGenerationResponseDTO(OutDTO):
+    custom_prompt: str
 
 
 def get_llm_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=LLMResponseDTO)
-    @log_usage(function_name="POST /v1/llm", log_type="api_endpoint")
-    async def call_llm(payload: LLMPayloadDTO, user: User = Depends(get_authenticated_user)):
+    @router.post("/custom-prompt", response_model=CustomPromptGenerationResponseDTO)
+    @log_usage(function_name="POST /v1/llm/custom-prompt", log_type="api_endpoint")
+    async def generate_custom_prompt(
+        payload: CustomPromptGenerationPayloadDTO,
+        user: User = Depends(get_authenticated_user),
+    ):
         """
-        Generic LLM endpoint.
-        It forwards caller-provided parameters directly into the LLMGateway call.
+        Generate a custom extraction prompt from a provided graph model schema JSON.
         """
         send_telemetry(
-            "LLM API Endpoint Invoked",
+            "LLM Custom Prompt Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": "POST /v1/llm",
+                "endpoint": "POST /v1/llm/custom-prompt",
+                "response_model": "str",
                 "parameter_keys": sorted(payload.parameters.keys()),
                 "cognee_version": cognee_version,
             },
         )
 
         try:
+            graph_model_schema_json = json.dumps(payload.graph_model, ensure_ascii=False)
+            package_root = pathlib.Path(__file__).resolve().parents[4]
+            prompt_path = (
+                package_root / "infrastructure" / "llm" / "prompts" / "custom_prompt_generation.txt"
+            )
+
+            if prompt_path.exists():
+                system_prompt = render_prompt(
+                    prompt_path.name,
+                    {"GRAPH_SCHEMA_JSON": graph_model_schema_json},
+                    base_directory=str(prompt_path.parent),
+                )
+            else:
+                # Fallback to default resolver path used elsewhere in the codebase.
+                system_prompt = render_prompt(
+                    "custom_prompt_generation.txt",
+                    {"GRAPH_SCHEMA_JSON": graph_model_schema_json},
+                )
+
             llm_output = await LLMGateway.acreate_structured_output(
                 text_input=payload.text_input,
-                system_prompt=payload.system_prompt,
-                response_model=GenericOutput,
+                system_prompt=system_prompt,
+                response_model=str,
                 **payload.parameters,
             )
-            return LLMResponseDTO(output=llm_output.output)
+
+            return CustomPromptGenerationResponseDTO(custom_prompt=llm_output)
+        except ValueError as error:
+            return JSONResponse(status_code=400, content={"error": str(error)})
         except Exception as error:
-            logger.error("LLM API request failed")
+            logger.error("LLM custom prompt generation request failed")
             return JSONResponse(status_code=409, content={"error": str(error)})
 
     return router

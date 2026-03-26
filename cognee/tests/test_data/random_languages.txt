@@ -1,0 +1,6 @@
+Python is a programming language widely used in machine learning, data analysis, and web development.
+Rust is a programming language used in systems programming, embedded software, and cybersecurity.
+SQL is a programming language used in database management and business intelligence reporting.
+JavaScript is a programming language used in frontend web development and interactive user interface design.
+Go is a programming language used in cloud infrastructure and backend microservices.
+R is a programming language used in statistics and academic research.
