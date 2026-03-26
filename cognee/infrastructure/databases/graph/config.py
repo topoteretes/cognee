@@ -41,6 +41,7 @@ class GraphConfig(BaseSettings):
     graph_database_name: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
+    graph_database_allow_anonymous: bool = False
     graph_database_port: int = 123
     graph_database_key: str = ""
     graph_file_path: str = ""
@@ -92,6 +93,7 @@ class GraphConfig(BaseSettings):
             "graph_database_url": self.graph_database_url,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
+            "graph_database_allow_anonymous": self.graph_database_allow_anonymous,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
@@ -120,6 +122,7 @@ class GraphConfig(BaseSettings):
             "graph_database_name": self.graph_database_name,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
+            "graph_database_allow_anonymous": self.graph_database_allow_anonymous,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,

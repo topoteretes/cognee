@@ -1,7 +1,11 @@
 import uuid
+from datetime import datetime
+import json
+
 import redis
 import redis.asyncio as aioredis
 from contextlib import contextmanager
+
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from pydantic import ValidationError
@@ -11,8 +15,6 @@ from cognee.infrastructure.databases.exceptions import (
     SessionQAEntryValidationError,
 )
 from cognee.shared.logging_utils import get_logger
-from datetime import datetime
-import json
 
 logger = get_logger("RedisAdapter")
 
@@ -29,12 +31,14 @@ class RedisAdapter(CacheDBInterface):
         timeout=240,
         blocking_timeout=300,
         connection_timeout=30,
+        session_ttl_seconds: int | None = 604800,
     ):
         super().__init__(host, port, lock_name, log_key)
 
         self.host = host
         self.port = port
         self.connection_timeout = connection_timeout
+        self.session_ttl_seconds = session_ttl_seconds
 
         try:
             self.sync_redis = redis.Redis(
@@ -117,6 +121,10 @@ class RedisAdapter(CacheDBInterface):
         await self.async_redis.delete(session_key)
         for entry in entries:
             await self.async_redis.rpush(session_key, json.dumps(entry))
+
+    async def _apply_session_ttl(self, session_key: str) -> None:
+        if self.session_ttl_seconds and self.session_ttl_seconds > 0:
+            await self.async_redis.expire(session_key, self.session_ttl_seconds)
 
     @staticmethod
     def _merge_entry_update(
@@ -238,6 +246,7 @@ class RedisAdapter(CacheDBInterface):
                 memify_metadata=memify_metadata,
             )
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
+            await self._apply_session_ttl(session_key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while adding Q&A: {str(e)}"
             logger.error(error_msg)
@@ -301,6 +310,7 @@ class RedisAdapter(CacheDBInterface):
             )
             entries[idx] = self._validate_entry_dict(merged)
             await self._write_entry_at(session_key, idx, entries[idx])
+            await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while updating Q&A: {str(e)}"
@@ -326,6 +336,7 @@ class RedisAdapter(CacheDBInterface):
             merged = self._merge_entry_clear_feedback(entries[idx])
             entries[idx] = self._validate_entry_dict(merged)
             await self._write_entry_at(session_key, idx, entries[idx])
+            await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while clearing feedback: {str(e)}"
@@ -351,6 +362,8 @@ class RedisAdapter(CacheDBInterface):
                 return False
             entries.pop(idx)
             await self._rewrite_entries(session_key, entries)
+            if entries:
+                await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting Q&A: {str(e)}"

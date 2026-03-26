@@ -31,6 +31,7 @@ def create_graph_engine(
     graph_database_name="",
     graph_database_username="",
     graph_database_password="",
+    graph_database_allow_anonymous=False,
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
@@ -46,6 +47,7 @@ def create_graph_engine(
         graph_database_name,
         graph_database_username,
         graph_database_password,
+        graph_database_allow_anonymous,
         graph_database_port,
         graph_database_key,
         graph_dataset_database_handler,
@@ -60,6 +62,7 @@ def _create_graph_engine(
     graph_database_name="",
     graph_database_username="",
     graph_database_password="",
+    graph_database_allow_anonymous=False,
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
@@ -115,6 +118,7 @@ def _create_graph_engine(
             graph_database_username=graph_database_username or None,
             graph_database_password=graph_database_password or None,
             graph_database_name=graph_database_name or None,
+            graph_database_allow_anonymous=graph_database_allow_anonymous,
         )
 
     elif graph_database_provider == "postgres":

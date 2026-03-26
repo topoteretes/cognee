@@ -18,6 +18,7 @@ from cognee.modules.observability import (
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import ERROR, get_logger
+from cognee.exceptions import CogneeValidationError
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine
@@ -49,13 +50,24 @@ async def get_memory_fragment(
     properties_to_project: Optional[List[str]] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     relevant_ids_to_filter: Optional[List[str]] = None,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
+    feedback_influence: float = 0.0,
     graph_engine=None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
+
+    node_properties_to_project = list(properties_to_project)
+    edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
+
+    if feedback_influence > 0.0:
+        if "feedback_weight" not in node_properties_to_project:
+            node_properties_to_project.append("feedback_weight")
+        if "feedback_weight" not in edge_properties_to_project:
+            edge_properties_to_project.append("feedback_weight")
 
     memory_fragment = CogneeGraph()
 
@@ -64,12 +76,14 @@ async def get_memory_fragment(
             graph_engine = await get_graph_engine()
         await memory_fragment.project_graph_from_db(
             graph_engine,
-            node_properties_to_project=properties_to_project,
-            edge_properties_to_project=["relationship_name", "edge_text", "edge_object_id"],
+            node_properties_to_project=node_properties_to_project,
+            edge_properties_to_project=edge_properties_to_project,
             node_type=node_type,
             node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
             relevant_ids_to_filter=relevant_ids_to_filter,
             triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
         )
     except EntityNotFoundError:
         pass
@@ -85,7 +99,9 @@ async def _get_top_triplet_importances(
     properties_to_project: Optional[List[str]],
     node_type: Optional[Type],
     node_name: Optional[List[str]],
+    node_name_filter_operator: str,
     triplet_distance_penalty: float,
+    feedback_influence: float,
     wide_search_limit: Optional[int],
     top_k: int,
     query_list_length: Optional[int] = None,
@@ -113,8 +129,10 @@ async def _get_top_triplet_importances(
             properties_to_project=properties_to_project,
             node_type=node_type,
             node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
             relevant_ids_to_filter=relevant_node_ids,
             triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
             graph_engine=graph_engine,
         )
 
@@ -126,7 +144,9 @@ async def _get_top_triplet_importances(
     )
 
     return await memory_fragment.calculate_top_triplet_importances(
-        k=top_k, query_list_length=query_list_length
+        k=top_k,
+        query_list_length=query_list_length,
+        feedback_influence=feedback_influence,
     )
 
 
@@ -139,8 +159,10 @@ async def brute_force_triplet_search(
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
+    feedback_influence: float = 0.0,
     unified_engine: Optional[UnifiedStoreEngine] = None,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """
@@ -158,6 +180,7 @@ async def brute_force_triplet_search(
         wide_search_top_k (Optional[int]): Number of initial elements to retrieve from collections.
             Ignored in batch mode (always None to project full graph).
         triplet_distance_penalty (Optional[float]): Default distance penalty in graph projection
+        feedback_influence (float): Weight of feedback influence in range [0, 1]
 
     Returns:
         List[Edge]: The top triplet results for single query mode (flat list).
@@ -173,6 +196,11 @@ async def brute_force_triplet_search(
 
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
+    if not 0.0 <= feedback_influence <= 1.0:
+        raise CogneeValidationError(
+            message="feedback_influence must be in range [0, 1]",
+            name="InvalidFeedbackInfluenceError",
+        )
 
     with new_span("cognee.retrieval.triplet_search") as otel_span:
         otel_span.set_attribute("cognee.retrieval.top_k", top_k)
@@ -211,6 +239,7 @@ async def brute_force_triplet_search(
                 collections=collections,
                 wide_search_limit=wide_search_limit,
                 node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
             )
 
             if query_batch is not None:
@@ -227,7 +256,9 @@ async def brute_force_triplet_search(
                 properties_to_project,
                 node_type,
                 node_name,
+                node_name_filter_operator,
                 triplet_distance_penalty,
+                feedback_influence,
                 wide_search_limit,
                 top_k,
                 query_list_length=query_list_length,
