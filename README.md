@@ -87,7 +87,7 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 
 ### Examples
 
-```python
+```bash
 # Use Case 1: Customer Support Agent
 # Goal: Resolve customer issues using their personal data across finance, support, and product history.
 
