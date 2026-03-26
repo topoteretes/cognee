@@ -26,7 +26,7 @@ class Node(BaseModel):
         node_id: str,
         attributes: Optional[Dict[str, Any]] = None,
         dimension: int = 1,
-        node_penalty: float = 3.5,
+        node_penalty: float = 6.5,
     ):
         if dimension <= 0:
             raise InvalidDimensionsError()
@@ -155,7 +155,7 @@ class Edge(BaseModel):
         attributes: Optional[Dict[str, Any]] = None,
         directed: bool = True,
         dimension: int = 1,
-        edge_penalty: float = 3.5,
+        edge_penalty: float = 6.5,
     ):
         if dimension <= 0:
             raise InvalidDimensionsError()
