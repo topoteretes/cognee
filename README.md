@@ -79,9 +79,9 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 - Persistent and Learning Agents - learn from feedback, context management, cross-agent knowledge sharing
 - Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
 
-<div style="text-align: center">
+<p align="center">
   <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
-</div>
+</p>
 
 
 ## Basic Usage & Feature Guide
