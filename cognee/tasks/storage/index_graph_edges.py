@@ -73,6 +73,15 @@ async def index_graph_edges(
         raise RuntimeError("Initialization error") from e
 
     edge_type_datapoints = create_edge_type_datapoints(edges_data)
+
+    # Persist EdgeType nodes in the graph database so they are available for
+    # GRAPH_COMPLETION triplet search.  Without this, adapters that don't
+    # store nodes via index_data_points (e.g. FalkorDB) will have EdgeType
+    # entries without vector embeddings, causing triplet search to fail.
+    if edge_type_datapoints:
+        graph_engine = await get_graph_engine()
+        await graph_engine.add_nodes(edge_type_datapoints)
+
     await index_data_points(edge_type_datapoints, vector_engine=vector_engine)
 
     return None
