@@ -87,55 +87,6 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
   <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
 </p>
 
-### Use Cases
-
-#### Customer Support Agent
-
-```python
-Goal: Resolve customer issues using their personal data across finance, support, and product history.
-
-User: "My invoice looks wrong and the issue is still not resolved."
-
-Cognee tracks: past interactions, failed actions, resolved cases, product history
-
-# Agent response:
-Agent: "I found 2 similar billing cases resolved last month.
-        The issue was caused by a sync delay between payment
-        and invoice systems — a fix was applied on your account."
-
-# What happens under the hood:
-- Unifies data sources from various company channels
-- Reconstructs the interaction timeline and tracks outcomes
-- Retrieves similar resolved cases
-- Maps to the best resolution strategy
-- Updates memory after execution so the agent never repeats the same mistake
-```
-
----
-
-#### Expert Knowledge Distillation (SQL Copilot)
-
-```python
-Goal: Help junior analysts solve tasks by reusing expert-level queries, patterns, and reasoning.
-
-User: "How do I calculate customer retention for this dataset?"
-
-Cognee tracks: expert SQL queries, workflow patterns, schema structures, successful implementations
-
-# Agent response:
-Agent: "Here's how senior analysts solved a similar retention query.
-        Cognee matched your schema to a known structure and adapted
-        the expert's logic to fit your dataset."
-
-# What happens under the hood:
-- Extracts and stores patterns from expert SQL queries and workflows
-- Maps the current schema to previously seen structures
-- Retrieves similar tasks and their successful implementations
-- Adapts expert reasoning to the current context
-- Updates memory with new successful patterns so junior analysts perform at near-expert level
-```
-
-
 ## Basic Usage & Feature Guide
 
 To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing) of Cognee's core features.
@@ -224,9 +175,53 @@ To open the local UI, run:
 cognee-cli -ui
 ```
 
-### Examples
+## Examples
 
 Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations.
+
+**Use Case 1 — Customer Support Agent**
+
+```python
+Goal: Resolve customer issues using their personal data across finance, support, and product history.
+
+User: "My invoice looks wrong and the issue is still not resolved."
+
+Cognee tracks: past interactions, failed actions, resolved cases, product history
+
+# Agent response:
+Agent: "I found 2 similar billing cases resolved last month.
+        The issue was caused by a sync delay between payment
+        and invoice systems — a fix was applied on your account."
+
+# What happens under the hood:
+- Unifies data sources from various company channels
+- Reconstructs the interaction timeline and tracks outcomes
+- Retrieves similar resolved cases
+- Maps to the best resolution strategy
+- Updates memory after execution so the agent never repeats the same mistake
+```
+
+**Use Case 2 — Expert Knowledge Distillation (SQL Copilot)**
+
+```python
+Goal: Help junior analysts solve tasks by reusing expert-level queries, patterns, and reasoning.
+
+User: "How do I calculate customer retention for this dataset?"
+
+Cognee tracks: expert SQL queries, workflow patterns, schema structures, successful implementations
+
+# Agent response:
+Agent: "Here's how senior analysts solved a similar retention query.
+        Cognee matched your schema to a known structure and adapted
+        the expert's logic to fit your dataset."
+
+# What happens under the hood:
+- Extracts and stores patterns from expert SQL queries and workflows
+- Maps the current schema to previously seen structures
+- Retrieves similar tasks and their successful implementations
+- Adapts expert reasoning to the current context
+- Updates memory with new successful patterns so junior analysts perform at near-expert level
+```
 
 ## Latest News
 
