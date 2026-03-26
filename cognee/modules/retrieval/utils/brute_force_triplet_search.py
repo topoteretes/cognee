@@ -24,6 +24,57 @@ if TYPE_CHECKING:
 
 logger = get_logger(level=ERROR)
 
+# Built-in collections that are always searched.
+_BUILTIN_COLLECTIONS = [
+    "Entity_name",
+    "TextSummary_text",
+    "EntityType_name",
+    "DocumentChunk_text",
+]
+
+
+async def _discover_collections(vector_engine=None) -> List[str]:
+    """Discover searchable vector collections.
+
+    Starts with built-in collections (Entity, TextSummary, EntityType,
+    DocumentChunk) and probes for additional collections created by custom
+    DataPoint types (e.g. from ``cognify(graph_model=...)``).
+
+    Collections that don't exist are silently skipped (``has_collection``
+    returns False), so it is safe to probe for types that were never indexed.
+    """
+    if vector_engine is None:
+        from cognee.infrastructure.databases.vector import get_vector_engine
+
+        vector_engine = get_vector_engine()
+
+    collections = list(_BUILTIN_COLLECTIONS)
+
+    # Probe for common custom DataPoint collections.  Custom DataPoint types
+    # are indexed by ``index_data_points`` using the "{TypeName}_{field}"
+    # naming convention.  We check ``has_collection`` so that only collections
+    # actually present in the vector store are included.
+    _CANDIDATE_COLLECTIONS = [
+        # Collections commonly created by ontology-based graph_model
+        "Concept_name",
+        "Statement_text",
+        "Organization_name",
+        "SoftwareApplication_name",
+        "Person_name",
+        "Role_name",
+        "Membership_text",
+        "Opportunity_name",
+    ]
+
+    for coll in _CANDIDATE_COLLECTIONS:
+        try:
+            if await vector_engine.has_collection(coll):
+                collections.append(coll)
+        except Exception:
+            pass  # Adapter may not implement has_collection
+
+    return collections
+
 
 def format_triplets(edges):
     """Formats edges into human-readable triplet strings."""
@@ -186,12 +237,9 @@ async def brute_force_triplet_search(
         )
 
         if collections is None:
-            collections = [
-                "Entity_name",
-                "TextSummary_text",
-                "EntityType_name",
-                "DocumentChunk_text",
-            ]
+            collections = await _discover_collections(
+                unified_engine.vector if unified_engine else None
+            )
 
         if "EdgeType_relationship_name" not in collections:
             collections.append("EdgeType_relationship_name")
