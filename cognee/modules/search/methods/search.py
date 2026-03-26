@@ -293,7 +293,7 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
-def _serialize_result_objects(objects):
+def _serialize_result_objects(objects: Any) -> Any:
     """Serialize objects_result, converting Edge objects to JSON-safe dicts.
 
     Edge and Node objects in CogneeGraphElements have circular references
@@ -301,10 +301,8 @@ def _serialize_result_objects(objects):
     ``jsonable_encoder`` to raise ``RecursionError``.  This helper breaks
     the cycle by extracting only the essential fields.
     """
-    if not objects:
+    if not objects or not isinstance(objects, list):
         return objects
-
-    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 
     serialized = []
     for obj in objects:
