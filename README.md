@@ -70,6 +70,8 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 
 :star: _Help us reach more developers and grow the cognee community. Star this repo!_
 
+:books: _Check our detailed [documentation](https://docs.cognee.ai/getting-started/installation#environment-configuration) for setup and configuration._
+
 
 ### Why use Cognee:
 
@@ -77,6 +79,9 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 - Persistent and Learning Agents - learn from feedback, context management, cross-agent knowledge sharing
 - Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
 
+<div style="text-align: center">
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_products.png" alt="Cognee Products" width="80%" />
+</div>
 
 
 ## Basic Usage & Feature Guide
@@ -87,7 +92,7 @@ To learn more, [check out this short, end-to-end Colab walkthrough](https://cola
 
 ## Quickstart
 
-Let’s try Cognee in just a few lines of code. For detailed setup and configuration, see the [Cognee Docs](https://docs.cognee.ai/getting-started/installation#environment-configuration).
+Let’s try Cognee in just a few lines of code.
 
 ### Prerequisites
 
