@@ -85,6 +85,29 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
   <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
 </p>
 
+### Examples
+
+```
+# Use Case 1: Customer Support Agent
+# Goal: Resolve customer issues using their personal data across finance, support, and product history.
+
+# User: "My invoice looks wrong and the issue is still not resolved."
+
+# Cognee tracks: past interactions, failed actions, resolved cases, product history
+
+# Agent response:
+Agent: "I found 2 similar billing cases resolved last month.
+        The issue was caused by a sync delay between payment
+        and invoice systems — a fix was applied on your account."
+
+# What happens under the hood:
+- Unifies data sources from various company channels
+- Reconstructs the interaction timeline and tracks outcomes
+- Retrieves similar resolved cases
+- Maps to the best resolution strategy
+- Updates memory after execution so the agent never repeats the same mistake
+```
+
 
 ## Basic Usage & Feature Guide
 
@@ -177,18 +200,6 @@ cognee-cli -ui
 ## Demos & Examples
 
 See Cognee in action:
-
-```
-Use Case 1: Customer Support Agent
-Goal: Resolve customer issues using their personal data across finance, support, and product history.
-
-Cognee:
-  - Unifies data sources from various company channels
-  - Reconstructs the interaction timeline and tracks outcomes
-  - Retrieves similar resolved cases
-  - Maps to the best resolution strategy
-  - Updates memory after execution so the agent never repeats the same mistake
-```
 
 ### Persistent Agent Memory
 
