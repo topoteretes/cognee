@@ -70,7 +70,7 @@ class LLMConfig(BaseSettings):
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
 
     llm_max_concurrent: int = (
-        5  # Max concurrent LLM calls in batch operations (e.g. graph extraction)
+        10  # Max concurrent LLM calls in batch operations (e.g. graph extraction)
     )
 
     llama_cpp_model_path: Optional[str] = None

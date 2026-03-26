@@ -48,17 +48,25 @@ class CorpusBuilderExecutor:
         load_golden_context: bool = False,
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
         chunks_per_batch: Optional[int] = None,
+        custom_prompt: Optional[str] = None,
     ) -> List[str]:
         self.load_corpus(
             limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
         )
         await self.run_cognee(
-            chunk_size=chunk_size, chunker=chunker, chunks_per_batch=chunks_per_batch
+            chunk_size=chunk_size,
+            chunker=chunker,
+            chunks_per_batch=chunks_per_batch,
+            custom_prompt=custom_prompt,
         )
         return self.questions
 
     async def run_cognee(
-        self, chunk_size=1024, chunker=TextChunker, chunks_per_batch: Optional[int] = None
+        self,
+        chunk_size=1024,
+        chunker=TextChunker,
+        chunks_per_batch: Optional[int] = None,
+        custom_prompt: Optional[str] = None,
     ) -> None:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
@@ -68,6 +76,8 @@ class CorpusBuilderExecutor:
         task_kwargs = {"chunk_size": chunk_size, "chunker": chunker}
         if chunks_per_batch is not None:
             task_kwargs["chunks_per_batch"] = chunks_per_batch
+        if custom_prompt is not None:
+            task_kwargs["custom_prompt"] = custom_prompt
         tasks = await self.task_getter(**task_kwargs)
         pipeline_run = run_pipeline(tasks=tasks)
 

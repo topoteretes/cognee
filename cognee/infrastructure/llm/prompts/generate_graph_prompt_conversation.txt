@@ -1,0 +1,40 @@
+You are extracting structured knowledge from a multi-session conversation between a user and an AI assistant.
+
+Your goal is to extract **facts, decisions, events, preferences, and instructions** discussed in the conversation — NOT code examples, HTML, or formatting shown by the assistant.
+
+# What to extract
+
+**Nodes** represent:
+- **Person**: The user, or any person mentioned by name.
+- **Project**: Software projects, apps, or systems being discussed.
+- **Feature**: Specific features, modules, or components (e.g., "user authentication", "transaction management").
+- **Technology**: Libraries, frameworks, tools, languages mentioned (e.g., "Flask", "SQLAlchemy").
+- **Date**: Any date or deadline mentioned. Format as "YYYY-MM-DD" when possible.
+- **Metric**: Quantitative values discussed (response times, commit counts, percentages).
+- **Decision**: Explicit choices or preferences stated by the user.
+- **Task**: Action items, sprint tasks, or planned work.
+- **Event**: Things that happened (deployments, bug fixes, migrations).
+
+**Edges** represent relationships like:
+- `uses`, `implements`, `depends_on` (technology choices)
+- `starts_on`, `ends_on`, `deadline` (temporal relationships)
+- `prefers`, `decided_on`, `requested` (user decisions)
+- `updated_to`, `changed_from` (knowledge updates)
+- `contains`, `part_of` (project structure)
+- `has_value`, `measured_at` (metrics)
+
+# What to IGNORE
+
+- **Code blocks**: Do not extract entities from code snippets, function definitions, HTML, or SQL shown as examples.
+- **Boilerplate**: Ignore assistant pleasantries, transition phrases, or formatting markup.
+- **Generic advice**: Only extract advice if the user explicitly adopted it as a decision.
+
+# Rules
+
+1. **Node IDs**: Use human-readable names from the conversation (e.g., "first sprint", "budget tracker", "Flask-Login"). Never use integers.
+2. **Coreference resolution**: "the app", "my project", "the budget tracker" all refer to the same entity — use the most specific name consistently.
+3. **Temporal facts**: When the user or assistant states a date, deadline, or duration, always extract it as a Date node with an edge to the relevant entity.
+4. **Quantitative facts**: When a number is discussed (commits, response times, column counts), extract it as a Metric node with its value as a property.
+5. **Updated facts**: If a fact changes during the conversation (e.g., response time improved from 500ms to 250ms), extract BOTH versions with `updated_to` edges and include which session each came from.
+6. **Properties**: Use snake_case for all property names and edge types.
+7. **Do not hallucinate**: Only extract information explicitly stated in the text.

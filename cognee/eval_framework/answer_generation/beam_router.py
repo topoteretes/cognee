@@ -5,6 +5,7 @@ The router classifies the question (using pre-labeled types from the dataset)
 and delegates to the matching retrieval strategy.
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -27,49 +28,62 @@ _TYPE_PROMPTS: Dict[str, str] = {
     ),
     "temporal_reasoning": (
         "You are answering a question that requires reasoning about time. "
-        "Pay attention to dates, time references, and the order of events. "
-        "Reference specific dates or time periods in your answer."
+        "The context includes [Session X, Turn Y] markers showing the chronological "
+        "order of the conversation. Pay attention to these markers, dates, time "
+        "references, and the order of events. Reference specific dates or time "
+        "periods in your answer."
     ),
     "multi_session_reasoning": (
         "You are answering a question that requires combining information "
-        "from multiple conversation sessions. Think step by step: first identify "
-        "the relevant pieces of information from different sessions, then "
-        "synthesize them into a coherent answer."
+        "from multiple conversation sessions. The context includes [Session X, Turn Y] "
+        "markers — use them to identify which session each fact comes from. "
+        "Think step by step: first identify the relevant pieces from different sessions, "
+        "then synthesize them into a coherent answer."
     ),
     "contradiction_resolution": (
         "You are answering a question about contradictory information in a conversation. "
-        "Identify both the original statement and the contradicting one. "
-        "Explain which is more recent or authoritative, and resolve the contradiction."
+        "The context includes [Session X, Turn Y] markers showing when each piece of "
+        "information was stated. When two facts conflict, the one from a later session "
+        "or later turn is the correct/updated version. Identify both statements, note "
+        "their positions, and use the most recent one as the answer."
     ),
     "event_ordering": (
         "You are answering a question about the order of events in a conversation. "
-        "List events in chronological order. Reference specific sessions or "
-        "time anchors when available."
+        "The context includes [Session X, Turn Y] markers showing chronological position. "
+        "Sort events by their session and turn numbers. Reference specific sessions, "
+        "turn numbers, or time anchors when available."
     ),
     "knowledge_update": (
         "You are answering a question about updated information. "
-        "The conversation may contain both old and new versions of a fact. "
-        "Always use the most recent information unless specifically asked about history."
+        "The context includes [Session X, Turn Y] markers showing when each piece of "
+        "information was stated. The conversation may contain both old and new versions "
+        "of a fact. Always use the information from the latest session/turn unless "
+        "specifically asked about history."
     ),
     "summarization": (
         "You are summarizing part of a conversation. "
-        "Cover all key points mentioned in the relevant sessions. "
-        "Be comprehensive but concise. Use bullet points if appropriate."
+        "The context includes [Session X, Turn Y] markers — use them to organize "
+        "your summary by session when multiple sessions are involved. "
+        "Cover all key points. Be comprehensive but concise."
     ),
     "abstention": (
         "You are answering a question where the correct response may be to abstain. "
-        "If the conversation does not contain enough evidence to answer confidently, "
-        "say that the information is not available rather than guessing."
+        "ONLY answer if the context contains direct, explicit evidence. If the context "
+        "does not contain the specific information asked about — even if it contains "
+        "related information — respond with: 'This information was not discussed in "
+        "the conversation.' Do NOT guess or infer from partial evidence."
     ),
     "preference_following": (
         "You are answering a question about user preferences expressed in the conversation. "
-        "Pay attention to explicitly stated preferences, changes in preference over time, "
-        "and implicit preferences inferred from the user's behavior."
+        "The context includes [Session X, Turn Y] markers — preferences may change over time, "
+        "so use the most recent preference unless asked about history. Pay attention to "
+        "explicitly stated preferences and implicit ones inferred from behavior."
     ),
     "instruction_following": (
         "You are answering a question about instructions given during the conversation. "
-        "Check whether specific instructions were followed consistently. "
-        "Reference the original instruction and evidence of compliance or non-compliance."
+        "The context includes [Session X, Turn Y] markers — use them to locate the original "
+        "instruction and any follow-up actions. Check whether the instruction was followed "
+        "consistently. Reference the original instruction and evidence of compliance."
     ),
 }
 
@@ -81,18 +95,35 @@ _TYPE_PROMPTS: Dict[str, str] = {
 _TYPE_RETRIEVERS: Dict[str, type] = {
     # Direct factual lookup
     "information_extraction": GraphCompletionRetriever,
-    "abstention": GraphCompletionRetriever,
     "preference_following": GraphCompletionRetriever,
-    # Wider context to find evidence across sessions and resolve ambiguity
-    "temporal_reasoning": GraphCompletionContextExtensionRetriever,
-    "event_ordering": GraphCompletionContextExtensionRetriever,
+    # RAG over raw chunks — raw context better for abstention (clearer what was/wasn't discussed)
+    "abstention": CompletionRetriever,
+    # RAG over raw chunks — graph loses temporal/event ordering, chunks preserve message flow
+    "temporal_reasoning": CompletionRetriever,
+    "event_ordering": CompletionRetriever,
     "knowledge_update": GraphCompletionContextExtensionRetriever,
     "multi_session_reasoning": GraphCompletionContextExtensionRetriever,
     "contradiction_resolution": GraphCompletionContextExtensionRetriever,
-    "instruction_following": GraphCompletionContextExtensionRetriever,
+    "instruction_following": GraphCompletionRetriever,
     # RAG over raw chunks — better detail coverage than graph summaries
     "summarization": CompletionRetriever,
 }
+
+# Per-type top_k overrides (default is 10)
+_TYPE_TOP_K: Dict[str, int] = {
+    "summarization": 35,  # Sessions have ~30 turns, need broad coverage
+    "event_ordering": 25,  # Need enough chunks to see full event sequence
+    "temporal_reasoning": 20,  # Need enough chunks to find date references
+    "abstention": 15,  # Enough context to judge what was/wasn't discussed
+    "multi_session_reasoning": 15,  # Evidence spread across multiple sessions
+    "knowledge_update": 15,  # Need to see both old and new versions of a fact
+    "contradiction_resolution": 15,  # Need to see both conflicting statements
+    "information_extraction": 12,  # Slightly more context for precise facts
+    "instruction_following": 12,  # Need instruction + evidence of compliance
+}
+
+# Per-type context extension rounds (default is 4)
+_TYPE_EXTENSION_ROUNDS: Dict[str, int] = {}
 
 _DEFAULT_PROMPT = (
     "You are answering a question about a conversation. "
@@ -118,11 +149,21 @@ class BEAMRouter:
         if question_type not in self._retriever_cache:
             retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
             system_prompt = self.get_system_prompt(question_type)
-            kwargs: Dict[str, Any] = {"system_prompt": system_prompt}
+            top_k = _TYPE_TOP_K.get(question_type, 10)
+            kwargs: Dict[str, Any] = {"system_prompt": system_prompt, "top_k": top_k}
 
-            # CompletionRetriever (RAG) benefits from more chunks for summarization
-            if retriever_cls is CompletionRetriever:
-                kwargs["top_k"] = 10
+            # Graph-based retriever tuning
+            if retriever_cls in (
+                GraphCompletionRetriever,
+                GraphCompletionContextExtensionRetriever,
+            ):
+                kwargs["wide_search_top_k"] = 200
+
+            # More iterations for categories that need broader evidence
+            if retriever_cls is GraphCompletionContextExtensionRetriever:
+                kwargs["context_extension_rounds"] = _TYPE_EXTENSION_ROUNDS.get(
+                    question_type, 4
+                )
 
             self._retriever_cache[question_type] = retriever_cls(**kwargs)
 
@@ -133,24 +174,37 @@ class BEAMRouter:
         """Get the system prompt for a question type."""
         return _TYPE_PROMPTS.get(question_type, _DEFAULT_PROMPT)
 
-    async def answer_questions(self, questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Answer a list of BEAM probing questions using type-based routing.
+    def _make_retriever(self, question_type: str) -> BaseRetriever:
+        """Create a fresh retriever instance (not cached) for parallel use."""
+        retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
+        system_prompt = self.get_system_prompt(question_type)
+        top_k = _TYPE_TOP_K.get(question_type, 10)
+        kwargs: Dict[str, Any] = {"system_prompt": system_prompt, "top_k": top_k}
 
-        Args:
-            questions: List of dicts with "question", "answer" (golden),
-                "question_type", and optionally "rubric".
+        if retriever_cls in (
+            GraphCompletionRetriever,
+            GraphCompletionContextExtensionRetriever,
+        ):
+            kwargs["wide_search_top_k"] = 200
+            kwargs["triplet_distance_penalty"] = 4.0
 
-        Returns:
-            List of answer dicts compatible with the eval framework.
-        """
-        answers = []
+        if retriever_cls is GraphCompletionContextExtensionRetriever:
+            kwargs["context_extension_rounds"] = _TYPE_EXTENSION_ROUNDS.get(
+                question_type, 4
+            )
 
-        for instance in questions:
+        return retriever_cls(**kwargs)
+
+    async def _answer_single(
+        self, instance: Dict[str, Any], semaphore: asyncio.Semaphore
+    ) -> Dict[str, Any]:
+        """Answer a single question with concurrency control."""
+        async with semaphore:
             query_text = instance["question"]
             question_type = instance.get("question_type", "information_extraction")
             golden_answer = instance["answer"]
 
-            retriever = self._get_retriever(question_type)
+            retriever = self._make_retriever(question_type)
 
             try:
                 retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
@@ -188,10 +242,26 @@ class BEAMRouter:
             if "difficulty" in instance:
                 answer["difficulty"] = instance["difficulty"]
 
-            answers.append(answer)
             logger.info(
                 f"[{question_type}] Answered: '{query_text[:60]}...' "
                 f"(retriever: {type(retriever).__name__})"
             )
 
-        return answers
+            return answer
+
+    async def answer_questions(
+        self, questions: List[Dict[str, Any]], max_concurrent: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Answer a list of BEAM probing questions using type-based routing.
+
+        Args:
+            questions: List of dicts with "question", "answer" (golden),
+                "question_type", and optionally "rubric".
+            max_concurrent: Max questions to answer in parallel.
+
+        Returns:
+            List of answer dicts compatible with the eval framework.
+        """
+        semaphore = asyncio.Semaphore(max_concurrent)
+        tasks = [self._answer_single(q, semaphore) for q in questions]
+        return await asyncio.gather(*tasks)

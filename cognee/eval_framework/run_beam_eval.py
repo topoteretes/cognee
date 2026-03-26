@@ -6,6 +6,7 @@ Usage:
 
 import asyncio
 import json
+import os
 
 from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
@@ -18,8 +19,20 @@ from cognee.eval_framework.metrics_dashboard import create_dashboard
 
 logger = get_logger()
 
-NUM_CONVERSATIONS = 3
+NUM_CONVERSATIONS = 20
 BEAM_MAX_BATCHES = None  # None = use all sessions
+
+# Load conversation-specific graph extraction prompt
+_PROMPT_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "infrastructure",
+    "llm",
+    "prompts",
+    "generate_graph_prompt_conversation.txt",
+)
+with open(_PROMPT_PATH) as _f:
+    CONVERSATION_GRAPH_PROMPT = _f.read()
 
 
 def _make_eval_params(conversation_index: int) -> dict:
@@ -55,6 +68,12 @@ async def run_single_conversation(conversation_index: int) -> dict:
     params = _make_eval_params(conversation_index)
     params["_beam_max_batches"] = BEAM_MAX_BATCHES
     params["_beam_conversation_index"] = conversation_index
+    params["custom_prompt"] = CONVERSATION_GRAPH_PROMPT
+
+    from cognee.modules.chunking.ConversationChunker import ConversationChunker
+
+    params["chunker"] = ConversationChunker
+    params["chunk_size"] = 8192  # Large limit — turn pairs are the real boundary
 
     # Step 1: Build corpus
     logger.info(f"[conv {conversation_index}] Step 1: Building corpus...")
