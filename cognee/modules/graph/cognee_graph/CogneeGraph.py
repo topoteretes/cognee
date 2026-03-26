@@ -38,10 +38,13 @@ class CogneeGraph(CogneeAbstractGraph):
         self.triplet_distance_penalty = 3.5
 
     def add_node(self, node: Node) -> None:
-        if node.id not in self.nodes:
-            self.nodes[node.id] = node
-        else:
-            raise EntityAlreadyExistsError(message=f"Node with id {node.id} already exists.")
+        if node.id in self.nodes:
+            logger.debug(
+                "Skipping duplicate node",
+                extra={"node_id": node.id},
+            )
+            return
+        self.nodes[node.id] = node
 
     def add_edge(self, edge: Edge) -> None:
         self.edges.append(edge)
