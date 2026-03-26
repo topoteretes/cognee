@@ -301,7 +301,20 @@ def _serialize_result_objects(objects: Any) -> Any:
     ``jsonable_encoder`` to raise ``RecursionError``.  This helper breaks
     the cycle by extracting only the essential fields.
     """
-    if not objects or not isinstance(objects, list):
+    if not objects:
+        return objects
+
+    # Handle a single Edge object (result_object is typed as Any)
+    if isinstance(objects, Edge):
+        return {
+            "source_node_id": objects.node1.id,
+            "target_node_id": objects.node2.id,
+            "source_node_attributes": objects.node1.attributes,
+            "target_node_attributes": objects.node2.attributes,
+            "edge_attributes": objects.attributes,
+        }
+
+    if not isinstance(objects, list):
         return objects
 
     serialized = []
