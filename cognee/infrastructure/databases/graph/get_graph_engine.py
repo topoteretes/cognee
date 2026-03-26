@@ -39,6 +39,13 @@ def create_graph_engine(
     Wrapper function to call create graph engine with caching.
     For a detailed description, see _create_graph_engine.
     """
+    # Normalize empty/None port before the lru_cache boundary to avoid
+    # duplicate cache entries for "" vs None.
+    normalized_port = (
+        None
+        if graph_database_port in ("", None)
+        else graph_database_port
+    )
     return _create_graph_engine(
         graph_database_provider,
         graph_file_path,
@@ -46,7 +53,7 @@ def create_graph_engine(
         graph_database_name,
         graph_database_username,
         graph_database_password,
-        graph_database_port,
+        normalized_port,
         graph_database_key,
         graph_dataset_database_handler,
     )
