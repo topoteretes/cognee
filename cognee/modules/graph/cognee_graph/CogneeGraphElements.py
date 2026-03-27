@@ -1,9 +1,10 @@
 import numpy as np
 from typing import List, Dict, Optional, Any, Union
+from pydantic import BaseModel, ConfigDict, field_serializer
 from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
 
 
-class Node:
+class Node(BaseModel):
     """
     Represents a node in a graph.
     Attributes:
@@ -18,6 +19,7 @@ class Node:
     skeleton_neighbours: List["Node"]
     skeleton_edges: List["Edge"]
     status: np.ndarray
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(
         self,
@@ -28,12 +30,29 @@ class Node:
     ):
         if dimension <= 0:
             raise InvalidDimensionsError()
-        self.id = node_id
-        self.attributes = attributes if attributes is not None else {}
-        self.attributes["vector_distance"] = None
-        self.skeleton_neighbours = []
-        self.skeleton_edges = []
-        self.status = np.ones(dimension, dtype=int)
+        node_attributes = attributes if attributes is not None else {}
+        node_attributes["vector_distance"] = None
+        super().__init__(
+            id=node_id,
+            attributes=node_attributes,
+            skeleton_neighbours=[],
+            skeleton_edges=[],
+            status=np.ones(dimension, dtype=int),
+        )
+
+    @field_serializer("status")
+    def serialize_status(self, status: np.ndarray, _info) -> List[int]:
+        return status.tolist()
+
+    @field_serializer("skeleton_neighbours")
+    def serialize_skeleton_neighbours(
+        self, neighbours: List["Node"], _info
+    ) -> List[Dict[str, Any]]:
+        return [n.to_json() for n in neighbours]
+
+    @field_serializer("skeleton_edges")
+    def serialize_skeleton_edges(self, edges: List["Edge"], _info) -> List[Dict[str, Any]]:
+        return [e.to_json() for e in edges]
 
     def reset_vector_distances(self, query_count: int, default_penalty: float) -> None:
         self.attributes["vector_distance"] = [default_penalty] * query_count
@@ -96,6 +115,12 @@ class Node:
     def get_skeleton_neighbours(self):
         return self.skeleton_neighbours
 
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "node_id": self.id,
+            "node_attributes": self.attributes,
+        }
+
     def __repr__(self) -> str:
         return f"Node({self.id}, attributes={self.attributes})"
 
@@ -106,7 +131,7 @@ class Node:
         return isinstance(other, Node) and self.id == other.id
 
 
-class Edge:
+class Edge(BaseModel):
     """
     Represents an edge in a graph, connecting two nodes.
     Attributes:
@@ -121,6 +146,7 @@ class Edge:
     attributes: Dict[str, Any]
     directed: bool
     status: np.ndarray
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(
         self,
@@ -133,12 +159,23 @@ class Edge:
     ):
         if dimension <= 0:
             raise InvalidDimensionsError()
-        self.node1 = node1
-        self.node2 = node2
-        self.attributes = attributes if attributes is not None else {}
-        self.attributes["vector_distance"] = None
-        self.directed = directed
-        self.status = np.ones(dimension, dtype=int)
+        edge_attributes = attributes if attributes is not None else {}
+        edge_attributes["vector_distance"] = None
+        super().__init__(
+            node1=node1,
+            node2=node2,
+            attributes=edge_attributes,
+            directed=directed,
+            status=np.ones(dimension, dtype=int),
+        )
+
+    @field_serializer("status")
+    def serialize_status(self, status: np.ndarray, _info) -> List[int]:
+        return status.tolist()
+
+    @field_serializer("node1", "node2")
+    def serialize_node(self, node: "Node", _info) -> Dict[str, Any]:
+        return node.to_json()
 
     def get_distance_key(self) -> Optional[str]:
         key = self.attributes.get("edge_type_id")
@@ -182,6 +219,15 @@ class Edge:
 
     def get_destination_node(self):
         return self.node2
+
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "source_node_id": self.node1.id,
+            "target_node_id": self.node2.id,
+            "source_node_attributes": self.node1.attributes,
+            "target_node_attributes": self.node2.attributes,
+            "edge_attributes": self.attributes,
+        }
 
     def __repr__(self) -> str:
         direction = "->" if self.directed else "--"
