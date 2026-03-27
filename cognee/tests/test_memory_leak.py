@@ -17,6 +17,7 @@ import pathlib
 import threading
 import time
 import urllib.request
+from typing import Any, cast
 
 import psutil
 
@@ -102,6 +103,8 @@ _all_graph_engines: list = []
 
 # When True, KuzuAdapter instances are wrapped in SubprocessGraphDBWrapper.
 USE_SUBPROCESS_GRAPH_ADAPTER = False
+# When True, LanceDBAdapter instances are wrapped in SubprocessVectorDBWrapper.
+USE_SUBPROCESS_VECTOR_ADAPTER = False
 
 
 def install_graph_memory_logging():
@@ -123,8 +126,9 @@ def install_graph_memory_logging():
     from functools import lru_cache
 
     factory_mod = importlib.import_module("cognee.infrastructure.databases.graph.get_graph_engine")
+    factory_mod_any = cast(Any, factory_mod)
 
-    old_cached = factory_mod._create_graph_engine
+    old_cached = factory_mod_any._create_graph_engine
     original_create = old_cached.__wrapped__
     old_cached.cache_clear()
 
@@ -149,7 +153,8 @@ def install_graph_memory_logging():
                 from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
 
                 db_path = args[1] if len(args) > 1 else kwargs.get("graph_file_path", "")
-                engine = SubprocessGraphDBWrapper(
+                subprocess_graph_wrapper_cls = cast(Any, SubprocessGraphDBWrapper)
+                engine = subprocess_graph_wrapper_cls(
                     KuzuAdapter, db_path=db_path, shutdown_timeout=30,
                 )
                 print(
@@ -173,13 +178,16 @@ def install_graph_memory_logging():
         print(f"  [graph-patch] patched engine {type(engine).__name__} id={id(engine)}", flush=True)
         return engine
 
-    factory_mod._create_graph_engine = patched_create
+    factory_mod_any._create_graph_engine = patched_create
     print("  [graph-patch] factory installed", flush=True)
 
 
 def install_vector_engine_tracking():
     """Monkey-patch _create_vector_engine so we can track all LanceDB adapter
-    instances created by the multi-tenant system and close them all after each cycle.
+    instances created by the multi-tenant system.
+
+    When USE_SUBPROCESS_VECTOR_ADAPTER is True, LanceDBAdapter is created inside a
+    dedicated subprocess so its connection and caches live outside the main process.
     """
     import importlib
     from functools import lru_cache
@@ -187,19 +195,49 @@ def install_vector_engine_tracking():
     factory_mod = importlib.import_module(
         "cognee.infrastructure.databases.vector.create_vector_engine"
     )
+    factory_mod_any = cast(Any, factory_mod)
 
-    old_cached = factory_mod._create_vector_engine
+    old_cached = factory_mod_any._create_vector_engine
     original_create = old_cached.__wrapped__
     old_cached.cache_clear()
 
     @lru_cache
     def tracked_create(*args, **kwargs):
+        if USE_SUBPROCESS_VECTOR_ADAPTER:
+            from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+            from cognee.infrastructure.databases.vector.subprocess_vector_wrapper import (
+                SubprocessVectorDBWrapper,
+            )
+
+            provider = args[0] if args else kwargs.get("vector_db_provider", "")
+            if provider.lower() == "lancedb":
+                vector_db_url = args[1] if len(args) > 1 else kwargs.get("vector_db_url", "")
+                vector_db_key = args[4] if len(args) > 4 else kwargs.get("vector_db_key", "")
+
+                engine = SubprocessVectorDBWrapper(
+                    LanceDBAdapter,
+                    url=vector_db_url,
+                    api_key=vector_db_key,
+                    shutdown_timeout=30,
+                )
+                _all_vector_engines.append(engine)
+                print(
+                    "  [vector-track] wrapped LanceDBAdapter in SubprocessVectorDBWrapper"
+                    f" (url={vector_db_url})",
+                    flush=True,
+                )
+                print(
+                    f"  [vector-track] tracking {type(engine).__name__} id={id(engine)}",
+                    flush=True,
+                )
+                return engine
+
         engine = original_create(*args, **kwargs)
         _all_vector_engines.append(engine)
         print(f"  [vector-track] tracking {type(engine).__name__} id={id(engine)}", flush=True)
         return engine
 
-    factory_mod._create_vector_engine = tracked_create
+    factory_mod_any._create_vector_engine = tracked_create
     print("  [vector-track] factory installed", flush=True)
 
 
@@ -257,9 +295,10 @@ def print_summary(mem_log: list):
     print(f"Delta: {end_mb - start_mb:+.1f} MB")
 
 
-async def main(max_parts=None, subprocess_graph=False):
-    global USE_SUBPROCESS_GRAPH_ADAPTER
+async def main(max_parts=None, subprocess_graph=False, subprocess_vector=False):
+    global USE_SUBPROCESS_GRAPH_ADAPTER, USE_SUBPROCESS_VECTOR_ADAPTER
     USE_SUBPROCESS_GRAPH_ADAPTER = subprocess_graph
+    USE_SUBPROCESS_VECTOR_ADAPTER = subprocess_vector
 
     # -- configure cognee to use lancedb with isolated directories --
     cognee.config.set_vector_db_config({"vector_db_provider": "lancedb"})
@@ -327,4 +366,10 @@ if __name__ == "__main__":
         help="Run KuzuAdapter in an isolated subprocess via SubprocessGraphDBWrapper",
     )
     args = parser.parse_args()
-    asyncio.run(main(max_parts=args.parts, subprocess_graph=args.subprocess))
+    asyncio.run(
+        main(
+            max_parts=args.parts,
+            subprocess_graph=args.subprocess,
+            subprocess_vector=args.subprocess,
+        )
+    )
