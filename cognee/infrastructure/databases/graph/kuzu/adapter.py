@@ -24,7 +24,7 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.infrastructure.databases.cache.config import get_cache_config
-from cognee.infrastructure.databases.utils.idle_connection_manager import IdleConnectionManager
+from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
@@ -69,7 +69,6 @@ class KuzuAdapter(GraphDBInterface):
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
         self._connection_change_lock = asyncio.Lock()
         self._connection_lock = asyncio.Lock()
-        self._idle_manager = IdleConnectionManager(self)
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -221,9 +220,9 @@ class KuzuAdapter(GraphDBInterface):
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
-        Execute a Kuzu query asynchronously with automatic reconnection.
+        Execute a Kuzu query asynchronously.
 
-        This method runs a database query while managing potential reconnections. It handles
+        This method runs a database query while managing lazy connection initialization. It handles
         parameters in a dictionary and processes results to return structured data. The method
         raises any exceptions encountered during query execution.
 
@@ -239,76 +238,78 @@ class KuzuAdapter(GraphDBInterface):
 
             - List[Tuple]: A list of tuples representing the query results.
         """
-        async with self._idle_manager.using():
-            with new_span("cognee.db.graph.query") as otel_span:
-                otel_span.set_attribute(COGNEE_DB_SYSTEM, "kuzu")
-                otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
+        with new_span("cognee.db.graph.query") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "kuzu")
+            otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
 
-                loop = asyncio.get_running_loop()
-                params = params or {}
+            loop = asyncio.get_running_loop()
+            params = params or {}
 
-                def blocking_query(connection):
-                    lock_acquired = False
-                    try:
-                        if cache_config.shared_kuzu_lock:
-                            self.redis_lock.acquire_lock()
-                            lock_acquired = True
-
-                        result = connection.execute(query, params)
-                        rows = []
-
-                        while result.has_next():
-                            row = result.get_next()
-                            processed_rows = []
-                            for val in row:
-                                if hasattr(val, "as_py"):
-                                    val = val.as_py()
-                                processed_rows.append(val)
-                            rows.append(tuple(processed_rows))
-
-                        return rows
-                    except Exception as e:
-                        logger.error(f"Query execution failed: {str(e)}")
-                        raise
-                    finally:
-                        if cache_config.shared_kuzu_lock and lock_acquired:
-                            self.redis_lock.release_lock()
-
+            def blocking_query(connection):
+                lock_acquired = False
                 try:
-                    # Hold _connection_lock only for initialization, not for
-                    # the full query execution — allows concurrent queries
-                    # while the idle manager's active_count prevents close().
-                    async with self._connection_lock:
-                        connection = self.get_or_init_connection()
-
                     if cache_config.shared_kuzu_lock:
-                        self.open_connections += 1
-                        logger.info(f"Open connections after open: {self.open_connections}")
-                        try:
-                            result = blocking_query(connection)
-                        finally:
-                            self.open_connections -= 1
-                            logger.info(f"Open connections after close: {self.open_connections}")
-                            await self.close()
-                    else:
-                        result = await loop.run_in_executor(
-                            self.executor, blocking_query, connection
-                        )
+                        assert self.redis_lock is not None
+                        self.redis_lock.acquire_lock()
+                        lock_acquired = True
 
-                    otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
-                    return result
+                    result = connection.execute(query, params)
+                    rows = []
+
+                    while result.has_next():
+                        row = result.get_next()
+                        processed_rows = []
+                        for val in row:
+                            if hasattr(val, "as_py"):
+                                val = val.as_py()
+                            processed_rows.append(val)
+                        rows.append(tuple(processed_rows))
+
+                    return rows
                 except Exception as e:
-                    otel_span.set_status(StatusCode.ERROR, str(e))
-                    otel_span.record_exception(e)
+                    logger.error(f"Query execution failed: {str(e)}")
+                    raise
+                finally:
+                    if cache_config.shared_kuzu_lock and lock_acquired:
+                        assert self.redis_lock is not None
+                        self.redis_lock.release_lock()
+
+            try:
+                # Hold _connection_lock only for initialization, not for the
+                # full query execution.
+                async with self._connection_lock:
+                    connection = self.get_or_init_connection()
+
+                if cache_config.shared_kuzu_lock:
+                    self.open_connections += 1
+                    logger.info(f"Open connections after open: {self.open_connections}")
+                    try:
+                        result = blocking_query(connection)
+                    finally:
+                        self.open_connections -= 1
+                        logger.info(f"Open connections after close: {self.open_connections}")
+                        await self.close()
+                else:
+                    result = await loop.run_in_executor(
+                        self.executor, blocking_query, connection
+                    )
+
+                otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
+                return result
+            except Exception as e:
+                otel_span.set_status(StatusCode.ERROR, str(e))
+                otel_span.record_exception(e)
+                raise
 
     def get_or_init_connection(self) -> Connection:
         """Return the current connection, initializing it first if needed.
 
         Callers must hold ``_connection_lock`` to prevent races with
-        ``close()`` being called from the idle manager's background task.
+        explicit calls to ``close()``.
         """
         if not self.connection:
             self._initialize_connection()
+        assert self.connection is not None
         return self.connection
 
     async def close(self):
