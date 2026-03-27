@@ -56,6 +56,7 @@ def create_vector_engine(
     vector_db_username: str = "",
     vector_db_password: str = "",
     vector_db_host: str = "",
+    vector_db_subprocess_enabled: bool = False,
 ):
     """
     Wrapper function to call create vector engine with caching.
@@ -101,6 +102,7 @@ def create_vector_engine(
         vector_db_username,
         vector_db_password,
         vector_db_host,
+        vector_db_subprocess_enabled,
     )
 
 
@@ -115,6 +117,7 @@ def _create_vector_engine(
     vector_db_username: str,
     vector_db_password: str,
     vector_db_host: str,
+    vector_db_subprocess_enabled: bool,
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -142,10 +145,9 @@ def _create_vector_engine(
 
         An instance of the corresponding database adapter class for the specified provider.
     """
-    embedding_engine = get_embedding_engine()
-
     if vector_db_provider in supported_databases:
         adapter = supported_databases[vector_db_provider]
+        embedding_engine = get_embedding_engine()
 
         return adapter(
             url=vector_db_url,
@@ -155,6 +157,8 @@ def _create_vector_engine(
         )
 
     if vector_db_provider.lower() == "pgvector":
+        embedding_engine = get_embedding_engine()
+
         from cognee.context_global_variables import backend_access_control_enabled
 
         if backend_access_control_enabled():
@@ -207,6 +211,8 @@ def _create_vector_engine(
         )
 
     elif vector_db_provider.lower() == "chromadb":
+        embedding_engine = get_embedding_engine()
+
         try:
             import chromadb
         except ImportError:
@@ -223,6 +229,8 @@ def _create_vector_engine(
         )
 
     elif vector_db_provider.lower() == "neptune_analytics":
+        embedding_engine = get_embedding_engine()
+
         try:
             from langchain_aws import NeptuneAnalyticsGraph
         except ImportError:
@@ -252,6 +260,17 @@ def _create_vector_engine(
 
     elif vector_db_provider.lower() == "lancedb":
         from .lancedb.LanceDBAdapter import LanceDBAdapter
+
+        if vector_db_subprocess_enabled:
+            from .subprocess_vector_wrapper import SubprocessVectorDBWrapper
+
+            return SubprocessVectorDBWrapper(
+                LanceDBAdapter,
+                url=vector_db_url,
+                api_key=vector_db_key,
+            )
+
+        embedding_engine = get_embedding_engine()
 
         return LanceDBAdapter(
             url=vector_db_url,

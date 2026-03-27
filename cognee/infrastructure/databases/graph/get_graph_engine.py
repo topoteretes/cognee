@@ -3,6 +3,7 @@
 import inspect
 import os
 from numbers import Number
+from typing import Any, cast
 
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
@@ -76,6 +77,7 @@ def create_graph_engine(
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
+    graph_database_subprocess_enabled=False,
 ):
     """
     Wrapper function to call create graph engine with caching.
@@ -113,6 +115,7 @@ def create_graph_engine(
         graph_database_port,
         graph_database_key,
         graph_dataset_database_handler,
+        graph_database_subprocess_enabled,
     )
 
 
@@ -128,6 +131,7 @@ def _create_graph_engine(
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
+    graph_database_subprocess_enabled=False,
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -196,6 +200,11 @@ def _create_graph_engine(
             raise EnvironmentError("Missing required Kuzu database path.")
 
         from .kuzu.adapter import KuzuAdapter
+        if graph_database_subprocess_enabled:
+            from .subprocess_graph_wrapper import SubprocessGraphDBWrapper
+
+            subprocess_graph_wrapper_cls = cast(Any, SubprocessGraphDBWrapper)
+            return subprocess_graph_wrapper_cls(KuzuAdapter, db_path=graph_file_path)
 
         return KuzuAdapter(db_path=graph_file_path)
 

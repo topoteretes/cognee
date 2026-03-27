@@ -23,6 +23,13 @@ import psutil
 
 import cognee
 
+from cognee.infrastructure.databases.graph.subprocess_graph_wrapper import (
+    SubprocessGraphDBWrapper,
+)
+from cognee.infrastructure.databases.vector.subprocess_vector_wrapper import (
+    SubprocessVectorDBWrapper,
+)
+
 
 GUTENBERG_URL = "https://www.gutenberg.org/cache/epub/2600/pg2600.txt"
 TEXT_FILENAME = "war_and_peace.txt"
@@ -101,13 +108,58 @@ def _wrap_graph_method(original, method_name):
 _all_vector_engines: list = []
 _all_graph_engines: list = []
 
-# When True, KuzuAdapter instances are wrapped in SubprocessGraphDBWrapper.
-USE_SUBPROCESS_GRAPH_ADAPTER = False
-# When True, LanceDBAdapter instances are wrapped in SubprocessVectorDBWrapper.
-USE_SUBPROCESS_VECTOR_ADAPTER = False
+
+def _graph_provider_from_factory_args(*args, **kwargs) -> str:
+    provider = args[0] if args else kwargs.get("graph_database_provider", "")
+    return str(provider).lower()
 
 
-def install_graph_memory_logging():
+def _vector_provider_from_factory_args(*args, **kwargs) -> str:
+    provider = args[0] if args else kwargs.get("vector_db_provider", "")
+    return str(provider).lower()
+
+
+def _force_graph_subprocess_args(*args, **kwargs):
+    mutable_args = list(args)
+    if mutable_args:
+        if len(mutable_args) >= 10:
+            mutable_args[9] = True
+        else:
+            kwargs["graph_database_subprocess_enabled"] = True
+    else:
+        kwargs["graph_database_subprocess_enabled"] = True
+    return tuple(mutable_args), kwargs
+
+
+def _force_vector_subprocess_args(*args, **kwargs):
+    mutable_args = list(args)
+    if mutable_args:
+        if len(mutable_args) >= 10:
+            mutable_args[9] = True
+        else:
+            kwargs["vector_db_subprocess_enabled"] = True
+    else:
+        kwargs["vector_db_subprocess_enabled"] = True
+    return tuple(mutable_args), kwargs
+
+
+def _assert_graph_engine_mode(engine: Any, *args, require_subprocess: bool, **kwargs) -> None:
+    if require_subprocess and _graph_provider_from_factory_args(*args, **kwargs) == "kuzu":
+        if not isinstance(engine, SubprocessGraphDBWrapper):
+            raise AssertionError(
+                "Expected Kuzu graph engine to run in a subprocess when --subprocess is enabled"
+            )
+
+
+def _assert_vector_engine_mode(engine: Any, *args, require_subprocess: bool, **kwargs) -> None:
+    if require_subprocess and _vector_provider_from_factory_args(*args, **kwargs) == "lancedb":
+        if not isinstance(engine, SubprocessVectorDBWrapper):
+            raise AssertionError(
+                "Expected LanceDB vector engine to run in a subprocess when --subprocess is enabled"
+            )
+
+
+def install_graph_memory_logging(*, require_subprocess: bool = False):
     """Monkey-patch the _create_graph_engine factory so every engine it creates
     gets memory-logging wrappers on its methods AND is tracked for cleanup.
 
@@ -117,10 +169,6 @@ def install_graph_memory_logging():
 
     We replace the cached function with a new @lru_cache that wraps the
     original, and clear the old cache to avoid stale instances holding locks.
-
-    When USE_SUBPROCESS_GRAPH_ADAPTER is True, any KuzuAdapter returned by
-    the factory is replaced with a SubprocessGraphDBWrapper that runs the
-    adapter in an isolated process.
     """
     import importlib
     from functools import lru_cache
@@ -140,36 +188,16 @@ def install_graph_memory_logging():
 
     @lru_cache
     def patched_create(*args, **kwargs):
-        if USE_SUBPROCESS_GRAPH_ADAPTER:
-            from cognee.infrastructure.databases.graph.subprocess_graph_wrapper import (
-                SubprocessGraphDBWrapper,
-            )
-
-            # Detect if the factory would create a KuzuAdapter by checking
-            # the provider arg (first positional) without actually creating
-            # the adapter — avoids the file lock conflict.
-            provider = args[0] if args else kwargs.get("graph_database_provider", "")
-            if provider == "kuzu":
-                from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
-
-                db_path = args[1] if len(args) > 1 else kwargs.get("graph_file_path", "")
-                subprocess_graph_wrapper_cls = cast(Any, SubprocessGraphDBWrapper)
-                engine = subprocess_graph_wrapper_cls(
-                    KuzuAdapter, db_path=db_path, shutdown_timeout=30,
-                )
-                print(
-                    f"  [graph-patch] wrapped KuzuAdapter in SubprocessGraphDBWrapper"
-                    f" (db_path={db_path})",
-                    flush=True,
-                )
-                _all_graph_engines.append(engine)
-                for name in methods_to_wrap:
-                    if hasattr(engine, name):
-                        setattr(engine, name, _wrap_graph_method(getattr(engine, name), name))
-                print(f"  [graph-patch] patched engine {type(engine).__name__} id={id(engine)}", flush=True)
-                return engine
+        if require_subprocess and _graph_provider_from_factory_args(*args, **kwargs) == "kuzu":
+            args, kwargs = _force_graph_subprocess_args(*args, **kwargs)
 
         engine = original_create(*args, **kwargs)
+        _assert_graph_engine_mode(
+            engine,
+            *args,
+            require_subprocess=require_subprocess,
+            **kwargs,
+        )
 
         _all_graph_engines.append(engine)
         for name in methods_to_wrap:
@@ -182,12 +210,9 @@ def install_graph_memory_logging():
     print("  [graph-patch] factory installed", flush=True)
 
 
-def install_vector_engine_tracking():
+def install_vector_engine_tracking(*, require_subprocess: bool = False):
     """Monkey-patch _create_vector_engine so we can track all LanceDB adapter
     instances created by the multi-tenant system.
-
-    When USE_SUBPROCESS_VECTOR_ADAPTER is True, LanceDBAdapter is created inside a
-    dedicated subprocess so its connection and caches live outside the main process.
     """
     import importlib
     from functools import lru_cache
@@ -203,36 +228,16 @@ def install_vector_engine_tracking():
 
     @lru_cache
     def tracked_create(*args, **kwargs):
-        if USE_SUBPROCESS_VECTOR_ADAPTER:
-            from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
-            from cognee.infrastructure.databases.vector.subprocess_vector_wrapper import (
-                SubprocessVectorDBWrapper,
-            )
-
-            provider = args[0] if args else kwargs.get("vector_db_provider", "")
-            if provider.lower() == "lancedb":
-                vector_db_url = args[1] if len(args) > 1 else kwargs.get("vector_db_url", "")
-                vector_db_key = args[4] if len(args) > 4 else kwargs.get("vector_db_key", "")
-
-                engine = SubprocessVectorDBWrapper(
-                    LanceDBAdapter,
-                    url=vector_db_url,
-                    api_key=vector_db_key,
-                    shutdown_timeout=30,
-                )
-                _all_vector_engines.append(engine)
-                print(
-                    "  [vector-track] wrapped LanceDBAdapter in SubprocessVectorDBWrapper"
-                    f" (url={vector_db_url})",
-                    flush=True,
-                )
-                print(
-                    f"  [vector-track] tracking {type(engine).__name__} id={id(engine)}",
-                    flush=True,
-                )
-                return engine
+        if require_subprocess and _vector_provider_from_factory_args(*args, **kwargs) == "lancedb":
+            args, kwargs = _force_vector_subprocess_args(*args, **kwargs)
 
         engine = original_create(*args, **kwargs)
+        _assert_vector_engine_mode(
+            engine,
+            *args,
+            require_subprocess=require_subprocess,
+            **kwargs,
+        )
         _all_vector_engines.append(engine)
         print(f"  [vector-track] tracking {type(engine).__name__} id={id(engine)}", flush=True)
         return engine
@@ -296,12 +301,16 @@ def print_summary(mem_log: list):
 
 
 async def main(max_parts=None, subprocess_graph=False, subprocess_vector=False):
-    global USE_SUBPROCESS_GRAPH_ADAPTER, USE_SUBPROCESS_VECTOR_ADAPTER
-    USE_SUBPROCESS_GRAPH_ADAPTER = subprocess_graph
-    USE_SUBPROCESS_VECTOR_ADAPTER = subprocess_vector
-
     # -- configure cognee to use lancedb with isolated directories --
-    cognee.config.set_vector_db_config({"vector_db_provider": "lancedb"})
+    cognee.config.set_vector_db_config(
+        {
+            "vector_db_provider": "lancedb",
+            "vector_db_subprocess_enabled": subprocess_vector,
+        }
+    )
+    cognee.config.set_graph_db_config(
+        {"graph_database_subprocess_enabled": subprocess_graph}
+    )
 
     base_dir = pathlib.Path(__file__).parent.resolve()
     cognee.config.data_root_directory(
@@ -318,21 +327,24 @@ async def main(max_parts=None, subprocess_graph=False, subprocess_vector=False):
     parts_dir = str(base_dir / "test_data" / "memory_leak_parts")
     part_paths = split_text_file(text_file_path, NUM_CYCLES, parts_dir)
 
-    # -- clean slate (before patching factories, so prune uses normal adapters) --
+    # Install tracking before any database access so the test can enforce that
+    # local engines are subprocess-backed from the start when requested.
+    install_graph_memory_logging(require_subprocess=subprocess_graph)
+    install_vector_engine_tracking(require_subprocess=subprocess_vector)
+
+    # -- clean slate --
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    # Explicitly close and clear cached graph engines created during prune
-    # so the kuzu file lock is released before the subprocess wrapper opens it.
+    # Explicitly close and clear cached engines created during prune so later
+    # cycles start from a clean engine state.
     import importlib as _il
 
     _gfm = _il.import_module("cognee.infrastructure.databases.graph.get_graph_engine")
     _gfm._create_graph_engine.cache_clear()
+    _vfm = _il.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
+    _vfm._create_vector_engine.cache_clear()
     gc.collect()
-
-    # -- install graph DB memory logging and vector engine tracking --
-    install_graph_memory_logging()
-    install_vector_engine_tracking()
 
     # -- start memory monitor --
     mem_log: list[dict] = []
