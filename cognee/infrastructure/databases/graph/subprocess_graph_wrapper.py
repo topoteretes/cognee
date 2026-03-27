@@ -9,12 +9,14 @@ import importlib
 import inspect
 import multiprocessing as mp
 import queue
+import time
 import traceback
 from dataclasses import dataclass
 from typing import Any, Optional, Type
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.memory_cleanup import get_process_rss
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -123,9 +125,7 @@ def _worker(
                     result = loop.run_until_complete(result)
                 resp_q.put(_Response(result=result))
             except AttributeError:
-                resp_q.put(_Response(
-                    error=_ATTRIBUTE_ERROR_PREFIX + traceback.format_exc()
-                ))
+                resp_q.put(_Response(error=_ATTRIBUTE_ERROR_PREFIX + traceback.format_exc()))
             except Exception:
                 resp_q.put(_Response(error=traceback.format_exc()))
     finally:
@@ -165,6 +165,7 @@ class SubprocessGraphDBWrapper(GraphDBInterface):
         self._req_q = ctx.Queue()
         self._resp_q = ctx.Queue()
         self._closed = False
+        self._last_accessed_at = time.time()
         self._shutdown_timeout = shutdown_timeout
 
         self._proc = ctx.Process(
@@ -192,9 +193,7 @@ class SubprocessGraphDBWrapper(GraphDBInterface):
 
         if resp.error:
             self._proc.join(timeout=5)
-            raise RuntimeError(
-                f"Adapter initialization failed in subprocess:\n{resp.error}"
-            )
+            raise RuntimeError(f"Adapter initialization failed in subprocess:\n{resp.error}")
 
         # The worker sends the adapter's public attribute names on success.
         self._adapter_attrs: set = resp.result or set()
@@ -210,12 +209,12 @@ class SubprocessGraphDBWrapper(GraphDBInterface):
 
     async def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
         """Send a method call to the subprocess and return the result."""
+        self._touch()
+
         if self._closed:
             raise RuntimeError("Subprocess wrapper is closed")
         if not self._proc.is_alive():
-            raise RuntimeError(
-                f"Subprocess exited unexpectedly (exit code {self._proc.exitcode})"
-            )
+            raise RuntimeError(f"Subprocess exited unexpectedly (exit code {self._proc.exitcode})")
 
         args = _prepare_for_pickle(args)
         kwargs = _prepare_for_pickle(kwargs)
@@ -226,12 +225,8 @@ class SubprocessGraphDBWrapper(GraphDBInterface):
 
         if resp.error:
             if resp.error.startswith(_ATTRIBUTE_ERROR_PREFIX):
-                raise AttributeError(
-                    f"Subprocess adapter has no attribute '{method}'"
-                )
-            raise RuntimeError(
-                f"Subprocess call to '{method}' failed:\n{resp.error}"
-            )
+                raise AttributeError(f"Subprocess adapter has no attribute '{method}'")
+            raise RuntimeError(f"Subprocess call to '{method}' failed:\n{resp.error}")
         return resp.result
 
     def _wait_response(self) -> _Response:
@@ -245,21 +240,20 @@ class SubprocessGraphDBWrapper(GraphDBInterface):
                         f"Subprocess exited unexpectedly (exit code {self._proc.exitcode})"
                     )
 
-    async def close(self) -> None:
-        """Gracefully shut down the subprocess, force-kill if it doesn't exit in time."""
+    def _touch(self) -> None:
+        self._last_accessed_at = time.time()
+
+    def _close_sync(self) -> None:
         if self._closed:
             return
         self._closed = True
 
-        if not self._proc.is_alive():
+        if not hasattr(self, "_proc") or not self._proc.is_alive():
             return
 
         try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._req_q.put, _SHUTDOWN)
-            await loop.run_in_executor(
-                None, self._proc.join, self._shutdown_timeout
-            )
+            self._req_q.put(_SHUTDOWN)
+            self._proc.join(timeout=self._shutdown_timeout)
         except Exception:
             logger.warning("Error during graceful subprocess shutdown", exc_info=True)
 
@@ -268,31 +262,31 @@ class SubprocessGraphDBWrapper(GraphDBInterface):
             self._proc.terminate()
             self._proc.join(timeout=5)
 
+    def memory_used(self) -> int:
+        if self._closed or not hasattr(self, "_proc") or not self._proc.is_alive():
+            return 0
+        return get_process_rss(self._proc.pid)
+
+    def last_accessed_ts(self) -> float:
+        return self._last_accessed_at
+
+    def clean(self) -> None:
+        self._close_sync()
+
+    async def close(self) -> None:
+        """Gracefully shut down the subprocess, force-kill if it doesn't exit in time."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._close_sync)
+
     def __del__(self):
-        if self._closed or not hasattr(self, "_proc"):
-            return
-        self._closed = True
-
-        if not self._proc.is_alive():
-            return
-
-        try:
-            self._req_q.put_nowait(_SHUTDOWN)
-            self._proc.join(timeout=self._shutdown_timeout)
-        except Exception:
-            pass
-
-        if self._proc.is_alive():
-            self._proc.terminate()
+        self._close_sync()
 
     def __getattr__(self, name: str):
         """Proxy for methods not on GraphDBInterface (adapter-specific methods)."""
         if name.startswith("_"):
             raise AttributeError(name)
         if hasattr(self, "_adapter_attrs") and name not in self._adapter_attrs:
-            raise AttributeError(
-                f"Subprocess adapter has no attribute '{name}'"
-            )
+            raise AttributeError(f"Subprocess adapter has no attribute '{name}'")
 
         async def dynamic_proxy(*args, **kwargs):
             return await self._call(name, *args, **kwargs)
@@ -304,9 +298,7 @@ class SubprocessGraphDBWrapper(GraphDBInterface):
 # Stamp proxy methods for all public async methods on GraphDBInterface.
 # This satisfies the ABC requirement that all abstract methods are implemented.
 _stamped = set()
-for _name, _method in inspect.getmembers(
-    GraphDBInterface, predicate=inspect.iscoroutinefunction
-):
+for _name, _method in inspect.getmembers(GraphDBInterface, predicate=inspect.iscoroutinefunction):
     if not _name.startswith("_") and _name not in SubprocessGraphDBWrapper.__dict__:
         setattr(SubprocessGraphDBWrapper, _name, _make_proxy(_name))
         _stamped.add(_name)

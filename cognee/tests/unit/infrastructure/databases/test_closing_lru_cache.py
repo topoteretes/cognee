@@ -1,9 +1,18 @@
 """Tests for ClosingLRUCache and the @closing_lru_cache decorator."""
 
+import pytest
+
 from cognee.infrastructure.databases.utils.closing_lru_cache import (
     ClosingLRUCache,
     closing_lru_cache,
 )
+from cognee.infrastructure.memory_cleanup import stop_memory_cleanup_manager
+
+
+@pytest.fixture(autouse=True)
+def _reset_memory_cleanup_manager():
+    yield
+    stop_memory_cleanup_manager(reset=True)
 
 
 class _Closeable:
@@ -33,6 +42,19 @@ class _NotCloseable:
 
     def __init__(self, name=""):
         self.name = name
+
+
+class _MemoryAwareCloseable(_Closeable):
+    def __init__(self, name="", memory=1, last_accessed=1.0):
+        super().__init__(name)
+        self._memory = memory
+        self._last_accessed = last_accessed
+
+    def memory_used(self) -> int:
+        return self._memory
+
+    def last_accessed_ts(self) -> float:
+        return self._last_accessed
 
 
 # -- ClosingLRUCache: basic caching -----------------------------------------
@@ -150,6 +172,20 @@ def test_cache_clear_handles_async_close():
     assert obj.closed is True
 
 
+def test_get_items_wraps_memory_aware_entries():
+    cache = ClosingLRUCache(maxsize=4)
+    obj = cache.get_or_create("a", lambda: _MemoryAwareCloseable("a", memory=42, last_accessed=5.0))
+
+    items = cache.get_items()
+
+    assert len(items) == 1
+    assert items[0].memory_used() == 42
+    assert items[0].last_accessed_ts() >= 5.0
+    items[0].clean()
+    assert obj.closed is True
+    assert cache.cache_info()["size"] == 0
+
+
 # -- @closing_lru_cache decorator -------------------------------------------
 
 
@@ -171,6 +207,7 @@ def test_decorator_caches_return_value():
 
 def test_decorator_different_args_create_different_entries():
     """Different arguments produce distinct cached values."""
+
     @closing_lru_cache(maxsize=4)
     def create(key):
         return _Closeable(key)
@@ -184,6 +221,7 @@ def test_decorator_different_args_create_different_entries():
 
 def test_decorator_evicts_and_closes():
     """Decorated function evicts oldest entry and calls close() on it."""
+
     @closing_lru_cache(maxsize=2)
     def create(key):
         return _Closeable(key)
@@ -197,6 +235,7 @@ def test_decorator_evicts_and_closes():
 
 def test_decorator_exposes_cache_clear():
     """Decorated function has a cache_clear method that closes all entries."""
+
     @closing_lru_cache(maxsize=4)
     def create(key):
         return _Closeable(key)
@@ -208,6 +247,7 @@ def test_decorator_exposes_cache_clear():
 
 def test_decorator_exposes_cache_info():
     """Decorated function has a cache_info method."""
+
     @closing_lru_cache(maxsize=10)
     def create(key):
         return _Closeable(key)
@@ -220,6 +260,7 @@ def test_decorator_exposes_cache_info():
 
 def test_decorator_exposes_wrapped():
     """Decorated function has __wrapped__ pointing to the original."""
+
     def original(key):
         return _Closeable(key)
 
@@ -229,6 +270,7 @@ def test_decorator_exposes_wrapped():
 
 def test_decorator_kwargs_are_part_of_cache_key():
     """Different keyword arguments produce separate cache entries."""
+
     @closing_lru_cache(maxsize=4)
     def create(a, b="default"):
         return _Closeable(f"{a}-{b}")

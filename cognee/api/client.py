@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 
 from cognee.exceptions import CogneeApiError
+from cognee.infrastructure.memory_cleanup import stop_memory_cleanup_manager
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.api.v1.cloud.routers import get_checks_router
 from cognee.api.v1.notebooks.routers import get_notebooks_router
@@ -96,7 +97,10 @@ async def lifespan(app: FastAPI):
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
-    yield
+    try:
+        yield
+    finally:
+        stop_memory_cleanup_manager(reset=True)
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)

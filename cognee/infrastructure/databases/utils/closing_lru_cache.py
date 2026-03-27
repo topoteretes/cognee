@@ -3,10 +3,18 @@
 import asyncio
 import logging
 from collections import OrderedDict
+from dataclasses import dataclass
 from functools import wraps
 from threading import Lock
+from time import time
+
+from cognee.infrastructure.memory_cleanup import get_memory_cleanup_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _is_memory_trackable(value):
+    return all(hasattr(value, attr) for attr in ("memory_used", "last_accessed_ts"))
 
 
 def _close_value(value):
@@ -45,39 +53,124 @@ class ClosingLRUCache:
         self._cache: OrderedDict = OrderedDict()
         self._maxsize = maxsize
         self._lock = Lock()
+        self._registered = False
+
+    def _ensure_registered(self):
+        if self._registered:
+            return
+
+        with self._lock:
+            if self._registered:
+                return
+            get_memory_cleanup_manager().register_component(self)
+            self._registered = True
+
+    def _evict_key_if_matching(self, key, value):
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None or entry.value is not value:
+                return False
+            self._cache.pop(key)
+
+        _close_value(value)
+        return True
+
+    @staticmethod
+    def _value_last_accessed_ts(value):
+        if not _is_memory_trackable(value):
+            return 0.0
+
+        try:
+            return float(value.last_accessed_ts())
+        except Exception:
+            logger.warning(
+                "Failed to read memory timestamp from %s",
+                type(value).__name__,
+                exc_info=True,
+            )
+            return 0.0
 
     def get_or_create(self, key, factory):
+        self._ensure_registered()
+        now = time()
+
         with self._lock:
             if key in self._cache:
+                entry = self._cache[key]
+                entry.last_accessed_at = now
                 self._cache.move_to_end(key)
-                return self._cache[key]
+                return entry.value
 
         value = factory()
 
         with self._lock:
             # Re-check after releasing lock — another thread may have created it.
             if key in self._cache:
+                entry = self._cache[key]
+                entry.last_accessed_at = now
                 self._cache.move_to_end(key)
-                return self._cache[key]
+                cached_value = entry.value
+            else:
+                cached_value = None
+
+            if cached_value is not None:
+                _close_value(value)
+                return cached_value
 
             if self._maxsize > 0 and len(self._cache) >= self._maxsize:
                 _, evicted = self._cache.popitem(last=False)
-                _close_value(evicted)
+                _close_value(evicted.value)
 
-            self._cache[key] = value
+            self._cache[key] = _CacheEntry(value=value, last_accessed_at=now)
             return value
 
     def cache_clear(self):
         """Close and remove all cached entries."""
         with self._lock:
-            for value in self._cache.values():
-                _close_value(value)
+            for entry in self._cache.values():
+                _close_value(entry.value)
             self._cache.clear()
 
     def cache_info(self):
         """Return current size and max size."""
         with self._lock:
             return {"size": len(self._cache), "maxsize": self._maxsize}
+
+    def get_items(self):
+        self._ensure_registered()
+
+        with self._lock:
+            return [
+                _CacheMemoryItem(self, key, entry)
+                for key, entry in self._cache.items()
+                if _is_memory_trackable(entry.value)
+            ]
+
+
+@dataclass
+class _CacheEntry:
+    value: object
+    last_accessed_at: float
+
+
+class _CacheMemoryItem:
+    def __init__(self, cache: ClosingLRUCache, key, entry: _CacheEntry):
+        self._cache = cache
+        self._key = key
+        self._value = entry.value
+        self._cache_accessed_at = entry.last_accessed_at
+
+    def memory_used(self) -> int:
+        return int(self._value.memory_used())
+
+    def last_accessed_ts(self) -> float:
+        return max(
+            self._cache_accessed_at,
+            self._cache._value_last_accessed_ts(self._value),
+        )
+
+    def clean(self):
+        self._cache._evict_key_if_matching(self._key, self._value)
 
 
 def closing_lru_cache(maxsize: int = 128):
