@@ -14,6 +14,7 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
     GraphCompletionContextExtensionRetriever,
 )
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -98,9 +99,9 @@ _TYPE_RETRIEVERS: Dict[str, type] = {
     "preference_following": GraphCompletionRetriever,
     # RAG over raw chunks — raw context better for abstention (clearer what was/wasn't discussed)
     "abstention": CompletionRetriever,
-    # RAG over raw chunks — graph loses temporal/event ordering, chunks preserve message flow
-    "temporal_reasoning": CompletionRetriever,
-    "event_ordering": CompletionRetriever,
+    # Temporal retriever — uses event graph with time-aware filtering
+    "temporal_reasoning": TemporalRetriever,
+    "event_ordering": TemporalRetriever,
     "knowledge_update": GraphCompletionContextExtensionRetriever,
     "multi_session_reasoning": GraphCompletionContextExtensionRetriever,
     "contradiction_resolution": GraphCompletionContextExtensionRetriever,
@@ -112,8 +113,8 @@ _TYPE_RETRIEVERS: Dict[str, type] = {
 # Per-type top_k overrides (default is 10)
 _TYPE_TOP_K: Dict[str, int] = {
     "summarization": 35,  # Sessions have ~30 turns, need broad coverage
-    "event_ordering": 25,  # Need enough chunks to see full event sequence
-    "temporal_reasoning": 20,  # Need enough chunks to find date references
+    "event_ordering": 15,  # TemporalRetriever: find enough events to order
+    "temporal_reasoning": 15,  # TemporalRetriever: find enough time-filtered events
     "abstention": 15,  # Enough context to judge what was/wasn't discussed
     "multi_session_reasoning": 15,  # Evidence spread across multiple sessions
     "knowledge_update": 15,  # Need to see both old and new versions of a fact
@@ -148,9 +149,16 @@ class BEAMRouter:
         """Get or create a retriever instance for the given question type."""
         if question_type not in self._retriever_cache:
             retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
-            system_prompt = self.get_system_prompt(question_type)
             top_k = _TYPE_TOP_K.get(question_type, 10)
-            kwargs: Dict[str, Any] = {"system_prompt": system_prompt, "top_k": top_k}
+
+            # TemporalRetriever doesn't accept system_prompt
+            if retriever_cls is TemporalRetriever:
+                kwargs: Dict[str, Any] = {"top_k": top_k, "wide_search_top_k": 200}
+                self._retriever_cache[question_type] = retriever_cls(**kwargs)
+                return self._retriever_cache[question_type]
+
+            system_prompt = self.get_system_prompt(question_type)
+            kwargs = {"system_prompt": system_prompt, "top_k": top_k}
 
             # Graph-based retriever tuning
             if retriever_cls in (
@@ -177,16 +185,21 @@ class BEAMRouter:
     def _make_retriever(self, question_type: str) -> BaseRetriever:
         """Create a fresh retriever instance (not cached) for parallel use."""
         retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
-        system_prompt = self.get_system_prompt(question_type)
         top_k = _TYPE_TOP_K.get(question_type, 10)
-        kwargs: Dict[str, Any] = {"system_prompt": system_prompt, "top_k": top_k}
+
+        # TemporalRetriever doesn't accept system_prompt, only system_prompt_path
+        if retriever_cls is TemporalRetriever:
+            kwargs: Dict[str, Any] = {"top_k": top_k, "wide_search_top_k": 200}
+            return retriever_cls(**kwargs)
+
+        system_prompt = self.get_system_prompt(question_type)
+        kwargs = {"system_prompt": system_prompt, "top_k": top_k}
 
         if retriever_cls in (
             GraphCompletionRetriever,
             GraphCompletionContextExtensionRetriever,
         ):
             kwargs["wide_search_top_k"] = 200
-            kwargs["triplet_distance_penalty"] = 4.0
 
         if retriever_cls is GraphCompletionContextExtensionRetriever:
             kwargs["context_extension_rounds"] = _TYPE_EXTENSION_ROUNDS.get(

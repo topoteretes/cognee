@@ -47,7 +47,7 @@ def _make_eval_params(conversation_index: int) -> dict:
         evaluating_contexts=False,
         evaluation_engine="DeepEval",
         evaluation_metrics=["rubric", "f1", "EM"],
-        task_getter_type="Default",
+        task_getter_type="Temporal",
         chunks_per_batch=10,
         calculate_metrics=True,
         dashboard=False,
@@ -68,12 +68,10 @@ async def run_single_conversation(conversation_index: int) -> dict:
     params = _make_eval_params(conversation_index)
     params["_beam_max_batches"] = BEAM_MAX_BATCHES
     params["_beam_conversation_index"] = conversation_index
-    params["custom_prompt"] = CONVERSATION_GRAPH_PROMPT
+    # Temporal pipeline has its own event extraction — no custom graph prompt needed
 
-    from cognee.modules.chunking.ConversationChunker import ConversationChunker
-
-    params["chunker"] = ConversationChunker
-    params["chunk_size"] = 8192  # Large limit — turn pairs are the real boundary
+    # Temporal pipeline needs smaller chunks to avoid max_tokens limit on event extraction
+    params["chunk_size"] = 1024
 
     # Step 1: Build corpus
     logger.info(f"[conv {conversation_index}] Step 1: Building corpus...")

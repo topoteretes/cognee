@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Callable, Awaitable, List
-from cognee.api.v1.cognify.cognify import get_default_tasks
+from cognee.api.v1.cognify.cognify import get_default_tasks, get_temporal_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.eval_framework.corpus_builder.task_getters.get_cascade_graph_tasks import (
     get_cascade_graph_tasks,
@@ -15,6 +15,7 @@ class TaskGetters(Enum):
     """Enum mapping task getter types to their respective functions."""
 
     DEFAULT = ("Default", get_default_tasks)
+    TEMPORAL = ("Temporal", get_temporal_tasks)
     CASCADE_GRAPH = ("CascadeGraph", get_cascade_graph_tasks)
     NO_SUMMARIES = ("NoSummaries", get_no_summary_tasks)
     JUST_CHUNKS = ("JustChunks", get_just_chunks_tasks)
