@@ -60,26 +60,19 @@ def get_llm_router() -> APIRouter:
 
         try:
             graph_model_schema_json = json.dumps(payload.graph_model, ensure_ascii=False)
-            package_root = pathlib.Path(__file__).resolve().parents[4]
-            prompt_path = (
-                package_root / "infrastructure" / "llm" / "prompts" / "custom_prompt_generation.txt"
+
+            user_prompt = render_prompt(
+                "custom_prompt_generation_user.txt",
+                {"GRAPH_SCHEMA_JSON": graph_model_schema_json},
             )
 
-            if prompt_path.exists():
-                system_prompt = render_prompt(
-                    prompt_path.name,
-                    {"GRAPH_SCHEMA_JSON": graph_model_schema_json},
-                    base_directory=str(prompt_path.parent),
-                )
-            else:
-                # Fallback to default resolver path used elsewhere in the codebase.
-                system_prompt = render_prompt(
-                    "custom_prompt_generation.txt",
-                    {"GRAPH_SCHEMA_JSON": graph_model_schema_json},
-                )
+            system_prompt = render_prompt(
+                "custom_prompt_generation_system.txt",
+                {},
+            )
 
             llm_output = await LLMGateway.acreate_structured_output(
-                text_input=payload.text_input,
+                text_input=user_prompt,
                 system_prompt=system_prompt,
                 response_model=str,
                 **payload.parameters,
