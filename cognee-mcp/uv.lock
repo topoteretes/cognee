@@ -878,7 +878,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "0.5.4"
+version = "0.5.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -927,9 +927,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/95/34/ca6499ce126bd885d7b3d77fa7054a523f312d38744ddd4346db8759c1e4/cognee-0.5.4.tar.gz", hash = "sha256:4fef700616f866b35d2410e0a08aecc1800c4dacb7725c29a48c65f31baa5571", size = 14675948, upload-time = "2026-03-10T22:16:37.086Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/db/d1/d488eb1c12eb9918a991ddc54652384e26f4645f7c62ca56570594d16a32/cognee-0.5.5.tar.gz", hash = "sha256:777408a9dfed35eea9c9a39915eb736863f16557c33c2a4357789255cf1b5e8c", size = 14722743, upload-time = "2026-03-14T14:22:10.704Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/50/ad/737145a583fc192a4f2c9a85ef9a5062a169c43fef2a62a881037a236a6f/cognee-0.5.4-py3-none-any.whl", hash = "sha256:ebe628e8e25057611a3caeb9b4700d9faffe60712ea54eb807ed51ee85976959", size = 1651091, upload-time = "2026-03-10T22:16:41.17Z" },
+    { url = "https://files.pythonhosted.org/packages/05/b1/08afba39774441ee69a65aafef577f6d60da3f186d605fa94824b7e2dd61/cognee-0.5.5-py3-none-any.whl", hash = "sha256:ba8f5f0d9f69336966f412f0dfa85a717cdd100a78d6733316efd65effb7f9a3", size = 1716094, upload-time = "2026-03-14T14:22:08.071Z" },
 ]
 
 [package.optional-dependencies]
@@ -972,7 +972,7 @@ postgres-binary = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cognee", extras = ["postgres", "docs", "neo4j"], specifier = "==0.5.4" },
+    { name = "cognee", extras = ["postgres", "docs", "neo4j"], specifier = "==0.5.5" },
     { name = "fastmcp", specifier = ">=2.10.0,<3.0.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
     { name = "mcp", specifier = ">=1.12.0,<2.0.0" },
