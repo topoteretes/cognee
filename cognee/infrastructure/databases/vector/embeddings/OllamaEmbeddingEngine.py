@@ -20,6 +20,10 @@ from cognee.infrastructure.llm.tokenizer.HuggingFace import (
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.utils import create_secure_ssl_context
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    sanitize_embedding_text_inputs,
+    handle_embedding_response,
+)
 
 logger = get_logger("OllamaEmbeddingEngine")
 
@@ -90,15 +94,18 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
             - List[List[float]]: A list of embedding vectors corresponding to the text prompts.
         """
+        sanitized_text_input = sanitize_embedding_text_inputs(text)
         if self.mock:
-            return [[0.0] * self.dimensions for _ in text]
+            return [[0.0] * self.dimensions for _ in sanitized_text_input]
 
         # Handle case when a single string is passed instead of a list
-        if not isinstance(text, list):
-            text = [text]
+        if not isinstance(sanitized_text_input, list):
+            text = [sanitized_text_input]
 
-        embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
-        return embeddings
+        embeddings = await asyncio.gather(
+            *[self._get_embedding(prompt) for prompt in sanitized_text_input]
+        )
+        return handle_embedding_response(text, embeddings, self.dimensions)
 
     def _truncate_text_to_token_limit(self, text: str, max_tokens: int = 2048) -> str:
         """
@@ -110,6 +117,12 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             logger.warning(
                 f"Text exceeds character limit ({len(text)} > {char_limit}), truncating..."
             )
+            # TODO: Refactor to better handle truncation, handle it the same as it is handled in LiteLLMEmbeddingEngine
+            #       when the ContextWindowExceededError happens.
+            #       Also max_tokens is never provided to function call so it will always default to 2048, we should make
+            #       it so that it is provided based on the model's context length.
+            #       The char_limit is not a good estimate based on the average number of characters per token, and
+            #       actual value should be based on actual token count using the tokenizer or when the ContextWindowExceededError happens.
             return text[:char_limit]
         return text
 
