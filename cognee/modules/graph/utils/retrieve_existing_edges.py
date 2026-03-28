@@ -40,7 +40,7 @@ async def retrieve_existing_edges(
         - Prevents processing the same node multiple times using a processed_nodes tracker
         - The returned mapping can be used with expand_with_nodes_and_edges() to avoid duplicates
     """
-    processed_nodes = {}
+    processed_edges = set()
     type_node_edges = []
     entity_node_edges = []
     type_entity_edges = []
@@ -51,17 +51,23 @@ async def retrieve_existing_edges(
         graph = chunk_graphs[index]
 
         for node in graph.nodes:
-            type_node_id = generate_node_id(node.type)
-            entity_node_id = generate_node_id(node.id)
+            type_node_id = generate_node_id(f"type:{node.type}")
+            entity_node_id = generate_node_id(f"entity:{node.id}")
 
-            if str(type_node_id) not in processed_nodes:
-                type_node_edges.append((data_chunk.id, type_node_id, "exists_in"))
-                processed_nodes[str(type_node_id)] = True
+            type_edge = (data_chunk.id, type_node_id, "exists_in")
+            if type_edge not in processed_edges:
+                type_node_edges.append(type_edge)
+                processed_edges.add(type_edge)
 
-            if str(entity_node_id) not in processed_nodes:
-                entity_node_edges.append((data_chunk.id, entity_node_id, "mentioned_in"))
-                type_entity_edges.append((entity_node_id, type_node_id, "is_a"))
-                processed_nodes[str(entity_node_id)] = True
+            entity_edge = (data_chunk.id, entity_node_id, "mentioned_in")
+            if entity_edge not in processed_edges:
+                entity_node_edges.append(entity_edge)
+                processed_edges.add(entity_edge)
+
+            type_entity_edge = (entity_node_id, type_node_id, "is_a")
+            if type_entity_edge not in processed_edges:
+                type_entity_edges.append(type_entity_edge)
+                processed_edges.add(type_entity_edge)
 
         graph_node_edges.extend(
             (

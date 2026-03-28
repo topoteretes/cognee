@@ -36,7 +36,7 @@ def _process_ontology_nodes(
 ) -> None:
     """Process and store ontology nodes"""
     for ontology_node in ontology_nodes:
-        ont_node_id = generate_node_id(ontology_node.name)
+        ont_node_id = generate_node_id(f"type:{ontology_node.name}") if ontology_node.category == "classes" else generate_node_id(f"entity:{ontology_node.name}")
         ont_node_name = generate_node_name(ontology_node.name)
 
         if ontology_node.category == "classes":
@@ -102,7 +102,7 @@ def _create_type_node(
     ontology_relationships: list,
 ) -> EntityType:
     """Create or retrieve a type node with ontology validation"""
-    node_id = generate_node_id(node_type)
+    node_id = generate_node_id(f"type:{node_type}")
     node_name = generate_node_name(node_type)
     type_node_key = _create_node_key(node_id, "type")
 
@@ -120,7 +120,7 @@ def _create_type_node(
 
     if ontology_validated:
         old_key = type_node_key
-        node_id = generate_node_id(closest_class.name)
+        node_id = generate_node_id(f"type:{closest_class.name}")
         type_node_key = _create_node_key(node_id, "type")
         new_node_name = generate_node_name(closest_class.name)
 
@@ -161,7 +161,7 @@ def _create_entity_node(
     ontology_relationships: list,
 ) -> Entity:
     """Create or retrieve an entity node with ontology validation"""
-    generated_node_id = generate_node_id(node_id)
+    generated_node_id = generate_node_id(f"entity:{node_id}")
     generated_node_name = generate_node_name(node_name)
     entity_node_key = _create_node_key(generated_node_id, "entity")
 
@@ -179,7 +179,7 @@ def _create_entity_node(
 
     if ontology_validated:
         old_key = entity_node_key
-        generated_node_id = generate_node_id(start_ent_ont.name)
+        generated_node_id = generate_node_id(f"entity:{start_ent_ont.name}")
         entity_node_key = _create_node_key(generated_node_id, "entity")
         new_node_name = generate_node_name(start_ent_ont.name)
 
@@ -280,8 +280,8 @@ def _process_graph_edges(
         source_id = name_mapping.get(generate_node_name(edge.source_node_id), edge.source_node_id)
         target_id = name_mapping.get(generate_node_name(edge.target_node_id), edge.target_node_id)
 
-        source_node_id = generate_node_id(source_id)
-        target_node_id = generate_node_id(target_id)
+        source_node_id = generate_node_id(f"entity:{source_id}")
+        target_node_id = generate_node_id(f"entity:{target_id}")
         relationship_name = generate_edge_name(edge.relationship_name)
         edge_key = _create_edge_key(source_node_id, target_node_id, relationship_name)
 
