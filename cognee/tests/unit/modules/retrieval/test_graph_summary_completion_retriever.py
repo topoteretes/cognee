@@ -36,12 +36,14 @@ class TestGraphSummaryCompletionRetriever:
             top_k=10,
             wide_search_top_k=200,
             triplet_distance_penalty=2.5,
+            feedback_influence=0.15,
         )
 
         assert retriever.summarize_prompt_path == "custom_summarize.txt"
         assert retriever.user_prompt_path == "custom_user.txt"
         assert retriever.system_prompt_path == "custom_system.txt"
         assert retriever.top_k == 10
+        assert retriever.feedback_influence == 0.15
 
     @pytest.mark.asyncio
     async def test_resolve_edges_to_text_calls_super_and_summarizes(self, mock_edge):
