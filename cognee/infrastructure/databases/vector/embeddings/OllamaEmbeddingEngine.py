@@ -121,6 +121,8 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             #       when the ContextWindowExceededError happens.
             #       Also max_tokens is never provided to function call so it will always default to 2048, we should make
             #       it so that it is provided based on the model's context length.
+            #       The char_limit is not a good estimate based on the average number of characters per token, and
+            #       actual value should be based on actual token count using the tokenizer or when the ContextWindowExceededError happens.
             return text[:char_limit]
         return text
 
