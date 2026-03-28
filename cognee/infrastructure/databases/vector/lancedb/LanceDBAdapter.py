@@ -1,6 +1,7 @@
 import asyncio
 from os import path
 from uuid import UUID
+import pyarrow as pa
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
@@ -12,6 +13,7 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.modules.storage.utils import copy_model, get_own_properties
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -23,6 +25,8 @@ from cognee.modules.observability.tracing import (
     COGNEE_VECTOR_COLLECTION,
     COGNEE_VECTOR_RESULT_COUNT,
 )
+
+logger = get_logger("LanceDBAdapter")
 
 
 class IndexSchema(DataPoint):
@@ -203,13 +207,139 @@ class LanceDBAdapter(VectorDBInterface):
 
         lance_data_points = list({dp.id: dp for dp in lance_data_points}.values())
 
+        try:
+            async with self.VECTOR_DB_LOCK:
+                await (
+                    collection.merge_insert("id")
+                    .when_matched_update_all()
+                    .when_not_matched_insert_all()
+                    .execute(lance_data_points)
+                )
+        except Exception as e:
+            if "not found in target schema" not in str(e):
+                raise
+            logger.warning(
+                "Schema mismatch detected for collection '%s', migrating table: %s",
+                collection_name,
+                e,
+            )
+            await self._migrate_collection_schema(
+                collection_name, collection, payload_schema, lance_data_points
+            )
+
+    async def _migrate_collection_schema(
+        self,
+        collection_name: str,
+        old_collection,
+        payload_schema,
+        new_lance_data_points: list,
+    ):
+        """Migrate a LanceDB table to a new schema while preserving existing data.
+
+        Reads all existing rows, drops the table, recreates it with the updated
+        schema, and re-inserts both old and new data.
+        """
+        existing_arrow_table = await old_collection.to_arrow()
+        existing_rows = existing_arrow_table.to_pylist()
+
+        vector_size = self.embedding_engine.get_vector_size()
+        schema_model = self.get_data_point_schema(payload_schema)
+        data_point_types = get_type_hints(schema_model)
+
+        class MigrationLanceDataPoint(LanceModel):
+            id: data_point_types["id"]
+            vector: Vector(vector_size)
+            payload: schema_model
+
         async with self.VECTOR_DB_LOCK:
+            connection = await self.get_connection()
+            await connection.drop_table(collection_name)
+            await connection.create_table(
+                name=collection_name,
+                schema=MigrationLanceDataPoint,
+                exist_ok=True,
+            )
+            collection = await connection.open_table(collection_name)
+
+            if existing_rows:
+                new_ids = {dp.id for dp in new_lance_data_points}
+                # Keep old rows that aren't being replaced by new data
+                old_rows_to_keep = [r for r in existing_rows if r.get("id") not in new_ids]
+                if old_rows_to_keep:
+                    new_schema = (await collection.to_arrow()).schema
+                    old_table = pa.Table.from_pylist(old_rows_to_keep)
+                    migrated_columns = []
+                    num_rows = len(old_rows_to_keep)
+                    for field in new_schema:
+                        if field.name not in old_table.column_names:
+                            migrated_columns.append(pa.nulls(num_rows, type=field.type))
+                        elif pa.types.is_struct(field.type):
+                            migrated_columns.append(
+                                self._migrate_struct_column(
+                                    old_table.column(field.name).combine_chunks(),
+                                    field.type,
+                                    num_rows,
+                                )
+                            )
+                        else:
+                            migrated_columns.append(old_table.column(field.name).cast(field.type))
+                    migrated_table = pa.Table.from_arrays(migrated_columns, schema=new_schema)
+                    await collection.add(migrated_table)
+
             await (
                 collection.merge_insert("id")
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
-                .execute(lance_data_points)
+                .execute(new_lance_data_points)
             )
+
+        logger.info(
+            "Successfully migrated collection '%s' (%d existing rows preserved)",
+            collection_name,
+            len(existing_rows),
+        )
+
+    @staticmethod
+    def _migrate_struct_column(
+        old_struct_array: pa.StructArray,
+        target_type: pa.StructType,
+        num_rows: int,
+    ) -> pa.StructArray:
+        """Rebuild a struct array to match *target_type*, filling missing fields
+        with type-appropriate defaults and preserving existing ones."""
+        old_field_names = {
+            old_struct_array.type.field(i).name for i in range(old_struct_array.type.num_fields)
+        }
+        arrays = []
+        fields = []
+        for i in range(target_type.num_fields):
+            field = target_type.field(i)
+            if field.name in old_field_names:
+                child = old_struct_array.field(field.name)
+                if pa.types.is_struct(field.type):
+                    child = LanceDBAdapter._migrate_struct_column(child, field.type, num_rows)
+                else:
+                    child = child.cast(field.type)
+                arrays.append(child)
+            else:
+                arrays.append(LanceDBAdapter._default_array(field.type, num_rows))
+            fields.append(field)
+        return pa.StructArray.from_arrays(arrays, fields=fields)
+
+    @staticmethod
+    def _default_array(arrow_type: pa.DataType, num_rows: int) -> pa.Array:
+        """Create an array of *num_rows* filled with a type-appropriate default
+        value (zero for numerics, empty string for strings, etc.).  Falls back
+        to nulls for types that have no obvious default."""
+        if pa.types.is_floating(arrow_type):
+            return pa.array([0.0] * num_rows, type=arrow_type)
+        if pa.types.is_integer(arrow_type):
+            return pa.array([0] * num_rows, type=arrow_type)
+        if pa.types.is_boolean(arrow_type):
+            return pa.array([False] * num_rows, type=arrow_type)
+        if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
+            return pa.array([""] * num_rows, type=arrow_type)
+        return pa.nulls(num_rows, type=arrow_type)
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         try:
