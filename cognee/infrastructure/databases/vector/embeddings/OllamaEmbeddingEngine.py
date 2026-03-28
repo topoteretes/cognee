@@ -119,6 +119,8 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             )
             # TODO: Refactor to better handle truncation, handle it the same as it is handled in LiteLLMEmbeddingEngine
             #       when the ContextWindowExceededError happens.
+            #       Also max_tokens is never provided to function call so it will always default to 2048, we should make
+            #       it so that it is provided based on the model's context length.
             return text[:char_limit]
         return text
 
