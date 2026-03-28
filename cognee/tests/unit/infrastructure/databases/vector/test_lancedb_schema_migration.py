@@ -42,71 +42,73 @@ def _make_point(id: str, text: str) -> IndexSchema:
 async def _seed_collection(adapter, collection_name, points):
     """Seed a collection following the production flow: create_collection first,
     then create_data_points (avoids the known lock re-entry in create_data_points)."""
-    payload_schema = type(points[0])
-    await adapter.create_collection(collection_name, payload_schema)
+    await adapter.create_collection(collection_name, type(points[0]))
     await adapter.create_data_points(collection_name, points)
 
 
-async def _narrow_payload_schema(adapter, collection_name: str):
-    """Remove a non-essential field from the payload struct in an existing
-    LanceDB table, simulating schema drift (table created before the model
-    gained that field).
+async def _strip_payload_field(adapter, collection_name: str) -> str:
+    """Remove the last non-essential field from the payload struct of an
+    existing LanceDB table, simulating schema drift.
 
-    Returns the name of the field that was removed.
+    This builds a new Arrow table from scratch with a narrower struct type
+    and replaces the collection — no reverse-engineering of the auto-generated
+    schema required.
+
+    Returns the name of the removed field.
     """
     collection = await adapter.get_collection(collection_name)
-    arrow_table = await collection.to_arrow()
-    payload_idx = arrow_table.schema.get_field_index("payload")
-    payload_struct = arrow_table.schema.field(payload_idx).type
+    table = await collection.to_arrow()
+    payload_idx = table.schema.get_field_index("payload")
+    payload_type = table.schema.field(payload_idx).type
 
-    # Pick the last removable field (anything other than id/text which
-    # IndexSchema requires).
+    # Find the last field that isn't required by IndexSchema
     removable = None
-    for i in range(payload_struct.num_fields):
-        name = payload_struct.field(i).name
-        if name not in ("id", "text"):
+    for i in range(payload_type.num_fields):
+        if payload_type.field(i).name not in ("id", "text"):
             removable = i
 
-    assert removable is not None, "No removable field found in payload struct"
+    assert removable is not None, "No removable field found"
+    removed_name = payload_type.field(removable).name
 
-    removed_name = payload_struct.field(removable).name
+    # Build narrowed struct
+    keep_indices = [j for j in range(payload_type.num_fields) if j != removable]
+    keep_fields = [payload_type.field(j) for j in keep_indices]
+    payload_array = table.column("payload").combine_chunks()
+    keep_arrays = [payload_array.field(payload_type.field(j).name) for j in keep_indices]
 
-    keep_fields = [
-        payload_struct.field(j) for j in range(payload_struct.num_fields) if j != removable
-    ]
-    payload_col = arrow_table.column("payload").combine_chunks()
-    keep_arrays = [
-        payload_col.field(payload_struct.field(j).name)
-        for j in range(payload_struct.num_fields)
-        if j != removable
-    ]
-    narrowed_payload = pa.StructArray.from_arrays(keep_arrays, fields=keep_fields)
-    narrowed_table = arrow_table.set_column(
+    narrowed = table.set_column(
         payload_idx,
         pa.field("payload", pa.struct(keep_fields)),
-        narrowed_payload,
+        pa.StructArray.from_arrays(keep_arrays, fields=keep_fields),
     )
 
     connection = await adapter.get_connection()
     await connection.drop_table(collection_name)
-    await connection.create_table(collection_name, data=narrowed_table)
+    await connection.create_table(collection_name, data=narrowed)
 
     return removed_name
+
+
+def _get_payload_field_names(schema: pa.Schema) -> list[str]:
+    """Extract field names from the payload struct in a table schema."""
+    payload_type = schema.field(schema.get_field_index("payload")).type
+    return [payload_type.field(i).name for i in range(payload_type.num_fields)]
+
+
+# ---------------------------------------------------------------------------
+# Happy-path tests
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
 async def test_schema_migration_preserves_existing_data(tmp_path):
-    """Insert data, artificially narrow the table schema, then insert again.
-
-    The second insert should trigger an automatic migration and all rows
-    from the first insert must still be retrievable.
-    """
+    """Insert data, narrow the table schema, insert again.
+    All historical rows must survive and the schema must be updated."""
     db_path = str(tmp_path / "test_migration.lancedb")
     adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
     collection_name = "TestMigration_text"
 
-    # Phase 1: seed the table
     old_points = [
         _make_point(id=str(uuid4()), text="historical record one"),
         _make_point(id=str(uuid4()), text="historical record two"),
@@ -117,23 +119,17 @@ async def test_schema_migration_preserves_existing_data(tmp_path):
     assert len(retrieved) == 1
     assert retrieved[0].payload["text"] == "historical record one"
 
-    # Phase 2: simulate schema drift
-    removed_field = await _narrow_payload_schema(adapter, collection_name)
+    removed_field = await _strip_payload_field(adapter, collection_name)
 
     # Confirm the field is gone
-    reopened = await adapter.get_collection(collection_name)
-    schema_after = (await reopened.to_arrow()).schema
-    payload_struct_after = schema_after.field(schema_after.get_field_index("payload")).type
-    field_names_after = [
-        payload_struct_after.field(k).name for k in range(payload_struct_after.num_fields)
-    ]
-    assert removed_field not in field_names_after, "Test setup: field should be gone"
+    schema_after = (await (await adapter.get_collection(collection_name)).to_arrow()).schema
+    assert removed_field not in _get_payload_field_names(schema_after)
 
-    # Phase 3: insert new data — triggers migration
+    # Insert new data — triggers migration
     new_points = [_make_point(id=str(uuid4()), text="new record after migration")]
     await adapter.create_data_points(collection_name, new_points)
 
-    # Phase 4: all data must have survived
+    # All data must have survived
     all_ids = [p.id for p in old_points] + [p.id for p in new_points]
     all_results = await adapter.retrieve(collection_name, all_ids)
     retrieved_ids = {str(r.id) for r in all_results}
@@ -143,16 +139,9 @@ async def test_schema_migration_preserves_existing_data(tmp_path):
     for point in new_points:
         assert point.id in retrieved_ids, f"New point {point.id} not found after migration"
 
-    # Verify the migrated table has the full schema again
-    final_collection = await adapter.get_collection(collection_name)
-    final_schema = (await final_collection.to_arrow()).schema
-    payload_struct_final = final_schema.field(final_schema.get_field_index("payload")).type
-    final_field_names = [
-        payload_struct_final.field(k).name for k in range(payload_struct_final.num_fields)
-    ]
-    assert removed_field in final_field_names, (
-        f"Migrated table should include the '{removed_field}' field"
-    )
+    # Migrated table must have the full schema
+    final_schema = (await (await adapter.get_collection(collection_name)).to_arrow()).schema
+    assert removed_field in _get_payload_field_names(final_schema)
 
 
 @pytest.mark.asyncio
@@ -166,9 +155,7 @@ async def test_no_migration_when_schema_matches(tmp_path):
     first_id = str(uuid4())
     second_id = str(uuid4())
 
-    points_1 = [_make_point(id=first_id, text="first")]
-    await _seed_collection(adapter, collection_name, points_1)
-
+    await _seed_collection(adapter, collection_name, [_make_point(id=first_id, text="first")])
     await adapter.create_data_points(collection_name, [_make_point(id=second_id, text="second")])
 
     results = await adapter.retrieve(collection_name, [first_id, second_id])
@@ -188,10 +175,8 @@ async def test_migration_deduplicates_by_id(tmp_path):
     await _seed_collection(
         adapter, collection_name, [_make_point(id=shared_id, text="original text")]
     )
+    await _strip_payload_field(adapter, collection_name)
 
-    await _narrow_payload_schema(adapter, collection_name)
-
-    # Insert with same id but updated text — triggers migration
     await adapter.create_data_points(
         collection_name, [_make_point(id=shared_id, text="updated text")]
     )
@@ -199,3 +184,100 @@ async def test_migration_deduplicates_by_id(tmp_path):
     results = await adapter.retrieve(collection_name, [shared_id])
     assert len(results) == 1
     assert results[0].payload["text"] == "updated text"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
+async def test_migration_uses_pydantic_defaults(tmp_path):
+    """After migration, newly-added fields should carry the Pydantic model
+    default (e.g. feedback_weight=0.5), not a generic zero."""
+    db_path = str(tmp_path / "test_defaults.lancedb")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    collection_name = "TestDefaults_text"
+
+    point = _make_point(id=str(uuid4()), text="check defaults")
+    await _seed_collection(adapter, collection_name, [point])
+
+    removed_field = await _strip_payload_field(adapter, collection_name)
+
+    # Insert a new point to trigger migration
+    new_point = _make_point(id=str(uuid4()), text="new")
+    await adapter.create_data_points(collection_name, [new_point])
+
+    # Retrieve the OLD point — its migrated field should have the model default
+    results = await adapter.retrieve(collection_name, [point.id])
+    assert len(results) == 1
+
+    migrated_value = results[0].payload.get(removed_field)
+    # The Pydantic model's default should have been used, not a generic zero.
+    # For IndexSchema (extends DataPoint), feedback_weight defaults to 0.5.
+    if removed_field == "feedback_weight":
+        assert migrated_value == 0.5, f"Expected Pydantic default 0.5, got {migrated_value}"
+
+
+# ---------------------------------------------------------------------------
+# Failure / edge-case tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
+async def test_migration_creates_recovery_table_on_failure(tmp_path):
+    """If migration fails mid-way, a __recovery table should be created
+    so the user doesn't silently lose data."""
+    db_path = str(tmp_path / "test_recovery.lancedb")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    collection_name = "TestRecovery_text"
+
+    point = _make_point(id=str(uuid4()), text="important data")
+    await _seed_collection(adapter, collection_name, [point])
+    await _strip_payload_field(adapter, collection_name)
+
+    # Sabotage _align_table_to_schema so the migration fails after the old
+    # table has been dropped but before data is fully re-inserted.
+    original_align = adapter._align_table_to_schema
+
+    def _exploding_align(*args, **kwargs):
+        raise RuntimeError("simulated migration failure")
+
+    adapter._align_table_to_schema = _exploding_align
+
+    with pytest.raises(RuntimeError, match="simulated migration failure"):
+        await adapter.create_data_points(
+            collection_name, [_make_point(id=str(uuid4()), text="trigger")]
+        )
+
+    adapter._align_table_to_schema = original_align
+
+    # A recovery table should exist with the original data
+    connection = await adapter.get_connection()
+    tables = await connection.table_names()
+    recovery_name = f"{collection_name}__recovery"
+    assert recovery_name in tables, f"Expected recovery table '{recovery_name}', found: {tables}"
+
+    recovery_table = await connection.open_table(recovery_name)
+    recovery_data = await recovery_table.to_arrow()
+    assert recovery_data.num_rows >= 1, "Recovery table should contain the original row(s)"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
+async def test_non_schema_errors_are_not_swallowed(tmp_path):
+    """Errors unrelated to schema mismatch must propagate, not be caught
+    by the migration handler."""
+    db_path = str(tmp_path / "test_passthrough.lancedb")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    collection_name = "TestPassthrough_text"
+
+    await _seed_collection(adapter, collection_name, [_make_point(id=str(uuid4()), text="seed")])
+
+    # Sabotage embed_data to cause a non-schema error during merge_insert
+    async def _explode(texts):
+        raise RuntimeError("network timeout")
+
+    adapter.embed_data = _explode
+
+    with pytest.raises(RuntimeError, match="network timeout"):
+        await adapter.create_data_points(
+            collection_name, [_make_point(id=str(uuid4()), text="boom")]
+        )

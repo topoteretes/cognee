@@ -2,6 +2,7 @@ import asyncio
 from os import path
 from uuid import UUID
 import pyarrow as pa
+import pyarrow.compute
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
@@ -215,7 +216,7 @@ class LanceDBAdapter(VectorDBInterface):
                     .when_not_matched_insert_all()
                     .execute(lance_data_points)
                 )
-        except Exception as e:
+        except (ValueError, OSError, RuntimeError) as e:
             if "not found in target schema" not in str(e):
                 raise
             logger.warning(
@@ -230,17 +231,18 @@ class LanceDBAdapter(VectorDBInterface):
     async def _migrate_collection_schema(
         self,
         collection_name: str,
-        old_collection,
-        payload_schema,
-        new_lance_data_points: list,
+        old_collection: "lancedb.table.AsyncTable",
+        payload_schema: type,
+        new_lance_data_points: List[LanceModel],
     ):
         """Migrate a LanceDB table to a new schema while preserving existing data.
 
-        Reads all existing rows, drops the table, recreates it with the updated
-        schema, and re-inserts both old and new data.
+        Reads all existing rows as an Arrow table (no Python round-trip), drops
+        the old table, recreates it with the updated schema, and re-inserts both
+        old and new data.  If the migration itself fails the old data is written
+        back to a recovery table so it is not silently lost.
         """
-        existing_arrow_table = await old_collection.to_arrow()
-        existing_rows = existing_arrow_table.to_pylist()
+        existing_table = await old_collection.to_arrow()
 
         vector_size = self.embedding_engine.get_vector_size()
         schema_model = self.get_data_point_schema(payload_schema)
@@ -257,56 +259,94 @@ class LanceDBAdapter(VectorDBInterface):
             await connection.create_table(
                 name=collection_name,
                 schema=MigrationLanceDataPoint,
-                exist_ok=True,
             )
             collection = await connection.open_table(collection_name)
 
-            if existing_rows:
-                new_ids = {dp.id for dp in new_lance_data_points}
-                # Keep old rows that aren't being replaced by new data
-                old_rows_to_keep = [r for r in existing_rows if r.get("id") not in new_ids]
-                if old_rows_to_keep:
-                    new_schema = (await collection.to_arrow()).schema
-                    old_table = pa.Table.from_pylist(old_rows_to_keep)
-                    migrated_columns = []
-                    num_rows = len(old_rows_to_keep)
-                    for field in new_schema:
-                        if field.name not in old_table.column_names:
-                            migrated_columns.append(pa.nulls(num_rows, type=field.type))
-                        elif pa.types.is_struct(field.type):
-                            migrated_columns.append(
-                                self._migrate_struct_column(
-                                    old_table.column(field.name).combine_chunks(),
-                                    field.type,
-                                    num_rows,
-                                )
-                            )
-                        else:
-                            migrated_columns.append(old_table.column(field.name).cast(field.type))
-                    migrated_table = pa.Table.from_arrays(migrated_columns, schema=new_schema)
-                    await collection.add(migrated_table)
+            rows_preserved = 0
 
-            await (
-                collection.merge_insert("id")
-                .when_matched_update_all()
-                .when_not_matched_insert_all()
-                .execute(new_lance_data_points)
-            )
+            try:
+                if existing_table.num_rows > 0:
+                    new_ids = {dp.id for dp in new_lance_data_points}
+                    id_col = existing_table.column("id")
+                    mask = pa.compute.invert(pa.compute.is_in(id_col, pa.array(list(new_ids))))
+                    old_table = existing_table.filter(mask)
+                    rows_preserved = old_table.num_rows
+
+                    if rows_preserved > 0:
+                        new_schema = (await collection.to_arrow()).schema
+                        migrated_table = self._align_table_to_schema(
+                            old_table, new_schema, payload_schema
+                        )
+                        await collection.add(migrated_table)
+
+                await (
+                    collection.merge_insert("id")
+                    .when_matched_update_all()
+                    .when_not_matched_insert_all()
+                    .execute(new_lance_data_points)
+                )
+            except Exception:
+                logger.error(
+                    "Migration failed for collection '%s'. "
+                    "Attempting to restore original data into '%s__recovery'.",
+                    collection_name,
+                    collection_name,
+                )
+                try:
+                    await connection.create_table(
+                        name=f"{collection_name}__recovery",
+                        data=existing_table,
+                    )
+                except Exception:
+                    logger.error(
+                        "Recovery table creation also failed for '%s'. "
+                        "Original Arrow data had %d rows.",
+                        collection_name,
+                        existing_table.num_rows,
+                    )
+                raise
 
         logger.info(
             "Successfully migrated collection '%s' (%d existing rows preserved)",
             collection_name,
-            len(existing_rows),
+            rows_preserved,
         )
+
+    def _align_table_to_schema(
+        self,
+        old_table: pa.Table,
+        new_schema: pa.Schema,
+        payload_schema: type,
+    ) -> pa.Table:
+        """Align an old Arrow table to a new schema, filling missing columns
+        with model-aware defaults and recursively rebuilding struct columns."""
+        migrated_columns = []
+        num_rows = old_table.num_rows
+        for field in new_schema:
+            if field.name not in old_table.column_names:
+                migrated_columns.append(self._default_array(field.type, num_rows, payload_schema))
+            elif pa.types.is_struct(field.type):
+                migrated_columns.append(
+                    self._migrate_struct_column(
+                        old_table.column(field.name).combine_chunks(),
+                        field.type,
+                        num_rows,
+                        payload_schema,
+                    )
+                )
+            else:
+                migrated_columns.append(old_table.column(field.name).cast(field.type))
+        return pa.Table.from_arrays(migrated_columns, schema=new_schema)
 
     @staticmethod
     def _migrate_struct_column(
         old_struct_array: pa.StructArray,
         target_type: pa.StructType,
         num_rows: int,
+        payload_schema: type = None,
     ) -> pa.StructArray:
         """Rebuild a struct array to match *target_type*, filling missing fields
-        with type-appropriate defaults and preserving existing ones."""
+        with model-aware defaults and preserving existing ones."""
         old_field_names = {
             old_struct_array.type.field(i).name for i in range(old_struct_array.type.num_fields)
         }
@@ -317,20 +357,52 @@ class LanceDBAdapter(VectorDBInterface):
             if field.name in old_field_names:
                 child = old_struct_array.field(field.name)
                 if pa.types.is_struct(field.type):
-                    child = LanceDBAdapter._migrate_struct_column(child, field.type, num_rows)
+                    child = LanceDBAdapter._migrate_struct_column(
+                        child, field.type, num_rows, payload_schema
+                    )
                 else:
                     child = child.cast(field.type)
                 arrays.append(child)
             else:
-                arrays.append(LanceDBAdapter._default_array(field.type, num_rows))
+                arrays.append(
+                    LanceDBAdapter._default_array(field.type, num_rows, payload_schema, field.name)
+                )
             fields.append(field)
         return pa.StructArray.from_arrays(arrays, fields=fields)
 
     @staticmethod
-    def _default_array(arrow_type: pa.DataType, num_rows: int) -> pa.Array:
-        """Create an array of *num_rows* filled with a type-appropriate default
-        value (zero for numerics, empty string for strings, etc.).  Falls back
-        to nulls for types that have no obvious default."""
+    def _get_pydantic_default(payload_schema: type, field_name: str):
+        """Extract the default value for *field_name* from a Pydantic model class.
+        Returns ``None`` when no usable default is found."""
+        if payload_schema is None:
+            return None
+        model_fields = getattr(payload_schema, "model_fields", None)
+        if not model_fields or field_name not in model_fields:
+            return None
+        field_info = model_fields[field_name]
+        default = field_info.default
+        if default is None or (hasattr(field_info, "is_required") and field_info.is_required()):
+            return None
+        return default
+
+    @staticmethod
+    def _default_array(
+        arrow_type: pa.DataType,
+        num_rows: int,
+        payload_schema: type = None,
+        field_name: str = None,
+    ) -> pa.Array:
+        """Create an array of *num_rows* filled with the Pydantic model default
+        for *field_name* when available, otherwise a type-appropriate zero-value.
+        Falls back to a nullable array only for types with no obvious default."""
+        if payload_schema and field_name:
+            pydantic_default = LanceDBAdapter._get_pydantic_default(payload_schema, field_name)
+            if pydantic_default is not None:
+                try:
+                    return pa.array([pydantic_default] * num_rows, type=arrow_type)
+                except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError):
+                    pass
+
         if pa.types.is_floating(arrow_type):
             return pa.array([0.0] * num_rows, type=arrow_type)
         if pa.types.is_integer(arrow_type):
@@ -339,6 +411,12 @@ class LanceDBAdapter(VectorDBInterface):
             return pa.array([False] * num_rows, type=arrow_type)
         if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
             return pa.array([""] * num_rows, type=arrow_type)
+        if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+            return pa.array([[] for _ in range(num_rows)], type=arrow_type)
+        if pa.types.is_null(arrow_type):
+            return pa.nulls(num_rows, type=arrow_type)
+        # Last resort: nullable array.  This can fail on non-nullable fields in
+        # Lance, but we've covered all common types above.
         return pa.nulls(num_rows, type=arrow_type)
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
