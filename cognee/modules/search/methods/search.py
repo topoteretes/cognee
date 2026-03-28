@@ -14,6 +14,7 @@ from cognee.context_global_variables import (
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.search.methods._serialize import serialize_result_objects
 from cognee.modules.search.types import (
     SearchResult,
     SearchType,
@@ -311,7 +312,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 # Include all different types of results only in verbose mode
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
-                search_result_dict["objects_result"] = search_result.result_object
+                search_result_dict["objects_result"] = serialize_result_objects(search_result.result_object)
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -326,7 +327,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict = {
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
-                    "objects_result": search_result.result_object,
+                    "objects_result": serialize_result_objects(search_result.result_object),
                 }
                 return_value.append(search_result_dict)
             return return_value
