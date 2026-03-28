@@ -1,7 +1,15 @@
 import os
 import logging
 from typing import List, Optional
-from fastembed import TextEmbedding
+
+try:
+    from fastembed import TextEmbedding
+except ImportError:
+    raise ImportError(
+        "fastembed is required for FastembedEmbeddingEngine but is not installed. "
+        "Install it with: pip install 'cognee[fastembed]'"
+    )
+
 import litellm
 from tenacity import (
     retry,

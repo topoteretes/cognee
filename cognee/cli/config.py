@@ -13,6 +13,10 @@ COMMAND_DESCRIPTIONS = {
     "cognify": "Transform ingested data into a structured knowledge graph",
     "delete": "Delete data from cognee knowledge base",
     "config": "Manage cognee configuration settings",
+    "datasets": "Manage datasets (list, create, inspect, status, delete)",
+    "sessions": "View conversation sessions and Q&A history",
+    "feedback": "Add or remove feedback on session Q&A entries",
+    "memify": "Run the memory enrichment pipeline on a dataset",
 }
 
 # Search type choices
