@@ -117,6 +117,8 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             logger.warning(
                 f"Text exceeds character limit ({len(text)} > {char_limit}), truncating..."
             )
+            # TODO: Refactor to better handle truncation, handle it the same as it is handled in LiteLLMEmbeddingEngine
+            #       when the ContextWindowExceededError happens.
             return text[:char_limit]
         return text
 
