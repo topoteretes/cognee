@@ -1,5 +1,5 @@
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.chunking import DocumentChunk
+from cognee.modules.chunking.models import DocumentChunk
 
 
 async def has_new_chunks(
