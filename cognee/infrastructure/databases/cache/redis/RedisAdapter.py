@@ -1,7 +1,11 @@
 import uuid
+from datetime import datetime
+import json
+
 import redis
 import redis.asyncio as aioredis
 from contextlib import contextmanager
+
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from pydantic import ValidationError
@@ -11,8 +15,6 @@ from cognee.infrastructure.databases.exceptions import (
     SessionQAEntryValidationError,
 )
 from cognee.shared.logging_utils import get_logger
-from datetime import datetime
-import json
 
 logger = get_logger("RedisAdapter")
 
@@ -29,12 +31,14 @@ class RedisAdapter(CacheDBInterface):
         timeout=240,
         blocking_timeout=300,
         connection_timeout=30,
+        session_ttl_seconds: int | None = 604800,
     ):
         super().__init__(host, port, lock_name, log_key)
 
         self.host = host
         self.port = port
         self.connection_timeout = connection_timeout
+        self.session_ttl_seconds = session_ttl_seconds
 
         try:
             self.sync_redis = redis.Redis(
@@ -91,6 +95,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
     ) -> dict:
         entry = SessionQAEntry(
             time=datetime.utcnow().isoformat(),
@@ -101,6 +106,7 @@ class RedisAdapter(CacheDBInterface):
             feedback_text=feedback_text,
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
+            memify_metadata=memify_metadata,
         )
         return entry.model_dump()
 
@@ -116,6 +122,10 @@ class RedisAdapter(CacheDBInterface):
         for entry in entries:
             await self.async_redis.rpush(session_key, json.dumps(entry))
 
+    async def _apply_session_ttl(self, session_key: str) -> None:
+        if self.session_ttl_seconds and self.session_ttl_seconds > 0:
+            await self.async_redis.expire(session_key, self.session_ttl_seconds)
+
     @staticmethod
     def _merge_entry_update(
         entry: dict,
@@ -125,6 +135,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
     ) -> dict:
         merged = {**entry}
         if question is not None:
@@ -139,6 +150,12 @@ class RedisAdapter(CacheDBInterface):
             merged["feedback_score"] = feedback_score
         if used_graph_element_ids is not None:
             merged["used_graph_element_ids"] = used_graph_element_ids
+        if memify_metadata is not None:
+            existing_metadata = merged.get("memify_metadata")
+            if isinstance(existing_metadata, dict):
+                merged["memify_metadata"] = {**existing_metadata, **memify_metadata}
+            else:
+                merged["memify_metadata"] = memify_metadata
         return merged
 
     @staticmethod
@@ -210,6 +227,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
     ):
         """
         Add a Q/A/context triplet to a Redis list for this session.
@@ -225,8 +243,10 @@ class RedisAdapter(CacheDBInterface):
                 feedback_text,
                 feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
+                memify_metadata=memify_metadata,
             )
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
+            await self._apply_session_ttl(session_key)
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while adding Q&A: {str(e)}"
             logger.error(error_msg)
@@ -265,6 +285,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -285,9 +306,11 @@ class RedisAdapter(CacheDBInterface):
                 feedback_text,
                 feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
+                memify_metadata=memify_metadata,
             )
             entries[idx] = self._validate_entry_dict(merged)
             await self._write_entry_at(session_key, idx, entries[idx])
+            await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while updating Q&A: {str(e)}"
@@ -313,6 +336,7 @@ class RedisAdapter(CacheDBInterface):
             merged = self._merge_entry_clear_feedback(entries[idx])
             entries[idx] = self._validate_entry_dict(merged)
             await self._write_entry_at(session_key, idx, entries[idx])
+            await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while clearing feedback: {str(e)}"
@@ -338,6 +362,8 @@ class RedisAdapter(CacheDBInterface):
                 return False
             entries.pop(idx)
             await self._rewrite_entries(session_key, entries)
+            if entries:
+                await self._apply_session_ttl(session_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting Q&A: {str(e)}"

@@ -1,0 +1,35 @@
+{
+  "session_id": "demo_session",
+  "questions": [
+    {
+      "question": "Tell me specifically about Dr. Emily Carter's background and strongest machine learning experience.",
+      "feedback_score": 5,
+      "feedback_text": "Excellent. This captured Emily's senior NLP and production ML strengths."
+    },
+    {
+      "question": "Tell me specifically about Michael Rodriguez and his measurable business impact.",
+      "feedback_score": 1,
+      "feedback_text": "Not good. This did not align with the expected Michael-focused details."
+    },
+    {
+      "question": "Tell me specifically about Sarah Nguyen and where she improved model efficiency.",
+      "feedback_score": 4,
+      "feedback_text": "Good overall. Slightly above neutral, but still missing some Sarah context."
+    },
+    {
+      "question": "Michael Rodriguez has a PhD from Stanford and leads NLP research at InnovateAI Labs, correct?",
+      "feedback_score": 1,
+      "feedback_text": "Incorrect. Those details belong to Emily Carter, not Michael."
+    },
+    {
+      "question": "Who appears strongest for a forecasting-heavy role, and why?",
+      "feedback_score": 4,
+      "feedback_text": "Good answer. Sarah is the better fit and this is slightly above neutral quality."
+    },
+    {
+      "question": "Which candidate profile most strongly matches an NLP-heavy senior data scientist role?",
+      "feedback_score": 5,
+      "feedback_text": "Excellent recommendation. Emily is clearly the best NLP-heavy senior profile."
+    }
+  ]
+}

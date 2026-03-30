@@ -331,6 +331,7 @@ class SessionManager:
         answer: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
+        memify_metadata: Optional[dict] = None,
         session_id: Optional[str] = None,
     ) -> bool:
         """
@@ -338,6 +339,7 @@ class SessionManager:
 
         Only passed fields are updated; None preserves existing values.
         Returns True if updated, False if not found or cache unavailable.
+        memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
@@ -354,6 +356,7 @@ class SessionManager:
             answer=answer,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            memify_metadata=memify_metadata,
         )
 
     async def add_feedback(
@@ -369,13 +372,19 @@ class SessionManager:
         Add or update feedback for a QA entry.
 
         Convenience method that updates only feedback fields.
+        Resets feedback-weight memify status so updated feedback can be re-applied.
         Returns True if updated, False if not found or cache unavailable.
         """
+        from cognee.tasks.memify.feedback_weights_constants import (
+            MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+        )
+
         return await self.update_qa(
             user_id=user_id,
             qa_id=qa_id,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False},
             session_id=session_id,
         )
 

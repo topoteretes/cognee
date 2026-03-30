@@ -7,6 +7,9 @@ from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
     SessionQAEntryValidationError,
 )
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 
 class _InMemoryRedisList:
@@ -14,6 +17,8 @@ class _InMemoryRedisList:
 
     def __init__(self):
         self.data: dict[str, list[str]] = {}
+        self.ttls: dict[str, int] = {}
+        self.expire_calls: list[tuple[str, int]] = []
 
     async def rpush(self, key: str, *vals: str):
         self.data.setdefault(key, []).extend(vals)
@@ -32,26 +37,36 @@ class _InMemoryRedisList:
         self.data[key][idx] = val
 
     async def delete(self, key: str):
+        self.ttls.pop(key, None)
         return 1 if self.data.pop(key, None) is not None else 0
 
     async def expire(self, key: str, ttl: int):
-        pass
+        self.ttls[key] = ttl
+        self.expire_calls.append((key, ttl))
 
     async def ttl(self, key: str):
-        """Return remaining TTL; -1 = no expiry, -2 = key missing. Mock returns -1."""
-        return -1 if key in self.data else -2
+        """Return remaining TTL; -1 = no expiry, -2 = key missing."""
+        if key not in self.data:
+            return -2
+        return self.ttls.get(key, -1)
 
     async def flushdb(self):
         self.data.clear()
+        self.ttls.clear()
+        self.expire_calls.clear()
 
 
 @pytest.fixture
-def adapter():
-    store = _InMemoryRedisList()
+def redis_store():
+    return _InMemoryRedisList()
+
+
+@pytest.fixture
+def adapter(redis_store):
     patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
     with (
         patch(f"{patch_mod}.redis.Redis", return_value=MagicMock(ping=MagicMock())),
-        patch(f"{patch_mod}.aioredis.Redis", return_value=store),
+        patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
     ):
         from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
@@ -64,6 +79,33 @@ async def test_create_and_get(adapter):
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
     entries = await adapter.get_all_qa_entries("u1", "s1")
     assert len(entries) == 1 and entries[0]["qa_id"] == "id1"
+
+
+@pytest.mark.asyncio
+async def test_create_qa_entry_sets_session_ttl_when_enabled(adapter, redis_store):
+    """Session keys receive TTL on create when Redis session TTL is enabled."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+
+    session_key = "agent_sessions:u1:s1"
+    assert await redis_store.ttl(session_key) == 604800
+    assert redis_store.expire_calls[-1] == (session_key, 604800)
+
+
+@pytest.mark.asyncio
+async def test_create_qa_entry_does_not_set_session_ttl_when_disabled(redis_store):
+    """Session keys do not receive TTL when disabled with 0 or None semantics."""
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    with (
+        patch(f"{patch_mod}.redis.Redis", return_value=MagicMock(ping=MagicMock())),
+        patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        adapter = RedisAdapter(host="localhost", port=6379, session_ttl_seconds=0)
+
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    assert await redis_store.ttl("agent_sessions:u1:s1") == -1
+    assert redis_store.expire_calls == []
 
 
 @pytest.mark.asyncio
@@ -103,6 +145,18 @@ async def test_update(adapter):
 
 
 @pytest.mark.asyncio
+async def test_update_refreshes_session_ttl(adapter, redis_store):
+    """Session TTL is refreshed after QA updates."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    redis_store.expire_calls.clear()
+
+    ok = await adapter.update_qa_entry("u1", "s1", "id1", feedback_score=5)
+
+    assert ok is True
+    assert redis_store.expire_calls == [("agent_sessions:u1:s1", 604800)]
+
+
+@pytest.mark.asyncio
 async def test_update_invalid_raises(adapter):
     """Raise SessionQAEntryValidationError when feedback_score is out of range or gets wrong format."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
@@ -126,12 +180,65 @@ async def test_delete_feedback(adapter):
 
 
 @pytest.mark.asyncio
+async def test_delete_feedback_refreshes_session_ttl(adapter, redis_store):
+    """Clearing feedback should refresh the session TTL."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.update_qa_entry("u1", "s1", "id1", feedback_text="good", feedback_score=5)
+    redis_store.expire_calls.clear()
+
+    ok = await adapter.delete_feedback("u1", "s1", "id1")
+
+    assert ok is True
+    assert redis_store.expire_calls == [("agent_sessions:u1:s1", 604800)]
+
+
+@pytest.mark.asyncio
+async def test_update_memify_metadata_merges_existing_keys(adapter):
+    """update_qa_entry merges memify_metadata keys instead of replacing the map."""
+    await adapter.create_qa_entry(
+        "u1",
+        "s1",
+        "Q",
+        "C",
+        "A",
+        qa_id="id1",
+        memify_metadata={"persist_sessions_in_knowledge_graph": True},
+    )
+    ok = await adapter.update_qa_entry(
+        "u1",
+        "s1",
+        "id1",
+        memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False},
+    )
+    assert ok
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert entries[0]["memify_metadata"] == {
+        "persist_sessions_in_knowledge_graph": True,
+        MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_delete_entry(adapter):
     """Delete a single QA entry by qa_id."""
     await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
     await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
     ok = await adapter.delete_qa_entry("u1", "s1", "id1")
     assert ok and len(await adapter.get_all_qa_entries("u1", "s1")) == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_entry_reapplies_session_ttl_after_rewrite(adapter, redis_store):
+    """Rewriting the session list during delete preserves the configured TTL."""
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
+    redis_store.expire_calls.clear()
+
+    ok = await adapter.delete_qa_entry("u1", "s1", "id1")
+
+    assert ok is True
+    assert await redis_store.ttl("agent_sessions:u1:s1") == 604800
+    assert redis_store.expire_calls == [("agent_sessions:u1:s1", 604800)]
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,15 @@ import pytest
 
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.types import SearchType
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
+    GraphSummaryCompletionRetriever,
+)
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 
 
 class _DummyCommunityRetriever:
@@ -123,3 +132,47 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
         SearchType.CODING_RULES, query_text="q", node_name=[]
     )
     assert isinstance(retriever_instance, CodingRulesRetriever)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("search_type", "expected_class"),
+    [
+        (SearchType.GRAPH_COMPLETION, GraphCompletionRetriever),
+        (SearchType.GRAPH_COMPLETION_COT, GraphCompletionCotRetriever),
+        (
+            SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
+            GraphCompletionContextExtensionRetriever,
+        ),
+        (SearchType.GRAPH_SUMMARY_COMPLETION, GraphSummaryCompletionRetriever),
+        (SearchType.TEMPORAL, TemporalRetriever),
+    ],
+)
+async def test_graph_search_retrievers_receive_feedback_influence(search_type, expected_class):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        search_type,
+        query_text="q",
+        feedback_influence=0.4,
+    )
+
+    assert isinstance(retriever_instance, expected_class)
+    assert retriever_instance.feedback_influence == 0.4
+
+
+@pytest.mark.asyncio
+async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    for search_type in [
+        SearchType.GRAPH_COMPLETION,
+        SearchType.GRAPH_COMPLETION_COT,
+        SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
+        SearchType.GRAPH_SUMMARY_COMPLETION,
+        SearchType.TEMPORAL,
+    ]:
+        retriever_instance = await mod.get_search_type_retriever_instance(
+            search_type, query_text="q"
+        )
+        assert retriever_instance.triplet_distance_penalty == 6.5
