@@ -53,47 +53,48 @@ def _ensure_param_sets():
         _ADD_PARAMS, _COGNIFY_PARAMS, _SHARED_PARAMS = _build_param_sets()
 
 
-def _summarize_data(data) -> str:
-    """Extract a text summary from the ingested data for session logging."""
+def _data_to_text(data) -> str:
+    """Convert ingested data to its full text representation."""
     if isinstance(data, str):
-        return data[:500]
+        return data
     if isinstance(data, list):
         parts = []
         for item in data:
             if isinstance(item, str):
-                parts.append(item[:200])
+                parts.append(item)
             elif hasattr(item, "name"):
                 parts.append(f"[file: {item.name}]")
             else:
                 parts.append(f"[{type(item).__name__}]")
-        return ", ".join(parts)[:500]
+        return "\n\n".join(parts)
     if hasattr(data, "name"):
         return f"[file: {data.name}]"
     return f"[{type(data).__name__}]"
 
 
-async def _init_session(session_id: str, data, dataset_name: str, user):
-    """Record the remember() call as the first entry in a session."""
+async def _add_to_session(session_id: str, data, user):
+    """Add a Q&A entry to the session cache."""
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
     sm = get_session_manager()
     if not sm.is_available:
+        logger.warning("remember: session cache not available (enable CACHING=true)")
         return
 
     user_id = str(user.id) if user and hasattr(user, "id") else None
     if not user_id:
         return
 
-    data_summary = _summarize_data(data)
+    text = _data_to_text(data)
 
     await sm.add_qa(
         user_id=user_id,
         session_id=session_id,
-        question=f"[User provided data to dataset '{dataset_name}']",
+        question="",
         context="",
-        answer=data_summary,
+        answer=text,
     )
-    logger.info("remember: initialized session '%s' with ingested data summary", session_id)
+    logger.info("remember: added entry to session '%s'", session_id)
 
 
 async def remember(
@@ -174,7 +175,7 @@ async def remember(
 
     # Session memory: store in session cache only, skip permanent graph
     if session_id:
-        await _init_session(session_id, data, dataset_name, user)
+        await _add_to_session(session_id, data, user)
         return {
             "status": "session_stored",
             "session_id": session_id,
