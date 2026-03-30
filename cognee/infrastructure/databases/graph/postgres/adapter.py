@@ -1,13 +1,15 @@
 """Postgres graph adapter using two tables (graph_node, graph_edge) over SQLAlchemy + asyncpg."""
 
 import json
-import asyncio
 from uuid import UUID
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Union, Optional, Tuple, Type
 
-from sqlalchemy import text, Table, Column, MetaData, String, DateTime, values, select, exists
+from sqlalchemy import (
+    text, Table, Column, MetaData, String, DateTime, Index, ForeignKey,
+    values, select, exists, func,
+)
 from sqlalchemy import column as sa_column
 from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
 
@@ -18,45 +20,7 @@ from cognee.modules.storage.utils import JSONEncoder
 
 logger = get_logger()
 
-# Schema DDL executed once on initialise()
-_SCHEMA_DDL = [
-    """
-    CREATE TABLE IF NOT EXISTS graph_node (
-        id          TEXT PRIMARY KEY,
-        name        TEXT,
-        type        TEXT,
-        properties  JSONB,
-        created_at  TIMESTAMPTZ DEFAULT now(),
-        updated_at  TIMESTAMPTZ DEFAULT now()
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS graph_edge (
-        source_id         TEXT NOT NULL REFERENCES graph_node(id) ON DELETE CASCADE,
-        target_id         TEXT NOT NULL REFERENCES graph_node(id) ON DELETE CASCADE,
-        relationship_name TEXT NOT NULL,
-        properties        JSONB,
-        created_at        TIMESTAMPTZ DEFAULT now(),
-        updated_at        TIMESTAMPTZ DEFAULT now(),
-        PRIMARY KEY (source_id, target_id, relationship_name)
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_edge_source ON graph_edge(source_id)",
-    "CREATE INDEX IF NOT EXISTS idx_edge_target ON graph_edge(target_id)",
-    "CREATE INDEX IF NOT EXISTS idx_node_type   ON graph_node(type)",
-    # Covering index: neighbor lookups without heap reads
-    """
-    CREATE INDEX IF NOT EXISTS idx_edge_source_cover
-    ON graph_edge(source_id) INCLUDE (target_id, relationship_name)
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_edge_target_cover
-    ON graph_edge(target_id) INCLUDE (source_id, relationship_name)
-    """,
-]
-
-
-# SQLAlchemy Core table definitions for batched DML
+# Single source of truth for schema: used for both DDL and DML
 _meta = MetaData()
 
 _node_table = Table(
@@ -66,19 +30,42 @@ _node_table = Table(
     Column("name", String),
     Column("type", String),
     Column("properties", JSONB),
-    Column("created_at", DateTime(timezone=True)),
-    Column("updated_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
 )
 
 _edge_table = Table(
     "graph_edge",
     _meta,
-    Column("source_id", String, primary_key=True),
-    Column("target_id", String, primary_key=True),
-    Column("relationship_name", String, primary_key=True),
+    Column(
+        "source_id", String,
+        ForeignKey("graph_node.id", ondelete="CASCADE"),
+        primary_key=True, nullable=False,
+    ),
+    Column(
+        "target_id", String,
+        ForeignKey("graph_node.id", ondelete="CASCADE"),
+        primary_key=True, nullable=False,
+    ),
+    Column("relationship_name", String, primary_key=True, nullable=False),
     Column("properties", JSONB),
-    Column("created_at", DateTime(timezone=True)),
-    Column("updated_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
+)
+
+# Plain indexes
+Index("idx_edge_source", _edge_table.c.source_id)
+Index("idx_edge_target", _edge_table.c.target_id)
+Index("idx_node_type", _node_table.c.type)
+
+# Covering indexes: neighbor lookups without heap reads
+Index(
+    "idx_edge_source_cover", _edge_table.c.source_id,
+    postgresql_include=["target_id", "relationship_name"],
+)
+Index(
+    "idx_edge_target_cover", _edge_table.c.target_id,
+    postgresql_include=["source_id", "relationship_name"],
 )
 
 
@@ -95,10 +82,8 @@ class PostgresAdapter(GraphDBInterface):
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
-        async with self._session() as session:
-            for ddl in _SCHEMA_DDL:
-                await session.execute(text(ddl))
-            await session.commit()
+        async with self.engine.engine.begin() as conn:
+            await conn.run_sync(_meta.create_all, checkfirst=True)
 
     async def _ensure_initialized(self) -> None:
         """Re-run initialize() if tables were dropped (e.g. by prune_system).
