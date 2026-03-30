@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Union, Optional, Tuple, Type
 
-from sqlalchemy import text
+from sqlalchemy import text, Table, Column, MetaData, String, DateTime, values, select, exists
+from sqlalchemy import column as sa_column
+from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -52,6 +54,32 @@ _SCHEMA_DDL = [
     ON graph_edge(target_id) INCLUDE (source_id, relationship_name)
     """,
 ]
+
+
+# SQLAlchemy Core table definitions for batched DML
+_meta = MetaData()
+
+_node_table = Table(
+    "graph_node",
+    _meta,
+    Column("id", String, primary_key=True),
+    Column("name", String),
+    Column("type", String),
+    Column("properties", JSONB),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+
+_edge_table = Table(
+    "graph_edge",
+    _meta,
+    Column("source_id", String, primary_key=True),
+    Column("target_id", String, primary_key=True),
+    Column("relationship_name", String, primary_key=True),
+    Column("properties", JSONB),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
 
 
 class PostgresAdapter(GraphDBInterface):
@@ -170,21 +198,33 @@ class PostgresAdapter(GraphDBInterface):
             core, extra_json = self._split_core_and_extra(props)
             rows.append({**core, "properties": extra_json, "now": now})
 
-        # Single session, single commit for the whole batch
+        # Remap 'now' into the column names the table expects
+        values = [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "type": r["type"],
+                "properties": json.loads(r["properties"]),
+                "created_at": now,
+                "updated_at": now,
+            }
+            for r in rows
+        ]
+
+        # Batch upsert via pg_insert — single multi-row INSERT
+        stmt = pg_insert(_node_table).values(values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["id"],
+            set_={
+                "name": stmt.excluded.name,
+                "type": stmt.excluded.type,
+                "properties": stmt.excluded.properties,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+
         async with self._session() as session:
-            for row in rows:
-                await session.execute(
-                    text("""
-                        INSERT INTO graph_node (id, name, type, properties, created_at, updated_at)
-                        VALUES (:id, :name, :type, CAST(:properties AS jsonb), :now, :now)
-                        ON CONFLICT (id) DO UPDATE SET
-                            name = EXCLUDED.name,
-                            type = EXCLUDED.type,
-                            properties = EXCLUDED.properties,
-                            updated_at = EXCLUDED.updated_at
-                    """),
-                    row,
-                )
+            await session.execute(stmt)
             await session.commit()
 
     async def delete_node(self, node_id: str) -> None:
@@ -239,29 +279,31 @@ class PostgresAdapter(GraphDBInterface):
 
         now = datetime.now(timezone.utc)
 
-        async with self._session() as session:
-            for edge in edges:
-                source_id, target_id, rel_name = str(edge[0]), str(edge[1]), edge[2]
-                props = edge[3] if len(edge) > 3 and edge[3] else {}
-                props_json = self._serialize_properties(props)
+        # Normalize edge tuples into dicts matching table columns
+        values = []
+        for edge in edges:
+            raw_props = edge[3] if len(edge) > 3 and edge[3] else {}
+            values.append({
+                "source_id": str(edge[0]),
+                "target_id": str(edge[1]),
+                "relationship_name": edge[2],
+                "properties": json.loads(self._serialize_properties(raw_props)),
+                "created_at": now,
+                "updated_at": now,
+            })
 
-                await session.execute(
-                    text("""
-                        INSERT INTO graph_edge
-                            (source_id, target_id, relationship_name, properties, created_at, updated_at)
-                        VALUES (:src, :tgt, :rel, CAST(:props AS jsonb), :now, :now)
-                        ON CONFLICT (source_id, target_id, relationship_name) DO UPDATE SET
-                            properties = EXCLUDED.properties,
-                            updated_at = EXCLUDED.updated_at
-                    """),
-                    {
-                        "src": source_id,
-                        "tgt": target_id,
-                        "rel": rel_name,
-                        "props": props_json,
-                        "now": now,
-                    },
-                )
+        # Batch upsert via pg_insert — single multi-row INSERT
+        stmt = pg_insert(_edge_table).values(values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["source_id", "target_id", "relationship_name"],
+            set_={
+                "properties": stmt.excluded.properties,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+
+        async with self._session() as session:
+            await session.execute(stmt)
             await session.commit()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
@@ -273,22 +315,30 @@ class PostgresAdapter(GraphDBInterface):
         if not edges:
             return []
 
-        existing = []
-        async with self._session() as session:
-            for src, tgt, rel in edges:
-                result = await session.execute(
-                    text("""
-                        SELECT EXISTS(
-                            SELECT 1 FROM graph_edge
-                            WHERE source_id = :src AND target_id = :tgt
-                              AND relationship_name = :rel
-                        )
-                    """),
-                    {"src": str(src), "tgt": str(tgt), "rel": str(rel)},
+        # Single query: join candidate tuples against graph_edge
+        candidates = values(
+            sa_column("src", String),
+            sa_column("tgt", String),
+            sa_column("rel", String),
+            name="q",
+        ).data([(str(s), str(t), str(r)) for s, t, r in edges])
+
+        stmt = (
+            select(candidates.c.src, candidates.c.tgt, candidates.c.rel)
+            .where(
+                exists(
+                    select(text("1"))
+                    .select_from(_edge_table)
+                    .where(_edge_table.c.source_id == candidates.c.src)
+                    .where(_edge_table.c.target_id == candidates.c.tgt)
+                    .where(_edge_table.c.relationship_name == candidates.c.rel)
                 )
-                if result.scalar():
-                    existing.append((str(src), str(tgt), str(rel)))
-        return existing
+            )
+        )
+
+        async with self._session() as session:
+            result = await session.execute(stmt)
+            return [(row[0], row[1], row[2]) for row in result.fetchall()]
 
     async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
         async with self._session() as session:
