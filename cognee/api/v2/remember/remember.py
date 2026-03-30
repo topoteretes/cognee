@@ -107,20 +107,23 @@ async def remember(
     run_in_background: bool = False,
     **kwargs: Unpack[RememberKwargs],
 ):
-    """Ingest data and build the knowledge graph in a single call.
+    """Store data in memory.
 
-    Combines ``add()`` and ``cognify()`` into one step.
+    Two modes depending on whether ``session_id`` is provided:
 
-    When ``session_id`` is provided, the session is initialized with an
-    entry recording what the user told the system. Subsequent ``recall()``
-    calls with the same ``session_id`` will see this in the conversation
-    history, giving the LLM awareness that the user just provided data.
+    **Without session_id (permanent memory):** Runs ``add()`` +
+    ``cognify()`` to ingest data and build the knowledge graph.
+
+    **With session_id (session memory):** Stores the data in the
+    session cache only. The data is NOT ingested into the permanent
+    graph. Use ``improve(session_ids=[...])`` later to sync session
+    content into the permanent graph.
 
     Args:
-        data: The data to ingest (text, file paths, binary streams, etc.).
+        data: The data to store (text, file paths, binary streams, etc.).
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
-        session_id: Optional session ID. When set, initializes the session
-            with a record of the ingested data.
+        session_id: Optional session ID. When set, stores data in the
+            session cache instead of the permanent graph.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
         chunker: Text chunking strategy. Defaults to *TextChunker*.
         custom_prompt: Custom prompt for entity extraction.
@@ -128,6 +131,7 @@ async def remember(
         **kwargs: Additional options -- see ``RememberKwargs``.
 
     Returns:
+        When session_id: dict with session status.
         When blocking: the result of the cognify step (pipeline run info).
         When background: a dict with initial pipeline run info.
     """
@@ -168,12 +172,17 @@ async def remember(
         user = await get_default_user()
         shared_kwargs["user"] = user
 
-    async def _run():
-        # Initialize session before ingestion so the conversation starts
-        # with "user provided data" as the first entry
-        if session_id:
-            await _init_session(session_id, data, dataset_name, user)
+    # Session memory: store in session cache only, skip permanent graph
+    if session_id:
+        await _init_session(session_id, data, dataset_name, user)
+        return {
+            "status": "session_stored",
+            "session_id": session_id,
+            "dataset_name": dataset_name,
+        }
 
+    # Permanent memory: add + cognify into the knowledge graph
+    async def _run():
         await add(
             data=data,
             dataset_name=dataset_name,
@@ -207,7 +216,6 @@ async def remember(
             "status": "started",
             "dataset_name": dataset_name,
             "dataset_id": str(dataset_id) if dataset_id else None,
-            "session_id": session_id,
             "run_in_background": True,
         }
 
