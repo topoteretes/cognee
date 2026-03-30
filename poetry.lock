@@ -7,7 +7,7 @@ description = "Accelerate"
 optional = true
 python-versions = ">=3.10.0"
 groups = ["main"]
-markers = "(extra == \"docs\" or extra == \"docling\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"docling\")"
+markers = "(extra == \"docs\" or extra == \"docling\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"docling\")"
 files = [
     {file = "accelerate-1.12.0-py3-none-any.whl", hash = "sha256:3e2091cd341423207e2f084a6654b1efcd250dc326f2a37d6dde446e07cabb11"},
     {file = "accelerate-1.12.0.tar.gz", hash = "sha256:70988c352feb481887077d2ab845125024b2a137a5090d6d7a32b57d03a45df6"},
@@ -692,6 +692,47 @@ files = [
 ]
 
 [[package]]
+name = "azure-core"
+version = "1.39.0"
+description = "Microsoft Azure Core Library for Python"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"azure\""
+files = [
+    {file = "azure_core-1.39.0-py3-none-any.whl", hash = "sha256:4ac7b70fab5438c3f68770649a78daf97833caa83827f91df9c14e0e0ea7d34f"},
+    {file = "azure_core-1.39.0.tar.gz", hash = "sha256:8a90a562998dd44ce84597590fff6249701b98c0e8797c95fcdd695b54c35d74"},
+]
+
+[package.dependencies]
+requests = ">=2.21.0"
+typing-extensions = ">=4.6.0"
+
+[package.extras]
+aio = ["aiohttp (>=3.0)"]
+tracing = ["opentelemetry-api (>=1.26,<2.0)"]
+
+[[package]]
+name = "azure-identity"
+version = "1.25.3"
+description = "Microsoft Azure Identity Library for Python"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"azure\""
+files = [
+    {file = "azure_identity-1.25.3-py3-none-any.whl", hash = "sha256:f4d0b956a8146f30333e071374171f3cfa7bdb8073adb8c3814b65567aa7447c"},
+    {file = "azure_identity-1.25.3.tar.gz", hash = "sha256:ab23c0d63015f50b630ef6c6cf395e7262f439ce06e5d07a64e874c724f8d9e6"},
+]
+
+[package.dependencies]
+azure-core = ">=1.31.0"
+cryptography = ">=2.5"
+msal = ">=1.35.1"
+msal-extensions = ">=1.2.0"
+typing-extensions = ">=4.0.0"
+
+[[package]]
 name = "babel"
 version = "2.18.0"
 description = "Internationalization utilities"
@@ -965,7 +1006,7 @@ description = "The Blis BLAS-like linear algebra library, as a self-contained C-
 optional = true
 python-versions = "<3.15,>=3.9"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "blis-1.3.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:650f1d2b28e3c875927c63deebda463a6f9d237dff30e445bfe2127718c1a344"},
     {file = "blis-1.3.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:9b0d42420ddd543eec51ccb99d38364a0c0833b6895eced37127822de6ecacff"},
@@ -1081,7 +1122,7 @@ description = "Super lightweight function registries for your library"
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "catalogue-2.0.10-py3-none-any.whl", hash = "sha256:58c2de0020aa90f4a2da7dfad161bf7b3b054c86a5f09fcedc0b2b740c109a9f"},
     {file = "catalogue-2.0.10.tar.gz", hash = "sha256:4f56daa940913d3f09d589c191c74e5a6d51762b3a9e37dd53b7437afd6cda15"},
@@ -1493,7 +1534,7 @@ description = "pathlib-style classes for cloud storage services."
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "cloudpathlib-0.23.0-py3-none-any.whl", hash = "sha256:8520b3b01468fee77de37ab5d50b1b524ea6b4a8731c35d1b7407ac0cd716002"},
     {file = "cloudpathlib-0.23.0.tar.gz", hash = "sha256:eb38a34c6b8a048ecfd2b2f60917f7cbad4a105b7c979196450c2f541f4d6b4b"},
@@ -1512,7 +1553,7 @@ description = "Cross-platform colored terminal text."
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 groups = ["main"]
-markers = "(platform_system == \"Windows\" or sys_platform == \"win32\" or os_name == \"nt\" or extra == \"llama-index\" or extra == \"dev\") and (platform_system == \"Windows\" or sys_platform == \"win32\" or extra == \"llama-index\" or extra == \"dev\" or extra == \"chromadb\")"
+markers = "(platform_system == \"Windows\" or sys_platform == \"win32\" or os_name == \"nt\" or extra == \"llama-index\" or extra == \"dev\") and (sys_platform == \"win32\" or platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"dev\" or extra == \"chromadb\") and (python_version <= \"3.12\" or platform_system == \"Windows\" or extra == \"fastembed\" or extra == \"notebook\" or extra == \"dev\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"docling\" or extra == \"docs\" or extra == \"llama-index\") and (platform_system == \"Windows\" or python_version < \"3.12\" or extra == \"codegraph\" or extra == \"fastembed\" or extra == \"notebook\" or extra == \"dev\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"docling\" or extra == \"llama-index\" or extra == \"docs\") and (platform_system == \"Windows\" or python_version == \"3.10\" or extra == \"llama-index\" or extra == \"dev\" or extra == \"chromadb\" or extra == \"codegraph\" or extra == \"fastembed\" or extra == \"notebook\" or extra == \"deepeval\" or extra == \"docling\" or extra == \"docs\") and (platform_system == \"Windows\" or python_version >= \"3.11\" or extra == \"llama-index\" or extra == \"dev\" or extra == \"codegraph\" or extra == \"fastembed\" or extra == \"notebook\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"docling\") and (platform_system == \"Windows\" or extra == \"llama-index\" or extra == \"dev\" or extra == \"codegraph\" or extra == \"fastembed\" or extra == \"notebook\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"docling\" or extra == \"docs\")"
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
@@ -1522,9 +1563,10 @@ files = [
 name = "coloredlogs"
 version = "15.0.1"
 description = "Colored terminal output for Python's logging module"
-optional = false
+optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docs\") and python_version <= \"3.12\" or (platform_system != \"Windows\" or extra == \"fastembed\" or extra == \"chromadb\") and python_version == \"3.13\" and (extra == \"docs\" or extra == \"fastembed\" or extra == \"chromadb\")"
 files = [
     {file = "coloredlogs-15.0.1-py2.py3-none-any.whl", hash = "sha256:612ee75c546f53e92e70049c9dbfcc18c935a2b9a53b66085ce9ef6a6e5c0934"},
     {file = "coloredlogs-15.0.1.tar.gz", hash = "sha256:7c991aa71a4577af2f82600d8f8f3a89f936baeaf9b50a9c197da014e5bf16b0"},
@@ -1578,7 +1620,7 @@ description = "The sweetest config system for Python"
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "confection-0.1.5-py3-none-any.whl", hash = "sha256:e29d3c3f8eac06b3f77eb9dfb4bf2fc6bcc9622a98ca00a698e3d019c6430b14"},
     {file = "confection-0.1.5.tar.gz", hash = "sha256:8e72dd3ca6bd4f48913cd220f10b8275978e740411654b6e8ca6d7008c590f0e"},
@@ -1673,7 +1715,7 @@ description = "Python library for calculating contours of 2D quadrilateral grids
 optional = true
 python-versions = ">=3.11"
 groups = ["main"]
-markers = "python_version >= \"3.11\" and (extra == \"docs\" or extra == \"evals\") and (platform_system != \"Windows\" or python_version < \"3.13\" or extra == \"evals\")"
+markers = "python_version >= \"3.11\" and (extra == \"docs\" or extra == \"evals\") and (python_version < \"3.13\" or platform_system != \"Windows\" or extra == \"evals\")"
 files = [
     {file = "contourpy-1.3.3-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:709a48ef9a690e1343202916450bc48b9e51c049b089c7f79a267b46cffcdaa1"},
     {file = "contourpy-1.3.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:23416f38bfd74d5d28ab8429cc4d63fa67d5068bd711a85edb1c3fb0c3e2f381"},
@@ -2028,7 +2070,7 @@ description = "Composable style cycles"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "(extra == \"docs\" or extra == \"evals\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"evals\")"
+markers = "(extra == \"docs\" or extra == \"evals\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"evals\")"
 files = [
     {file = "cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30"},
     {file = "cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c"},
@@ -2045,7 +2087,7 @@ description = "Manage calls to calloc/free through Cython"
 optional = true
 python-versions = "<3.15,>=3.9"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "cymem-2.0.13-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:8efc4f308169237aade0e82877a65a563833dec32eb7ab2326120253e0e9e918"},
     {file = "cymem-2.0.13-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:e03bb575a96c59bc210d7d59862747f0012696b0dac3427ce8af33c7afb3d4a2"},
@@ -2948,9 +2990,10 @@ sqlalchemy = {version = ">=2.0.0,<2.1.0", extras = ["asyncio"]}
 name = "fastembed"
 version = "0.6.0"
 description = "Fast, light, accurate library built for retrieval embedding generation"
-optional = false
+optional = true
 python-versions = ">=3.9.0"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\") and (python_version <= \"3.12\" or extra == \"fastembed\")"
 files = [
     {file = "fastembed-0.6.0-py3-none-any.whl", hash = "sha256:a08385e9388adea0529a586004f2d588c9787880a510e4e5d167127a11e75328"},
     {file = "fastembed-0.6.0.tar.gz", hash = "sha256:5c9ead25f23449535b07243bbe1f370b820dcc77ec2931e61674e3fe7ff24733"},
@@ -3106,9 +3149,10 @@ files = [
 name = "flatbuffers"
 version = "25.12.19"
 description = "The FlatBuffers serialization format for Python"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docs\") and python_version <= \"3.12\" or (platform_system != \"Windows\" or extra == \"fastembed\" or extra == \"chromadb\") and python_version == \"3.13\" and (extra == \"docs\" or extra == \"fastembed\" or extra == \"chromadb\")"
 files = [
     {file = "flatbuffers-25.12.19-py2.py3-none-any.whl", hash = "sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4"},
 ]
@@ -3120,7 +3164,7 @@ description = "Tools to manipulate font files"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"docs\" or extra == \"evals\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"evals\")"
+markers = "(extra == \"docs\" or extra == \"evals\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"evals\")"
 files = [
     {file = "fonttools-4.61.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:7c7db70d57e5e1089a274cbb2b1fd635c9a24de809a231b154965d415d6c6d24"},
     {file = "fonttools-4.61.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:5fe9fd43882620017add5eabb781ebfbc6998ee49b35bd7f8f79af1f9f99a958"},
@@ -4180,9 +4224,10 @@ typing = ["types-PyYAML", "types-requests", "types-simplejson", "types-toml", "t
 name = "humanfriendly"
 version = "10.0"
 description = "Human friendly output for text interfaces using Python"
-optional = false
+optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docs\") and python_version <= \"3.12\" or (platform_system != \"Windows\" or extra == \"fastembed\" or extra == \"chromadb\") and python_version == \"3.13\" and (extra == \"docs\" or extra == \"fastembed\" or extra == \"chromadb\")"
 files = [
     {file = "humanfriendly-10.0-py2.py3-none-any.whl", hash = "sha256:1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477"},
     {file = "humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc"},
@@ -4339,7 +4384,7 @@ description = "A library for installing Python wheels."
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "installer-0.7.0-py3-none-any.whl", hash = "sha256:05d1933f0a5ba7d8d6296bb6d5018e7c94fa473ceb10cf198a92ccea19c27b53"},
     {file = "installer-0.7.0.tar.gz", hash = "sha256:a26d3e3116289bb08216e0d0f7d925fcef0b0194eedfa0c944bcaaa106c4b631"},
@@ -5103,7 +5148,7 @@ description = "A fast implementation of the Cassowary constraint solver"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"docs\" or extra == \"evals\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"evals\")"
+markers = "(extra == \"docs\" or extra == \"evals\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"evals\")"
 files = [
     {file = "kiwisolver-1.4.9-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:b4b4d74bda2b8ebf4da5bd42af11d02d04428b2c32846e4c2c93219df8a7987b"},
     {file = "kiwisolver-1.4.9-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:fb3b8132019ea572f4611d770991000d7f58127560c4889729248eb5852a102f"},
@@ -5838,9 +5883,10 @@ files = [
 name = "loguru"
 version = "0.7.3"
 description = "Python logging made (stupidly) simple"
-optional = false
+optional = true
 python-versions = "<4.0,>=3.5"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\") and (python_version <= \"3.12\" or extra == \"fastembed\")"
 files = [
     {file = "loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c"},
     {file = "loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6"},
@@ -6583,7 +6629,7 @@ description = "Python plotting package"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"docs\" or extra == \"evals\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"evals\")"
+markers = "(extra == \"docs\" or extra == \"evals\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"evals\")"
 files = [
     {file = "matplotlib-3.10.8-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:00270d217d6b20d14b584c521f810d60c5c78406dc289859776550df837dcda7"},
     {file = "matplotlib-3.10.8-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:37b3c1cc42aa184b3f738cfa18c1c1d72fd496d85467a6cf7b807936d39aa656"},
@@ -6977,7 +7023,7 @@ description = "ml_dtypes is a stand-alone implementation of several NumPy dtype 
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"docs\" and (platform_system != \"Windows\" or python_version <= \"3.12\")"
+markers = "extra == \"docs\" and (python_version <= \"3.12\" or platform_system != \"Windows\")"
 files = [
     {file = "ml_dtypes-0.5.4-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:b95e97e470fe60ed493fd9ae3911d8da4ebac16bd21f87ffa2b7c588bf22ea2c"},
     {file = "ml_dtypes-0.5.4-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b4b801ebe0b477be666696bda493a9be8356f1f0057a57f1e35cd26928823e5a"},
@@ -7035,9 +7081,10 @@ dev = ["absl-py", "pyink", "pylint (>=2.6.0)", "pytest", "pytest-xdist"]
 name = "mmh3"
 version = "5.2.0"
 description = "Python extension for MurmurHash (MurmurHash3), a set of fast and robust hash functions."
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\") and (python_version <= \"3.12\" or extra == \"fastembed\" or extra == \"chromadb\")"
 files = [
     {file = "mmh3-5.2.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:81c504ad11c588c8629536b032940f2a359dda3b6cbfd4ad8f74cb24dcd1b0bc"},
     {file = "mmh3-5.2.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:0b898cecff57442724a0f52bf42c2de42de63083a91008fb452887e372f9c328"},
@@ -7256,9 +7303,10 @@ testing = ["ipywidgets", "multiprocess (>=0.70.15) ; python_version >= \"3.11\""
 name = "mpmath"
 version = "1.3.0"
 description = "Python library for arbitrary-precision floating-point arithmetic"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docs\" or extra == \"docling\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docling\") and (python_version <= \"3.12\" or extra == \"docs\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docling\")"
 files = [
     {file = "mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"},
     {file = "mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f"},
@@ -7269,6 +7317,46 @@ develop = ["codecov", "pycodestyle", "pytest (>=4.6)", "pytest-cov", "wheel"]
 docs = ["sphinx"]
 gmpy = ["gmpy2 (>=2.1.0a4) ; platform_python_implementation != \"PyPy\""]
 tests = ["pytest (>=4.6)"]
+
+[[package]]
+name = "msal"
+version = "1.35.1"
+description = "The Microsoft Authentication Library (MSAL) for Python library enables your app to access the Microsoft Cloud by supporting authentication of users with Microsoft Azure Active Directory accounts (AAD) and Microsoft Accounts (MSA) using industry standard OAuth2 and OpenID Connect."
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"azure\""
+files = [
+    {file = "msal-1.35.1-py3-none-any.whl", hash = "sha256:8f4e82f34b10c19e326ec69f44dc6b30171f2f7098f3720ea8a9f0c11832caa3"},
+    {file = "msal-1.35.1.tar.gz", hash = "sha256:70cac18ab80a053bff86219ba64cfe3da1f307c74b009e2da57ef040eb1b5656"},
+]
+
+[package.dependencies]
+cryptography = ">=2.5,<49"
+PyJWT = {version = ">=1.0.0,<3", extras = ["crypto"]}
+requests = ">=2.0.0,<3"
+
+[package.extras]
+broker = ["pymsalruntime (>=0.14,<0.21) ; python_version >= \"3.8\" and platform_system == \"Windows\"", "pymsalruntime (>=0.17,<0.21) ; python_version >= \"3.8\" and platform_system == \"Darwin\"", "pymsalruntime (>=0.18,<0.21) ; python_version >= \"3.8\" and platform_system == \"Linux\""]
+
+[[package]]
+name = "msal-extensions"
+version = "1.3.1"
+description = "Microsoft Authentication Library extensions (MSAL EX) provides a persistence API that can save your data on disk, encrypted on Windows, macOS and Linux. Concurrent data access will be coordinated by a file lock mechanism."
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"azure\""
+files = [
+    {file = "msal_extensions-1.3.1-py3-none-any.whl", hash = "sha256:96d3de4d034504e969ac5e85bae8106c8373b5c6568e4c8fa7af2eca9dbe6bca"},
+    {file = "msal_extensions-1.3.1.tar.gz", hash = "sha256:c5b0fd10f65ef62b5f1d62f4251d51cbcaf003fcedae8c91b040a488614be1a4"},
+]
+
+[package.dependencies]
+msal = ">=1.29,<2"
+
+[package.extras]
+portalocker = ["portalocker (>=1.4,<4)"]
 
 [[package]]
 name = "msoffcrypto-tool"
@@ -7483,7 +7571,7 @@ description = "Cython bindings for MurmurHash"
 optional = true
 python-versions = "<3.15,>=3.6"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "murmurhash-1.0.15-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:f4989c16053a9a83b02c520dd00a31f0877d5fd2ab8a9b6b75ed9eba0e25c489"},
     {file = "murmurhash-1.0.15-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:899068ba3d7c371e7edd093852c634cce802fefd9aaddfcc0d2fda1d7433c7f9"},
@@ -8399,7 +8487,7 @@ description = "Open Neural Network Exchange"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"docs\" and (platform_system != \"Windows\" or python_version <= \"3.12\")"
+markers = "extra == \"docs\" and (python_version <= \"3.12\" or platform_system != \"Windows\")"
 files = [
     {file = "onnx-1.20.1-cp310-cp310-macosx_12_0_universal2.whl", hash = "sha256:3fe243e83ad737637af6512708454e720d4b0864def2b28e6b0ee587b80a50be"},
     {file = "onnx-1.20.1-cp310-cp310-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e24e96b48f27e4d6b44cb0b195b367a2665da2d819621eec51903d575fc49d38"},
@@ -8439,9 +8527,10 @@ reference = ["Pillow"]
 name = "onnxruntime"
 version = "1.22.1"
 description = "ONNX Runtime is a runtime accelerator for Machine Learning models"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docs\") and python_version <= \"3.12\" or (platform_system != \"Windows\" or extra == \"fastembed\" or extra == \"chromadb\") and python_version == \"3.13\" and (extra == \"docs\" or extra == \"fastembed\" or extra == \"chromadb\")"
 files = [
     {file = "onnxruntime-1.22.1-cp310-cp310-macosx_13_0_universal2.whl", hash = "sha256:80e7f51da1f5201c1379b8d6ef6170505cd800e40da216290f5e06be01aadf95"},
     {file = "onnxruntime-1.22.1-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b89ddfdbbdaf7e3a59515dee657f6515601d55cb21a0f0f48c81aefc54ff1b73"},
@@ -8506,7 +8595,7 @@ description = "Wrapper package for OpenCV python bindings."
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "(extra == \"docs\" or extra == \"docling\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"docling\")"
+markers = "(extra == \"docs\" or extra == \"docling\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"docling\")"
 files = [
     {file = "opencv_python-4.13.0.92-cp37-abi3-macosx_13_0_arm64.whl", hash = "sha256:caf60c071ec391ba51ed00a4a920f996d0b64e3e46068aac1f646b5de0326a19"},
     {file = "opencv_python-4.13.0.92-cp37-abi3-macosx_14_0_x86_64.whl", hash = "sha256:5868a8c028a0b37561579bfb8ac1875babdc69546d236249fff296a8c010ccf9"},
@@ -8759,7 +8848,7 @@ description = "Fast, correct Python JSON library supporting dataclasses, datetim
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(sys_platform != \"emscripten\" or extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\") and (extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\" or extra == \"dlt\") and (platform_python_implementation != \"PyPy\" or extra == \"chromadb\")"
+markers = "(platform_python_implementation != \"PyPy\" or extra == \"chromadb\") and (sys_platform != \"emscripten\" or extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\") and (extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\" or extra == \"dlt\")"
 files = [
     {file = "orjson-3.11.7-cp310-cp310-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl", hash = "sha256:a02c833f38f36546ba65a452127633afce4cf0dd7296b753d3bb54e55e5c0174"},
     {file = "orjson-3.11.7-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b63c6e6738d7c3470ad01601e23376aa511e50e1f3931395b9f9c722406d1a67"},
@@ -9321,9 +9410,10 @@ test = ["attrs (>=20.2.0)", "coverage[toml]", "hypothesis (>=6.36)", "numpy (>=1
 name = "pillow"
 version = "11.3.0"
 description = "Python Imaging Library (Fork)"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\" or extra == \"llama-index\" or extra == \"mistral\" or extra == \"docs\" or extra == \"docling\" or extra == \"evals\") and (python_version <= \"3.12\" or extra == \"fastembed\" or extra == \"llama-index\" or extra == \"mistral\" or extra == \"docs\" or extra == \"evals\" or extra == \"docling\")"
 files = [
     {file = "pillow-11.3.0-cp310-cp310-macosx_10_10_x86_64.whl", hash = "sha256:1b9c17fd4ace828b3003dfd1e30bff24863e0eb59b535e8f80194d9cc7ecf860"},
     {file = "pillow-11.3.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:65dc69160114cdd0ca0f35cb434633c75e8e7fad4cf855177a05bf38678f73ad"},
@@ -9619,7 +9709,7 @@ description = "Cython hash table that trusts the keys are pre-hashed"
 optional = true
 python-versions = "<3.15,>=3.6"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "preshed-3.0.12-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:d8f0bc207bb5bfe69e3a232367c264cac900dc14e9219cd061b98eaca9e7da61"},
     {file = "preshed-3.0.12-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:0c8a8d571c044ddab5369d30d172c87545f44daa1510bde92b7e0144a8f4f92b"},
@@ -9886,9 +9976,10 @@ testing = ["google-api-core (>=1.31.5)"]
 name = "protobuf"
 version = "6.33.5"
 description = ""
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "(python_version <= \"3.12\" or extra == \"docs\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"distributed\" or extra == \"mistral\" or extra == \"tracing\" or extra == \"monitoring\" or extra == \"deepeval\") and (extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docs\" or extra == \"distributed\" or extra == \"mistral\" or extra == \"tracing\" or extra == \"monitoring\" or extra == \"deepeval\")"
 files = [
     {file = "protobuf-6.33.5-cp310-abi3-win32.whl", hash = "sha256:d71b040839446bac0f4d162e758bea99c8251161dae9d0983a3b88dee345153b"},
     {file = "protobuf-6.33.5-cp310-abi3-win_amd64.whl", hash = "sha256:3093804752167bcab3998bec9f1048baae6e29505adaf1afd14a37bddede533c"},
@@ -10075,9 +10166,10 @@ bcrypt = ["bcrypt (>=4.1.2,<6)"]
 name = "py-rust-stemmers"
 version = "0.1.5"
 description = "Fast and parallel snowball stemmer"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\") and (python_version <= \"3.12\" or extra == \"fastembed\")"
 files = [
     {file = "py_rust_stemmers-0.1.5-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:bfbd9034ae00419ff2154e33b8f5b4c4d99d1f9271f31ed059e5c7e9fa005844"},
     {file = "py_rust_stemmers-0.1.5-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c7162ae66df2bb0fc39b350c24a049f5f5151c03c046092ba095c2141ec223a2"},
@@ -10880,7 +10972,7 @@ description = "Thin wrapper for pandoc."
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "(platform_system != \"Windows\" or python_version < \"3.13\") and python_version >= \"3.11\" and extra == \"docs\""
+markers = "python_version >= \"3.11\" and extra == \"docs\" and (platform_system != \"Windows\" or python_version < \"3.13\")"
 files = [
     {file = "pypandoc_binary-1.16.2-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:dc71533dcce1cb112994e44f95a21c042c02e4fd4b4815442d8cbf7fe0159a88"},
     {file = "pypandoc_binary-1.16.2-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a240d645963266be5d68c2b5a0fb9703dfa5bb5e6a8367e36060e2584236b457"},
@@ -10991,10 +11083,10 @@ files = [
 name = "pyreadline3"
 version = "3.5.4"
 description = "A python implementation of GNU readline."
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "sys_platform == \"win32\""
+markers = "sys_platform == \"win32\" and (extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docs\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"fastembed\" or extra == \"chromadb\") and (python_version <= \"3.12\" or extra == \"docs\" or extra == \"fastembed\" or extra == \"chromadb\")"
 files = [
     {file = "pyreadline3-3.5.4-py3-none-any.whl", hash = "sha256:eaf8e6cc3c49bcccf145fc6067ba8643d1df34d604a1ec0eccbf7a18e6d3fae6"},
     {file = "pyreadline3-3.5.4.tar.gz", hash = "sha256:8d57d53039a1c75adba8e50dd3d992b28143480816187ea5efbd5c78e6c885b7"},
@@ -12580,7 +12672,7 @@ description = "Fundamental algorithms for scientific computing in Python"
 optional = true
 python-versions = ">=3.11"
 groups = ["main"]
-markers = "python_version >= \"3.11\" and (extra == \"docs\" or extra == \"evals\" or extra == \"docling\") and (platform_system != \"Windows\" or python_version < \"3.13\" or extra == \"evals\" or extra == \"docling\")"
+markers = "python_version >= \"3.11\" and (extra == \"docs\" or extra == \"evals\" or extra == \"docling\") and (python_version < \"3.13\" or platform_system != \"Windows\" or extra == \"evals\" or extra == \"docling\")"
 files = [
     {file = "scipy-1.17.1-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:1f95b894f13729334fb990162e911c9e5dc1ab390c58aa6cbecb389c5b5e28ec"},
     {file = "scipy-1.17.1-cp311-cp311-macosx_12_0_arm64.whl", hash = "sha256:e18f12c6b0bc5a592ed23d3f7b891f68fd7f8241d69b7883769eb5d5dfb52696"},
@@ -13014,7 +13106,7 @@ description = "Utils for streaming large files (S3, HDFS, GCS, SFTP, Azure Blob 
 optional = true
 python-versions = "<4.0,>=3.10"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "smart_open-7.5.1-py3-none-any.whl", hash = "sha256:3e07cbbd9c8a908bcb8e25d48becf1a5cbb4886fa975e9f34c672ed171df2318"},
     {file = "smart_open-7.5.1.tar.gz", hash = "sha256:3f08e16827c4733699e6b2cc40328a3568f900cb12ad9a3ad233ba6c872d9fe7"},
@@ -13091,7 +13183,7 @@ description = "Industrial-strength Natural Language Processing (NLP) in Python"
 optional = true
 python-versions = "<3.15,>=3.9"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "spacy-3.8.11-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:f9cc7f775cfc41ccb8be63bd6258a1ec4613d4ad3859f2ba2c079f34240b21f6"},
     {file = "spacy-3.8.11-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:be9d665be8581926fba4303543ba189d34e8517803052551b000cf1a1af33b87"},
@@ -13189,7 +13281,7 @@ description = "Legacy registered functions for spaCy backwards compatibility"
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "spacy-legacy-3.0.12.tar.gz", hash = "sha256:b37d6e0c9b6e1d7ca1cf5bc7152ab64a4c4671f59c85adaf7a3fcb870357a774"},
     {file = "spacy_legacy-3.0.12-py2.py3-none-any.whl", hash = "sha256:476e3bd0d05f8c339ed60f40986c07387c0a71479245d6d0f4298dbd52cda55f"},
@@ -13202,7 +13294,7 @@ description = "Logging utilities for SpaCy"
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "spacy-loggers-1.0.5.tar.gz", hash = "sha256:d60b0bdbf915a60e516cc2e653baeff946f0cfc461b452d11a4d5458c6fe5f24"},
     {file = "spacy_loggers-1.0.5-py3-none-any.whl", hash = "sha256:196284c9c446cc0cdb944005384270d775fdeaf4f494d8e269466cfa497ef645"},
@@ -13335,7 +13427,7 @@ description = "Modern high-performance serialization utilities for Python"
 optional = true
 python-versions = "<3.15,>=3.9"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "srsly-2.5.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:5491fe0683da900cd0c563538510c70a007380e1f6b29ebbb5225e7590981e2a"},
     {file = "srsly-2.5.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:7375c2955935b73a6cad3851fe819c2f4ec506504afe7ca92b917555e6850fae"},
@@ -13490,9 +13582,10 @@ typing-extensions = {version = "*", markers = "python_version < \"3.11\""}
 name = "sympy"
 version = "1.14.0"
 description = "Computer algebra system (CAS) in Python"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "(extra == \"codegraph\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docs\" or extra == \"docling\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docling\") and (python_version <= \"3.12\" or extra == \"docs\" or extra == \"fastembed\" or extra == \"chromadb\" or extra == \"docling\")"
 files = [
     {file = "sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"},
     {file = "sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517"},
@@ -13603,7 +13696,7 @@ description = "A refreshing functional take on deep learning, compatible with yo
 optional = true
 python-versions = "<3.15,>=3.10"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "thinc-8.3.10-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:fbe0313cb3c898f4e6a3f13b704af51f4bf8f927078deb0fe2d6eaf3c6c5b31b"},
     {file = "thinc-8.3.10-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:892ac91cf7cc8d3ac9a4527c68ead37a96e87132c9f589de56b057b50358e895"},
@@ -13781,7 +13874,7 @@ description = "PyTorch Image Models"
 optional = true
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"docs\" and (platform_system != \"Windows\" or python_version <= \"3.12\")"
+markers = "extra == \"docs\" and (python_version <= \"3.12\" or platform_system != \"Windows\")"
 files = [
     {file = "timm-1.0.25-py3-none-any.whl", hash = "sha256:bef7f61dd717cb2dbbb7e326f143e13d660a47ecbd84116e6fe33732bed5c484"},
     {file = "timm-1.0.25.tar.gz", hash = "sha256:47f59fc2754725735cc81bb83bcbfce5bec4ebd5d4bb9e69da57daa92fcfa768"},
@@ -13947,7 +14040,7 @@ description = "Tensors and Dynamic neural networks in Python with strong GPU acc
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"docs\" or extra == \"docling\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"docling\")"
+markers = "(extra == \"docs\" or extra == \"docling\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"docling\")"
 files = [
     {file = "torch-2.10.0-1-cp310-none-macosx_11_0_arm64.whl", hash = "sha256:c37fc46eedd9175f9c81814cc47308f1b42cfe4987e532d4b423d23852f2bf63"},
     {file = "torch-2.10.0-1-cp311-none-macosx_11_0_arm64.whl", hash = "sha256:f699f31a236a677b3118bc0a3ef3d89c0c29b5ec0b20f4c4bf0b110378487464"},
@@ -14021,7 +14114,7 @@ description = "image and video datasets and models for torch deep learning"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "(extra == \"docs\" or extra == \"docling\") and (platform_system != \"Windows\" or python_version <= \"3.12\" or extra == \"docling\")"
+markers = "(extra == \"docs\" or extra == \"docling\") and (python_version <= \"3.12\" or platform_system != \"Windows\" or extra == \"docling\")"
 files = [
     {file = "torchvision-0.25.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:a95c47abb817d4e90ea1a8e57bd0d728e3e6b533b3495ae77d84d883c4d11f56"},
     {file = "torchvision-0.25.0-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:acc339aba4a858192998c2b91f635827e40d9c469d9cf1455bafdda6e4c28ea4"},
@@ -14424,7 +14517,7 @@ description = "Typer, build great CLIs. Easy to code. Based on Python type hints
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "typer_slim-0.21.2-py3-none-any.whl", hash = "sha256:4705082bb6c66c090f60e47c8be09a93158c139ce0aa98df7c6c47e723395e5f"},
     {file = "typer_slim-0.21.2.tar.gz", hash = "sha256:78f20d793036a62aaf9c3798306142b08261d4b2a941c6e463081239f062a2f9"},
@@ -14514,7 +14607,7 @@ description = "Provider of IANA time zone data"
 optional = true
 python-versions = ">=2"
 groups = ["main"]
-markers = "(platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"docs\" or extra == \"evals\" or extra == \"docling\" or extra == \"dlt\") and (extra == \"notebook\" or extra == \"dev\" or extra == \"docs\" or extra == \"evals\" or extra == \"docling\" or extra == \"dlt\" or extra == \"scraping\" or python_version <= \"3.12\") and (extra == \"scraping\" or extra == \"docling\" or extra == \"notebook\" or extra == \"dev\" or extra == \"docs\" or extra == \"evals\" or extra == \"dlt\")"
+markers = "(platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"docs\" or extra == \"evals\" or extra == \"docling\" or extra == \"dlt\") and (python_version <= \"3.12\" or extra == \"notebook\" or extra == \"dev\" or extra == \"docs\" or extra == \"evals\" or extra == \"docling\" or extra == \"dlt\" or extra == \"scraping\") and (extra == \"scraping\" or extra == \"docling\" or extra == \"notebook\" or extra == \"dev\" or extra == \"docs\" or extra == \"evals\" or extra == \"dlt\")"
 files = [
     {file = "tzdata-2025.3-py2.py3-none-any.whl", hash = "sha256:06a47e5700f3081aab02b2e513160914ff0694bce9947d6b76ebd6bf57cfc5d1"},
     {file = "tzdata-2025.3.tar.gz", hash = "sha256:de39c2ca5dc7b0344f2eba86f49d614019d29f060fc4ebc8a417896a620b56a7"},
@@ -14625,7 +14718,7 @@ description = "A library that prepares raw documents for downstream ML tasks."
 optional = true
 python-versions = "<3.14,>=3.11"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "unstructured-0.21.5-py3-none-any.whl", hash = "sha256:d88a277c368462b69a8843b9cb22476f3cc4d0a58455536520359387224b3366"},
     {file = "unstructured-0.21.5.tar.gz", hash = "sha256:3e220d0c2b9c8ec12c99767162b95ab0acfca75e979b82c66c15ca15caa60139"},
@@ -14726,7 +14819,7 @@ description = "A library for performing inference using trained models."
 optional = true
 python-versions = ">=3.7.0"
 groups = ["main"]
-markers = "extra == \"docs\" and (platform_system != \"Windows\" or python_version <= \"3.12\")"
+markers = "extra == \"docs\" and (python_version <= \"3.12\" or platform_system != \"Windows\")"
 files = [
     {file = "unstructured_inference-1.2.0-py3-none-any.whl", hash = "sha256:60a1635aa8e97a9e7daed1a129836f51c26588e0d2062c9cc6a5a17e6d40cb6a"},
     {file = "unstructured_inference-1.2.0.tar.gz", hash = "sha256:19ca28512f3649c70a759cf2a4e98663e942a1b83c1acdb9506b0445f4862f23"},
@@ -14952,7 +15045,7 @@ description = "A lightweight console printing and formatting toolkit"
 optional = true
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "wasabi-1.1.3-py3-none-any.whl", hash = "sha256:f76e16e8f7e79f8c4c8be49b4024ac725713ab10cd7f19350ad18a8e3f71728c"},
     {file = "wasabi-1.1.3.tar.gz", hash = "sha256:4bb3008f003809db0c3e28b4daf20906ea871a2bb43f9914197d540f4f2e0878"},
@@ -15148,7 +15241,7 @@ description = "Weasel: A small and easy workflow system"
 optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "extra == \"docs\" and python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"docs\""
 files = [
     {file = "weasel-0.4.3-py3-none-any.whl", hash = "sha256:08f65b5d0dbded4879e08a64882de9b9514753d9eaa4c4e2a576e33666ac12cf"},
     {file = "weasel-0.4.3.tar.gz", hash = "sha256:f293d6174398e8f478c78481e00c503ee4b82ea7a3e6d0d6a01e46a6b1396845"},
@@ -15335,10 +15428,10 @@ files = [
 name = "win32-setctime"
 version = "1.2.0"
 description = "A small Python utility to set file creation time on Windows"
-optional = false
+optional = true
 python-versions = ">=3.5"
 groups = ["main"]
-markers = "sys_platform == \"win32\""
+markers = "sys_platform == \"win32\" and (extra == \"codegraph\" or extra == \"fastembed\") and (python_version <= \"3.12\" or extra == \"fastembed\")"
 files = [
     {file = "win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390"},
     {file = "win32_setctime-1.2.0.tar.gz", hash = "sha256:ae1fdf948f5640aae05c511ade119313fb6a30d7eabe25fef9764dca5873c4c0"},
@@ -15902,6 +15995,7 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 anthropic = ["anthropic"]
 api = []
 aws = ["s3fs"]
+azure = ["azure-identity"]
 baml = ["baml-py"]
 chromadb = ["chromadb", "pypika"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
@@ -15913,6 +16007,7 @@ dlt = ["dlt"]
 docling = ["docling", "transformers"]
 docs = ["lxml", "lxml", "unstructured"]
 evals = ["gdown", "matplotlib", "pandas", "plotly", "scikit-learn"]
+fastembed = ["fastembed", "onnxruntime"]
 graphiti = ["graphiti-core"]
 groq = ["groq"]
 huggingface = ["transformers"]
@@ -15935,4 +16030,4 @@ tracing = ["opentelemetry-api", "opentelemetry-exporter-otlp-proto-grpc", "opent
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.14"
-content-hash = "e52478e6dddffbecc27fac3f113a38178139a614de789af228c7fae7e14df8c9"
+content-hash = "94c63ac653d7558754cf913924bac578a2668b30277609c3a4812b6d386f3b70"

@@ -142,19 +142,19 @@ def deploy_cognee():
     # Generate a signed preview URL (no auth headers needed)
     signed_url = sandbox.create_signed_preview_url(8000, expires_in_seconds=86400)
 
-    print(f"\nCognee is running!")
+    print("\nCognee is running!")
     print(f"  Sandbox ID: {sandbox.id}")
     print(f"\n  API URL: {signed_url.url}")
     print(f"  Health:  {signed_url.url}/health")
     print(f"  Docs:    {signed_url.url}/docs")
-    print(f"  (URL expires in 24 hours)")
-    print(f"\nTo check server logs:")
+    print("  (URL expires in 24 hours)")
+    print("\nTo check server logs:")
     print(
         f'  python -c "from daytona import Daytona, DaytonaConfig; '
         f"d=Daytona(DaytonaConfig(api_key='...', api_url='{api_url}')); "
         f"s=d.get('{sandbox.id}'); print(s.process.exec('cat /tmp/cognee-server.log').result)\""
     )
-    print(f"\nTo stop:")
+    print("\nTo stop:")
     print(f"  daytona sandbox stop {sandbox.id}")
 
     return sandbox
