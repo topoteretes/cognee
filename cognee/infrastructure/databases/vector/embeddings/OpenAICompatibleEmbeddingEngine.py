@@ -74,7 +74,6 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     mock: bool
     batch_size: int
 
-
     def __init__(
         self,
         model: Optional[str] = "default",
@@ -96,7 +95,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # so we need the URL to end with /v1 (not /v1/embeddings).
         base = self.endpoint.rstrip("/")
         if base.endswith("/v1/embeddings"):
-            base = base[:-len("/embeddings")]
+            base = base[: -len("/embeddings")]
         if not base.endswith("/v1"):
             base = base + "/v1"
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=base)
