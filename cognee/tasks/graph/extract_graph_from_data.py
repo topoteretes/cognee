@@ -176,7 +176,13 @@ async def extract_graph_from_data(
         if inspect.isawaitable(callback_result):
             await callback_result
 
-    # Note: Filter edges with missing source or target nodes
+    # --- Apply graph contract (if provided) ---
+    from cognee.contracts import apply_graph_contract, DataContract
+
+    data_contract = kwargs.get("contract")
+    graph_contract = data_contract.graph if isinstance(data_contract, DataContract) else None
+
+    # Filter edges with missing source or target nodes, then apply contract
     if graph_model == KnowledgeGraph:
         for graph in chunk_graphs:
             valid_node_ids = {node.id for node in graph.nodes}
@@ -185,6 +191,9 @@ async def extract_graph_from_data(
                 for edge in graph.edges
                 if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
             ]
+
+        if graph_contract is not None:
+            apply_graph_contract(graph_contract, chunk_graphs)
 
     # Extract resolver from config if provided, otherwise get default
     if config is None:

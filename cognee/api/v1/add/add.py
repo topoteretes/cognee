@@ -2,6 +2,7 @@ from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
 
 from cognee.modules.users.models import User
+from cognee.contracts import DataContract
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
@@ -37,6 +38,7 @@ async def add(
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
+    contract: Optional[DataContract] = None,
     **kwargs,
 ):
     """
@@ -194,6 +196,7 @@ async def add(
             node_set,
             dataset_id,
             preferred_loaders,
+            contract=contract,
         ),
     ]
 
