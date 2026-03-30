@@ -33,6 +33,7 @@ class LLMProvider(Enum):
     CUSTOM = "custom"
     GEMINI = "gemini"
     MISTRAL = "mistral"
+    AZURE = "azure"
     BEDROCK = "bedrock"
     LLAMA_CPP = "llama_cpp"
 
@@ -71,7 +72,28 @@ def get_llm_client(raise_api_key_error: bool = True):
 
     llm_args = llm_config.llm_args
 
-    if provider == LLMProvider.OPENAI:
+    if provider == LLMProvider.AZURE:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.azure_openai.adapter import (
+            AzureOpenAIAdapter,
+        )
+
+        return AzureOpenAIAdapter(
+            api_key=llm_config.llm_api_key,
+            endpoint=llm_config.llm_endpoint,
+            api_version=llm_config.llm_api_version,
+            model=llm_config.llm_model,
+            transcription_model=llm_config.transcription_model,
+            max_completion_tokens=max_completion_tokens,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
+            streaming=llm_config.llm_streaming,
+            fallback_api_key=llm_config.fallback_api_key,
+            fallback_endpoint=llm_config.fallback_endpoint,
+            fallback_model=llm_config.fallback_model,
+            llm_args=llm_args,
+            use_managed_identity=llm_config.llm_azure_use_managed_identity,
+        )
+
+    elif provider == LLMProvider.OPENAI:
         if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
@@ -138,6 +160,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             llm_config.llm_model,
             max_completion_tokens,
             "Custom",
+            endpoint=llm_config.llm_endpoint,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,

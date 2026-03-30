@@ -4,9 +4,26 @@ import pytest
 from cognee.infrastructure.databases.cache.config import CacheConfig, get_cache_config
 
 
-def test_cache_config_defaults():
+def test_cache_config_defaults(monkeypatch):
     """Test that CacheConfig has the correct default values."""
-    config = CacheConfig()
+    for env_var in (
+        "CACHE_BACKEND",
+        "CACHING",
+        "AUTO_FEEDBACK",
+        "SHARED_KUZU_LOCK",
+        "CACHE_HOST",
+        "CACHE_PORT",
+        "CACHE_USERNAME",
+        "CACHE_PASSWORD",
+        "AGENTIC_LOCK_EXPIRE",
+        "AGENTIC_LOCK_TIMEOUT",
+        "SESSION_TTL_SECONDS",
+        "USAGE_LOGGING",
+        "USAGE_LOGGING_TTL",
+    ):
+        monkeypatch.delenv(env_var, raising=False)
+
+    config = CacheConfig(_env_file=None)
 
     assert config.cache_backend == "fs"
     assert config.caching is False
@@ -15,6 +32,7 @@ def test_cache_config_defaults():
     assert config.cache_port == 6379
     assert config.agentic_lock_expire == 240
     assert config.agentic_lock_timeout == 300
+    assert config.session_ttl_seconds == 604800
 
 
 def test_cache_config_custom_values():
@@ -27,6 +45,7 @@ def test_cache_config_custom_values():
         cache_port=6380,
         agentic_lock_expire=120,
         agentic_lock_timeout=180,
+        session_ttl_seconds=3600,
     )
 
     assert config.cache_backend == "redis"
@@ -36,6 +55,7 @@ def test_cache_config_custom_values():
     assert config.cache_port == 6380
     assert config.agentic_lock_expire == 120
     assert config.agentic_lock_timeout == 180
+    assert config.session_ttl_seconds == 3600
 
 
 def test_cache_config_to_dict():
@@ -48,6 +68,7 @@ def test_cache_config_to_dict():
         cache_port=7000,
         agentic_lock_expire=100,
         agentic_lock_timeout=200,
+        session_ttl_seconds=0,
     )
 
     config_dict = config.to_dict()
@@ -63,9 +84,18 @@ def test_cache_config_to_dict():
         "cache_password": None,
         "agentic_lock_expire": 100,
         "agentic_lock_timeout": 200,
+        "session_ttl_seconds": 0,
         "usage_logging": False,
         "usage_logging_ttl": 604800,
     }
+
+
+def test_cache_config_session_ttl_none():
+    """Test that session_ttl_seconds accepts None to disable Redis session expiry."""
+    config = CacheConfig(session_ttl_seconds=None)
+
+    assert config.session_ttl_seconds is None
+    assert config.to_dict()["session_ttl_seconds"] is None
 
 
 def test_get_cache_config_singleton():

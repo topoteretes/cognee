@@ -1,7 +1,15 @@
 import os
 import logging
 from typing import List, Optional
-from fastembed import TextEmbedding
+
+try:
+    from fastembed import TextEmbedding
+except ImportError:
+    raise ImportError(
+        "fastembed is required for FastembedEmbeddingEngine but is not installed. "
+        "Install it with: pip install 'cognee[fastembed]'"
+    )
+
 import litellm
 from tenacity import (
     retry,
@@ -18,6 +26,10 @@ from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    sanitize_embedding_text_inputs,
+    handle_embedding_response,
+)
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
@@ -93,18 +105,19 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             - List[List[float]]: A list of embeddings, where each embedding is a list of floats
               representing the vector form of the input text.
         """
+        sanitized_text_input = sanitize_embedding_text_inputs(text)
         try:
             if self.mock:
-                return [[0.0] * self.dimensions for _ in text]
+                return [[0.0] * self.dimensions for _ in sanitized_text_input]
             else:
                 async with embedding_rate_limiter_context_manager():
                     embeddings = self.embedding_model.embed(
-                        text,
+                        sanitized_text_input,
                         batch_size=len(text),
                         parallel=None,
                     )
-
-                return list(embeddings)
+                embeddings = list(embeddings)
+                return handle_embedding_response(text, embeddings, self.dimensions)
 
         except Exception as error:
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")
