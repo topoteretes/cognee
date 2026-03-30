@@ -48,9 +48,7 @@ def _run_streamed(sandbox, session_id, command, label=""):
             session_id,
             cmd.cmd_id,
             lambda stdout: print(f"{prefix}{stdout}", end="", flush=True),
-            lambda stderr: print(
-                f"{prefix}{stderr}", end="", file=sys.stderr, flush=True
-            ),
+            lambda stderr: print(f"{prefix}{stderr}", end="", file=sys.stderr, flush=True),
         )
 
     asyncio.run(_stream())
@@ -131,13 +129,11 @@ def deploy_cognee():
         if "OK" in status:
             print("Server is ready!")
             break
-        print(f"  ({i+1}) {status}", flush=True)
+        print(f"  ({i + 1}) {status}", flush=True)
     else:
         # Print server log for debugging
         try:
-            log = sandbox.process.exec(
-                "tail -30 /tmp/cognee-server.log", timeout=5
-            )
+            log = sandbox.process.exec("tail -30 /tmp/cognee-server.log", timeout=5)
             print(f"\nServer log:\n{log.result}")
         except Exception:
             pass
@@ -153,9 +149,11 @@ def deploy_cognee():
     print(f"  Docs:    {signed_url.url}/docs")
     print(f"  (URL expires in 24 hours)")
     print(f"\nTo check server logs:")
-    print(f"  python -c \"from daytona import Daytona, DaytonaConfig; "
-          f"d=Daytona(DaytonaConfig(api_key='...', api_url='{api_url}')); "
-          f"s=d.get('{sandbox.id}'); print(s.process.exec('cat /tmp/cognee-server.log').result)\"")
+    print(
+        f'  python -c "from daytona import Daytona, DaytonaConfig; '
+        f"d=Daytona(DaytonaConfig(api_key='...', api_url='{api_url}')); "
+        f"s=d.get('{sandbox.id}'); print(s.process.exec('cat /tmp/cognee-server.log').result)\""
+    )
     print(f"\nTo stop:")
     print(f"  daytona sandbox stop {sandbox.id}")
 
