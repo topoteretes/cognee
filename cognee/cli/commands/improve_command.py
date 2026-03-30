@@ -35,6 +35,18 @@ tasks on an existing knowledge graph to add context, rules, and connections.
             help="Filter to specific named entities",
         )
         parser.add_argument(
+            "--session-ids",
+            "-s",
+            nargs="+",
+            help="Session IDs whose feedback and Q&A content should be bridged into the permanent graph",
+        )
+        parser.add_argument(
+            "--feedback-alpha",
+            type=float,
+            default=0.1,
+            help="Learning rate for feedback weight updates (default: 0.1)",
+        )
+        parser.add_argument(
             "--background",
             "-b",
             action="store_true",
@@ -57,6 +69,8 @@ tasks on an existing knowledge graph to add context, rules, and connections.
                     result = await cognee.improve(
                         dataset=dataset_arg,
                         node_name=args.node_name,
+                        session_ids=args.session_ids,
+                        feedback_alpha=args.feedback_alpha,
                         run_in_background=args.background,
                     )
                     return result
