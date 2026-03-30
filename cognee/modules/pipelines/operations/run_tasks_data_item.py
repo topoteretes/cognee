@@ -64,12 +64,19 @@ async def run_tasks_data_item_incremental(
     # If incremental_loading of data is set to True don't process documents already processed by pipeline
     # If data is being added to Cognee for the first time calculate the id of the data
     if not isinstance(data_item, Data):
-        file_path = await save_data_item_to_storage(data_item)
-        # Ingest data and add metadata
-        async with open_data_file(file_path) as file:
-            classified_data = ingestion.classify(file)
-            # data_id is the hash of file contents + owner id to avoid duplicate data
-            data_id = await ingestion.identify(classified_data, user)
+        # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
+        # over the content-hash-based ID so lookups stay consistent.
+        from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+
+        if isinstance(data_item, DataItemType) and data_item.data_id is not None:
+            data_id = data_item.data_id
+        else:
+            file_path = await save_data_item_to_storage(data_item)
+            # Ingest data and add metadata
+            async with open_data_file(file_path) as file:
+                classified_data = ingestion.classify(file)
+                # data_id is the hash of file contents + owner id to avoid duplicate data
+                data_id = await ingestion.identify(classified_data, user)
     else:
         # If data was already processed by Cognee get data id
         data_id = data_item.id

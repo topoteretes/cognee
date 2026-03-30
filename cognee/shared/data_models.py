@@ -45,9 +45,14 @@ else:
         """Node in a knowledge graph."""
 
         id: str
-        name: str
+        name: str = ""
         type: str
         description: str
+
+        def __init__(self, **data):
+            if not data.get("name"):
+                data["name"] = data.get("id", "")
+            super().__init__(**data)
 
     class Edge(BaseModel):
         """Edge in a knowledge graph."""

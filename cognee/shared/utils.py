@@ -8,13 +8,11 @@ import socketserver
 import ssl
 from datetime import datetime, timezone
 from threading import Thread
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import aiohttp
 
-from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -96,7 +94,7 @@ async def _send_telemetry_request(payload: dict) -> None:
         logger.debug("Telemetry request failed: %s", e)
 
 
-def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = {}):
+def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = None):
     if additional_properties is None:
         additional_properties = {}
     if os.getenv("TELEMETRY_DISABLED"):
@@ -122,13 +120,8 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
         },
     }
 
-    # Fire-and-forget async task — no threads, no blocking
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_send_telemetry_request(payload))
-    except RuntimeError:
-        # No running event loop (e.g. called from sync context) — skip silently
-        logger.debug("No running event loop for telemetry, skipping")
+    loop = asyncio.get_running_loop()
+    loop.create_task(_send_telemetry_request(payload))
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
