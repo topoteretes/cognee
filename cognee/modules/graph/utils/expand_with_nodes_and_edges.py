@@ -36,7 +36,11 @@ def _process_ontology_nodes(
 ) -> None:
     """Process and store ontology nodes"""
     for ontology_node in ontology_nodes:
-        ont_node_id = generate_node_id(f"type:{ontology_node.name}") if ontology_node.category == "classes" else generate_node_id(f"entity:{ontology_node.name}")
+        ont_node_id = (
+            generate_node_id(f"type:{ontology_node.name}")
+            if ontology_node.category == "classes"
+            else generate_node_id(f"entity:{ontology_node.name}")
+        )
         ont_node_name = generate_node_name(ontology_node.name)
 
         if ontology_node.category == "classes":
