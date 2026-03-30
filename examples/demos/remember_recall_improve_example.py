@@ -1,9 +1,9 @@
 """
 V2 Memory-Oriented API: remember, recall, improve, forget, status.
 
-Full lifecycle: ingest data with session tracking, query within that
-session (LLM sees what was just ingested), bridge session into the
-permanent graph, query the enriched graph.
+Full lifecycle: ingest data with session tracking, check per-item
+processing status, query within that session, bridge session into the
+permanent graph, verify freshness via content hashes, and clean up.
 
 Usage:
     uv run python examples/demos/remember_recall_improve_example.py
@@ -13,6 +13,8 @@ Requires:
 """
 
 import asyncio
+from datetime import datetime, timezone
+
 import cognee
 
 
@@ -34,19 +36,35 @@ SESSION = "demo_session"
 async def main():
     await cognee.forget(everything=True)
 
-    # Step 1: Remember with session -- ingest + build graph + init session
+    # Record the time before ingestion for the `since` filter
+    before_ingest = datetime.now(timezone.utc)
+
+    # Step 1: Remember -- ingest + build graph + init session
     print("--- Step 1: remember(session_id) ---")
     await cognee.remember(SAMPLE_TEXT, dataset_name="scientists", session_id=SESSION)
     print("  Data ingested and session initialized.")
 
-    # Step 2: Check status
-    print("\n--- Step 2: status() ---")
+    # Step 2: Dataset-level status (aggregates)
+    print("\n--- Step 2: status() -- dataset aggregates ---")
     statuses = await cognee.status(datasets=["scientists"])
     for s in statuses:
         print(f"  {s.dataset_name}: {s.item_count} items, cognify={s.cognify_pipeline_status}")
 
-    # Step 3: Recall in the same session -- LLM sees "user just provided data"
-    print("\n--- Step 3: recall(session_id) ---")
+    # Step 3: Per-item status -- see each file's processing state and content hash
+    print("\n--- Step 3: status(items=True) -- per-source detail ---")
+    items = await cognee.status(datasets=["scientists"], items=True)
+    for item in items:
+        print(f"  {item.name}: {item.status} (hash={item.content_hash[:12]}...)")
+        if item.error:
+            print(f"    error: {item.error}")
+
+    # Step 4: Filter by time -- only items ingested since we started
+    print("\n--- Step 4: status(items=True, since=...) -- time-filtered ---")
+    recent = await cognee.status(datasets=["scientists"], items=True, since=before_ingest)
+    print(f"  {len(recent)} item(s) ingested since {before_ingest.isoformat()}")
+
+    # Step 5: Recall in the same session
+    print("\n--- Step 5: recall(session_id) ---")
     answer = await cognee.recall(
         "What did the user just tell me about Einstein?",
         datasets=["scientists"],
@@ -54,8 +72,8 @@ async def main():
     )
     print(f"  Answer: {answer}")
 
-    # Step 4: Follow-up in the same session
-    print("\n--- Step 4: recall() follow-up ---")
+    # Step 6: Follow-up in the same session
+    print("\n--- Step 6: recall() follow-up ---")
     answer = await cognee.recall(
         "Who else was mentioned and what did they do?",
         datasets=["scientists"],
@@ -63,18 +81,29 @@ async def main():
     )
     print(f"  Answer: {answer}")
 
-    # Step 5: Improve -- bridge session feedback + Q&A into permanent graph
-    print("\n--- Step 5: improve(session_ids) ---")
+    # Step 7: Improve -- bridge session feedback into permanent graph
+    print("\n--- Step 7: improve(session_ids) ---")
     await cognee.improve(dataset="scientists", session_ids=[SESSION])
     print("  Session bridged into permanent graph.")
 
-    # Step 6: Recall without session -- graph is enriched with session content
-    print("\n--- Step 6: recall() after improve ---")
+    # Step 8: Recall without session -- graph is enriched
+    print("\n--- Step 8: recall() after improve ---")
     answer = await cognee.recall(
         "What contributions did these scientists make?",
         datasets=["scientists"],
     )
     print(f"  Answer: {answer}")
+
+    # Step 9: Freshness check -- compare search result hashes against status
+    print("\n--- Step 9: freshness check via source_content_hash ---")
+    current_hashes = {item.content_hash for item in items if item.status == "completed"}
+    print(f"  Current source hashes: {current_hashes}")
+    print("  (At retrieval time, compare node.source_content_hash against these)")
+
+    # Step 10: Clean up with forget
+    print("\n--- Step 10: forget(dataset) ---")
+    result = await cognee.forget(dataset="scientists")
+    print(f"  {result}")
 
     print("\nDone.")
 

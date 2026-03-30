@@ -2,7 +2,8 @@
 Custom pipeline example: LLM-powered entity extraction on DataPoint objects.
 
 Demonstrates the deferred-call pipeline pattern (TaskSpec / BoundTask)
-with typed DataPoint models, field annotations, and LLM structured output.
+with typed DataPoint models, field annotations, LLM structured output,
+and per-source freshness tracking via source_content_hash.
 
 Usage:
     uv run python examples/demos/custom_pipeline_single_object_example.py
@@ -105,17 +106,20 @@ async def link_claims_to_people(analysis: AnalysisResult) -> List[Person]:
 @task
 async def store_and_summarize(people: List[Person]) -> str:
     """Store DataPoints in graph + vector DBs, then return a summary."""
+
     # add_data_points persists nodes and edges to graph DB,
     # and indexes embeddable fields in vector DB
     await add_data_points(people)
 
     lines = []
     for person in people:
-        lines.append(f"{person.name} ({person.role})")
+        # source_content_hash is stamped by the pipeline provenance system;
+        # it carries the content hash of the source document this node came from
+        hash_display = person.source_content_hash or "N/A"
+        lines.append(f"{person.name} ({person.role}) [source_hash: {hash_display[:12]}]")
         if person.claims:
             for claim in person.claims:
                 lines.append(f"  - {claim.text} [confidence: {claim.confidence}]")
-                lines.append(f"    id: {claim.id} (deterministic UUID5)")
         else:
             lines.append("  (no claims linked)")
     return "\n".join(lines)
@@ -125,6 +129,11 @@ async def store_and_summarize(people: List[Person]) -> str:
 
 
 async def main():
+    import cognee
+
+    # Clean slate
+    await cognee.forget(everything=True)
+
     sample_text = (
         "Albert Einstein published the theory of general relativity in 1915, "
         "describing gravity as spacetime curvature. Marie Curie discovered "
@@ -132,6 +141,7 @@ async def main():
         "Niels Bohr proposed the atomic model with quantized electron orbits in 1913."
     )
 
+    # Run the custom pipeline
     results = await run_pipeline(
         [
             extract_entities(),
@@ -144,22 +154,31 @@ async def main():
 
     print(results[0] if results else "No output")
 
-    # Search the graph for what we just stored
-    print("\n--- Search: 'Who worked on gravity?' ---")
-    import cognee
+    # Per-item status: check what was processed
+    print("\n--- Per-item status ---")
+    items = await cognee.status(items=True)
+    for item in items:
+        print(f"  {item.name}: {item.status} (hash={item.content_hash[:12]}...)")
 
+    # Search the graph
+    print("\n--- Search: 'Who worked on gravity?' ---")
     answer = await cognee.search(
         "Who worked on gravity?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
     print(f"  {answer}")
 
-    print("\n--- Search: 'What did Curie discover?' ---")
-    answer = await cognee.search(
-        "What did Curie discover?",
-        query_type=cognee.SearchType.GRAPH_COMPLETION,
-    )
-    print(f"  {answer}")
+    # Freshness check: compare source_content_hash from search results
+    # against current hashes from status()
+    print("\n--- Freshness check ---")
+    current_hashes = {item.content_hash for item in items if item.status == "completed"}
+    print(f"  Known fresh hashes: {current_hashes}")
+    print("  Compare node.source_content_hash against these to verify freshness")
+
+    # Clean up
+    print("\n--- Forget everything ---")
+    result = await cognee.forget(everything=True)
+    print(f"  {result}")
 
 
 if __name__ == "__main__":
