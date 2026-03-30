@@ -223,6 +223,21 @@ Agent: "Here's how senior analysts solved a similar retention query.
 - Updates memory with new successful patterns so junior analysts perform at near-expert level
 ```
 
+## Deploy Cognee
+
+Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or self-host with one of the 1-click deployment configurations below.
+
+| Platform | Best For | Command |
+|----------|----------|---------|
+| **Cognee Cloud** | Managed service, no infrastructure to maintain | [Sign up](https://www.cognee.ai) |
+| **Modal** | Serverless, auto-scaling, GPU workloads | `bash distributed/deploy/modal-deploy.sh` |
+| **Railway** | Simplest PaaS, native Postgres | `railway init && railway up` |
+| **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
+| **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
+| **Daytona** | Cloud sandboxes (SDK or CLI) | See `distributed/deploy/daytona_sandbox.py` |
+
+See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
+
 ## Latest News
 
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
