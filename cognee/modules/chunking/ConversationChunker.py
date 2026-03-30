@@ -1,8 +1,7 @@
 """Chunker that splits conversation text by turn pairs (User + Assistant).
 
 Each chunk is one user message followed by its assistant response,
-keeping semantic units intact. Code blocks are stripped and replaced
-with a brief marker to reduce noise for graph extraction.
+keeping semantic units intact.
 
 Expects text formatted by BEAM's _flatten_chat:
     --- Session 1 ---
@@ -38,14 +37,12 @@ _INLINE_CODE_LINE = re.compile(
 )
 
 
-def _strip_code(text: str) -> str:
-    """Replace code blocks, HTML blocks, inline code, and BEAM metadata."""
+def _clean_text(text: str) -> str:
+    """Remove BEAM metadata, code blocks, HTML blocks, and inline code."""
     text = _CODE_BLOCK.sub("[code example omitted]", text)
     text = _HTML_BLOCK.sub("[HTML example omitted]", text)
     text = _BEAM_METADATA.sub("", text)
-    # Strip inline code lines (consecutive lines become a single marker)
     text = _INLINE_CODE_LINE.sub("[code line omitted]", text)
-    # Collapse consecutive "[code line omitted]" into one marker
     text = re.sub(r"(\[code line omitted\]\n?){2,}", "[code example omitted]\n", text)
     return text
 
@@ -61,14 +58,13 @@ def _split_into_turn_pairs(text: str) -> list[tuple[str, int, int]]:
     """
     lines = text.split("\n")
     chunks: list[tuple[str, int, int]] = []
-    current_session_header = ""
     current_turn_lines = []
     turns_in_pair = 0
     current_session = 1
     turn_in_session = 0
 
     def _flush():
-        nonlocal current_turn_lines, turns_in_pair, current_session_header, turn_in_session
+        nonlocal current_turn_lines, turns_in_pair, turn_in_session
         if current_turn_lines:
             turn_in_session += 1
             prefix = f"[Session {current_session}, Turn {turn_in_session}]\n"
@@ -76,7 +72,6 @@ def _split_into_turn_pairs(text: str) -> list[tuple[str, int, int]]:
             if chunk_text:
                 chunks.append((chunk_text, current_session, turn_in_session))
             current_turn_lines = []
-            current_session_header = ""
             turns_in_pair = 0
 
     for line in lines:
@@ -89,7 +84,6 @@ def _split_into_turn_pairs(text: str) -> list[tuple[str, int, int]]:
             if num_match:
                 current_session = int(num_match.group())
             turn_in_session = 0
-            current_session_header = line.strip() + "\n"
             continue
 
         # Detect turn starts
@@ -121,8 +115,8 @@ def _estimate_tokens(text: str) -> int:
 class ConversationChunker(Chunker):
     """Chunks conversation text by user-assistant turn pairs.
 
-    Code blocks and HTML are stripped before yielding chunks to reduce
-    noise for downstream graph extraction.
+    Code blocks, HTML, and inline code are stripped to reduce noise
+    for graph extraction. BEAM metadata annotations are also removed.
     """
 
     async def read(self):
@@ -133,7 +127,7 @@ class ConversationChunker(Chunker):
         turn_pairs = _split_into_turn_pairs(full_text)
 
         for idx, (pair_text, session_num, turn_num) in enumerate(turn_pairs):
-            cleaned = _strip_code(pair_text)
+            cleaned = _clean_text(pair_text)
             chunk_size = _estimate_tokens(cleaned)
 
             yield DocumentChunk(

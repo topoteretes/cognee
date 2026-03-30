@@ -6,10 +6,10 @@ Usage:
 
 import asyncio
 import json
-import os
 
 from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
+from cognee.modules.chunking.ConversationChunker import ConversationChunker
 from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_builder
 from cognee.eval_framework.answer_generation.run_question_answering_module import (
     run_question_answering,
@@ -21,18 +21,6 @@ logger = get_logger()
 
 NUM_CONVERSATIONS = 20
 BEAM_MAX_BATCHES = None  # None = use all sessions
-
-# Load conversation-specific graph extraction prompt
-_PROMPT_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "infrastructure",
-    "llm",
-    "prompts",
-    "generate_graph_prompt_conversation.txt",
-)
-with open(_PROMPT_PATH) as _f:
-    CONVERSATION_GRAPH_PROMPT = _f.read()
 
 
 def _make_eval_params(conversation_index: int) -> dict:
@@ -47,8 +35,7 @@ def _make_eval_params(conversation_index: int) -> dict:
         evaluating_contexts=False,
         evaluation_engine="DeepEval",
         evaluation_metrics=["rubric", "f1", "EM"],
-        task_getter_type="Temporal",
-        chunks_per_batch=10,
+        task_getter_type="Default",
         calculate_metrics=True,
         dashboard=False,
         questions_path=f"beam_questions_conv{conversation_index}.json",
@@ -68,10 +55,7 @@ async def run_single_conversation(conversation_index: int) -> dict:
     params = _make_eval_params(conversation_index)
     params["_beam_max_batches"] = BEAM_MAX_BATCHES
     params["_beam_conversation_index"] = conversation_index
-    # Temporal pipeline has its own event extraction — no custom graph prompt needed
-
-    # Temporal pipeline needs smaller chunks to avoid max_tokens limit on event extraction
-    params["chunk_size"] = 1024
+    params["chunker"] = ConversationChunker
 
     # Step 1: Build corpus
     logger.info(f"[conv {conversation_index}] Step 1: Building corpus...")

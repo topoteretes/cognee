@@ -43,7 +43,7 @@ class CorpusBuilderExecutor:
     async def build_corpus(
         self,
         limit: Optional[int] = None,
-        chunk_size=1024,
+        chunk_size=None,
         chunker=TextChunker,
         load_golden_context: bool = False,
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
@@ -63,7 +63,7 @@ class CorpusBuilderExecutor:
 
     async def run_cognee(
         self,
-        chunk_size=1024,
+        chunk_size=None,
         chunker=TextChunker,
         chunks_per_batch: Optional[int] = None,
         custom_prompt: Optional[str] = None,
