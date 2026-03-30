@@ -44,9 +44,11 @@ SESSION = "demo_session"
 
 async def main():
     # Ensure database tables exist (creates them on first run or after deletion)
-    from cognee.run_migrations import run_migrations
+    from cognee.infrastructure.databases.relational.create_db_and_tables import (
+        create_db_and_tables,
+    )
 
-    await run_migrations()
+    await create_db_and_tables()
 
     await cognee.forget(everything=True)
 
