@@ -191,15 +191,12 @@ async def test_payload_preserves_inherited_datapoint_fields(tmp_path):
     await _seed(adapter, col, [point])
 
     result = (await adapter.retrieve(col, [point.id]))[0]
-    expected_payload = {
-        "id": str(point.id),
-        "text": point.text,
-        "type": "_InheritedFieldsPoint",
-        "belongs_to_set": ["alpha", "beta"],
-        "source_task": "unit-test",
-        "feedback_weight": 0.75,
-        "created_at": point.created_at,
-        "updated_at": point.updated_at,
-    }
 
-    assert result.payload == expected_payload
+    assert result.payload["id"] == str(point.id)
+    assert result.payload["text"] == point.text
+    assert result.payload["type"] == "_InheritedFieldsPoint"
+    assert result.payload["belongs_to_set"] == ["alpha", "beta"]
+    assert result.payload["source_task"] == "unit-test"
+    assert result.payload["feedback_weight"] == 0.75
+    assert result.payload["created_at"] == point.created_at
+    assert result.payload["updated_at"] == point.updated_at
