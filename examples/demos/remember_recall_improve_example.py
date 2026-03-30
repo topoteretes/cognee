@@ -50,6 +50,17 @@ async def main():
 
     await create_db_and_tables()
 
+    # Enable filesystem-based session caching (required for session_id and improve)
+    import os
+
+    os.environ["CACHING"] = "true"
+    os.environ["CACHE_BACKEND"] = "fs"
+
+    # Clear cached config so the new env vars take effect
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+
+    get_cache_config.cache_clear()
+
     await cognee.forget(everything=True)
 
     # Record the time before ingestion for the `since` filter
