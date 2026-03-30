@@ -84,6 +84,10 @@ def get_improve_router() -> APIRouter:
                 return JSONResponse(status_code=420, content=improve_run)
             return improve_run
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Improve endpoint error: %s", error, exc_info=True)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "An error occurred during graph improvement."},
+            )
 
     return router

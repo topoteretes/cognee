@@ -27,6 +27,7 @@ from typing import Any, List, Optional
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
+from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.tasks.task import BoundTask, Task
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 
@@ -82,11 +83,11 @@ async def run_pipeline(
             inner = inner.with_config(**bound.kwargs)
         tasks.append(inner)
 
-    # Build context
-    ctx = context or {}
-    if dataset:
-        ctx["dataset_name"] = dataset
-    ctx["pipeline_name"] = pipeline_name
+    # Build typed context
+    ctx = PipelineContext(
+        user=user,
+        pipeline_name=pipeline_name,
+    )
 
     # Delegate to existing run_tasks_base — gets us observability,
     # telemetry, provenance stamping, error handling for free.

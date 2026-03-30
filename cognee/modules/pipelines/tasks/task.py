@@ -214,6 +214,13 @@ class Task:
         else:
             self.task_config = {"batch_size": 1}
 
+        # Whether the executable accepts a ctx parameter.
+        # Used by the pipeline to decide whether to pass PipelineContext.
+        try:
+            self.accepts_ctx = "ctx" in inspect.signature(executable).parameters
+        except (ValueError, TypeError):
+            self.accepts_ctx = False
+
         if batch_size is not None:
             self.task_config["batch_size"] = batch_size
 

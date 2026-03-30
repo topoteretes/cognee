@@ -2,7 +2,7 @@ import os
 
 import asyncio
 from functools import wraps
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -14,6 +14,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
+from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
@@ -57,7 +58,6 @@ async def run_tasks(
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
     pipeline_name: str = "unknown_pipeline",
-    context: Optional[Dict] = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
 ):
@@ -100,12 +100,12 @@ async def run_tasks(
                     pipeline_name,
                     pipeline_id,
                     pipeline_run_id,
-                    {
-                        **(context or {}),
-                        "user": user,
-                        "data": data_item,
-                        "dataset": dataset,
-                    },
+                    PipelineContext(
+                        user=user,
+                        data_item=data_item,
+                        dataset=dataset,
+                        pipeline_name=pipeline_name,
+                    ),
                     user,
                     incremental_loading,
                 )

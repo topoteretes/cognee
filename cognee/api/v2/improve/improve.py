@@ -8,6 +8,10 @@ except ImportError:
 
 from typing_extensions import TypedDict
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("improve")
+
 
 class ImproveKwargs(TypedDict, total=False):
     """Power-user overrides for improve(). Most users never need these."""
@@ -16,9 +20,10 @@ class ImproveKwargs(TypedDict, total=False):
     enrichment_tasks: list
     data: Any
     node_type: Type
-    user: object  # User context (resolved internally when None)
+    user: object
     vector_db_config: dict
     graph_db_config: dict
+    feedback_alpha: float
 
 
 async def improve(
@@ -26,26 +31,68 @@ async def improve(
     *,
     run_in_background: bool = False,
     node_name: Optional[List[str]] = None,
+    session_ids: Optional[List[str]] = None,
     **kwargs: Unpack[ImproveKwargs],
 ):
     """Enrich an existing knowledge graph with additional context and rules.
 
-    This is a memory-oriented alias for ``cognee.memify()``.  The most common
-    parameters are explicit keyword arguments; power-user options can be passed
-    via ``ImproveKwargs`` (see class definition for available keys).
+    When ``session_ids`` is provided, the improvement pipeline runs three
+    stages before the default enrichment:
+
+    1. **Apply feedback weights** -- session entries with feedback scores
+       update ``feedback_weight`` on the graph nodes/edges that were used
+       to produce those answers. Higher-rated answers boost their source
+       nodes; lower-rated answers decrease them.
+
+    2. **Persist session Q&A** -- the question/answer text from those
+       sessions is cognified into the permanent graph, tagged with
+       ``node_set="user_sessions_from_cache"``.
+
+    3. **Default enrichment** -- triplet embeddings are extracted and
+       indexed (same as calling ``improve()`` without sessions).
+
+    Without ``session_ids``, only stage 3 runs.
 
     Args:
         dataset: Dataset name or UUID to process.
         run_in_background: Run processing asynchronously.
         node_name: Filter graph to specific named entities.
-        **kwargs: Additional options — see ``ImproveKwargs``.
+        session_ids: Session IDs whose feedback and Q&A content
+            should be bridged into the permanent graph.
+        **kwargs: Additional options -- see ``ImproveKwargs``.
 
     Returns:
         Pipeline run info (same as ``cognee.memify()``).
+
+    Example::
+
+        # Enrich graph + bridge session feedback and content
+        await cognee.improve(dataset="docs", session_ids=["chat_1", "chat_2"])
+
+        # Enrich graph only (no session bridging)
+        await cognee.improve(dataset="docs")
     """
+    from cognee.modules.users.methods import get_default_user
+
+    user = kwargs.pop("user", None)
+    if user is None:
+        user = await get_default_user()
+
+    feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
+
+    # Stage 1 & 2: bridge sessions into the permanent graph
+    if session_ids:
+        await _bridge_sessions(
+            dataset=dataset,
+            session_ids=session_ids,
+            user=user,
+            feedback_alpha=feedback_alpha,
+            run_in_background=run_in_background,
+        )
+
+    # Stage 3: default enrichment (triplet embeddings)
     from cognee.modules.memify import memify
 
-    # Resolve default node_type here to avoid import at module level
     if "node_type" not in kwargs or kwargs.get("node_type") is None:
         from cognee.modules.engine.models.node_set import NodeSet
 
@@ -54,6 +101,50 @@ async def improve(
     return await memify(
         dataset=dataset,
         node_name=node_name,
+        user=user,
         run_in_background=run_in_background,
         **kwargs,
     )
+
+
+async def _bridge_sessions(
+    dataset: Union[str, UUID],
+    session_ids: List[str],
+    user,
+    feedback_alpha: float,
+    run_in_background: bool,
+):
+    """Run feedback weights and session persistence pipelines."""
+
+    # Stage 1: apply feedback weights from session scores
+    from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
+
+    dataset_name = dataset if isinstance(dataset, str) else "main_dataset"
+
+    try:
+        await apply_feedback_weights_pipeline(
+            user=user,
+            session_ids=session_ids,
+            dataset=dataset_name,
+            alpha=feedback_alpha,
+            run_in_background=False,
+        )
+        logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
+    except Exception as e:
+        logger.warning("improve: feedback weights failed (non-fatal): %s", e)
+
+    # Stage 2: persist session Q&A into permanent graph
+    from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
+        persist_sessions_in_knowledge_graph_pipeline,
+    )
+
+    try:
+        await persist_sessions_in_knowledge_graph_pipeline(
+            user=user,
+            session_ids=session_ids,
+            dataset=dataset_name,
+            run_in_background=False,
+        )
+        logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
+    except Exception as e:
+        logger.warning("improve: session persistence failed (non-fatal): %s", e)

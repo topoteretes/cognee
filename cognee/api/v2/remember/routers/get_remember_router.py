@@ -87,6 +87,10 @@ def get_remember_router() -> APIRouter:
                     return JSONResponse(status_code=420, content=jsonable_encoder(result))
             return result
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Remember endpoint error: %s", error, exc_info=True)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "An error occurred during remember."},
+            )
 
     return router

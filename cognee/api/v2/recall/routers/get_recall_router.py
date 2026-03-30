@@ -17,6 +17,7 @@ from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.exceptions import CogneeValidationError
+from cognee.shared.logging_utils import get_logger
 
 
 class RecallPayloadDTO(InDTO):
@@ -55,7 +56,12 @@ def get_recall_router() -> APIRouter:
             history = await get_history(user.id, limit=0)
             return history
         except Exception as error:
-            return JSONResponse(status_code=500, content={"error": str(error)})
+            logger = get_logger()
+            logger.error("Recall history error: %s", error, exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={"error": "An error occurred while fetching recall history."},
+            )
 
     @router.post("", response_model=Union[List[SearchResult], List])
     @log_usage(function_name="POST /v2/recall", log_type="api_endpoint")
@@ -108,18 +114,24 @@ def get_recall_router() -> APIRouter:
             )
             return jsonable_encoder(results)
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
+            logger = get_logger()
+            logger.error("Recall prerequisites error: %s", e, exc_info=True)
             status_code = getattr(e, "status_code", 422)
             return JSONResponse(
                 status_code=status_code,
                 content={
                     "error": "Recall prerequisites not met",
-                    "detail": str(e),
                     "hint": "Run `await cognee.remember(...)` or `await cognee.add(...)` then `await cognee.cognify()` before recalling.",
                 },
             )
         except PermissionDeniedError:
             return []
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger = get_logger()
+            logger.error("Recall endpoint error: %s", error, exc_info=True)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "An error occurred during recall."},
+            )
 
     return router

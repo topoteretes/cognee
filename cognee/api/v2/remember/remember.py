@@ -19,16 +19,16 @@ logger = get_logger("remember")
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
-    graph_model: Any  # Pydantic model for knowledge graph structure
-    node_set: List[str]  # Node identifiers for graph organization
-    dataset_id: UUID  # Explicit dataset UUID instead of name
-    preferred_loaders: list  # Custom loader configuration
-    incremental_loading: bool  # Enable incremental loading (default True)
-    data_per_batch: int  # Items per ingestion batch (default 20)
-    chunks_per_batch: int  # Chunks per cognify batch
-    user: object  # User context (resolved internally when None)
-    vector_db_config: dict  # Custom vector DB config (multi-tenant)
-    graph_db_config: dict  # Custom graph DB config (multi-tenant)
+    graph_model: Any
+    node_set: List[str]
+    dataset_id: UUID
+    preferred_loaders: list
+    incremental_loading: bool
+    data_per_batch: int
+    chunks_per_batch: int
+    user: object
+    vector_db_config: dict
+    graph_db_config: dict
 
 
 def _build_param_sets():
@@ -42,7 +42,6 @@ def _build_param_sets():
     return add_params, cognify_params, shared
 
 
-# Lazily initialized on first call to avoid import-time side effects.
 _ADD_PARAMS: Optional[frozenset] = None
 _COGNIFY_PARAMS: Optional[frozenset] = None
 _SHARED_PARAMS: Optional[frozenset] = None
@@ -54,10 +53,54 @@ def _ensure_param_sets():
         _ADD_PARAMS, _COGNIFY_PARAMS, _SHARED_PARAMS = _build_param_sets()
 
 
+def _summarize_data(data) -> str:
+    """Extract a text summary from the ingested data for session logging."""
+    if isinstance(data, str):
+        return data[:500]
+    if isinstance(data, list):
+        parts = []
+        for item in data:
+            if isinstance(item, str):
+                parts.append(item[:200])
+            elif hasattr(item, "name"):
+                parts.append(f"[file: {item.name}]")
+            else:
+                parts.append(f"[{type(item).__name__}]")
+        return ", ".join(parts)[:500]
+    if hasattr(data, "name"):
+        return f"[file: {data.name}]"
+    return f"[{type(data).__name__}]"
+
+
+async def _init_session(session_id: str, data, dataset_name: str, user):
+    """Record the remember() call as the first entry in a session."""
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    sm = get_session_manager()
+    if not sm.is_available:
+        return
+
+    user_id = str(user.id) if user and hasattr(user, "id") else None
+    if not user_id:
+        return
+
+    data_summary = _summarize_data(data)
+
+    await sm.add_qa(
+        user_id=user_id,
+        session_id=session_id,
+        question=f"[User provided data to dataset '{dataset_name}']",
+        context="",
+        answer=data_summary,
+    )
+    logger.info("remember: initialized session '%s' with ingested data summary", session_id)
+
+
 async def remember(
     data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
     dataset_name: str = "main_dataset",
     *,
+    session_id: Optional[str] = None,
     chunk_size: Optional[int] = None,
     chunker: Optional[Any] = None,
     custom_prompt: Optional[str] = None,
@@ -66,22 +109,23 @@ async def remember(
 ):
     """Ingest data and build the knowledge graph in a single call.
 
-    This is a convenience function that combines ``add()`` and ``cognify()``
-    into one step.  The most common parameters are explicit keyword arguments;
-    power-user options can be passed via ``RememberKwargs``.
+    Combines ``add()`` and ``cognify()`` into one step.
 
-    When ``run_in_background`` is *True* the **entire** operation (add then
-    cognify) is launched as a background task and the function returns
-    immediately.
+    When ``session_id`` is provided, the session is initialized with an
+    entry recording what the user told the system. Subsequent ``recall()``
+    calls with the same ``session_id`` will see this in the conversation
+    history, giving the LLM awareness that the user just provided data.
 
     Args:
         data: The data to ingest (text, file paths, binary streams, etc.).
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
+        session_id: Optional session ID. When set, initializes the session
+            with a record of the ingested data.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
         chunker: Text chunking strategy. Defaults to *TextChunker*.
         custom_prompt: Custom prompt for entity extraction.
         run_in_background: If *True*, run as a background task.
-        **kwargs: Additional options — see ``RememberKwargs``.
+        **kwargs: Additional options -- see ``RememberKwargs``.
 
     Returns:
         When blocking: the result of the cognify step (pipeline run info).
@@ -92,7 +136,6 @@ async def remember(
 
     _ensure_param_sets()
 
-    # Resolve chunker default
     if chunker is None:
         from cognee.modules.chunking.TextChunker import TextChunker
 
@@ -117,7 +160,20 @@ async def remember(
 
     dataset_id = add_kwargs.pop("dataset_id", None) or shared_kwargs.get("dataset_id")
 
+    # Resolve user early so we can use it for session init
+    user = shared_kwargs.get("user")
+    if user is None:
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+        shared_kwargs["user"] = user
+
     async def _run():
+        # Initialize session before ingestion so the conversation starts
+        # with "user provided data" as the first entry
+        if session_id:
+            await _init_session(session_id, data, dataset_name, user)
+
         await add(
             data=data,
             dataset_name=dataset_name,
@@ -151,6 +207,7 @@ async def remember(
             "status": "started",
             "dataset_name": dataset_name,
             "dataset_id": str(dataset_id) if dataset_id else None,
+            "session_id": session_id,
             "run_in_background": True,
         }
 
