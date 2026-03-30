@@ -10,8 +10,9 @@ from cognee.infrastructure.databases.exceptions import MissingQueryParameterErro
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.modules.storage.utils import copy_model, get_own_properties
+from cognee.modules.storage.utils import copy_model
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
@@ -190,8 +191,10 @@ class LanceDBAdapter(VectorDBInterface):
             payload: PayloadSchema
 
         def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
-            properties = get_own_properties(data_point)
-            properties["id"] = str(properties["id"])
+            payload_model = self.get_data_point_schema(type(data_point))
+            properties = payload_model.model_validate(
+                serialize_data(data_point.model_dump())
+            ).model_dump()
 
             return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
                 id=str(data_point.id),
@@ -483,17 +486,6 @@ class LanceDBAdapter(VectorDBInterface):
 
     def get_data_point_schema(self, model_type: BaseModel):
         related_models_fields = []
-        # Only include fields the concrete class defines, not inherited DataPoint fields
-        own_annotations = set()
-        for cls in model_type.__mro__:
-            if cls is DataPoint or cls is BaseModel or cls is object:
-                break
-            if hasattr(cls, "__annotations__"):
-                own_annotations.update(cls.__annotations__.keys())
-
-        datapoint_only_fields = [
-            name for name in DataPoint.model_fields if name not in own_annotations
-        ]
 
         for field_name, field_config in model_type.model_fields.items():
             if hasattr(field_config, "model_fields"):
@@ -525,6 +517,7 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
+                "belongs_to_set": (Optional[List[str]], None),
             },
-            exclude_fields=["metadata"] + related_models_fields + datapoint_only_fields,
+            exclude_fields=["metadata"] + related_models_fields,
         )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 from uuid import uuid4
+from cognee.infrastructure.engine import DataPoint
 
 try:
     from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import (
@@ -30,6 +31,11 @@ class _FakeEmbeddingEngine:
 
 def _make_point(id: str, text: str) -> IndexSchema:
     return IndexSchema(id=id, text=text)
+
+
+class _InheritedFieldsPoint(DataPoint):
+    text: str
+    metadata: dict = {"index_fields": ["text"]}
 
 
 async def _seed(adapter, name, points):
@@ -165,3 +171,32 @@ async def test_non_schema_errors_propagate(tmp_path):
 
     with pytest.raises(RuntimeError, match="network timeout"):
         await adapter.create_data_points(col, [_make_point(str(uuid4()), "boom")])
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_payload_preserves_inherited_datapoint_fields(tmp_path):
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    col = "InheritedFields_text"
+    point = _InheritedFieldsPoint(
+        id=str(uuid4()),
+        text="payload parity",
+        belongs_to_set=["alpha", "beta"],
+        source_task="unit-test",
+        feedback_weight=0.75,
+    )
+
+    await _seed(adapter, col, [point])
+
+    result = (await adapter.retrieve(col, [point.id]))[0]
+
+    assert result.payload["id"] == str(point.id)
+    assert result.payload["text"] == point.text
+    assert result.payload["type"] == "_InheritedFieldsPoint"
+    assert result.payload["belongs_to_set"] == ["alpha", "beta"]
+    assert result.payload["source_task"] == "unit-test"
+    assert result.payload["feedback_weight"] == 0.75
+    assert result.payload["created_at"] == point.created_at
+    assert result.payload["updated_at"] == point.updated_at
