@@ -112,7 +112,7 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 ### Step 3: Run the Pipeline
 
-Cognee will take your documents, load them into the knowledge angine and search combined vector/graph relationships.
+Cognee will take your documents, load them into the knowledge engine and search combined vector/graph relationships.
 
 Now, run a minimal pipeline:
 
