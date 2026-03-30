@@ -130,6 +130,9 @@ async def store_and_summarize(people: List[Person]) -> str:
 
 async def main():
     import cognee
+    from cognee.run_migrations import run_migrations
+
+    await run_migrations()
 
     # Clean slate
     await cognee.forget(everything=True)

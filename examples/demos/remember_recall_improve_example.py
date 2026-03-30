@@ -43,6 +43,11 @@ SESSION = "demo_session"
 
 
 async def main():
+    # Ensure database tables exist (creates them on first run or after deletion)
+    from cognee.run_migrations import run_migrations
+
+    await run_migrations()
+
     await cognee.forget(everything=True)
 
     # Record the time before ingestion for the `since` filter
