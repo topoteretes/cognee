@@ -54,6 +54,7 @@ class DataPoint(BaseModel):
     source_task: Optional[str] = None
     source_node_set: Optional[str] = None
     source_user: Optional[str] = None
+    source_content_hash: Optional[str] = None
     feedback_weight: float = 0.5
 
     def __init__(self, **data):

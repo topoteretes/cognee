@@ -8,6 +8,8 @@ except ImportError:
 
 from typing_extensions import TypedDict
 
+from cognee.modules.search.types import SearchType
+
 
 class RecallKwargs(TypedDict, total=False):
     """Power-user overrides for recall(). Most users never need these."""
@@ -16,57 +18,64 @@ class RecallKwargs(TypedDict, total=False):
     system_prompt: str
     system_prompt_path: str
     node_name: list[str]
+    node_name_filter_operator: str
     only_context: bool
     session_id: str
     wide_search_top_k: int
     triplet_distance_penalty: float
+    feedback_influence: float
     verbose: bool
     retriever_specific_config: dict
-    user: object  # User context (resolved internally when None)
+    user: object
 
 
 async def recall(
     query_text: str,
-    query_type=None,
+    query_type: Optional[SearchType] = None,
     *,
     datasets: Optional[list[str]] = None,
     top_k: int = 10,
-    recency_weight: float = 0.0,
+    auto_route: bool = True,
     **kwargs: Unpack[RecallKwargs],
 ) -> list:
     """Search the knowledge graph for relevant information.
 
-    This is a memory-oriented alias for ``cognee.search()``.  The most common
-    parameters are explicit keyword arguments; power-user options can be passed
-    via ``RecallKwargs`` (see class definition for available keys).
+    When ``query_type`` is omitted and ``auto_route`` is True (default),
+    a lightweight rule-based classifier picks the best search strategy.
+    Set ``auto_route=False`` to skip the classifier and use
+    GRAPH_COMPLETION as the default, or pass ``query_type`` explicitly.
 
     Args:
         query_text: Natural-language query.
-        query_type: Search strategy (default ``SearchType.GRAPH_COMPLETION``).
+        query_type: Search strategy. When provided, the router is bypassed.
         datasets: Dataset names to search within.
         top_k: Maximum results to return (default *10*).
-        recency_weight: Blend factor between semantic relevance and freshness.
-            ``0.0`` (default) uses pure semantic ranking; ``1.0`` ranks by
-            recency only.  Only affects ``ScoredResult``-based search types
-            (CHUNKS, RAG_COMPLETION, SUMMARIES, TRIPLET_COMPLETION).
-            Graph-based search types (GRAPH_COMPLETION) are unaffected.
-        **kwargs: Additional options — see ``RecallKwargs``.
+        auto_route: If True and query_type is None, classify the query
+            automatically. If False, fall back to GRAPH_COMPLETION.
+        **kwargs: Additional options -- see ``RecallKwargs``.
 
     Returns:
         Search results (same as ``cognee.search()``).
     """
     from cognee.api.v1.search import search
 
-    if query_type is None:
-        from cognee.modules.search.types import SearchType
+    routed_type = None
 
+    if query_type is not None:
+        # Explicit type: record override if the router would have picked differently
+        if auto_route:
+            from cognee.api.v2.recall.query_router import route_query, record_override
+
+            result = route_query(query_text)
+            routed_type = result.search_type
+            record_override(routed_type, query_type)
+    elif auto_route:
+        from cognee.api.v2.recall.query_router import route_query
+
+        result = route_query(query_text)
+        query_type = result.search_type
+    else:
         query_type = SearchType.GRAPH_COMPLETION
-
-    # Inject recency_weight into retriever_specific_config without mutating caller's dict
-    if recency_weight > 0.0:
-        rsc = dict(kwargs.get("retriever_specific_config") or {})
-        rsc["recency_weight"] = recency_weight
-        kwargs["retriever_specific_config"] = rsc
 
     return await search(
         query_text=query_text,

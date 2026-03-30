@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -28,19 +28,43 @@ class DatasetStatus(BaseModel):
     version: int
 
 
+class DataItemInfo(BaseModel):
+    """Per-item status within a dataset."""
+
+    data_id: UUID
+    dataset_id: UUID
+    dataset_name: str
+    name: str
+    status: str  # "completed", "errored", "pending"
+    error: Optional[str] = None
+    content_hash: str
+    ingested_at: datetime
+    updated_at: Optional[datetime] = None
+
+
 async def status(
     datasets: Optional[list[str]] = None,
     *,
+    items: bool = False,
+    since: Optional[datetime] = None,
     user=None,
-) -> list[DatasetStatus]:
+) -> Union[list[DatasetStatus], list[DataItemInfo]]:
     """Return processing status for the user's datasets.
+
+    When ``items=False`` (default), returns one ``DatasetStatus`` per
+    dataset with aggregate counts.  When ``items=True``, returns one
+    ``DataItemInfo`` per data item showing per-file status, including
+    error messages for failed items.
 
     Args:
         datasets: Optional list of dataset names to filter by.
+        items: If True, return per-item detail instead of aggregates.
+        since: Only include items created at or after this timestamp.
+            Applies to both aggregate counts and item-level detail.
         user: User context (resolved to default user when ``None``).
 
     Returns:
-        List of ``DatasetStatus`` objects, one per dataset.
+        List of ``DatasetStatus`` or ``DataItemInfo`` objects.
     """
     from cognee.modules.users.methods.get_default_user import get_default_user
     from cognee.modules.data.methods.get_authorized_existing_datasets import (
@@ -60,21 +84,25 @@ async def status(
     dataset_map = {ds.id: ds for ds in existing_datasets}
     dataset_ids = list(dataset_map.keys())
 
+    if items:
+        return await _item_level_status(dataset_ids, dataset_map, since=since)
+
     # Query 1: Bulk-load all Data items joined through DatasetData
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        rows = (
-            await session.execute(
-                select(
-                    DatasetData.dataset_id,
-                    Data.pipeline_status,
-                    Data.updated_at,
-                )
-                .join(Data, DatasetData.data_id == Data.id)
-                .where(DatasetData.dataset_id.in_(dataset_ids))
+        stmt = (
+            select(
+                DatasetData.dataset_id,
+                Data.pipeline_status,
+                Data.updated_at,
             )
-        ).all()
+            .join(Data, DatasetData.data_id == Data.id)
+            .where(DatasetData.dataset_id.in_(dataset_ids))
+        )
+        if since is not None:
+            stmt = stmt.where(Data.created_at >= since)
+        rows = (await session.execute(stmt)).all()
 
     # Aggregate per dataset
     agg: dict[UUID, dict] = {
@@ -145,6 +173,104 @@ async def status(
                 dataset_updated_at=ds.updated_at,
                 last_data_updated_at=bucket["last_updated"],
                 version=version_map.get(did, 0),
+            )
+        )
+
+    return results
+
+
+async def _item_level_status(dataset_ids, dataset_map, since=None):
+    """Return per-item DataItemInfo for the given datasets."""
+    from cognee.modules.pipelines.models.PipelineRun import PipelineRun, PipelineRunStatus
+
+    db_engine = get_relational_engine()
+
+    # Load all data items across requested datasets
+    async with db_engine.get_async_session() as session:
+        stmt = (
+            select(
+                DatasetData.dataset_id,
+                Data.id,
+                Data.name,
+                Data.content_hash,
+                Data.pipeline_status,
+                Data.created_at,
+                Data.updated_at,
+            )
+            .join(Data, DatasetData.data_id == Data.id)
+            .where(DatasetData.dataset_id.in_(dataset_ids))
+        )
+        if since is not None:
+            stmt = stmt.where(Data.created_at >= since)
+        rows = (await session.execute(stmt)).all()
+
+    if not rows:
+        return []
+
+    # Collect dataset_ids that have errored items so we can look up error messages
+    errored_dataset_ids = set()
+    for dataset_id, _, _, _, pipeline_status, _, _ in rows:
+        if not pipeline_status or not isinstance(pipeline_status, dict):
+            continue
+        cognify = pipeline_status.get("cognify_pipeline", {})
+        if cognify.get(str(dataset_id)) != "DATA_ITEM_PROCESSING_COMPLETED":
+            errored_dataset_ids.add(dataset_id)
+
+    # Load latest errored PipelineRun per dataset for error messages
+    error_map = {}
+    if errored_dataset_ids:
+        async with db_engine.get_async_session() as session:
+            error_runs = (
+                (
+                    await session.execute(
+                        select(PipelineRun)
+                        .where(PipelineRun.dataset_id.in_(list(errored_dataset_ids)))
+                        .where(PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED)
+                        .order_by(PipelineRun.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        # Keep only the most recent error per dataset
+        for run in error_runs:
+            if run.dataset_id not in error_map:
+                error_map[run.dataset_id] = run.run_info
+
+    # Build per-item results
+    results = []
+    for dataset_id, data_id, name, content_hash, pipeline_status, created_at, updated_at in rows:
+        ds = dataset_map[dataset_id]
+        ds_id_str = str(dataset_id)
+
+        # Determine item status from pipeline_status JSON
+        cognify_status = None
+        if pipeline_status and isinstance(pipeline_status, dict):
+            cognify_status = pipeline_status.get("cognify_pipeline", {}).get(ds_id_str)
+
+        if cognify_status == "DATA_ITEM_PROCESSING_COMPLETED":
+            item_status = "completed"
+            error = None
+        elif dataset_id in error_map:
+            item_status = "errored"
+            run_info = error_map[dataset_id]
+            error = str(run_info) if run_info else None
+        else:
+            item_status = "pending"
+            error = None
+
+        results.append(
+            DataItemInfo(
+                data_id=data_id,
+                dataset_id=dataset_id,
+                dataset_name=ds.name,
+                name=name,
+                status=item_status,
+                error=error,
+                content_hash=content_hash,
+                ingested_at=created_at,
+                updated_at=updated_at,
             )
         )
 
