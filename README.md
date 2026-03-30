@@ -200,3 +200,8 @@ We recently published a research paper on optimizing knowledge graphs for LLM re
       url={https://arxiv.org/abs/2505.24478},
 }
 ```
+
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/topoteretes-cognee).
+
