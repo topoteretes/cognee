@@ -34,7 +34,6 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         if match:
             # TODO: Add API KEY creation and return API key in response for easier API access
             # TODO: Add API KEY table migration
-            # TODO: Fix API key Swagger usage
             access_token = match.group(2)
             response.status_code = 200
             response.body = json.dumps(
