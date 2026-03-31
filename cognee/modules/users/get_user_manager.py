@@ -3,6 +3,7 @@ import re
 import json
 import uuid
 import logging
+from sqlalchemy import select
 from typing import Optional
 from fastapi import Depends, Request, Response
 from fastapi_users import BaseUserManager, UUIDIDMixin
@@ -11,6 +12,8 @@ from contextlib import asynccontextmanager
 
 from .models import User
 from .get_user_db import get_user_db
+from cognee.modules.users.models.UserApiKey import UserApiKey
+from cognee.infrastructure.databases.relational import get_relational_engine
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             r"(?i)\bSet-Cookie:\s*([^=]+)=([^;]+)", f"Set-Cookie: {access_token_cookie}"
         )
         if match:
+            # TODO: Add API KEY creation and return API key in response for easier API access
+            # TODO: Add API KEY table migration
+            # TODO: Fix API key Swagger usage
             access_token = match.group(2)
             response.status_code = 200
             response.body = json.dumps(
@@ -48,6 +54,19 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         self, user: User, token: str, request: Optional[Request] = None
     ):
         logger.info("Verification requested for user %s. Verification token: %s", user.id, token)
+
+    async def get_by_token(self, token: str) -> Optional[User]:
+        relational_engine = get_relational_engine()
+
+        async with relational_engine.get_async_session() as session:
+            user_api_key = (
+                await session.execute(select(UserApiKey).filter_by(api_key=token))
+            ).scalar()
+
+            if user_api_key:
+                user = await self.get(user_api_key.user_id)
+
+                return user
 
 
 async def get_user_manager(user_db: SQLAlchemyUserDatabase = Depends(get_user_db)):

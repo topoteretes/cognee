@@ -40,6 +40,7 @@ from cognee.api.v1.users.routers import (
     get_configuration_router,
     get_user_id_by_email_router,
 )
+from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
@@ -122,6 +123,7 @@ def custom_openapi():
     )
 
     openapi_schema["components"]["securitySchemes"] = {
+        "X-Api-Key": {"type": "apiKey", "in": "header", "name": "X-Api-Key"},
         "BearerAuth": {"type": "http", "scheme": "bearer"},
         "CookieAuth": {
             "type": "apiKey",
@@ -131,7 +133,7 @@ def custom_openapi():
     }
 
     if REQUIRE_AUTHENTICATION:
-        openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
+        openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}, {"X-Api-Key": []}]
 
     # Remove global security requirement - let individual endpoints specify their own security
     # openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
@@ -196,6 +198,8 @@ app.include_router(
     prefix="/api/v1/auth",
     tags=["auth"],
 )
+
+app.include_router(get_api_key_management_router(), prefix="/api/v1/auth", tags=["auth"])
 
 app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
 
