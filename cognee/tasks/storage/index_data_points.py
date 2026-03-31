@@ -43,7 +43,7 @@ async def index_data_points(data_points: list[DataPoint]):
                 data_points_by_type[type_name][field_name] = []
 
             indexed_data_point = data_point.model_copy()
-            indexed_data_point.metadata["index_fields"] = [field_name]
+            indexed_data_point.metadata = {**data_point.metadata, "index_fields": [field_name]}
             data_points_by_type[type_name][field_name].append(indexed_data_point)
 
     batch_size = vector_engine.embedding_engine.get_batch_size()
