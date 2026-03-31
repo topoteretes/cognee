@@ -1278,3 +1278,36 @@ jobs:
           CACHE_BACKEND: 'redis'
           CACHE_HOST: ${{ inputs.ci-image != '' && 'redis' || 'localhost' }}
         run: uv run pytest cognee/tests/test_usage_logger_e2e.py -v --log-level=INFO
+
+  run_conditional_auth_test:
+    name: Conditional Authentication Test
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Conditional Authentication Test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          ENABLE_BACKEND_ACCESS_CONTROL: "false"
+        run: uv run python ./cognee/tests/api/test_conditional_authentication_endpoints.py

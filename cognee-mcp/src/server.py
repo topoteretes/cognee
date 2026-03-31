@@ -17,6 +17,7 @@ import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
 from mcp.server import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from cognee.modules.storage.utils import JSONEncoder
 from starlette.responses import JSONResponse
 from starlette.middleware import Middleware
@@ -49,6 +50,55 @@ cognee_client: Optional[CogneeClient] = None
 
 # Stores background task errors so cognify_status can report them
 _task_errors: dict[str, str] = {}
+
+
+def _configure_transport_security(host: str) -> None:
+    """Configure MCP transport security based on env vars and bind host.
+
+    Must be called before run_sse_with_cors() or run_http_with_cors(), since
+    the SDK reads mcp.settings.transport_security lazily when creating the app.
+
+    Env vars:
+        MCP_DISABLE_DNS_REBINDING_PROTECTION: Set to "true" to disable all
+            Host/Origin header validation. Useful for LAN or Docker deployments.
+        MCP_ALLOWED_HOSTS: Comma-separated additional Host header patterns
+            (e.g. "192.168.1.50:*,myserver.local:*"). Appended to the
+            localhost defaults. Requires the ":*" port glob suffix.
+    """
+    disable = os.getenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "false").lower() == "true"
+
+    if disable:
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+        )
+        logger.info("MCP transport security: DNS rebinding protection disabled")
+        return
+
+    extra_hosts = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+
+    # The SDK only auto-populates localhost defaults when transport_security is
+    # None AND host is a loopback address. When the user binds to 0.0.0.0 or a
+    # LAN IP, we must provide the full allowed list ourselves.
+    localhost_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    localhost_origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+
+    allowed_hosts = localhost_hosts + extra_hosts
+    # Derive origins from extra hosts so users don't need to set both.
+    allowed_origins = localhost_origins + [f"http://{h}" for h in extra_hosts]
+
+    if host not in ("127.0.0.1", "localhost", "::1") or extra_hosts:
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
+        )
+        logger.info(
+            "MCP transport security: allowed_hosts=%s",
+            allowed_hosts,
+        )
+    else:
+        # Loopback-only with no extra hosts — let the SDK use its own defaults.
+        logger.info("MCP transport security: using SDK defaults (localhost only)")
 
 
 def _is_running_in_docker() -> bool:
@@ -92,12 +142,18 @@ def _validate_file_path(data: str) -> Optional[str]:
     return None
 
 
+def _get_cors_origins() -> list[str]:
+    """Parse CORS allowed origins from MCP_CORS_ALLOW_ORIGINS env var."""
+    raw = os.getenv("MCP_CORS_ALLOW_ORIGINS", "http://localhost:3000")
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 async def run_sse_with_cors():
     """Custom SSE transport with CORS middleware."""
     sse_app = mcp.sse_app()
     sse_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=_get_cors_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -118,7 +174,7 @@ async def run_http_with_cors():
     http_app = mcp.streamable_http_app()
     http_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=_get_cors_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -981,6 +1037,7 @@ async def main():
 
     mcp.settings.host = args.host
     mcp.settings.port = int(args.port)
+    _configure_transport_security(args.host)
 
     # Skip migrations when in API mode (the API server handles its own database)
     if not args.no_migration and not args.api_url:
