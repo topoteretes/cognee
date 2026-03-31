@@ -21,10 +21,6 @@ logger = get_logger("api.llm")
 
 class CustomPromptGenerationPayloadDTO(InDTO):
     graph_model: Dict[str, Any] = Field(..., description="Graph model schema as JSON object.")
-    text_input: str = Field(
-        default="Generate the extraction prompt now.",
-        description="Text input sent to the LLM.",
-    )
     parameters: Dict[str, Any] = Field(
         default_factory=dict,
         description="Additional kwargs forwarded to LLMGateway.",
@@ -59,7 +55,7 @@ def get_llm_router() -> APIRouter:
         )
 
         try:
-            graph_model_schema_json = json.dumps(payload.graph_model, ensure_ascii=False)
+            graph_model_schema_json = json.dumps(payload.graph_model)
 
             user_prompt = render_prompt(
                 "custom_prompt_generation_user.txt",
