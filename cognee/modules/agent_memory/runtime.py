@@ -41,7 +41,7 @@ class AgentMemoryConfig:
 class AgentScope:
     user: User
     dataset_name: str
-    dataset_id: str
+    dataset_id: UUID
     dataset_owner_id: Optional[UUID]
 
 
@@ -150,7 +150,7 @@ async def resolve_agent_scope(config: AgentMemoryConfig) -> AgentScope:
     return AgentScope(
         user=resolved_user,
         dataset_name=authorized_dataset.name,
-        dataset_id=str(authorized_dataset.id),
+        dataset_id=authorized_dataset.id,
         dataset_owner_id=authorized_dataset.owner_id,
     )
 
