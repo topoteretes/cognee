@@ -2,6 +2,9 @@ from enum import Enum
 from typing import Type
 
 from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+from cognee.eval_framework.benchmark_adapters.logistics_system_adapter import (
+    LogisticsSystemAdapter,
+)
 from cognee.eval_framework.benchmark_adapters.musique_adapter import MusiqueQAAdapter
 from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from cognee.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
@@ -10,6 +13,7 @@ from cognee.eval_framework.benchmark_adapters.twowikimultihop_adapter import Two
 class BenchmarkAdapter(Enum):
     DUMMY = ("Dummy", DummyAdapter)
     HOTPOTQA = ("HotPotQA", HotpotQAAdapter)
+    LOGISTICSSYSTEM = ("LogisticsSystem", LogisticsSystemAdapter)
     MUSIQUE = ("Musique", MusiqueQAAdapter)
     TWOWIKIMULTIHOP = ("TwoWikiMultiHop", TwoWikiMultihopAdapter)
 
