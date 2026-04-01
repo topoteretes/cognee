@@ -1,3 +1,16 @@
+"""
+Minimal quickstart for `cognee.agent_memory`.
+
+What this script demonstrates:
+- fixed memory query retrieval
+- dynamic memory query retrieval from a wrapped method parameter
+- the same downstream LLM path with memory disabled
+- trace persistence enabled on decorated calls
+
+The hidden fact ("Maple Panda") is intentionally private/demo-only knowledge so the
+memory-enabled calls are easier to distinguish from the no-memory call.
+"""
+
 import asyncio
 
 import cognee
@@ -5,6 +18,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
 async def setup_memory() -> None:
+    # Start from a clean slate and add a fact the base model is unlikely to know.
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await cognee.add(
@@ -31,6 +45,7 @@ async def ask_llm(question: str) -> str:
     memory_query_fixed="What is the private internal codename for the first supported cognee.agent_memory release?",
 )
 async def with_memory_agent() -> str:
+    # Uses a fixed retrieval query declared at decoration time.
     return await ask_llm(
         "What is the private internal codename for the first supported cognee.agent_memory release?"
     )
@@ -42,22 +57,29 @@ async def with_memory_agent() -> str:
     memory_query_from_method="question",
 )
 async def with_dynamic_memory_agent(question: str) -> str:
+    # Uses the wrapped method's `question` argument as the retrieval query.
     return await ask_llm(question)
 
 
 @cognee.agent_memory(with_memory=False, save_traces=True)
 async def without_memory_agent() -> str:
+    # Same downstream LLM call shape, but memory retrieval is disabled.
     return await ask_llm(
         "What is the private internal codename for the first supported cognee.agent_memory release?"
     )
 
 @cognee.agent_memory(with_memory=False, save_traces=True)
 async def trace_test() -> str:
+    # Simple call that is mostly useful for checking trace persistence.
     return await ask_llm("Just write out: results")
 
 
 async def main() -> None:
     await setup_memory()
+
+    print("This quickstart compares the same LLM path with memory on, memory off,")
+    print("and dynamic query resolution from a wrapped method parameter.")
+    print()
 
     with_memory = await with_memory_agent()
     with_dynamic_memory = await with_dynamic_memory_agent(
