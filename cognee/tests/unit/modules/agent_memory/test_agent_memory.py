@@ -506,6 +506,7 @@ async def test_persist_trace_handles_concurrent_calls_without_leaking_parent_con
 
 
 def test_agent_trace_always_belongs_to_agent_traces_nodeset():
+    """Normalize all traces into the canonical agent_traces nodeset and deterministic id."""
     trace = AgentTrace(
         origin_function="test_agent",
         with_memory=False,
@@ -518,8 +519,29 @@ def test_agent_trace_always_belongs_to_agent_traces_nodeset():
     assert trace.id == uuid5(NAMESPACE_OID, "AgentTrace:hello")
 
 
+def test_llmgateway_inject_agent_memory_includes_created_context_text():
+    """Prepend the created agent-memory text into the final LLM text input."""
+    from cognee.infrastructure.llm.LLMGateway import _inject_agent_memory
+
+    context = _make_context()
+    context.memory_context = "stored memory"
+    token = set_current_agent_memory_context(context)
+    try:
+        injected_text = _inject_agent_memory("original question")
+    finally:
+        reset_current_agent_memory_context(token)
+
+    assert injected_text == (
+        "Additional Cognee Memory Context:\n"
+        "stored memory\n\n"
+        "Original Input:\n"
+        "original question"
+    )
+
+
 @pytest.mark.asyncio
 async def test_llmgateway_injects_agent_memory(monkeypatch):
+    """Inject active agent memory into LLMGateway structured-output requests."""
     llm_gateway_module = importlib.import_module("cognee.infrastructure.llm.LLMGateway")
     llm_client = SimpleNamespace(acreate_structured_output=AsyncMock(return_value="ok"))
     monkeypatch.setattr(
