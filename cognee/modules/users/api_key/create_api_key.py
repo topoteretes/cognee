@@ -7,6 +7,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models.UserApiKey import UserApiKey
 from .exceptions import ApiKeyCreationError
 from .get_api_keys import get_api_keys
+from .hash_api_key import prepare_api_key_for_storage
 
 
 logger = get_logger(__name__)
@@ -31,11 +32,12 @@ async def create_api_key(user: User):
 
     async with relational_engine.get_async_session() as session:
         api_key = generate_api_key()
-        user_api_key = UserApiKey(user_id=user.id, api_key=api_key)
+        user_api_key = UserApiKey(user_id=user.id, api_key=prepare_api_key_for_storage(api_key))
         session.add(user_api_key)
 
         try:
             await session.commit()
+            user_api_key.api_key = api_key  # return raw key so caller can show it once
             return user_api_key
         except Exception as error:
             logger.error(f"Failed to create API key for user {user.id}: {str(error)}")

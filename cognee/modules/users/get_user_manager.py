@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from .models import User
 from .get_user_db import get_user_db
 from cognee.modules.users.models.UserApiKey import UserApiKey
+from cognee.modules.users.api_key.hash_api_key import prepare_api_key_for_lookup
 from cognee.infrastructure.databases.relational import get_relational_engine
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         async with relational_engine.get_async_session() as session:
             user_api_key = (
-                await session.execute(select(UserApiKey).filter_by(api_key=token))
+                await session.execute(
+                    select(UserApiKey).filter_by(api_key=prepare_api_key_for_lookup(token))
+                )
             ).scalar()
 
             if user_api_key:
