@@ -10,6 +10,7 @@ from cognee.modules.engine.models import NodeSet
 
 
 def _agent_traces_nodeset() -> NodeSet:
+    """Return the canonical nodeset used for persisted agent traces."""
     return NodeSet(
         id=uuid5(NAMESPACE_OID, "NodeSet:agent_traces"),
         name="agent_traces",

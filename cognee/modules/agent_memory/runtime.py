@@ -66,18 +66,21 @@ _agent_memory_context_var: contextvars.ContextVar[Optional[AgentMemoryContext]] 
 
 
 def get_current_agent_memory_context() -> Optional[AgentMemoryContext]:
+    """Return the active agent-memory execution context for the current async task."""
     return _agent_memory_context_var.get()
 
 
 def set_current_agent_memory_context(
     context: AgentMemoryContext,
 ) -> contextvars.Token[Optional[AgentMemoryContext]]:
+    """Store the active agent-memory context and return a reset token."""
     return _agent_memory_context_var.set(context)
 
 
 def reset_current_agent_memory_context(
     token: contextvars.Token[Optional[AgentMemoryContext]],
 ) -> None:
+    """Restore the previously active agent-memory context."""
     _agent_memory_context_var.reset(token)
 
 
@@ -91,6 +94,7 @@ def validate_agent_memory_config(
     user: Optional[User],
     dataset_name: Optional[str],
 ) -> AgentMemoryConfig:
+    """Validate and normalize the public decorator configuration."""
     if not isinstance(with_memory, bool):
         raise CogneeValidationError("with_memory must be a boolean.", log=False)
     if not isinstance(save_traces, bool):
@@ -131,6 +135,7 @@ def validate_agent_memory_config(
 
 
 async def resolve_agent_scope(config: AgentMemoryConfig) -> AgentScope:
+    """Resolve the dataset scope for a user who must have both read and write access."""
     resolved_user = config.user or session_user.get() or await get_default_user()
     requested_dataset_name = config.dataset_name or "main_dataset"
 
@@ -173,12 +178,14 @@ async def resolve_agent_scope(config: AgentMemoryConfig) -> AgentScope:
 
 
 def build_method_params(func, args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Bind wrapped call arguments to parameter names and sanitize them for storage."""
     bound_args = inspect.signature(func).bind_partial(*args, **kwargs)
     bound_args.apply_defaults()
     return {key: sanitize_value(value) for key, value in bound_args.arguments.items()}
 
 
 def normalize_optional_text(value: Any, limit: int = MAX_SERIALIZED_VALUE_LENGTH) -> Optional[str]:
+    """Convert a value into a bounded non-empty string, or return None when unusable."""
     if value is None:
         return None
 
@@ -196,6 +203,7 @@ def get_query_text_from_method_param(
     memory_query_from_method: Optional[str],
     method_params: dict[str, Any],
 ) -> Optional[str]:
+    """Extract a bounded retrieval query from a configured wrapped-method parameter."""
     if not memory_query_from_method or memory_query_from_method not in method_params:
         return None
 
@@ -207,6 +215,7 @@ def derive_query_text(
     memory_query_from_method: Optional[str],
     method_params: dict[str, Any],
 ) -> Optional[str]:
+    """Resolve the retrieval query from dynamic, fixed, or fallback method inputs."""
     query_from_method = get_query_text_from_method_param(memory_query_from_method, method_params)
     if query_from_method:
         return query_from_method
@@ -227,6 +236,7 @@ def derive_query_text(
 
 
 async def retrieve_memory_context(context: AgentMemoryContext) -> str:
+    """Fetch memory text for the current agent execution using the resolved dataset scope."""
     if not context.config.with_memory:
         return ""
     if context.scope is None:
@@ -274,6 +284,7 @@ async def retrieve_memory_context(context: AgentMemoryContext) -> str:
 
 
 async def persist_trace(context: AgentMemoryContext) -> None:
+    """Persist a bounded agent trace after execution in an isolated async task context."""
     if not context.config.save_traces:
         return
     if context.scope is None:
@@ -302,6 +313,7 @@ async def persist_trace(context: AgentMemoryContext) -> None:
 
 
 def build_trace_text(context: AgentMemoryContext) -> str:
+    """Build the lean searchable text field stored on the persisted trace."""
     output_text = serialize_trace_output(context.method_return_value)
     if output_text:
         return truncate_text(output_text, MAX_TRACE_TEXT_LENGTH)
@@ -310,6 +322,7 @@ def build_trace_text(context: AgentMemoryContext) -> str:
 
 
 def build_agent_trace(context: AgentMemoryContext) -> AgentTrace:
+    """Create the structured trace payload persisted for one agent execution."""
     return AgentTrace(
         origin_function=context.origin_function,
         with_memory=context.config.with_memory,
@@ -324,6 +337,7 @@ def build_agent_trace(context: AgentMemoryContext) -> AgentTrace:
 
 
 def serialize_trace_output(value: Any) -> str:
+    """Serialize a sanitized return value into a trace-friendly string."""
     sanitized_output = sanitize_value(value)
     if isinstance(sanitized_output, (dict, list)):
         return json.dumps(sanitized_output, default=str, ensure_ascii=False)
@@ -333,6 +347,7 @@ def serialize_trace_output(value: Any) -> str:
 
 
 def normalize_search_results(results: Any) -> str:
+    """Flatten heterogeneous search outputs into a single text blob."""
     if results is None:
         return ""
     if isinstance(results, str):
@@ -348,6 +363,7 @@ def normalize_search_results(results: Any) -> str:
 
 
 def sanitize_value(value: Any) -> Any:
+    """Convert arbitrary runtime values into bounded, persistence-safe structures."""
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, UUID):
@@ -372,6 +388,7 @@ def sanitize_value(value: Any) -> Any:
 
 
 def truncate_text(value: str, limit: int) -> str:
+    """Truncate text to a fixed limit while preserving an ellipsis suffix."""
     if len(value) <= limit:
         return value
     return value[: limit - 3] + "..."
