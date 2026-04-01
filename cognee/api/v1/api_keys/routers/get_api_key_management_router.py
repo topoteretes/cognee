@@ -43,19 +43,19 @@ def get_api_key_management_router():
             if HASH_API_KEY:
                 result.append(
                     {
-                        "id": api_key.id,
                         "key": "************",
                         "label": api_key.label,
                         "name": api_key.name,
+                        "id": api_key.id,
                     }
                 )
             else:
                 result.append(
                     {
-                        "id": api_key.id,
                         "key": api_key.api_key,
                         "label": api_key.label,
                         "name": api_key.name,
+                        "id": api_key.id,
                     }
                 )
         return result
@@ -77,10 +77,10 @@ def get_api_key_management_router():
             api_key = await create_api_key(user, name=payload.name)
 
             return {
-                "id": api_key.id,
                 "key": api_key.api_key,
                 "label": api_key.label,
                 "name": api_key.name,
+                "id": api_key.id,
             }
 
         except ApiKeyCreationError as error:
