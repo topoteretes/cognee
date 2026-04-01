@@ -54,6 +54,23 @@ _DEFAULT_PROMPT = (
     "Use the provided context to give an accurate answer."
 )
 
+# Per-type system prompt overrides for question types that benefit from targeted instructions.
+_TYPE_PROMPTS: Dict[str, str] = {
+    "summarization": (
+        "You are summarizing a multi-session conversation. "
+        "Provide a comprehensive, detailed summary that covers all key features, decisions, "
+        "milestones, challenges, solutions, and outcomes discussed across every session. "
+        "Be thorough and specific — include names, dates, technologies, and concrete details. "
+        "Do not omit any significant topic or decision."
+    ),
+    "temporal_reasoning": (
+        "You are answering a time-related question about a conversation. "
+        "Pay close attention to all dates, deadlines, durations, and time intervals mentioned "
+        "in the context. Calculate precisely and show your reasoning when computing differences "
+        "between dates or deadlines."
+    ),
+}
+
 
 class BEAMRouter:
     """Routes BEAM probing questions to the appropriate retriever and prompt.
@@ -70,7 +87,8 @@ class BEAMRouter:
     def _make_retriever(self, question_type: str) -> BaseRetriever:
         """Create a fresh retriever instance for parallel use."""
         retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
-        kwargs: Dict[str, Any] = {"system_prompt": _DEFAULT_PROMPT}
+        prompt = _TYPE_PROMPTS.get(question_type, _DEFAULT_PROMPT)
+        kwargs: Dict[str, Any] = {"system_prompt": prompt}
         if question_type in _TYPE_TOP_K:
             kwargs["top_k"] = _TYPE_TOP_K[question_type]
         return retriever_cls(**kwargs)
