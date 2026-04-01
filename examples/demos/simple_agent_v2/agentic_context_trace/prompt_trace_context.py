@@ -39,7 +39,7 @@ class AgentContextTrace(DataPoint):
                 query_text=memory_query,
                 query_type=SearchType.GRAPH_COMPLETION,
                 system_prompt='Answer the query, in a case of empty context return empty string.',
-                top_k=20
+                top_k=5
             )
             self.memory_context = str(memory_results)
         except NoDataError:
