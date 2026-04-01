@@ -7,7 +7,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models.UserApiKey import UserApiKey
 from .exceptions import ApiKeyCreationError
 from .get_api_keys import get_api_keys
-from .hash_api_key import prepare_api_key_for_storage
+from .hash_api_key import prepare_api_key
 
 
 logger = get_logger(__name__)
@@ -30,12 +30,14 @@ async def create_api_key(user: User, name: str = None):
 
     relational_engine = get_relational_engine()
 
+    api_key = generate_api_key()
+    prepared_api_key = prepare_api_key(api_key)
+    label = api_key[:8] + "****"
+
     async with relational_engine.get_async_session() as session:
-        api_key = generate_api_key()
-        label = api_key[:8] + "****"
         user_api_key = UserApiKey(
             user_id=user.id,
-            api_key=prepare_api_key_for_storage(api_key),
+            api_key=prepared_api_key,
             label=label,
             name=name,
         )
