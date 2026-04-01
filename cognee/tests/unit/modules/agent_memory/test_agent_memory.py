@@ -8,10 +8,12 @@ from cognee.exceptions import CogneeValidationError
 
 
 def _make_user():
+    """Build a lightweight user-like object for agent-memory unit tests."""
     return SimpleNamespace(id=uuid4(), tenant_id=uuid4())
 
 
 def _make_scope():
+    """Build a resolved scope stub with a user-owned demo dataset."""
     user = _make_user()
     dataset_id = uuid4()
     return SimpleNamespace(
@@ -23,6 +25,7 @@ def _make_scope():
 
 
 def test_agent_memory_rejects_sync_functions():
+    """Reject decorating sync callables because agent_memory is async-only."""
     import cognee
 
     with pytest.raises(CogneeValidationError):
@@ -33,6 +36,7 @@ def test_agent_memory_rejects_sync_functions():
 
 
 def test_agent_memory_rejects_invalid_dataset_name():
+    """Reject empty dataset names during decorator configuration validation."""
     import cognee
 
     with pytest.raises(CogneeValidationError):
@@ -40,6 +44,7 @@ def test_agent_memory_rejects_invalid_dataset_name():
 
 
 def test_agent_memory_rejects_both_fixed_and_dynamic_task_query():
+    """Reject configuring both fixed and method-derived memory queries together."""
     import cognee
 
     with pytest.raises(CogneeValidationError):
@@ -50,6 +55,7 @@ def test_agent_memory_rejects_both_fixed_and_dynamic_task_query():
 
 
 def test_agent_memory_rejects_missing_task_query_from_method_param():
+    """Reject dynamic query params that do not exist on the wrapped function."""
     import cognee
 
     with pytest.raises(CogneeValidationError):
@@ -61,6 +67,7 @@ def test_agent_memory_rejects_missing_task_query_from_method_param():
 
 @pytest.mark.asyncio
 async def test_agent_memory_sets_and_clears_context(monkeypatch):
+    """Set execution context during the call and clear it after completion."""
     import cognee
     from cognee.modules.agent_memory.runtime import get_current_agent_memory_context
 
@@ -93,6 +100,7 @@ async def test_agent_memory_sets_and_clears_context(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_memory_noop_mode_does_not_resolve_scope(monkeypatch):
+    """Skip scope resolution when both memory retrieval and trace persistence are disabled."""
     import cognee
 
     resolve_scope = AsyncMock()
@@ -126,6 +134,7 @@ async def test_agent_memory_noop_mode_does_not_resolve_scope(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_memory_isolated_between_decorated_methods_with_different_users(monkeypatch):
+    """Keep resolved memory separate across decorated methods using different users."""
     import cognee
 
     owner_user = _make_user()
@@ -201,6 +210,7 @@ async def test_agent_memory_isolated_between_decorated_methods_with_different_us
 
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
+    """Pass the resolved user and dataset id directly to search during retrieval."""
     from cognee.modules.agent_memory.runtime import (
         AgentMemoryConfig,
         AgentMemoryContext,
@@ -239,6 +249,7 @@ async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_resolve_agent_scope_defaults_to_main_dataset(monkeypatch):
+    """Resolve the default user and main_dataset when no explicit scope is provided."""
     from cognee.modules.agent_memory.runtime import AgentMemoryConfig, resolve_agent_scope
 
     user = _make_user()
@@ -276,6 +287,7 @@ async def test_resolve_agent_scope_defaults_to_main_dataset(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_resolve_agent_scope_requires_read_and_write_permissions(monkeypatch):
+    """Require the resolved dataset to be both readable and writable by the user."""
     from cognee.modules.agent_memory.runtime import AgentMemoryConfig, resolve_agent_scope
 
     user = _make_user()
@@ -306,6 +318,7 @@ async def test_resolve_agent_scope_requires_read_and_write_permissions(monkeypat
 
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_skips_when_no_query(monkeypatch):
+    """Skip search entirely when no usable memory query can be derived."""
     from cognee.modules.agent_memory.runtime import (
         AgentMemoryConfig,
         AgentMemoryContext,
@@ -340,6 +353,7 @@ async def test_retrieve_memory_context_skips_when_no_query(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_prefers_task_query_from_method(monkeypatch):
+    """Prefer the method-derived query over fallback derivation when configured."""
     from cognee.modules.agent_memory.runtime import (
         AgentMemoryConfig,
         AgentMemoryContext,
@@ -374,6 +388,7 @@ async def test_retrieve_memory_context_prefers_task_query_from_method(monkeypatc
 
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_falls_back_when_method_value_empty(monkeypatch):
+    """Fall back to the fixed query when the method-derived query resolves to empty text."""
     from cognee.modules.agent_memory.runtime import (
         AgentMemoryConfig,
         AgentMemoryContext,
@@ -408,6 +423,7 @@ async def test_retrieve_memory_context_falls_back_when_method_value_empty(monkey
 
 @pytest.mark.asyncio
 async def test_persist_trace_creates_bounded_structured_payload(monkeypatch):
+    """Persist a structured AgentTrace payload when trace saving is enabled."""
     from cognee.modules.agent_memory.runtime import (
         AgentMemoryConfig,
         AgentMemoryContext,
@@ -454,6 +470,7 @@ async def test_persist_trace_creates_bounded_structured_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_persist_trace_restores_previous_database_context(monkeypatch):
+    """Keep parent-task database contexts unchanged after trace persistence completes."""
     from cognee.infrastructure.files.storage.config import file_storage_config
     from cognee.context_global_variables import graph_db_config, vector_db_config
     from cognee.modules.agent_memory.runtime import (
@@ -511,6 +528,7 @@ async def test_persist_trace_restores_previous_database_context(monkeypatch):
 
 
 def test_agent_trace_always_belongs_to_agent_traces_nodeset():
+    """Normalize all traces into the canonical agent_traces nodeset and deterministic id."""
     from cognee.modules.agent_memory.models import AgentTrace
 
     trace = AgentTrace(
@@ -527,6 +545,7 @@ def test_agent_trace_always_belongs_to_agent_traces_nodeset():
 
 @pytest.mark.asyncio
 async def test_llmgateway_injects_agent_memory(monkeypatch):
+    """Inject active agent memory into LLMGateway structured-output requests."""
     import importlib
 
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
