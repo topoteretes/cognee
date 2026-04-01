@@ -270,9 +270,11 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         # Future optimization: batch multiple rows per INSERT if profiling shows benefit
         async with self._graph._session() as session:
             # Insert graph nodes
+            core_keys = {"id", "name", "type"}
             for dp in data_points:
                 props = dp.model_dump() if hasattr(dp, "model_dump") else vars(dp)
-                core, extra_json = self._graph._split_core_and_extra(props)
+                extra = {k: v for k, v in props.items() if k not in core_keys}
+                extra_json = json.dumps(extra, cls=JSONEncoder)
                 await session.execute(
                     text("""
                         INSERT INTO graph_node (id, name, type, properties, created_at, updated_at)
@@ -283,7 +285,13 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                             properties = EXCLUDED.properties,
                             updated_at = EXCLUDED.updated_at
                     """),
-                    {**core, "properties": extra_json, "now": now},
+                    {
+                        "id": str(props.get("id", "")),
+                        "name": str(props.get("name", "")),
+                        "type": str(props.get("type", "")),
+                        "properties": extra_json,
+                        "now": now,
+                    },
                 )
 
             # Insert vector embeddings into each collection table
