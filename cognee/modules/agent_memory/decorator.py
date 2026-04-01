@@ -58,7 +58,9 @@ def agent_memory(
 
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            scope = await resolve_agent_scope(config)
+            scope = None
+            if config.with_memory or config.save_traces:
+                scope = await resolve_agent_scope(config)
             context = AgentMemoryContext(
                 origin_function=fn.__qualname__,
                 config=config,

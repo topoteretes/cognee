@@ -52,7 +52,7 @@ class AgentMemoryContext:
     origin_function: str
     config: AgentMemoryConfig
     method_params: dict[str, Any]
-    scope: AgentScope
+    scope: Optional[AgentScope] = None
     memory_query: str = ""
     memory_context: str = ""
     method_return_value: Any = None
@@ -229,6 +229,8 @@ def derive_query_text(
 async def retrieve_memory_context(context: AgentMemoryContext) -> str:
     if not context.config.with_memory:
         return ""
+    if context.scope is None:
+        return ""
 
     query_text = derive_query_text(
         context.config.memory_query_fixed,
@@ -273,6 +275,8 @@ async def retrieve_memory_context(context: AgentMemoryContext) -> str:
 
 async def persist_trace(context: AgentMemoryContext) -> None:
     if not context.config.save_traces:
+        return
+    if context.scope is None:
         return
 
     trace = build_agent_trace(context)
