@@ -22,7 +22,7 @@ class ApiKeySettings(BaseSettings):
 apiKeySettings = ApiKeySettings()
 
 
-async def create_api_key(user: User):
+async def create_api_key(user: User, name: str = None):
     existing_api_keys = await get_api_keys(user)
 
     if len(existing_api_keys) >= apiKeySettings.max_user_api_keys:
@@ -32,7 +32,13 @@ async def create_api_key(user: User):
 
     async with relational_engine.get_async_session() as session:
         api_key = generate_api_key()
-        user_api_key = UserApiKey(user_id=user.id, api_key=prepare_api_key_for_storage(api_key))
+        label = api_key[:8] + "****"
+        user_api_key = UserApiKey(
+            user_id=user.id,
+            api_key=prepare_api_key_for_storage(api_key),
+            label=label,
+            name=name,
+        )
         session.add(user_api_key)
 
         try:

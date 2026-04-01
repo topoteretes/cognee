@@ -1,4 +1,5 @@
 from uuid import UUID
+from typing import Optional
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
@@ -11,6 +12,11 @@ from cognee.modules.users.api_key.exceptions import ApiKeyCreationError
 from cognee.modules.users.api_key.create_api_key import create_api_key
 from cognee.modules.users.api_key.delete_api_key import delete_api_key
 from cognee.modules.users.api_key.get_api_keys import get_api_keys
+from cognee.modules.users.api_key.hash_api_key import HASH_API_KEY
+
+
+class ApiKeyCreationPayload(InDTO):
+    name: Optional[str] = None
 
 
 class ApiKeyDeletionPayload(InDTO):
@@ -32,17 +38,33 @@ def get_api_key_management_router():
 
         api_keys = await get_api_keys(user)
 
-        return [
-            {
-                "id": api_key.id,
-                "key": api_key.api_key,
-                "label": api_key.api_key[0:10] + "*" * (len(api_key.api_key) - 10),
-            }
-            for api_key in api_keys
-        ]
+        result = []
+        for api_key in api_keys:
+            if HASH_API_KEY:
+                result.append(
+                    {
+                        "id": api_key.id,
+                        "key": "************",
+                        "label": api_key.label,
+                        "name": api_key.name,
+                    }
+                )
+            else:
+                result.append(
+                    {
+                        "id": api_key.id,
+                        "key": api_key.api_key,
+                        "label": api_key.label,
+                        "name": api_key.name,
+                    }
+                )
+        return result
 
     @api_key_management_router.post("/api-keys")
-    async def create_api_key_for_user(user: User = Depends(get_authenticated_user)):
+    async def create_api_key_for_user(
+        payload: ApiKeyCreationPayload,
+        user: User = Depends(get_authenticated_user),
+    ):
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
             user.id,
@@ -52,12 +74,13 @@ def get_api_key_management_router():
         )
 
         try:
-            api_key = await create_api_key(user)
+            api_key = await create_api_key(user, name=payload.name)
 
             return {
                 "id": api_key.id,
                 "key": api_key.api_key,
-                "label": api_key.api_key[0:10] + "*" * (len(api_key.api_key) - 10),
+                "label": api_key.label,
+                "name": api_key.name,
             }
 
         except ApiKeyCreationError as error:
