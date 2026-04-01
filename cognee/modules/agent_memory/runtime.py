@@ -368,6 +368,8 @@ def normalize_search_results(results: Any) -> str:
         if "search_result" in results:
             return normalize_search_results(results["search_result"])
         return json.dumps(sanitize_value(results), ensure_ascii=False)
+    if hasattr(results, "search_result"):
+        return normalize_search_results(results.search_result)
     return str(results)
 
 
