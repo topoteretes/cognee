@@ -330,6 +330,8 @@ def build_trace_text(context: AgentMemoryContext) -> str:
 
 def build_agent_trace(context: AgentMemoryContext) -> AgentTrace:
     """Create the structured trace payload persisted for one agent execution."""
+    # TODO: Redact or further constrain method_params and method_return_value before
+    # persisting them, since truncation alone does not prevent secrets or PII retention.
     return AgentTrace(
         origin_function=context.origin_function,
         with_memory=context.config.with_memory,
