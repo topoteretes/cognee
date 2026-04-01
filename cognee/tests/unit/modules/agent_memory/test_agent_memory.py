@@ -51,7 +51,9 @@ def _make_config(**overrides):
     return AgentMemoryConfig(**defaults)
 
 
-def _make_context(*, scope=None, method_params=None, origin_function="test_agent", **config_overrides):
+def _make_context(
+    *, scope=None, method_params=None, origin_function="test_agent", **config_overrides
+):
     scope = scope or _make_scope()
     config_defaults = {"user": scope.user, "dataset_name": scope.dataset_name}
     config_defaults.update(config_overrides)
