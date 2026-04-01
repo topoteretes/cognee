@@ -313,6 +313,7 @@ async def test_retrieve_memory_context_query_resolution(
 
 @pytest.mark.asyncio
 async def test_resolve_agent_scope_defaults_to_main_dataset(monkeypatch):
+    """Resolve the default user and main_dataset when no explicit scope is provided."""
     user = _make_user()
     dataset = SimpleNamespace(id=uuid4(), name="main_dataset", owner_id=user.id)
     permissions = AsyncMock(side_effect=[[dataset], [dataset]])
@@ -333,6 +334,32 @@ async def test_resolve_agent_scope_defaults_to_main_dataset(monkeypatch):
     assert scope.dataset_name == "main_dataset"
     assert scope.dataset_id == dataset.id
     assert scope.dataset_owner_id == user.id
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_scope_prefers_explicit_user_over_default_user(monkeypatch):
+    """Use the explicit decorator user instead of falling back to the default user."""
+    explicit_user = _make_user()
+    default_user = _make_user()
+    dataset = SimpleNamespace(id=uuid4(), name="main_dataset", owner_id=explicit_user.id)
+    get_default_user_mock = AsyncMock(return_value=default_user)
+    permissions = AsyncMock(side_effect=[[dataset], [dataset]])
+
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.runtime.get_default_user",
+        get_default_user_mock,
+    )
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.runtime.get_all_user_permission_datasets",
+        permissions,
+    )
+
+    scope = await resolve_agent_scope(_make_config(user=explicit_user, save_traces=True))
+
+    get_default_user_mock.assert_not_awaited()
+    assert permissions.await_args_list[0].args == (explicit_user, "read")
+    assert permissions.await_args_list[1].args == (explicit_user, "write")
+    assert scope.user == explicit_user
 
 
 @pytest.mark.asyncio

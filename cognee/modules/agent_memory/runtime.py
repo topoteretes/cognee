@@ -8,10 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
-from cognee.context_global_variables import (
-    session_user,
-    set_database_global_context_variables,
-)
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.observability import new_span
 from cognee.modules.users.methods import get_default_user
@@ -146,7 +143,7 @@ def validate_agent_memory_config(
 
 async def resolve_agent_scope(config: AgentMemoryConfig) -> AgentScope:
     """Resolve the dataset scope for a user who must have both read and write access."""
-    resolved_user = config.user or session_user.get() or await get_default_user()
+    resolved_user = config.user or await get_default_user()
     requested_dataset_name = config.dataset_name or "main_dataset"
 
     readable_datasets = await get_all_user_permission_datasets(resolved_user, "read")
