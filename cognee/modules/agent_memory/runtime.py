@@ -8,10 +8,13 @@ from typing import Any, Optional
 from uuid import UUID
 
 from cognee.context_global_variables import (
+    graph_db_config,
     session_user,
     set_database_global_context_variables,
+    vector_db_config,
 )
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.observability import new_span
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -258,6 +261,9 @@ async def persist_trace(context: AgentMemoryContext) -> None:
     if not context.config.save_traces:
         return
 
+    current_graph_context = graph_db_config.get()
+    current_vector_context = vector_db_config.get()
+    current_storage_context = file_storage_config.get()
     trace = build_agent_trace(context)
 
     try:
@@ -275,6 +281,10 @@ async def persist_trace(context: AgentMemoryContext) -> None:
             error,
             exc_info=False,
         )
+    finally:
+        graph_db_config.set(current_graph_context)
+        vector_db_config.set(current_vector_context)
+        file_storage_config.set(current_storage_context)
 
 
 def build_trace_text(context: AgentMemoryContext) -> str:
