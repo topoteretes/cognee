@@ -110,6 +110,8 @@ def test_agent_memory_rejects_sync_functions():
     "kwargs",
     [
         {"dataset_name": ""},
+        {"memory_query_fixed": "   "},
+        {"memory_query_from_method": "   "},
         {"memory_query_fixed": "Fixed query", "memory_query_from_method": "question"},
     ],
 )

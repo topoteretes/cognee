@@ -106,6 +106,16 @@ def validate_agent_memory_config(
             "memory_query_from_method must be a string when provided.",
             log=False,
         )
+    if memory_query_fixed is not None and not memory_query_fixed.strip():
+        raise CogneeValidationError(
+            "memory_query_fixed must not be blank when provided.",
+            log=False,
+        )
+    if memory_query_from_method is not None and not memory_query_from_method.strip():
+        raise CogneeValidationError(
+            "memory_query_from_method must not be blank when provided.",
+            log=False,
+        )
     if memory_query_fixed is not None and memory_query_from_method is not None:
         raise CogneeValidationError(
             "Only one of memory_query_fixed or memory_query_from_method can be provided to cognee.agent_memory.",
