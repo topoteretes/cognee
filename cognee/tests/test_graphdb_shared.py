@@ -97,7 +97,7 @@ async def run_graph_db_test(provider: str):
         )
         assert len(search_results) != 0, f"{provider}: SUMMARIES returned no results"
 
-        # Check search history
+        # Check search history: 3 searches x 2 entries each (query + result) = 6
         user = await get_default_user()
         history = await get_history(user.id)
         assert len(history) == 6, f"{provider}: expected 6 history entries, got {len(history)}"

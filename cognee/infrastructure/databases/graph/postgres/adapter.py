@@ -4,7 +4,7 @@ import json
 from uuid import UUID
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Union, Optional, Tuple, Type
+from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
 
 from sqlalchemy import (
     text, Table, Column, MetaData, String, DateTime, Index, ForeignKey,
@@ -72,7 +72,7 @@ class PostgresAdapter(GraphDBInterface):
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
-    def __init__(self, relational_engine):
+    def __init__(self, relational_engine: Any) -> None:
         """Accept an existing SQLAlchemyAdapter (shared with the relational layer)."""
         self.engine = relational_engine
 
@@ -89,7 +89,7 @@ class PostgresAdapter(GraphDBInterface):
         await self.initialize()
 
     @asynccontextmanager
-    async def _session(self):
+    async def _session(self) -> AsyncIterator[Any]:
         """Yield an async session from the underlying engine."""
         async with self.engine.get_async_session() as session:
             yield session
@@ -166,7 +166,7 @@ class PostgresAdapter(GraphDBInterface):
         rows = []
         for node in nodes:
             if isinstance(node, tuple):
-                props = {"id": node[0], **(node[1] or {})}
+                props = {**(node[1] or {}), "id": node[0]}
             elif hasattr(node, "model_dump"):
                 props = node.model_dump()
             else:
