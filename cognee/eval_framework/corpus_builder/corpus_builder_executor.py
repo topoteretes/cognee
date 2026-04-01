@@ -48,7 +48,6 @@ class CorpusBuilderExecutor:
         load_golden_context: bool = False,
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
     ) -> List[str]:
-        await self.adapter.prepare_corpus()
         self.load_corpus(
             limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
         )
@@ -59,12 +58,7 @@ class CorpusBuilderExecutor:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
 
-        # Benchmarks such as HotpotQA can repeat the same context passage across
-        # multiple questions. Deduplicate before ingestion to avoid racing inserts
-        # of the same deterministic Data.id during batched add() processing.
-        unique_corpus = list(dict.fromkeys(self.raw_corpus))
-
-        await cognee.add(unique_corpus)
+        await cognee.add(self.raw_corpus)
 
         tasks = await self.task_getter(chunk_size=chunk_size, chunker=chunker)
         pipeline_run = run_pipeline(tasks=tasks)
