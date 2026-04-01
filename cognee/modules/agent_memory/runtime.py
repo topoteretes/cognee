@@ -119,14 +119,10 @@ def validate_agent_memory_config(
         with_memory=with_memory,
         save_traces=save_traces,
         memory_query_fixed=(
-            memory_query_fixed.strip()
-            if isinstance(memory_query_fixed, str)
-            else None
+            memory_query_fixed.strip() if isinstance(memory_query_fixed, str) else None
         ),
         memory_query_from_method=(
-            memory_query_from_method.strip()
-            if isinstance(memory_query_from_method, str)
-            else None
+            memory_query_from_method.strip() if isinstance(memory_query_from_method, str) else None
         ),
         memory_top_k=memory_top_k,
         user=user,

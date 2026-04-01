@@ -68,6 +68,7 @@ async def without_memory_agent() -> str:
         "What is the private internal codename for the first supported cognee.agent_memory release?"
     )
 
+
 @cognee.agent_memory(with_memory=False, save_traces=True)
 async def trace_test() -> str:
     # Simple call that is mostly useful for checking trace persistence.
