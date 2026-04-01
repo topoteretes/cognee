@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import inspect
 import json
@@ -8,16 +9,14 @@ from typing import Any, Optional
 from uuid import UUID
 
 from cognee.context_global_variables import (
-    graph_db_config,
     session_user,
     set_database_global_context_variables,
-    vector_db_config,
 )
 from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.observability import new_span
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.shared.logging_utils import get_logger
 
 from .models import AgentTrace
@@ -136,19 +135,38 @@ def validate_agent_memory_config(
 
 
 async def resolve_agent_scope(config: AgentMemoryConfig) -> AgentScope:
-    from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
-        resolve_authorized_user_datasets,
-    )
-
     resolved_user = config.user or session_user.get() or await get_default_user()
-    requested_datasets = config.dataset_name or "main_dataset"
+    requested_dataset_name = config.dataset_name or "main_dataset"
 
-    _, authorized_datasets = await resolve_authorized_user_datasets(
-        requested_datasets,
-        resolved_user,
-    )
+    readable_datasets = await get_all_user_permission_datasets(resolved_user, "read")
+    writable_datasets = await get_all_user_permission_datasets(resolved_user, "write")
 
-    authorized_dataset = authorized_datasets[0]
+    readable_by_id = {dataset.id: dataset for dataset in readable_datasets}
+    writable_ids = {dataset.id: dataset for dataset in writable_datasets}
+    matching_datasets = [
+        dataset
+        for dataset in readable_by_id.values()
+        if dataset.id in writable_ids and dataset.name == requested_dataset_name
+    ]
+
+    if len(matching_datasets) > 1:
+        raise CogneeValidationError(
+            (
+                f"Multiple datasets named {requested_dataset_name!r} grant both read and write "
+                f"permissions to user {resolved_user.id}. Please use a unique dataset name."
+            ),
+            log=False,
+        )
+    if not matching_datasets:
+        raise CogneeValidationError(
+            (
+                f"User {resolved_user.id} must have both read and write permissions for dataset "
+                f"{requested_dataset_name!r} to use cognee.agent_memory."
+            ),
+            log=False,
+        )
+
+    authorized_dataset = matching_datasets[0]
 
     return AgentScope(
         user=resolved_user,
@@ -261,12 +279,9 @@ async def persist_trace(context: AgentMemoryContext) -> None:
     if not context.config.save_traces:
         return
 
-    current_graph_context = graph_db_config.get()
-    current_vector_context = vector_db_config.get()
-    current_storage_context = file_storage_config.get()
     trace = build_agent_trace(context)
 
-    try:
+    async def _persist_trace_in_task() -> None:
         from cognee.tasks.storage import add_data_points
 
         await set_database_global_context_variables(
@@ -274,6 +289,9 @@ async def persist_trace(context: AgentMemoryContext) -> None:
             context.scope.dataset_owner_id,
         )
         await add_data_points([trace])
+
+    try:
+        await asyncio.create_task(_persist_trace_in_task())
     except Exception as error:
         logger.warning(
             "Agent trace persistence failed for %s: %s",
@@ -281,10 +299,6 @@ async def persist_trace(context: AgentMemoryContext) -> None:
             error,
             exc_info=False,
         )
-    finally:
-        graph_db_config.set(current_graph_context)
-        vector_db_config.set(current_vector_context)
-        file_storage_config.set(current_storage_context)
 
 
 def build_trace_text(context: AgentMemoryContext) -> str:
