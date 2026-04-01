@@ -253,7 +253,7 @@ async def retrieve_memory_context(context: AgentMemoryContext) -> str:
                 query_text=query_text,
                 query_type=SearchType.GRAPH_COMPLETION,
                 user=context.scope.user,
-                datasets=[context.scope.dataset_name],
+                dataset_ids=[context.scope.dataset_id],
                 system_prompt=(
                     "Return only the relevant memory context for the query. "
                     "If no relevant context exists, return an empty string."
