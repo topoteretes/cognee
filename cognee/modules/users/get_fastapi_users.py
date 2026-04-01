@@ -17,7 +17,7 @@ def get_fastapi_users():
     api_key_backend = get_api_key_backend()
 
     fastapi_users = FastAPIUsers[User, uuid.UUID](
-        get_user_manager, [api_auth_backend, client_auth_backend, api_key_backend]
+        get_user_manager, [api_key_backend, api_auth_backend, client_auth_backend]
     )
 
     return fastapi_users
