@@ -1,7 +1,6 @@
 """Integration tests for the public cognee.agent_memory decorator behavior."""
 
 import json
-import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -78,8 +77,6 @@ def _find_nodes_by_type(nodes: list[dict], node_type: str) -> list[dict]:
 @pytest_asyncio.fixture
 async def agent_memory_integration_env(tmp_path):
     """Create a clean backend-access-controlled environment for agent-memory integration tests."""
-    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
-
     root = Path(tmp_path)
     cognee.config.data_root_directory(str(root / "data"))
     cognee.config.system_root_directory(str(root / "system"))

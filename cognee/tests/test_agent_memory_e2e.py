@@ -1,7 +1,6 @@
 """End-to-end tests for the public cognee.agent_memory feature."""
 
 import json
-import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -70,8 +69,6 @@ def _find_trace_nodes(nodes: list[dict | tuple]) -> list[dict | tuple]:
 @pytest_asyncio.fixture
 async def agent_memory_e2e_env(tmp_path):
     """Create a clean backend-access-controlled environment for agent-memory e2e tests."""
-    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
-
     root = Path(tmp_path)
     cognee.config.data_root_directory(str(root / "data"))
     cognee.config.system_root_directory(str(root / "system"))
