@@ -12,6 +12,11 @@ on:
         type: string
         default: "all"
         description: "Which vector databases to test (comma-separated list or 'all')"
+      python-version:
+        required: false
+        type: string
+        default: "3.11.x"
+        description: "Python version to use for testing"
       ci-image:
         required: false
         type: string

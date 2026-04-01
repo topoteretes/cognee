@@ -20,7 +20,6 @@ from cognee.modules.storage.utils import JSONEncoder
 
 logger = get_logger()
 
-# Single source of truth for schema: used for both DDL and DML
 _meta = MetaData()
 
 _node_table = Table(
@@ -53,7 +52,6 @@ _edge_table = Table(
     Column("updated_at", DateTime(timezone=True), server_default=func.now()),
 )
 
-# Plain indexes
 Index("idx_edge_source", _edge_table.c.source_id)
 Index("idx_edge_target", _edge_table.c.target_id)
 Index("idx_node_type", _node_table.c.type)
@@ -72,13 +70,11 @@ Index(
 class PostgresAdapter(GraphDBInterface):
     """Graph-as-tables adapter backed by Postgres, accessed via SQLAlchemy async sessions."""
 
+    _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
+
     def __init__(self, relational_engine):
         """Accept an existing SQLAlchemyAdapter (shared with the relational layer)."""
         self.engine = relational_engine
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
@@ -98,23 +94,9 @@ class PostgresAdapter(GraphDBInterface):
         async with self.engine.get_async_session() as session:
             yield session
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     def _serialize_properties(self, props: Dict[str, Any]) -> str:
         """Serialize a dict to a JSON string, handling datetimes and UUIDs."""
         return json.dumps(props, cls=JSONEncoder)
-
-    def _split_core_and_extra(self, properties: Dict[str, Any]) -> Tuple[dict, str]:
-        """Separate core columns (id, name, type) from the rest, JSON-encode the rest."""
-        core = {
-            "id": str(properties.get("id", "")),
-            "name": str(properties.get("name", "")),
-            "type": str(properties.get("type", "")),
-        }
-        extra = {k: v for k, v in properties.items() if k not in core}
-        return core, self._serialize_properties(extra)
 
     def _parse_node_row(self, row) -> Dict[str, Any]:
         """Convert a (id, name, type, properties) row to a merged dict."""
@@ -126,16 +108,12 @@ class PostgresAdapter(GraphDBInterface):
             data.update(props)
         return data
 
-    # ------------------------------------------------------------------
-    # GraphDBInterface: query
-    # ------------------------------------------------------------------
-
     async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
-        """Raw Cypher queries are not supported on the Postgres graph backend.
+        """Not supported. Use typed adapter methods or a graph-native backend.
 
-        All graph operations should use the typed adapter methods (add_nodes,
-        get_neighbors, get_connections, etc.). If you need raw Cypher support,
-        use a graph-native backend (Neo4j, Kuzu).
+        Raises:
+        -------
+            NotImplementedError
         """
         raise NotImplementedError(
             "The Postgres graph backend does not support raw Cypher queries. "
@@ -143,11 +121,13 @@ class PostgresAdapter(GraphDBInterface):
             "or use the typed adapter methods (add_nodes, get_neighbors, etc.)."
         )
 
-    # ------------------------------------------------------------------
-    # GraphDBInterface: node operations
-    # ------------------------------------------------------------------
-
     async def is_empty(self) -> bool:
+        """Check whether the graph contains any nodes.
+
+        Returns:
+        --------
+            bool: True if the graph has no nodes.
+        """
         await self._ensure_initialized()
         async with self._session() as session:
             result = await session.execute(text("SELECT EXISTS(SELECT 1 FROM graph_node LIMIT 1)"))
@@ -156,22 +136,33 @@ class PostgresAdapter(GraphDBInterface):
     async def add_node(
         self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Wrapper: add a single node via add_nodes."""
+        """Add a single node. Delegates to add_nodes.
+
+        Parameters:
+        -----------
+            node: A DataPoint instance or a string node ID.
+            properties: Optional property dict when node is a string ID.
+        """
         if isinstance(node, str):
             props = properties or {}
             props.setdefault("id", node)
-            # Pack as a DataPoint-like object would be, using a tuple
             await self.add_nodes([(node, props)])
         else:
             await self.add_nodes([node])
 
     async def add_nodes(self, nodes: Union[List[Tuple[str, Dict]], List[DataPoint]]) -> None:
+        """Add multiple nodes via batch upsert.
+
+        Parameters:
+        -----------
+            nodes: A list of (id, properties) tuples or DataPoint instances.
+        """
         if not nodes:
             return
 
         now = datetime.now(timezone.utc)
+        core_keys = {"id", "name", "type"}
 
-        # Normalize all inputs to (core_dict, extra_json) pairs
         rows = []
         for node in nodes:
             if isinstance(node, tuple):
@@ -180,24 +171,18 @@ class PostgresAdapter(GraphDBInterface):
                 props = node.model_dump()
             else:
                 props = vars(node)
-            core, extra_json = self._split_core_and_extra(props)
-            rows.append({**core, "properties": extra_json, "now": now})
 
-        # Remap 'now' into the column names the table expects
-        values = [
-            {
-                "id": r["id"],
-                "name": r["name"],
-                "type": r["type"],
-                "properties": json.loads(r["properties"]),
+            extra = {k: v for k, v in props.items() if k not in core_keys}
+            rows.append({
+                "id": str(props.get("id", "")),
+                "name": str(props.get("name", "")),
+                "type": str(props.get("type", "")),
+                "properties": json.loads(json.dumps(extra, cls=JSONEncoder)),
                 "created_at": now,
                 "updated_at": now,
-            }
-            for r in rows
-        ]
+            })
 
-        # Batch upsert via pg_insert — single multi-row INSERT
-        stmt = pg_insert(_node_table).values(values)
+        stmt = pg_insert(_node_table).values(rows)
         stmt = stmt.on_conflict_do_update(
             index_elements=["id"],
             set_={
@@ -213,10 +198,21 @@ class PostgresAdapter(GraphDBInterface):
             await session.commit()
 
     async def delete_node(self, node_id: str) -> None:
-        """Wrapper: delete a single node via delete_nodes."""
+        """Delete a single node. Delegates to delete_nodes.
+
+        Parameters:
+        -----------
+            node_id: The ID of the node to delete.
+        """
         await self.delete_nodes([node_id])
 
     async def delete_nodes(self, node_ids: List[str]) -> None:
+        """Delete multiple nodes by ID. Cascade-deletes connected edges.
+
+        Parameters:
+        -----------
+            node_ids: List of node IDs to delete.
+        """
         if not node_ids:
             return
         async with self._session() as session:
@@ -226,11 +222,30 @@ class PostgresAdapter(GraphDBInterface):
             await session.commit()
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Wrapper: get a single node via get_nodes."""
+        """Retrieve a single node by ID.
+
+        Parameters:
+        -----------
+            node_id: The ID of the node to retrieve.
+
+        Returns:
+        --------
+            A property dict for the node, or None if not found.
+        """
         results = await self.get_nodes([node_id])
         return results[0] if results else None
 
     async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+        """Retrieve multiple nodes by ID.
+
+        Parameters:
+        -----------
+            node_ids: List of node IDs to retrieve.
+
+        Returns:
+        --------
+            A list of property dicts, one per found node.
+        """
         if not node_ids:
             return []
         async with self._session() as session:
@@ -240,10 +255,6 @@ class PostgresAdapter(GraphDBInterface):
             )
             return [self._parse_node_row(row) for row in result.fetchall()]
 
-    # ------------------------------------------------------------------
-    # GraphDBInterface: edge operations
-    # ------------------------------------------------------------------
-
     async def add_edge(
         self,
         source_id: str,
@@ -251,7 +262,15 @@ class PostgresAdapter(GraphDBInterface):
         relationship_name: str,
         properties: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Wrapper: add a single edge via add_edges."""
+        """Add a single edge. Delegates to add_edges.
+
+        Parameters:
+        -----------
+            source_id: Source node ID.
+            target_id: Target node ID.
+            relationship_name: The edge label.
+            properties: Optional property dict for the edge.
+        """
         await self.add_edges(
             [(str(source_id), str(target_id), relationship_name, properties or {})]
         )
@@ -259,16 +278,21 @@ class PostgresAdapter(GraphDBInterface):
     async def add_edges(
         self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
     ) -> None:
+        """Add multiple edges via batch upsert.
+
+        Parameters:
+        -----------
+            edges: A list of (source_id, target_id, relationship_name, properties) tuples.
+        """
         if not edges:
             return
 
         now = datetime.now(timezone.utc)
 
-        # Normalize edge tuples into dicts matching table columns
-        values = []
+        rows = []
         for edge in edges:
             raw_props = edge[3] if len(edge) > 3 and edge[3] else {}
-            values.append({
+            rows.append({
                 "source_id": str(edge[0]),
                 "target_id": str(edge[1]),
                 "relationship_name": edge[2],
@@ -277,8 +301,7 @@ class PostgresAdapter(GraphDBInterface):
                 "updated_at": now,
             })
 
-        # Batch upsert via pg_insert — single multi-row INSERT
-        stmt = pg_insert(_edge_table).values(values)
+        stmt = pg_insert(_edge_table).values(rows)
         stmt = stmt.on_conflict_do_update(
             index_elements=["source_id", "target_id", "relationship_name"],
             set_={
@@ -292,15 +315,35 @@ class PostgresAdapter(GraphDBInterface):
             await session.commit()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
-        """Wrapper: check a single edge via has_edges."""
+        """Check whether a single edge exists.
+
+        Parameters:
+        -----------
+            source_id: Source node ID.
+            target_id: Target node ID.
+            relationship_name: The edge label.
+
+        Returns:
+        --------
+            True if the edge exists.
+        """
         result = await self.has_edges([(str(source_id), str(target_id), relationship_name)])
         return len(result) > 0
 
     async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+        """Check which of the given edges exist.
+
+        Parameters:
+        -----------
+            edges: A list of (source_id, target_id, relationship_name) tuples to check.
+
+        Returns:
+        --------
+            The subset of input tuples that exist in the database.
+        """
         if not edges:
             return []
 
-        # Single query: join candidate tuples against graph_edge
         candidates = values(
             sa_column("src", String),
             sa_column("tgt", String),
@@ -326,6 +369,16 @@ class PostgresAdapter(GraphDBInterface):
             return [(row[0], row[1], row[2]) for row in result.fetchall()]
 
     async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
+        """Retrieve all edges connected to a node.
+
+        Parameters:
+        -----------
+            node_id: The ID of the node.
+
+        Returns:
+        --------
+            A list of (source_dict, relationship_name, target_dict) tuples.
+        """
         async with self._session() as session:
             result = await session.execute(
                 text("""
@@ -351,11 +404,17 @@ class PostgresAdapter(GraphDBInterface):
                 edges.append((src, row[4], tgt))
             return edges
 
-    # ------------------------------------------------------------------
-    # GraphDBInterface: neighbor and connection queries
-    # ------------------------------------------------------------------
-
     async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all nodes directly connected to a given node.
+
+        Parameters:
+        -----------
+            node_id: The ID of the node.
+
+        Returns:
+        --------
+            A list of property dicts for neighboring nodes.
+        """
         async with self._session() as session:
             result = await session.execute(
                 text("""
@@ -374,6 +433,16 @@ class PostgresAdapter(GraphDBInterface):
     async def get_connections(
         self, node_id: Union[str, UUID]
     ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
+        """Retrieve all connections (source, edge, target) for a node.
+
+        Parameters:
+        -----------
+            node_id: The ID of the node.
+
+        Returns:
+        --------
+            A list of (source_dict, edge_dict, target_dict) tuples.
+        """
         nid = str(node_id)
 
         async with self._session() as session:
@@ -409,15 +478,17 @@ class PostgresAdapter(GraphDBInterface):
                 connections.append((src, edge, tgt))
             return connections
 
-    # ------------------------------------------------------------------
-    # GraphDBInterface: graph-wide reads
-    # ------------------------------------------------------------------
-
     async def get_graph_data(
         self,
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        """Retrieve all nodes and edges in the graph.
+
+        Returns:
+        --------
+            A tuple of (nodes, edges) where nodes are (id, props) and
+            edges are (source_id, target_id, relationship_name, props).
+        """
         async with self._session() as session:
-            # Fetch nodes
             node_result = await session.execute(
                 text("SELECT id, name, type, properties FROM graph_node")
             )
@@ -431,7 +502,6 @@ class PostgresAdapter(GraphDBInterface):
             if not nodes:
                 return [], []
 
-            # Fetch edges
             edge_result = await session.execute(
                 text("""
                     SELECT source_id, target_id, relationship_name, properties
@@ -450,123 +520,159 @@ class PostgresAdapter(GraphDBInterface):
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:
-        # Build WHERE clause from attribute filters
+        """Retrieve nodes matching attribute filters, plus edges between them.
+
+        Parameters:
+        -----------
+            attribute_filters: A list of {attr: [values]} dicts. Only 'id',
+                'name', and 'type' are valid filter attributes.
+
+        Returns:
+        --------
+            A tuple of (nodes, edges) matching the filters.
+        """
+        if not attribute_filters:
+            return await self.get_graph_data()
+
+        # Validate attribute names against whitelist to prevent SQL injection
         where_parts = []
         params = {}
         for i, filter_dict in enumerate(attribute_filters):
-            for attr, values in filter_dict.items():
+            for attr, filter_values in filter_dict.items():
+                if attr not in self._ALLOWED_FILTER_ATTRS:
+                    raise ValueError(f"Invalid filter attribute: {attr!r}")
                 param = f"filt_{i}_{attr}"
                 where_parts.append(f"n.{attr} = ANY(:{param})")
-                params[param] = values
+                params[param] = filter_values
+
+        if not where_parts:
+            return await self.get_graph_data()
 
         where_clause = " AND ".join(where_parts)
 
         async with self._session() as session:
-            # Fetch filtered nodes
-            node_result = await session.execute(
-                text(f"SELECT id, name, type, properties FROM graph_node n WHERE {where_clause}"),
+            result = await session.execute(
+                text(f"""
+                    WITH filtered_nodes AS (
+                        SELECT id, name, type, properties
+                        FROM graph_node n
+                        WHERE {where_clause}
+                    )
+                    SELECT 'node' AS kind, fn.id, fn.name, fn.type, fn.properties,
+                           NULL AS source_id, NULL AS target_id,
+                           NULL AS relationship_name, NULL AS edge_props
+                    FROM filtered_nodes fn
+                    UNION ALL
+                    SELECT 'edge', NULL, NULL, NULL, NULL,
+                           e.source_id, e.target_id,
+                           e.relationship_name, e.properties
+                    FROM graph_edge e
+                    WHERE e.source_id IN (SELECT id FROM filtered_nodes)
+                      AND e.target_id IN (SELECT id FROM filtered_nodes)
+                """),
                 params,
             )
+
             nodes = []
-            node_ids = []
-            for row in node_result.fetchall():
-                data = {"name": row[1], "type": row[2]}
-                if row[3]:
-                    data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
-                nodes.append((row[0], data))
-                node_ids.append(row[0])
-
-            if not nodes:
-                return [], []
-
-            # Fetch edges between filtered nodes
-            edge_result = await session.execute(
-                text("""
-                    SELECT source_id, target_id, relationship_name, properties
-                    FROM graph_edge
-                    WHERE source_id = ANY(:ids) AND target_id = ANY(:ids)
-                """),
-                {"ids": node_ids},
-            )
             edges = []
-            for row in edge_result.fetchall():
-                props = {}
-                if row[3]:
-                    props = row[3] if isinstance(row[3], dict) else json.loads(row[3])
-                edges.append((row[0], row[1], row[2], props))
+            for row in result.fetchall():
+                if row[0] == "node":
+                    data = {"name": row[2], "type": row[3]}
+                    if row[4]:
+                        data.update(row[4] if isinstance(row[4], dict) else json.loads(row[4]))
+                    nodes.append((row[1], data))
+                else:
+                    props = {}
+                    if row[8]:
+                        props = row[8] if isinstance(row[8], dict) else json.loads(row[8])
+                    edges.append((row[5], row[6], row[7], props))
 
             return nodes, edges
 
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str]
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
+        """Retrieve a subgraph containing matching nodes, their neighbors, and interconnecting edges.
+
+        Parameters:
+        -----------
+            node_type: The DataPoint subclass whose __name__ is the type label.
+            node_name: List of node names to match.
+
+        Returns:
+        --------
+            A tuple of (nodes, edges) for the subgraph.
+        """
         label = node_type.__name__
 
         async with self._session() as session:
-            # Find primary nodes
-            primary_result = await session.execute(
+            result = await session.execute(
                 text("""
-                    SELECT DISTINCT id FROM graph_node
-                    WHERE type = :label AND name = ANY(:names)
+                    WITH primary_nodes AS (
+                        SELECT DISTINCT id
+                        FROM graph_node
+                        WHERE type = :label AND name = ANY(:names)
+                    ),
+                    neighbor_ids AS (
+                        SELECT DISTINCT CASE
+                            WHEN e.source_id IN (SELECT id FROM primary_nodes)
+                            THEN e.target_id ELSE e.source_id
+                        END AS id
+                        FROM graph_edge e
+                        WHERE e.source_id IN (SELECT id FROM primary_nodes)
+                           OR e.target_id IN (SELECT id FROM primary_nodes)
+                    ),
+                    all_ids AS (
+                        SELECT id FROM primary_nodes
+                        UNION
+                        SELECT id FROM neighbor_ids
+                    )
+                    SELECT 'node' AS kind,
+                           n.id, n.name, n.type, n.properties,
+                           NULL AS source_id, NULL AS target_id,
+                           NULL AS relationship_name, NULL AS edge_props
+                    FROM graph_node n
+                    WHERE n.id IN (SELECT id FROM all_ids)
+                    UNION ALL
+                    SELECT 'edge', NULL, NULL, NULL, NULL,
+                           e.source_id, e.target_id,
+                           e.relationship_name, e.properties
+                    FROM graph_edge e
+                    WHERE e.source_id IN (SELECT id FROM all_ids)
+                      AND e.target_id IN (SELECT id FROM all_ids)
                 """),
                 {"label": label, "names": node_name},
             )
-            primary_ids = [row[0] for row in primary_result.fetchall()]
-            if not primary_ids:
-                return [], []
 
-            # Find neighbors
-            nbr_result = await session.execute(
-                text("""
-                    SELECT DISTINCT CASE
-                        WHEN source_id = ANY(:ids) THEN target_id
-                        ELSE source_id
-                    END AS neighbor_id
-                    FROM graph_edge
-                    WHERE source_id = ANY(:ids) OR target_id = ANY(:ids)
-                """),
-                {"ids": primary_ids},
-            )
-            neighbor_ids = [row[0] for row in nbr_result.fetchall()]
-            all_ids = list(set(primary_ids + neighbor_ids))
-
-            # Fetch all relevant nodes
-            node_result = await session.execute(
-                text("SELECT id, name, type, properties FROM graph_node WHERE id = ANY(:ids)"),
-                {"ids": all_ids},
-            )
             nodes = []
-            for row in node_result.fetchall():
-                data = {"id": row[0], "name": row[1], "type": row[2]}
-                if row[3]:
-                    data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
-                nodes.append((row[0], data))
-
-            # Fetch edges between these nodes
-            edge_result = await session.execute(
-                text("""
-                    SELECT source_id, target_id, relationship_name, properties
-                    FROM graph_edge
-                    WHERE source_id = ANY(:ids) AND target_id = ANY(:ids)
-                """),
-                {"ids": all_ids},
-            )
             edges = []
-            for row in edge_result.fetchall():
-                props = {}
-                if row[3]:
-                    props = row[3] if isinstance(row[3], dict) else json.loads(row[3])
-                edges.append((row[0], row[1], row[2], props))
+            for row in result.fetchall():
+                if row[0] == "node":
+                    data = {"id": row[1], "name": row[2], "type": row[3]}
+                    if row[4]:
+                        data.update(row[4] if isinstance(row[4], dict) else json.loads(row[4]))
+                    nodes.append((row[1], data))
+                else:
+                    props = {}
+                    if row[8]:
+                        props = row[8] if isinstance(row[8], dict) else json.loads(row[8])
+                    edges.append((row[5], row[6], row[7], props))
 
             return nodes, edges
 
-    # ------------------------------------------------------------------
-    # GraphDBInterface: metrics
-    # ------------------------------------------------------------------
-
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
+        """Compute graph metrics (node/edge counts, degree, density, components).
+
+        Parameters:
+        -----------
+            include_optional: If True, also compute self-loop count.
+
+        Returns:
+        --------
+            A dict of metric names to values. Diameter, avg shortest path,
+            and clustering return -1 (not computed).
+        """
         async with self._session() as session:
-            # Basic counts
             n_result = await session.execute(text("SELECT count(*) FROM graph_node"))
             num_nodes = n_result.scalar()
             e_result = await session.execute(text("SELECT count(*) FROM graph_edge"))
@@ -613,14 +719,10 @@ class PostgresAdapter(GraphDBInterface):
             }
 
             if include_optional:
-                # Self-loops
                 sl_result = await session.execute(
                     text("SELECT count(*) FROM graph_edge WHERE source_id = target_id")
                 )
                 metrics["num_selfloops"] = sl_result.scalar()
-
-                # Diameter and avg shortest path via BFS would be expensive;
-                # return -1 as placeholder (same as Kuzu when not computed)
                 metrics["diameter"] = -1
                 metrics["avg_shortest_path_length"] = -1
                 metrics["avg_clustering"] = -1
@@ -632,21 +734,26 @@ class PostgresAdapter(GraphDBInterface):
 
             return metrics
 
-    # ------------------------------------------------------------------
-    # GraphDBInterface: deletion
-    # ------------------------------------------------------------------
-
     async def delete_graph(self) -> None:
+        """Delete all nodes and edges from the graph."""
         await self._ensure_initialized()
         async with self._session() as session:
             await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
 
-    # ------------------------------------------------------------------
-    # GraphDBInterface: triplets
-    # ------------------------------------------------------------------
-
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+        """Retrieve a batch of (source, relationship, target) triplets.
+
+        Parameters:
+        -----------
+            offset: Number of triplets to skip.
+            limit: Maximum number of triplets to return.
+
+        Returns:
+        --------
+            A list of dicts with 'start_node', 'relationship_properties',
+            and 'end_node' keys.
+        """
         if offset < 0:
             raise ValueError(f"Offset must be non-negative, got {offset}")
         if limit < 0:
@@ -670,27 +777,22 @@ class PostgresAdapter(GraphDBInterface):
 
             triplets = []
             for row in result.fetchall():
-                # Parse start node
                 start_node = {"id": row[0], "name": row[1], "type": row[2]}
                 if row[3]:
                     start_node.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
 
-                # Parse relationship
                 rel = {"relationship_name": row[4]}
                 if row[5]:
                     rel_props = row[5] if isinstance(row[5], dict) else json.loads(row[5])
                     rel.update(rel_props)
 
-                # Parse end node
                 end_node = {"id": row[6], "name": row[7], "type": row[8]}
                 if row[9]:
                     end_node.update(row[9] if isinstance(row[9], dict) else json.loads(row[9]))
 
-                triplets.append(
-                    {
-                        "start_node": start_node,
-                        "relationship_properties": rel,
-                        "end_node": end_node,
-                    }
-                )
+                triplets.append({
+                    "start_node": start_node,
+                    "relationship_properties": rel,
+                    "end_node": end_node,
+                })
             return triplets
