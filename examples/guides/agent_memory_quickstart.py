@@ -89,10 +89,9 @@ async def main() -> None:
     without_memory = await without_memory_agent()
     trace_result = await trace_test()
 
+    print("The in-memory knowledge is that the feature is called Maple Panda")
 
-    print('The in-memory knowledge is that the feature is called Maple Panda')
-
-    print('AGENT ANSWERS:')
+    print("AGENT ANSWERS:")
     print("WITH MEMORY:")
     print(with_memory)
     print()
