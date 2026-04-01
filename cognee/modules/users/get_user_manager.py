@@ -28,17 +28,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_login(
         self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
     ):
-        access_token_cookie = response.headers.get("Set-Cookie")
-        match = re.search(
-            r"(?i)\bSet-Cookie:\s*([^=]+)=([^;]+)", f"Set-Cookie: {access_token_cookie}"
-        )
-        if match:
-            access_token = match.group(2)
-            response.status_code = 200
-            response.body = json.dumps(
-                {"access_token": access_token, "token_type": "bearer"}
-            ).encode(encoding="utf-8")
-            response.headers.append("Content-Type", "application/json")
+        logger.info("User %s has logged in.", user.id)
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         logger.info("User %s has registered.", user.id)
