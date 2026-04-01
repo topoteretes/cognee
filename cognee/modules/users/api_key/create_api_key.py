@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 
 
 class ApiKeySettings(BaseSettings):
-    max_user_api_keys: int = 5
+    max_user_api_keys: int = 10
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
