@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import NAMESPACE_OID, uuid4, uuid5
@@ -209,6 +210,58 @@ async def test_agent_memory_isolated_between_decorated_methods_with_different_us
 
 
 @pytest.mark.asyncio
+async def test_agent_memory_restores_outer_context_after_nested_decorated_call(monkeypatch):
+    """Restore the outer agent-memory context after a nested decorated call completes."""
+    import cognee
+    from cognee.modules.agent_memory.runtime import get_current_agent_memory_context
+
+    outer_scope = _make_scope()
+    inner_scope = _make_scope()
+
+    async def fake_retrieve_memory_context(context):
+        if context.origin_function.endswith("outer_agent"):
+            context.memory_query = "outer query"
+            return "outer memory"
+        context.memory_query = "inner query"
+        return "inner memory"
+
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.decorator.resolve_agent_scope",
+        AsyncMock(side_effect=[outer_scope, inner_scope]),
+    )
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.decorator.retrieve_memory_context",
+        AsyncMock(side_effect=fake_retrieve_memory_context),
+    )
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.decorator.persist_trace",
+        AsyncMock(),
+    )
+
+    @cognee.agent_memory(with_memory=True, save_traces=False, memory_query_fixed="outer")
+    async def outer_agent() -> tuple[str, str, str]:
+        outer_context = get_current_agent_memory_context()
+        assert outer_context is not None
+        outer_before = outer_context.memory_context
+        inner_result = await inner_agent()
+        outer_after_context = get_current_agent_memory_context()
+        assert outer_after_context is not None
+        return outer_before, inner_result, outer_after_context.memory_context
+
+    @cognee.agent_memory(with_memory=True, save_traces=False, memory_query_fixed="inner")
+    async def inner_agent() -> str:
+        inner_context = get_current_agent_memory_context()
+        assert inner_context is not None
+        return inner_context.memory_context
+
+    outer_before, inner_result, outer_after = await outer_agent()
+
+    assert outer_before == "outer memory"
+    assert inner_result == "inner memory"
+    assert outer_after == "outer memory"
+
+
+@pytest.mark.asyncio
 async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
     """Pass the resolved user and dataset id directly to search during retrieval."""
     from cognee.modules.agent_memory.runtime import (
@@ -245,6 +298,41 @@ async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
     assert call_kwargs["user"] == scope.user
     assert call_kwargs["dataset_ids"] == [scope.dataset_id]
     assert call_kwargs["top_k"] == 7
+
+
+@pytest.mark.asyncio
+async def test_retrieve_memory_context_stringifies_non_string_method_query(monkeypatch):
+    """Stringify non-string method values before passing them to search as memory queries."""
+    from cognee.modules.agent_memory.runtime import (
+        AgentMemoryConfig,
+        AgentMemoryContext,
+        retrieve_memory_context,
+    )
+
+    search_mock = AsyncMock(return_value=["Structured memory"])
+    monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
+
+    scope = _make_scope()
+    context = AgentMemoryContext(
+        origin_function="test_agent",
+        config=AgentMemoryConfig(
+            with_memory=True,
+            save_traces=False,
+            memory_query_fixed=None,
+            memory_query_from_method="payload",
+            memory_top_k=5,
+            user=scope.user,
+            dataset_name="demo",
+        ),
+        method_params={"payload": {"question": "nested query"}},
+        scope=scope,
+    )
+
+    result = await retrieve_memory_context(context)
+
+    assert result == "Structured memory"
+    assert context.memory_query == "{'question': 'nested query'}"
+    assert search_mock.await_args.kwargs["query_text"] == "{'question': 'nested query'}"
 
 
 @pytest.mark.asyncio
@@ -303,6 +391,38 @@ async def test_resolve_agent_scope_requires_read_and_write_permissions(monkeypat
     )
 
     with pytest.raises(CogneeValidationError, match="both read and write permissions"):
+        await resolve_agent_scope(
+            AgentMemoryConfig(
+                with_memory=True,
+                save_traces=False,
+                memory_query_fixed=None,
+                memory_query_from_method=None,
+                memory_top_k=5,
+                user=None,
+                dataset_name="shared",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_scope_rejects_duplicate_dataset_name_matches(monkeypatch):
+    """Reject ambiguous dataset-name matches when multiple readable and writable datasets exist."""
+    from cognee.modules.agent_memory.runtime import AgentMemoryConfig, resolve_agent_scope
+
+    user = _make_user()
+    first_dataset = SimpleNamespace(id=uuid4(), name="shared", owner_id=user.id)
+    second_dataset = SimpleNamespace(id=uuid4(), name="shared", owner_id=user.id)
+
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.runtime.get_default_user",
+        AsyncMock(return_value=user),
+    )
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.runtime.get_all_user_permission_datasets",
+        AsyncMock(side_effect=[[first_dataset, second_dataset], [first_dataset, second_dataset]]),
+    )
+
+    with pytest.raises(CogneeValidationError, match="Multiple datasets named"):
         await resolve_agent_scope(
             AgentMemoryConfig(
                 with_memory=True,
@@ -522,6 +642,103 @@ async def test_persist_trace_restores_previous_database_context(monkeypatch):
     await persist_trace(context)
 
     add_data_points.assert_awaited_once()
+    assert graph_db_config.get() == previous_graph_context
+    assert vector_db_config.get() == previous_vector_context
+    assert file_storage_config.get() == previous_storage_context
+
+
+@pytest.mark.asyncio
+async def test_agent_memory_persists_error_trace_and_reraises(monkeypatch):
+    """Persist an error trace while re-raising the original wrapped exception."""
+    import cognee
+
+    add_data_points = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.decorator.resolve_agent_scope",
+        AsyncMock(return_value=_make_scope()),
+    )
+    monkeypatch.setattr("cognee.tasks.storage.add_data_points", add_data_points)
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.runtime.set_database_global_context_variables",
+        AsyncMock(),
+    )
+
+    @cognee.agent_memory(with_memory=False, save_traces=True)
+    async def failing_agent() -> str:
+        raise RuntimeError("Intentional failure")
+
+    with pytest.raises(RuntimeError, match="Intentional failure"):
+        await failing_agent()
+
+    add_data_points.assert_awaited_once()
+    trace = add_data_points.await_args.args[0][0]
+    assert trace.status == "error"
+    assert trace.error_message == "Intentional failure"
+    assert trace.text == "Intentional failure"
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_handles_concurrent_calls_without_leaking_parent_context(monkeypatch):
+    """Persist concurrent traces without changing the caller task's database contexts."""
+    from cognee.context_global_variables import graph_db_config, vector_db_config
+    from cognee.infrastructure.files.storage.config import file_storage_config
+    from cognee.modules.agent_memory.runtime import (
+        AgentMemoryConfig,
+        AgentMemoryContext,
+        persist_trace,
+    )
+
+    persisted_texts: list[str] = []
+
+    async def fake_add_data_points(data_points):
+        await asyncio.sleep(0.01)
+        persisted_texts.append(data_points[0].text)
+
+    async def fake_set_database_global_context_variables(dataset_id, _owner_id):
+        graph_db_config.set({"graph_database_name": str(dataset_id)})
+        vector_db_config.set({"vector_db_name": str(dataset_id)})
+        file_storage_config.set({"data_root_directory": f"/tmp/{dataset_id}"})
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr("cognee.tasks.storage.add_data_points", fake_add_data_points)
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.runtime.set_database_global_context_variables",
+        fake_set_database_global_context_variables,
+    )
+
+    previous_graph_context = {"graph_database_name": "parent_dataset"}
+    previous_vector_context = {"vector_db_name": "parent_dataset"}
+    previous_storage_context = {"data_root_directory": "/tmp/parent_dataset"}
+
+    graph_db_config.set(previous_graph_context)
+    vector_db_config.set(previous_vector_context)
+    file_storage_config.set(previous_storage_context)
+
+    contexts = []
+    for value in ("first trace", "second trace"):
+        scope = _make_scope()
+        contexts.append(
+            AgentMemoryContext(
+                origin_function="test_agent",
+                config=AgentMemoryConfig(
+                    with_memory=False,
+                    save_traces=True,
+                    memory_query_fixed=None,
+                    memory_query_from_method=None,
+                    memory_top_k=5,
+                    user=scope.user,
+                    dataset_name=None,
+                ),
+                method_params={},
+                scope=scope,
+                method_return_value=value,
+                status="success",
+            )
+        )
+
+    await asyncio.gather(*(persist_trace(context) for context in contexts))
+
+    assert sorted(persisted_texts) == ["first trace", "second trace"]
     assert graph_db_config.get() == previous_graph_context
     assert vector_db_config.get() == previous_vector_context
     assert file_storage_config.get() == previous_storage_context
