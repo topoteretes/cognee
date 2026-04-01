@@ -532,10 +532,7 @@ def test_llmgateway_inject_agent_memory_includes_created_context_text():
         reset_current_agent_memory_context(token)
 
     assert injected_text == (
-        "Additional Cognee Memory Context:\n"
-        "stored memory\n\n"
-        "Original Input:\n"
-        "original question"
+        "Additional Cognee Memory Context:\nstored memory\n\nOriginal Input:\noriginal question"
     )
 
 
