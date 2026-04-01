@@ -226,7 +226,6 @@ exclude = [
     "migrations/",  # Ignore migrations directory
     "notebooks/",       # Ignore notebook files
     "build/",           # Ignore build directory
-    "cognee/pipelines.py",
     "cognee/modules/users/models/Group.py",
     "cognee/modules/users/models/ACL.py",
     "cognee/modules/pipelines/models/Task.py",
