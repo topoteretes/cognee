@@ -134,12 +134,18 @@ jobs:
 
       - name: Run Postgres Hybrid Adapter Tests
         env:
+          ENV: 'dev'
           DB_PROVIDER: postgres
           DB_HOST: localhost
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
           DB_NAME: cognee_db
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run pytest cognee/tests/e2e/postgres/test_postgres_hybrid_adapter.py -v
 
       - name: Run Postgres Hybrid E2E Test

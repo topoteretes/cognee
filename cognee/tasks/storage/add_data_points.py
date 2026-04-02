@@ -148,10 +148,7 @@ async def add_data_points(
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)
         if triplets:
-            if use_hybrid:
-                await graph_engine.add_nodes_with_vectors(triplets)
-            else:
-                await index_data_points(triplets, vector_engine=vector_engine)
+            await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
     return data_points

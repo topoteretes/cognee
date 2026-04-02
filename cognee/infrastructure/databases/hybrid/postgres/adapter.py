@@ -146,9 +146,14 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         return await self._graph.get_filtered_graph_data(attribute_filters)
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self,
+        node_type: Type[Any],
+        node_name: List[str],
+        node_name_filter_operator: str = "OR",
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
-        return await self._graph.get_nodeset_subgraph(node_type, node_name)
+        return await self._graph.get_nodeset_subgraph(
+            node_type, node_name, node_name_filter_operator
+        )
 
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         return await self._graph.get_graph_metrics(include_optional)
@@ -327,7 +332,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                         text(f"""
                             INSERT INTO {table} (id, payload, vector)
                             VALUES (:id, CAST(:payload AS json), :vector)
-                            ON CONFLICT (id) DO NOTHING
+                            ON CONFLICT (id) DO UPDATE SET
+                                payload = EXCLUDED.payload,
+                                vector = EXCLUDED.vector
                         """),
                         {
                             "id": str(dp.id),
@@ -428,7 +435,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                     text(f"""
                         INSERT INTO {table} (id, payload, vector)
                         VALUES (:id, CAST(:payload AS json), :vector)
-                        ON CONFLICT (id) DO NOTHING
+                        ON CONFLICT (id) DO UPDATE SET
+                            payload = EXCLUDED.payload,
+                            vector = EXCLUDED.vector
                     """),
                     {"id": str(edge_id), "payload": payload, "vector": str(vector)},
                 )
@@ -440,14 +449,14 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         node_ids: List[str],
         collections: Optional[Dict[str, List[str]]] = None,
     ) -> None:
-        """Delete nodes from graph and their embeddings from vector tables
-        in a single database transaction.
+        """Delete nodes from graph and optionally their embeddings from
+        vector tables in a single database transaction.
 
         Args:
-            node_ids: IDs of nodes to delete.
+            node_ids: IDs of nodes to delete from graph_node.
             collections: Mapping of collection_name -> list of IDs to delete
-                from that collection. If None, deletes node_ids from all
-                known collections.
+                from that collection. If None, only graph rows are deleted;
+                callers are responsible for supplying collection info.
         """
         if not node_ids:
             return
@@ -461,7 +470,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 {"ids": node_ids},
             )
 
-            # Delete from vector collections
+            # Delete from vector collections (caller must specify which)
             if collections:
                 for collection_name, ids in collections.items():
                     if not ids:
