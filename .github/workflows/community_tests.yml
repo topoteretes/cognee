@@ -1,0 +1,176 @@
+name: Community Tests (No Secrets)
+
+# Runs on ALL pull requests, including forks.
+# No secrets required — only fully mocked unit tests and code quality checks.
+# This gives community contributors fast feedback on their changes.
+
+on:
+  pull_request:
+    branches: [ main, dev ]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: community-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Validate uv lockfile
+        run: uv lock --check || { echo "'uv lock --check' failed. Run 'uv lock' and push your changes."; exit 1; }
+
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.1
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  unit-tests:
+    name: Unit Tests (Mocked, No Secrets)
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11.x']
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run mocked unit tests
+        run: |
+          uv run pytest \
+            cognee/tests/unit/processing/ \
+            cognee/tests/unit/entity_extraction/ \
+            cognee/tests/unit/modules/graph/ \
+            cognee/tests/unit/modules/chunking/ \
+            cognee/tests/unit/modules/data/ \
+            cognee/tests/unit/modules/retrieval/ \
+            --ignore=cognee/tests/unit/modules/retrieval/graph_completion_retriever_cot_test.py \
+            --ignore=cognee/tests/unit/modules/retrieval/temporal_retriever_test.py \
+            --ignore=cognee/tests/unit/modules/retrieval/triplet_retriever_test.py \
+            cognee/tests/unit/modules/search/ \
+            cognee/tests/unit/modules/pipelines/ \
+            cognee/tests/unit/modules/visualization/ \
+            cognee/tests/unit/modules/ontology/ \
+            cognee/tests/unit/modules/observability/ \
+            cognee/tests/unit/modules/users/ \
+            cognee/tests/unit/modules/memify_tasks/ \
+            cognee/tests/unit/interfaces/graph/ \
+            cognee/tests/unit/infrastructure/databases/cache/ \
+            cognee/tests/unit/infrastructure/databases/vector/test_vector_db_config.py \
+            cognee/tests/unit/infrastructure/databases/relational/ \
+            cognee/tests/unit/infrastructure/databases/test_unified_store_engine.py \
+            cognee/tests/unit/infrastructure/session/ \
+            cognee/tests/unit/infrastructure/llm/ \
+            cognee/tests/unit/infrastructure/test_rate_limiting_retry.py \
+            cognee/tests/unit/tasks/storage/test_add_data_points.py \
+            cognee/tests/unit/shared/ \
+            -v --tb=short
+
+  cli-unit-tests:
+    name: CLI Unit Tests (Mocked, No Secrets)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run CLI unit tests
+        run: uv run pytest cognee/tests/cli_tests/cli_unit_tests/ -v --tb=short
+
+  telemetry-test:
+    name: Telemetry Test (Mocked, No Secrets)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.x'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run telemetry test
+        run: uv run pytest cognee/tests/test_telemetry.py -v --tb=short
+
+  notify:
+    name: Community Tests Status
+    needs: [code-quality, unit-tests, cli-unit-tests, telemetry-test]
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Check Status
+        run: |
+          if [[ "${{ needs.code-quality.result }}" == "success" &&
+                "${{ needs.unit-tests.result }}" == "success" &&
+                "${{ needs.cli-unit-tests.result }}" == "success" &&
+                "${{ needs.telemetry-test.result }}" == "success" ]]; then
+            echo "All community tests passed!"
+          else
+            echo "One or more community tests failed."
+            exit 1
+          fi
