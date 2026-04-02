@@ -20,7 +20,7 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 EMAILS_FILE = DATA_DIR / "emails_stream.jsonl"
 MAX_ROUNDS = 8
 MAX_LOOP_ITERATIONS = 32
-DEFAULT_DATASET_NAME = "main_dataset"
+AGENTIC_TRACES_DATASET = "agentic_traces"
 
 PROPOSER_PROMPT = (
     "You propose one package for the user.\n"
@@ -275,7 +275,7 @@ async def setup_runtime() -> None:
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await setup()
-    await resolve_authorized_user_dataset(DEFAULT_DATASET_NAME)
+    await resolve_authorized_user_dataset(AGENTIC_TRACES_DATASET)
 
 
 async def run_stream_impl(

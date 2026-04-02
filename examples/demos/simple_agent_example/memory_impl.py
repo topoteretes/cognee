@@ -4,19 +4,30 @@ from __future__ import annotations
 
 import cognee
 
-from common import check_eligibility, propose_offer, run_stream_impl, setup_runtime
+from common import (
+    AGENTIC_TRACES_DATASET,
+    check_eligibility,
+    propose_offer,
+    run_stream_impl,
+    setup_runtime,
+)
 
 
 @cognee.agent_memory(
     with_memory=True,
     save_traces=False,
+    dataset_name=AGENTIC_TRACES_DATASET,
     memory_query_fixed=("What packages are accepted and to which user group?"),
 )
 async def _subagent_propose_offer(payload: dict) -> dict:
     return await propose_offer(payload)
 
 
-@cognee.agent_memory(with_memory=False, save_traces=True)
+@cognee.agent_memory(
+    with_memory=False,
+    save_traces=True,
+    dataset_name=AGENTIC_TRACES_DATASET,
+)
 async def _subagent_check_eligibility(payload: dict) -> dict:
     return await check_eligibility(payload)
 
