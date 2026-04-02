@@ -323,3 +323,19 @@ class GraphDBInterface(ABC):
         Returns per-id update success.
         """
         raise NotImplementedError("set_edge_feedback_weights is not implemented for this adapter")
+
+    async def get_triplets_batch(
+        self, offset: int, limit: int
+    ) -> List[Dict[str, Any]]:
+        """Retrieve a batch of triplets (source, edge, target).
+
+        Optional extension — implemented by PostgresAdapter, Neo4jAdapter,
+        and KuzuAdapter but not NeptuneGraphDB.
+
+        Parameters:
+        -----------
+
+            - offset: Number of triplets to skip.
+            - limit: Maximum number of triplets to return.
+        """
+        raise NotImplementedError("get_triplets_batch is not implemented for this adapter")
