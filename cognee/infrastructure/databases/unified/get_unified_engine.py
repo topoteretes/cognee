@@ -74,6 +74,17 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
 
         # Vector adapter: build connection string from relational config
         relational_config = get_relational_config()
+        required = {
+            "DB_HOST": relational_config.db_host,
+            "DB_PORT": relational_config.db_port,
+            "DB_USERNAME": relational_config.db_username,
+            "DB_PASSWORD": relational_config.db_password,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise EnvironmentError(
+                f"Missing relational settings for pghybrid: {', '.join(missing)}"
+            )
         connection_string = (
             f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
             f"@{relational_config.db_host}:{relational_config.db_port}"

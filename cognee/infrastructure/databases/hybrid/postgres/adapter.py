@@ -254,10 +254,17 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         # Embed all texts grouped by collection
         embeddings_by_collection: Dict[str, List[Tuple[DataPoint, List[float]]]] = {}
         for collection, items in vector_groups.items():
-            texts = [DataPoint.get_embeddable_data(dp) for dp, _ in items]
+            valid_items = [
+                (dp, DataPoint.get_embeddable_data(dp))
+                for dp, _ in items
+            ]
+            valid_items = [(dp, t) for dp, t in valid_items if t is not None]
+            if not valid_items:
+                continue
+            texts = [t for _, t in valid_items]
             vectors = await self._vector.embed_data(texts)
             embeddings_by_collection[collection] = [
-                (dp, vec) for (dp, _), vec in zip(items, vectors)
+                (dp, vec) for (dp, _), vec in zip(valid_items, vectors)
             ]
 
         # Ensure vector collection tables exist
@@ -477,9 +484,12 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                         text(f"DELETE FROM {table} WHERE CAST(id AS text) = ANY(:ids)"),
                         {"ids": triplet_ids},
                     )
-                except Exception:
-                    # Triplet collection may not exist
-                    pass
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if "does not exist" in error_msg or "relation" in error_msg:
+                        logger.debug("Triplet_text table not found, skipping: %s", e)
+                    else:
+                        logger.warning("Unexpected error deleting from Triplet_text: %s", e)
 
             await session.commit()
 

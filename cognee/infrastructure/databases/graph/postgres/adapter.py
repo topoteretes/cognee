@@ -769,7 +769,7 @@ class PostgresAdapter(GraphDBInterface):
                     FROM graph_edge e
                     JOIN graph_node s ON s.id = e.source_id
                     JOIN graph_node t ON t.id = e.target_id
-                    ORDER BY e.source_id, e.target_id
+                    ORDER BY e.source_id, e.target_id, e.relationship_name
                     OFFSET :off LIMIT :lim
                 """),
                 {"off": offset, "lim": limit},

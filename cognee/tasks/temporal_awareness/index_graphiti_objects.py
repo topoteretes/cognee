@@ -22,13 +22,12 @@ async def index_and_transform_graphiti_nodes_and_edges():
 
     # Graphiti integration requires Neo4j (it writes directly to Neo4j,
     # and these queries use Neo4j-specific Cypher to normalize its schema)
-    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-    from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
+    from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
 
-    if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
+    if not isinstance(graph_engine, Neo4jAdapter):
         raise RuntimeError(
-            "Graphiti temporal awareness is not supported with the Postgres graph backend. "
-            "Graphiti requires Neo4j. Set GRAPH_DATABASE_PROVIDER=neo4j to use this feature."
+            "Graphiti temporal awareness requires Neo4j. "
+            "Set GRAPH_DATABASE_PROVIDER=neo4j to use this feature."
         )
 
     await graph_engine.query("""MATCH (n) SET n.id = n.uuid RETURN n""", params={})
