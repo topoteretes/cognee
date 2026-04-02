@@ -22,6 +22,11 @@ MAX_ROUNDS = 8
 MAX_LOOP_ITERATIONS = 32
 RULES_DATASET = "rules_data"
 AGENTIC_TRACES_DATASET = "agentic_traces"
+RULES_DATA = [
+    "Students belong to the student user class and can receive only OFFER_FREE.",
+    "Startups belong to the startup user class and can receive only OFFER_PLUS.",
+    "Enterprise buyers belong to the enterprise user class and can receive only OFFER_ENTERPRISE.",
+]
 
 PROPOSER_PROMPT = (
     "You propose one package for the user.\n"
@@ -42,9 +47,23 @@ ELIGIBILITY_PROMPT = (
 
 
 class ProposalOutput(BaseModel):
-    user_category: str = Field(min_length=1)
-    requested_service_tier: str = Field(min_length=1)
-    proposed_action: str = Field(pattern=r"^OFFER_(FREE|STARTER|PLUS|PRO|TEAM|ENTERPRISE)$")
+    user_category: Literal["student", "startup", "enterprise"]
+    requested_service_tier: Literal[
+        "OFFER_FREE",
+        "OFFER_STARTER",
+        "OFFER_PLUS",
+        "OFFER_PRO",
+        "OFFER_TEAM",
+        "OFFER_ENTERPRISE",
+    ]
+    proposed_action: Literal[
+        "OFFER_FREE",
+        "OFFER_STARTER",
+        "OFFER_PLUS",
+        "OFFER_PRO",
+        "OFFER_TEAM",
+        "OFFER_ENTERPRISE",
+    ]
     rationale: str = Field(min_length=1, max_length=120)
 
 
@@ -275,6 +294,8 @@ async def setup_runtime() -> None:
     await setup()
     await resolve_authorized_user_dataset(RULES_DATASET)
     await resolve_authorized_user_dataset(AGENTIC_TRACES_DATASET)
+    await cognee.add(RULES_DATA, dataset_name=RULES_DATASET)
+    await cognee.cognify([RULES_DATASET])
 
 
 async def run_stream_impl(
