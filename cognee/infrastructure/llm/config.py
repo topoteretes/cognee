@@ -78,6 +78,8 @@ class LLMConfig(BaseSettings):
     fallback_endpoint: str = ""
     fallback_model: str = ""
 
+    llm_azure_use_managed_identity: bool = False
+
     llm_args: Union[str, Dict[str, Any], None] = None
 
     baml_registry: Optional[Any] = None
