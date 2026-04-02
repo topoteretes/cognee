@@ -219,7 +219,11 @@ def _create_graph_engine(
             graph_id=graph_identifier,
         )
 
+    all_providers = list(supported_databases.keys()) + [
+        "neo4j", "kuzu", "kuzu-remote", "postgres",
+        "neptune", "neptune_analytics",
+    ]
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'postgres', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(all_providers)}"
     )

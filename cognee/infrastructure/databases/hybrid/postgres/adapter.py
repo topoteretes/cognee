@@ -13,7 +13,7 @@ import json
 import re
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Union, Optional, Tuple, Type
+from typing import Dict, Any, List, Union, Optional, Tuple, Type, TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import text
@@ -24,6 +24,10 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
+
+if TYPE_CHECKING:
+    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 
@@ -49,7 +53,11 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     collection tables.
     """
 
-    def __init__(self, graph_adapter, vector_adapter):
+    def __init__(
+        self,
+        graph_adapter: "PostgresAdapter",
+        vector_adapter: "PGVectorAdapter",
+    ) -> None:
         self._graph = graph_adapter
         self._vector = vector_adapter
         # Expose embedding_engine for callers that access it directly
@@ -570,15 +578,15 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
 
         async with self._graph._session() as session:
             result = await session.execute(sql, params)
-            rows = result.fetchall()
+            rows = result.mappings().fetchall()
 
         return [
             {
-                "node_id": row[0],
-                "node_name": row[1],
-                "node_type": row[2],
-                "relationship_name": row[3],
-                "distance": row[-1],
+                "node_id": row["node_id"],
+                "node_name": row["node_name"],
+                "node_type": row["node_type"],
+                "relationship_name": row["relationship_name"],
+                "distance": row["distance"],
             }
             for row in rows
         ]

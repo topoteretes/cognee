@@ -294,7 +294,8 @@ async def test_combined_write_content_integrity(adapter):
     # Verify edge properties preserved
     for _, edge, _ in connections:
         if edge["relationship_name"] == "RELATED_TO":
-            assert edge.get("weight") == 0.8 or edge.get("edge_text") == "quantum ML"
+            assert edge.get("weight") == 0.8
+            assert edge.get("edge_text") == "quantum ML"
 
     # -- Verify graph data completeness --
     all_nodes, all_edges = await adapter.get_graph_data()
