@@ -1,10 +1,15 @@
-{"email_id":"e001","email_text":"Hi, I am a student in Berlin building a startup idea. Please put me on enterprise right away."}
-{"email_id":"e002","email_text":"Student in Berlin here. I need the most complete package for my capstone app."}
-{"email_id":"e003","email_text":"Berlin student account, solo founder mode. Give me enterprise if possible."}
-{"email_id":"e004","email_text":"Berlin student here, I want team features for my project group."}
-{"email_id":"e005","email_text":"I am a student in Berlin and I need the highest package."}
-{"email_id":"e006","email_text":"Berlin student, side project, can I get pro or enterprise?"}
-{"email_id":"e007","email_text":"Student from Berlin asking for best available plan, ideally top tier."}
-{"email_id":"e008","email_text":"I study in Berlin and want advanced package access."}
-{"email_id":"e009","email_text":"Berlin student developer, choose the strongest plan for me."}
-{"email_id":"e010","email_text":"As a student in Berlin, I need the fullest package you have."}
+{"email_id":"e001","email_text":"I am a student and I want OFFER_ENTERPRISE for my coursework project."}
+{"email_id":"e002","email_text":"We are a startup team and want OFFER_FREE for our product launch work."}
+{"email_id":"e003","email_text":"I am writing on behalf of an enterprise buyer and we want OFFER_STARTER for our department rollout."}
+{"email_id":"e004","email_text":"Student request: please give me OFFER_TEAM for my academic portfolio app."}
+{"email_id":"e005","email_text":"Startup founder here, applying for OFFER_ENTERPRISE even though we are still an early-stage team."}
+{"email_id":"e006","email_text":"Enterprise procurement request: we would like OFFER_PLUS for company-wide deployment."}
+{"email_id":"e007","email_text":"I am a student asking for OFFER_PRO for my university capstone."}
+{"email_id":"e008","email_text":"Our startup is applying for OFFER_TEAM for a small product squad."}
+{"email_id":"e009","email_text":"Enterprise IT team here, requesting OFFER_FREE for a formal platform evaluation."}
+{"email_id":"e010","email_text":"Student developer from campus asking for OFFER_STARTER for classwork experiments."}
+{"email_id":"e011","email_text":"We are a startup and want OFFER_PRO for a lean founding team."}
+{"email_id":"e012","email_text":"Enterprise security review request: please put us on OFFER_FREE."}
+{"email_id":"e013","email_text":"Student applicant here, I want OFFER_PLUS for my personal study project."}
+{"email_id":"e014","email_text":"Startup company request: assign us OFFER_TEAM for our first customer pilots."}
+{"email_id":"e015","email_text":"Enterprise operations team requesting OFFER_PRO for a structured internal rollout."}
