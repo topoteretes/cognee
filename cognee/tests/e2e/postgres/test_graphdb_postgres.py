@@ -7,7 +7,7 @@ Requires:
 """
 
 import asyncio
-from cognee.tests.test_graphdb_shared import run_graph_db_test
+from cognee.tests.e2e.postgres.test_graphdb_shared import run_graph_db_test
 
 
 async def main():

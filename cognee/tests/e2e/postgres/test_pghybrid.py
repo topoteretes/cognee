@@ -14,7 +14,7 @@ import asyncio
 
 # Import cognee first -- its __init__ calls dotenv.load_dotenv(override=True)
 # which overwrites os.environ from .env. We must set our overrides AFTER this.
-from cognee.tests.test_graphdb_shared import run_graph_db_test
+from cognee.tests.e2e.postgres.test_graphdb_shared import run_graph_db_test
 
 # Now override env vars (after dotenv has run)
 os.environ["USE_UNIFIED_PROVIDER"] = "pghybrid"
