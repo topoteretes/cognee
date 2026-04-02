@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
@@ -102,9 +103,13 @@ async def add_data_points(
     unified = await get_unified_engine()
     graph_engine = unified.graph
     vector_engine = unified.vector
+    use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
-    await graph_engine.add_nodes(nodes)
-    await index_data_points(nodes, vector_engine=vector_engine)
+    if use_hybrid:
+        await graph_engine.add_nodes_with_vectors(nodes)
+    else:
+        await graph_engine.add_nodes(nodes)
+        await index_data_points(nodes, vector_engine=vector_engine)
 
     if user and dataset and data:
         await upsert_nodes(
@@ -114,14 +119,20 @@ async def add_data_points(
             edges, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
         )
 
-    await graph_engine.add_edges(edges)
-    await index_graph_edges(edges, vector_engine=vector_engine)
+    if use_hybrid:
+        await graph_engine.add_edges_with_vectors(edges)
+    else:
+        await graph_engine.add_edges(edges)
+        await index_graph_edges(edges, vector_engine=vector_engine)
 
     if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
         custom_edges = ensure_default_edge_properties(custom_edges)
-        await graph_engine.add_edges(custom_edges)
-        await index_graph_edges(custom_edges, vector_engine=vector_engine)
+        if use_hybrid:
+            await graph_engine.add_edges_with_vectors(custom_edges)
+        else:
+            await graph_engine.add_edges(custom_edges)
+            await index_graph_edges(custom_edges, vector_engine=vector_engine)
 
         if user and dataset and data:
             await upsert_edges(
@@ -137,7 +148,10 @@ async def add_data_points(
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)
         if triplets:
-            await index_data_points(triplets, vector_engine=vector_engine)
+            if use_hybrid:
+                await graph_engine.add_nodes_with_vectors(triplets)
+            else:
+                await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
     return data_points

@@ -317,11 +317,11 @@ async def test_combined_write_content_integrity(adapter):
     # -- Verify vector payloads contain original data --
     for result in vector_results:
         assert result.payload is not None
-        assert "name" in result.payload
+        assert "text" in result.payload
         if str(result.id) == id1:
-            assert result.payload["name"] == "Quantum Computing"
+            assert result.payload["text"] == "Quantum Computing"
         elif str(result.id) == id3:
-            assert result.payload["name"] == "Neural Networks"
+            assert result.payload["text"] == "Neural Networks"
 
     # -- Verify vector search returns relevant results --
     search_results = await adapter.search(
@@ -332,7 +332,7 @@ async def test_combined_write_content_integrity(adapter):
     )
     assert len(search_results) > 0
     # The closest result should be "Quantum Computing"
-    assert search_results[0].payload["name"] == "Quantum Computing"
+    assert search_results[0].payload["text"] == "Quantum Computing"
 
 
 # -- Tests: combined writes with vector collections (run last) --

@@ -24,6 +24,7 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
+from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import IndexSchema
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
@@ -262,7 +263,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 vector_groups[collection].append((dp, field_name))
 
         # Embed all texts grouped by collection
-        embeddings_by_collection: Dict[str, List[Tuple[DataPoint, List[float]]]] = {}
+        embeddings_by_collection: Dict[str, List[Tuple[DataPoint, List[float], str]]] = {}
         for collection, items in vector_groups.items():
             valid_items = [
                 (dp, DataPoint.get_embeddable_data(dp))
@@ -274,7 +275,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             texts = [t for _, t in valid_items]
             vectors = await self._vector.embed_data(texts)
             embeddings_by_collection[collection] = [
-                (dp, vec) for (dp, _), vec in zip(valid_items, vectors)
+                (dp, vec, t) for (dp, t), vec in zip(valid_items, vectors)
             ]
 
         # Ensure vector collection tables exist
@@ -314,9 +315,13 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             # Insert vector embeddings into each collection table
             for collection, items in embeddings_by_collection.items():
                 table = _validate_table_name(collection)
-                for dp, vector in items:
-                    payload = serialize_data(dp.model_dump())
-                    payload["belongs_to_set"] = dp.belongs_to_set or []
+                for dp, vector, embed_text in items:
+                    index_point = IndexSchema(
+                        id=dp.id,
+                        text=embed_text,
+                        belongs_to_set=(dp.belongs_to_set or []),
+                    )
+                    payload = serialize_data(index_point.model_dump())
                     await session.execute(
                         text(f"""
                             INSERT INTO {table} (id, payload, vector)
