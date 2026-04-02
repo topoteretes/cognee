@@ -73,7 +73,7 @@ class EligibilityOutput(BaseModel):
     feedback: str
 
 
-RootFn = Callable[[dict], Awaitable[dict]]
+RootFn = Callable[[dict, str], Awaitable[dict]]
 
 
 class ToolName(str, Enum):
@@ -189,8 +189,7 @@ def build_email_state_line(
     decision = check.decision if check else "none"
     feedback = check.feedback if check else "none"
     return (
-        f"[{email_id}] {prefix} user={user} offer={offer} "
-        f"decision={decision} feedback={feedback}"
+        f"[{email_id}] {prefix} user={user} offer={offer} decision={decision} feedback={feedback}"
     )
 
 
@@ -224,9 +223,13 @@ def resolve_final_state(
     return last_proposal, last_check
 
 
-async def propose_offer(payload: dict) -> dict:
+async def propose_offer(payload: dict, email: str) -> dict:
+    proposal_payload = {
+        **payload,
+        "email_text": email,
+    }
     result = await LLMGateway.acreate_structured_output(
-        text_input=build_proposal_input(payload),
+        text_input=build_proposal_input(proposal_payload),
         system_prompt=PROPOSER_PROMPT,
         response_model=ProposalOutput,
     )
@@ -344,13 +347,13 @@ async def run_stream_impl(
 
             if next_step.tool_name == ToolName.PROPOSE_OFFER:
                 proposal_payload = await subagent_propose_offer(
-                    {
+                    payload={
                         "email_id": email["email_id"],
-                        "email_text": email["email_text"],
                         "feedback_history": feedback_history,
                         "proposal_history": proposal_history,
                         "rejected_offers": sorted(rejected_offers),
-                    }
+                    },
+                    email=email["email_text"],
                 )
                 current_proposal = ProposalOutput.model_validate(proposal_payload)
                 last_proposal = current_proposal
