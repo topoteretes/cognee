@@ -135,9 +135,11 @@ def test_logistics_adapter_creates_world_when_missing(tmp_path):
     }
 
     answers_by_type = {item["question_type"]: item for item in qa_pairs[:3]}
-    assert isinstance(answers_by_type["delivery_days"]["answer"], (int, type(None)))
-    assert isinstance(answers_by_type["transport_cost"]["answer"], (float, int, type(None)))
+    assert isinstance(answers_by_type["delivery_days"]["answer"], str)
+    assert isinstance(answers_by_type["transport_cost"]["answer"], str)
     assert isinstance(answers_by_type["carrier"]["answer"], str)
+    assert isinstance(answers_by_type["delivery_days"]["golden_answer"], (int, type(None)))
+    assert isinstance(answers_by_type["transport_cost"]["golden_answer"], (float, int, type(None)))
     assert isinstance(answers_by_type["delivery_days"]["golden_context"], str)
 
 
