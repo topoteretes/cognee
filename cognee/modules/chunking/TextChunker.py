@@ -30,7 +30,6 @@ class TextChunker(Chunker):
                             chunk_index=self.chunk_index,
                             cut_type=chunk_data["cut_type"],
                             contains=[],
-                            importance_weight=self.document.importance_weight,
                             metadata={
                                 "index_fields": ["text"],
                             },
@@ -50,7 +49,6 @@ class TextChunker(Chunker):
                                 chunk_index=self.chunk_index,
                                 cut_type=paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
                                 contains=[],
-                                importance_weight=self.document.importance_weight,
                                 metadata={
                                     "index_fields": ["text"],
                                 },
@@ -73,7 +71,6 @@ class TextChunker(Chunker):
                     chunk_index=self.chunk_index,
                     cut_type=paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
                     contains=[],
-                    importance_weight=self.document.importance_weight,
                     metadata={"index_fields": ["text"]},
                 )
             except Exception as e:

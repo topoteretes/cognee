@@ -36,7 +36,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.edges = []
         self.edges_by_distance_key = {}
         self.directed = directed
-        self.triplet_distance_penalty = 3.5
+        self.triplet_distance_penalty = 6.5
         self.feedback_influence = 0.0
 
     def add_node(self, node: Node) -> None:
@@ -170,7 +170,7 @@ class CogneeGraph(CogneeAbstractGraph):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         relevant_ids_to_filter: Optional[List[str]] = None,
-        triplet_distance_penalty: float = 3.5,
+        triplet_distance_penalty: float = 6.5,
         feedback_influence: float = 0.0,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
@@ -319,15 +319,25 @@ class CogneeGraph(CogneeAbstractGraph):
             if active_feedback_influence <= 0.0:
                 return distance
 
+            # Only blend real cosine distances in [0, 2].
+            # Fallback penalties and out-of-range values must remain unchanged so
+            # missing components stay ranked below valid matches.
+            if distance >= self.triplet_distance_penalty or distance < 0.0 or distance > 2.0:
+                return distance
+
             try:
                 normalized_feedback_weight = float(feedback_weight)
             except (TypeError, ValueError):
                 normalized_feedback_weight = 0.5
 
             normalized_feedback_weight = max(0.0, min(1.0, normalized_feedback_weight))
-            return (1.0 - active_feedback_influence) * distance + active_feedback_influence * (
-                1.0 - normalized_feedback_weight
+            # Blend in a normalized space (cosine distance in [0, 2] -> [0, 1]),
+            # then project back to distance scale so score magnitudes stay consistent.
+            normalized_distance = distance / 2.0
+            blended_normalized = (1.0 - active_feedback_influence) * normalized_distance + (
+                active_feedback_influence * (1.0 - normalized_feedback_weight)
             )
+            return blended_normalized * 2.0
 
         def score(edge: Edge) -> float:
             elements = (
@@ -339,11 +349,6 @@ class CogneeGraph(CogneeAbstractGraph):
             importances = []
             for element, label in elements:
                 distances = element.attributes.get("vector_distance")
-                importance_weight = element.attributes.get("importance_weight")
-                try:
-                    importance_weight = float(importance_weight)
-                except (TypeError, ValueError):
-                    importance_weight = 0.5
                 if not isinstance(distances, list) or query_index >= len(distances):
                     raise ValueError(
                         f"{label}: vector_distance must be a list with length > {query_index} "
@@ -358,7 +363,6 @@ class CogneeGraph(CogneeAbstractGraph):
                         f"{label}: vector_distance[{query_index}] must be float-like, "
                         f"got {type(value).__name__}"
                     )
-                distance = (2 - importance_weight) * distance
                 feedback_weight = element.attributes.get("feedback_weight", 0.5)
                 importances.append(_effective_distance(distance, feedback_weight))
 
