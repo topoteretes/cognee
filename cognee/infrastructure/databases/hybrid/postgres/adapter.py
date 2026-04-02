@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 
 logger = get_logger()
@@ -408,26 +409,28 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             # Insert edge type vectors
             table = _validate_table_name(collection)
             for edge_text, count in edge_type_counts.items():
-                edge_id = str(generate_edge_id(edge_id=edge_text))
+                edge_id = generate_edge_id(edge_id=edge_text)
                 vector = text_to_vector.get(edge_text)
                 if vector is None:
                     continue
-                payload = json.dumps(
-                    serialize_data(
-                        {
-                            "id": edge_id,
-                            "relationship_name": edge_text,
-                            "number_of_edges": count,
-                        }
-                    )
+                edge_type_dp = EdgeType(
+                    id=edge_id,
+                    relationship_name=edge_text,
+                    number_of_edges=count,
                 )
+                index_point = IndexSchema(
+                    id=edge_id,
+                    text=edge_text,
+                    belongs_to_set=(edge_type_dp.belongs_to_set or []),
+                )
+                payload = json.dumps(serialize_data(index_point.model_dump()))
                 await session.execute(
                     text(f"""
                         INSERT INTO {table} (id, payload, vector)
                         VALUES (:id, CAST(:payload AS json), :vector)
                         ON CONFLICT (id) DO NOTHING
                     """),
-                    {"id": edge_id, "payload": payload, "vector": str(vector)},
+                    {"id": str(edge_id), "payload": payload, "vector": str(vector)},
                 )
 
             await session.commit()

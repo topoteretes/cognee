@@ -335,6 +335,90 @@ async def test_combined_write_content_integrity(adapter):
     assert search_results[0].payload["text"] == "Quantum Computing"
 
 
+@pytest.mark.asyncio
+async def test_hybrid_payload_matches_separate_path(adapter):
+    """Vector payloads from add_nodes_with_vectors + add_edges_with_vectors
+    must be identical to what the separate add_nodes + index_data_points
+    and add_edges + index_data_points paths produce."""
+    from uuid import uuid5, NAMESPACE_OID
+
+    # Build two parallel graphs with the same structure but different IDs
+    def make_ids(prefix):
+        return {
+            k: str(uuid5(NAMESPACE_OID, f"{prefix}_{k}"))
+            for k in ("physics", "math", "cs")
+        }
+
+    h = make_ids("hybrid")
+    s = make_ids("separate")
+
+    def make_nodes(ids):
+        return [
+            TestEntity(id=ids["physics"], name="Quantum Physics", type="Science"),
+            TestEntity(id=ids["math"], name="Linear Algebra", type="Mathematics"),
+            TestEntity(id=ids["cs"], name="Machine Learning", type="Computer Science"),
+        ]
+
+    def make_edges(ids):
+        return [
+            (ids["physics"], ids["math"], "REQUIRES", {"weight": 0.9}),
+            (ids["math"], ids["cs"], "ENABLES", {"weight": 0.7}),
+            (ids["physics"], ids["cs"], "INSPIRES", {"weight": 0.5}),
+        ]
+
+    # -- Path A: hybrid --
+    await adapter.add_nodes_with_vectors(make_nodes(h))
+    await adapter.add_edges_with_vectors(make_edges(h))
+
+    # -- Path B: separate --
+    sep_nodes = make_nodes(s)
+    await adapter._graph.add_nodes(sep_nodes)
+    await adapter._vector.index_data_points("TestEntity", "name", sep_nodes)
+    sep_edges = make_edges(s)
+    await adapter._graph.add_edges(sep_edges)
+    from cognee.tasks.storage.index_graph_edges import index_graph_edges
+    await index_graph_edges(sep_edges, vector_engine=adapter._vector)
+
+    # -- Compare node payloads --
+    hybrid_node_results = await adapter.retrieve(
+        "TestEntity_name", list(h.values())
+    )
+    separate_node_results = await adapter.retrieve(
+        "TestEntity_name", list(s.values())
+    )
+    assert len(hybrid_node_results) == 3
+    assert len(separate_node_results) == 3
+
+    # Sort by text so we compare matching nodes
+    hybrid_node_results.sort(key=lambda r: r.payload["text"])
+    separate_node_results.sort(key=lambda r: r.payload["text"])
+
+    skip_keys = {"id", "created_at", "updated_at"}
+    for h_res, s_res in zip(hybrid_node_results, separate_node_results):
+        assert set(h_res.payload.keys()) == set(s_res.payload.keys()), (
+            f"node key mismatch: hybrid={set(h_res.payload.keys())} "
+            f"separate={set(s_res.payload.keys())}"
+        )
+        for key in h_res.payload:
+            if key in skip_keys:
+                continue
+            assert h_res.payload[key] == s_res.payload[key], (
+                f"node key {key!r}: hybrid={h_res.payload[key]!r} "
+                f"!= separate={s_res.payload[key]!r}"
+            )
+
+    # -- Compare edge type payloads --
+    hybrid_edge_results = await adapter.search(
+        "EdgeType_relationship_name",
+        query_text="REQUIRES ENABLES INSPIRES",
+        limit=10,
+        include_payload=True,
+    )
+    # Both paths write to the same EdgeType collection; verify at least 3 types
+    edge_texts = {r.payload["text"] for r in hybrid_edge_results}
+    assert {"REQUIRES", "ENABLES", "INSPIRES"} <= edge_texts
+
+
 # -- Tests: combined writes with vector collections (run last) --
 
 
