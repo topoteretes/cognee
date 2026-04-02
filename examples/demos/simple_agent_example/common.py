@@ -42,7 +42,6 @@ ELIGIBILITY_PROMPT = (
 
 
 class ProposalOutput(BaseModel):
-    location: str = Field(min_length=1)
     user_category: str = Field(min_length=1)
     requested_service_tier: str = Field(min_length=1)
     proposed_action: str = Field(pattern=r"^OFFER_(FREE|STARTER|PLUS|PRO|TEAM|ENTERPRISE)$")
@@ -87,7 +86,6 @@ def build_eligibility_input(proposal: ProposalOutput) -> str:
     return (
         f"Proposed action: {proposal.proposed_action}\n"
         f"User category: {proposal.user_category}\n"
-        f"Location: {proposal.location}\n"
     )
 
 
@@ -167,12 +165,11 @@ def build_email_state_line(
 ) -> str:
     offer = proposal.proposed_action if proposal else "none"
     user = proposal.user_category if proposal else "none"
-    location = proposal.location if proposal else "none"
     decision = check.decision if check else "none"
     feedback = check.feedback if check else "none"
     return (
-        f"[{email_id}] {prefix} user={user} location={location} "
-        f"offer={offer} decision={decision} feedback={feedback}"
+        f"[{email_id}] {prefix} user={user} offer={offer} "
+        f"decision={decision} feedback={feedback}"
     )
 
 
