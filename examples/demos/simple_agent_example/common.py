@@ -30,7 +30,8 @@ RULES_DATA = [
 
 PROPOSER_PROMPT = (
     "You propose one package for the user.\n"
-    "Choose exactly one of: OFFER_FREE, OFFER_STARTER, OFFER_PLUS, OFFER_PRO, "
+    "First identify the user based on the e-mail, users can be student, startup, or enterprise.\n"
+    "Then Choose exactly one of: OFFER_FREE, OFFER_STARTER, OFFER_PLUS, OFFER_PRO, "
     "OFFER_TEAM, OFFER_ENTERPRISE.\n"
     "Aim for a package that can realistically be approved.\n"
     "Use any available memory context if it helps.\n"
@@ -43,7 +44,7 @@ ELIGIBILITY_PROMPT = (
     "Decide only from the retrieved rules context.\n"
     "If the retrieved rules support the proposal, return YES. Otherwise return NO.\n"
     "Return a short, specific feedback sentence about the proposed package only.\n"
-    "Do not mention alternatives or general package policy beyond the retrieved rules."
+    "Do not mention alternatives, any other package, or general package policy beyond the retrieved rules."
 )
 
 
@@ -73,7 +74,7 @@ class EligibilityOutput(BaseModel):
     feedback: str
 
 
-RootFn = Callable[[dict, str], Awaitable[dict]]
+RootFn = Callable[[dict], Awaitable[dict]]
 
 
 class ToolName(str, Enum):
@@ -223,13 +224,9 @@ def resolve_final_state(
     return last_proposal, last_check
 
 
-async def propose_offer(payload: dict, email: str) -> dict:
-    proposal_payload = {
-        **payload,
-        "email_text": email,
-    }
+async def propose_offer(payload: dict) -> dict:
     result = await LLMGateway.acreate_structured_output(
-        text_input=build_proposal_input(proposal_payload),
+        text_input=build_proposal_input(payload),
         system_prompt=PROPOSER_PROMPT,
         response_model=ProposalOutput,
     )
@@ -240,12 +237,12 @@ async def check_eligibility(payload: dict) -> dict:
     proposal = ProposalOutput.model_validate(payload["proposal"])
     rules_results = await cognee.search(
         query_text=(
-            f"Is {proposal.proposed_action} allowed for {proposal.user_category} users? "
-            "Answer only from the stored rules."
+            f"Answer YES or NO only: is {proposal.proposed_action} allowed for {proposal.user_category} users?"
         ),
         query_type=cognee.SearchType.GRAPH_COMPLETION,
         datasets=[RULES_DATASET],
-        top_k=3,
+        system_prompt="Return only YES or NO.",
+        top_k=5,
     )
     if isinstance(rules_results, list):
         rules_context = "\n".join(str(item) for item in rules_results if item).strip()
@@ -347,13 +344,13 @@ async def run_stream_impl(
 
             if next_step.tool_name == ToolName.PROPOSE_OFFER:
                 proposal_payload = await subagent_propose_offer(
-                    payload={
+                    {
                         "email_id": email["email_id"],
+                        "email_text": email["email_text"],
                         "feedback_history": feedback_history,
                         "proposal_history": proposal_history,
                         "rejected_offers": sorted(rejected_offers),
-                    },
-                    email=email["email_text"],
+                    }
                 )
                 current_proposal = ProposalOutput.model_validate(proposal_payload)
                 last_proposal = current_proposal

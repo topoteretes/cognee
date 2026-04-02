@@ -17,10 +17,11 @@ from common import (
     with_memory=True,
     save_traces=False,
     dataset_name=AGENTIC_TRACES_DATASET,
-    memory_query_from_method="email",
+    memory_query_fixed="What are the feedbacks that are expressing acceptance?",
+    memory_top_k=20
 )
-async def _subagent_propose_offer(payload: dict, email: str) -> dict:
-    return await propose_offer(payload, email)
+async def _subagent_propose_offer(payload: dict) -> dict:
+    return await propose_offer(payload)
 
 
 @cognee.agent_memory(
