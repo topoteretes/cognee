@@ -40,9 +40,10 @@ PROPOSER_PROMPT = (
 
 ELIGIBILITY_PROMPT = (
     "You check whether the proposed package is eligible.\n"
-    "Approve only OFFER_FREE. Reject every other offer.\n"
+    "Decide only from the retrieved rules context.\n"
+    "If the retrieved rules support the proposal, return YES. Otherwise return NO.\n"
     "Return a short, specific feedback sentence about the proposed package only.\n"
-    "Do not mention any alternative package or what is available instead."
+    "Do not mention alternatives or general package policy beyond the retrieved rules."
 )
 
 
@@ -101,10 +102,11 @@ def build_proposal_input(payload: dict) -> str:
     )
 
 
-def build_eligibility_input(proposal: ProposalOutput) -> str:
+def build_eligibility_input(proposal: ProposalOutput, rules_context: str) -> str:
     return (
         f"Proposed action: {proposal.proposed_action}\n"
         f"User category: {proposal.user_category}\n"
+        f"Rules context from Cognee search:\n{rules_context}\n"
     )
 
 
@@ -233,8 +235,21 @@ async def propose_offer(payload: dict) -> dict:
 
 async def check_eligibility(payload: dict) -> dict:
     proposal = ProposalOutput.model_validate(payload["proposal"])
+    rules_results = await cognee.search(
+        query_text=(
+            f"Is {proposal.proposed_action} allowed for {proposal.user_category} users? "
+            "Answer only from the stored rules."
+        ),
+        query_type=cognee.SearchType.GRAPH_COMPLETION,
+        datasets=[RULES_DATASET],
+        top_k=3,
+    )
+    if isinstance(rules_results, list):
+        rules_context = "\n".join(str(item) for item in rules_results if item).strip()
+    else:
+        rules_context = str(rules_results)
     result = await LLMGateway.acreate_structured_output(
-        text_input=build_eligibility_input(proposal),
+        text_input=build_eligibility_input(proposal, rules_context),
         system_prompt=ELIGIBILITY_PROMPT,
         response_model=EligibilityOutput,
     )
