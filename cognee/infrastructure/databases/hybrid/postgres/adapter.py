@@ -193,6 +193,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ) -> List[ScoredResult]:
         return await self._vector.search(
             collection_name,
@@ -202,6 +203,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             with_vector,
             include_payload,
             node_name,
+            node_name_filter_operator,
         )
 
     async def batch_search(
@@ -314,6 +316,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 table = _validate_table_name(collection)
                 for dp, vector in items:
                     payload = serialize_data(dp.model_dump())
+                    payload["belongs_to_set"] = dp.belongs_to_set or []
                     await session.execute(
                         text(f"""
                             INSERT INTO {table} (id, payload, vector)
