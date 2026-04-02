@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Awaitable, Callable, Literal, Optional
@@ -300,6 +301,10 @@ def load_emails() -> list[dict]:
 
 
 async def setup_runtime() -> None:
+    if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "").lower() != "true":
+        raise RuntimeError(
+            "This demo requires ENABLE_BACKEND_ACCESS_CONTROL=true."
+        )
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await setup()
