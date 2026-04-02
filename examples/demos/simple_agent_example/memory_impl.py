@@ -10,9 +10,7 @@ from common import check_eligibility, propose_offer, run_stream_impl, setup_runt
 @cognee.agent_memory(
     with_memory=True,
     save_traces=False,
-    memory_query_fixed=(
-        "What packages are accepted and to which user group?"
-    ),
+    memory_query_fixed=("What packages are accepted and to which user group?"),
 )
 async def _subagent_propose_offer(payload: dict) -> dict:
     return await propose_offer(payload)
