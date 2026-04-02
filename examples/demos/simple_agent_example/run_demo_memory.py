@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-
-from cognee.shared.logging_utils import ERROR, setup_logging
-
-from memory_impl import run_stream, setup_memory
+import os
 
 
 async def main() -> None:
+    os.environ["LOG_LEVEL"] = "ERROR"
+    from cognee.shared.logging_utils import ERROR, setup_logging
+    from memory_impl import run_stream, setup_memory
+
     setup_logging(ERROR)
     await setup_memory()
     await run_stream()
