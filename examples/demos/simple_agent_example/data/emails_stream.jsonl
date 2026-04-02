@@ -1,16 +1,10 @@
-{"email_id":"e001","email_text":"I am a student and I want OFFER_ENTERPRISE for my coursework project."}
-{"email_id":"e023","email_text":"I am a student and I want PRO for my coursework project."}
-{"email_id":"e002","email_text":"We are a startup team and want OFFER_FREE for our product launch work."}
-{"email_id":"e003","email_text":"I am writing on behalf of an enterprise buyer and we want OFFER_STARTER for our department rollout."}
-{"email_id":"e004","email_text":"Student request: please give me OFFER_TEAM for my academic portfolio app."}
-{"email_id":"e005","email_text":"Startup founder here, applying for OFFER_ENTERPRISE even though we are still an early-stage team."}
-{"email_id":"e006","email_text":"We are a big enterprise: we would like OFFER_PLUS for company-wide deployment."}
-{"email_id":"e007","email_text":"I am a student asking for OFFER_PRO for my university capstone."}
+{"email_id":"e001","email_text":"I am a student and I want OFFER_TEAM for my coursework project."}
+{"email_id":"e002","email_text":"Student request: please give me OFFER_TEAM for my academic portfolio app."}
+{"email_id":"e003","email_text":"I am a student asking for OFFER_PRO for my university capstone."}
+{"email_id":"e004","email_text":"Student developer from campus asking for OFFER_STARTER for classwork experiments."}
+{"email_id":"e005","email_text":"Student applicant here, I want OFFER_PLUS for my personal study project."}
+{"email_id":"e006","email_text":"We are a startup team and want OFFER_FREE for our product launch work."}
+{"email_id":"e007","email_text":"Startup founder here, applying for OFFER_TEAM even though we are still an early-stage team."}
 {"email_id":"e008","email_text":"Our startup is applying for OFFER_TEAM for a small product squad."}
-{"email_id":"e009","email_text":"We are a big enterprise, requesting OFFER_FREE for a formal platform evaluation."}
-{"email_id":"e010","email_text":"Student developer from campus asking for OFFER_STARTER for classwork experiments."}
-{"email_id":"e011","email_text":"We are a startup and want OFFER_PRO for a lean founding team."}
-{"email_id":"e012","email_text":"Enterprise security review request: please put us on OFFER_FREE."}
-{"email_id":"e013","email_text":"Student applicant here, I want OFFER_PLUS for my personal study project."}
-{"email_id":"e014","email_text":"Startup company request: assign us OFFER_TEAM for our first customer pilots."}
-{"email_id":"e015","email_text":"Enterprise operations team requesting OFFER_PRO for a structured internal rollout."}
+{"email_id":"e009","email_text":"We are a startup and want OFFER_PRO for a lean founding team."}
+{"email_id":"e010","email_text":"Startup company request: assign us OFFER_TEAM for our first customer pilots."}

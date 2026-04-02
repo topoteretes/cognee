@@ -25,14 +25,12 @@ AGENTIC_TRACES_DATASET = "agentic_traces"
 RULES_DATA = [
     "Students belong to the student user class and can receive only OFFER_FREE.",
     "Startups belong to the startup user class and can receive only OFFER_PLUS.",
-    "Enterprise buyers belong to the enterprise user class and can receive only OFFER_ENTERPRISE.",
 ]
 
 PROPOSER_PROMPT = (
     "You propose one package for the user.\n"
-    "First identify the user based on the e-mail, users can be student, startup, or enterprise.\n"
-    "Then Choose exactly one of: OFFER_FREE, OFFER_STARTER, OFFER_PLUS, OFFER_PRO, "
-    "OFFER_TEAM, OFFER_ENTERPRISE.\n"
+    "First identify the user based on the e-mail, users can be student or startup.\n"
+    "Then choose exactly one of: OFFER_FREE, OFFER_STARTER, OFFER_PLUS, OFFER_PRO, OFFER_TEAM.\n"
     "Aim for a package that can realistically be approved.\n"
     "Use any available memory context if it helps.\n"
     "Do not repeat a rejected package.\n"
@@ -49,14 +47,13 @@ ELIGIBILITY_PROMPT = (
 
 
 class ProposalOutput(BaseModel):
-    user_category: Literal["student", "startup", "enterprise"]
+    user_category: Literal["student", "startup"]
     requested_service_tier: Literal[
         "OFFER_FREE",
         "OFFER_STARTER",
         "OFFER_PLUS",
         "OFFER_PRO",
         "OFFER_TEAM",
-        "OFFER_ENTERPRISE",
     ]
     proposed_action: Literal[
         "OFFER_FREE",
@@ -64,7 +61,6 @@ class ProposalOutput(BaseModel):
         "OFFER_PLUS",
         "OFFER_PRO",
         "OFFER_TEAM",
-        "OFFER_ENTERPRISE",
     ]
     rationale: str = Field(min_length=1, max_length=120)
 
