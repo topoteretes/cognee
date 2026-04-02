@@ -5,130 +5,38 @@ import json
 from typing import List
 
 import cognee
-import difflib
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.shared.graph_model_utils import graph_model_to_graph_schema, graph_schema_to_graph_model
+from cognee.shared.graph_model_utils import (
+    graph_model_to_graph_schema,
+    graph_schema_to_graph_model,
+)
 
-from copy import deepcopy
-from typing import Any, Type
 from pydantic import BaseModel
 
 
-def build_schema_without_base(
-    model: Type[BaseModel],
-    base: Type[BaseModel],
-) -> dict[str, Any]:
-    """
-    Generate JSON schema for `model`, remove inherited `base` fields,
-    prune base defs, and repair/remove broken local $refs.
-    """
-    schema = deepcopy(model.model_json_schema())
-    base_fields = set(base.model_fields.keys())
-    base_name = base.__name__
-
-    # 1) Remove base fields from every object schema (root + $defs)
-    def strip_base_fields(node: Any) -> None:
-        if isinstance(node, dict):
-            props = node.get("properties")
-            if isinstance(props, dict):
-                for f in list(props.keys()):
-                    if f in base_fields:
-                        props.pop(f, None)
-                if "required" in node and isinstance(node["required"], list):
-                    node["required"] = [r for r in node["required"] if r in props]
-            for v in node.values():
-                strip_base_fields(v)
-        elif isinstance(node, list):
-            for item in node:
-                strip_base_fields(item)
-
-    strip_base_fields(schema)
-
-    # 2) Prune base-like defs
-    defs = schema.get("$defs", {})
-    if isinstance(defs, dict):
-        to_drop = set()
-        for def_name, def_schema in defs.items():
-            title = def_schema.get("title") if isinstance(def_schema, dict) else None
-            if title == base_name or base_name in def_name:
-                to_drop.add(def_name)
-        for d in to_drop:
-            defs.pop(d, None)
-
-    # 3) Remove/repair broken local refs after pruning defs
-    existing_defs = set(schema.get("$defs", {}).keys())
-
-    def ref_to_def_name(ref: str) -> str | None:
-        pfx = "#/$defs/"
-        return ref[len(pfx) :] if ref.startswith(pfx) else None
-
-    def prune_broken(node: Any) -> Any:
-        if isinstance(node, dict):
-            # direct local ref
-            if "$ref" in node and isinstance(node["$ref"], str):
-                dname = ref_to_def_name(node["$ref"])
-                if dname is not None and dname not in existing_defs:
-                    return None  # drop this schema branch
-
-            out = {}
-            for k, v in node.items():
-                if k in ("anyOf", "oneOf", "allOf") and isinstance(v, list):
-                    pruned = [prune_broken(x) for x in v]
-                    pruned = [x for x in pruned if x is not None]
-                    if pruned:
-                        out[k] = pruned
-                    else:
-                        return None
-                elif k == "properties" and isinstance(v, dict):
-                    new_props = {}
-                    for pn, ps in v.items():
-                        fixed = prune_broken(ps)
-                        if fixed is not None:
-                            new_props[pn] = fixed
-                    out[k] = new_props
-                else:
-                    out[k] = prune_broken(v)
-
-            # keep required aligned with remaining properties
-            if "properties" in out and "required" in out and isinstance(out["required"], list):
-                prop_names = set(out["properties"].keys())
-                out["required"] = [r for r in out["required"] if r in prop_names]
-
-            return out
-
-        if isinstance(node, list):
-            pruned = [prune_broken(x) for x in node]
-            return [x for x in pruned if x is not None]
-
-        return node
-
-    fixed = prune_broken(schema)
-    return fixed if isinstance(fixed, dict) else {}
-
-
 # Define a custom graph model for programming languages.
-class FieldType(DataPoint):
+class FieldType(BaseModel):
     name: str = "Field"
 
 
-class Field(DataPoint):
+class Field(BaseModel):
     name: str
     is_type: FieldType
-    metadata: dict = {"index_fields": ["name"]}
+    # metadata: dict = {"index_fields": ["name"]}
 
 
-class ProgrammingLanguageType(DataPoint):
+class ProgrammingLanguageType(BaseModel):
     name: str = "Programming Language"
 
 
-class ProgrammingLanguage(DataPoint):
+class ProgrammingLanguage(BaseModel):
     name: str
     used_in: list[Field] = []
     is_type: ProgrammingLanguageType
-    metadata: dict = {"index_fields": ["name"]}
+    # metadata: dict = {"index_fields": ["name"]}
 
 
 class ShopType(DataPoint):
@@ -159,26 +67,26 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    # schema_dict = graph_model_to_graph_schema(Town)
-    # graph_model_schema_json = json.dumps(schema_dict)
+    schema_dict = graph_model_to_graph_schema(Town)
+    graph_model_schema_json = json.dumps(schema_dict)
 
-    # print(graph_model_schema_json)
-
-    model_schema = build_schema_without_base(Town, DataPoint)
+    # model_schema = build_schema_without_base(Town, DataPoint)
     # print(json.dumps(model_schema))
 
-    graph_model = graph_schema_to_graph_model(model_schema)
+    graph_model = graph_schema_to_graph_model(schema_dict)
+
+    print(graph_model_schema_json)
 
     user_prompt = render_prompt(
-        "custom_prompt_generation_user.txt", {"GRAPH_SCHEMA_JSON": model_schema}
+        "custom_prompt_generation_user.txt", {"GRAPH_SCHEMA_JSON": graph_model_schema_json}
     )
     system_prompt = render_prompt("custom_prompt_generation_system.txt", {})
 
     custom_prompt = await LLMGateway.acreate_structured_output(
         text_input=user_prompt, system_prompt=system_prompt, response_model=str
     )
-
     print("Custom prompt generation complete")
+    print(custom_prompt)
 
     # await cognee.add("""
     #     Python is a programming language widely used in machine learning, data analysis, and web development.
@@ -211,8 +119,6 @@ That evening, as lights reflected in the river and Novi Sad settled into its gen
         graph_model=graph_model,
         custom_prompt=custom_prompt,
     )
-
-    print(custom_prompt)
 
     await cognee.visualize_graph()
 

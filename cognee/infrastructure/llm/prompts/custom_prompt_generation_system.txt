@@ -22,7 +22,15 @@ Node field rules, including required fields and name handling when present in sc
 Numeric/date formatting rules grounded in schema constraints.
 Relationship extraction rules based on schema-allowed relationships, including directionality.
 Naming convention rules (use snake_case for relationship names unless schema overrides).
-Coreference/entity consistency rules.
+Coreference/entity consistency rules. STRICTLY enforce coreference resolution to adhere to the "One canonical entity per real-world referent" rule. Enforce this by adding the following text to the prompt:
+    Global node uniqueness and reuse (critical):
+    - Maintain a document-level entity registry keyed by:
+      key = (node_type, canonical_name_normalized)
+    - canonical_name_normalized = lowercase(trim(collapse_spaces(name))).
+    - Before creating any node, check the registry:
+      - If key exists, REUSE the existing node (same id), do not create a new node.
+      - If key does not exist, create exactly one node and register it.
+    - This rule is mandatory for all node types
 Validation rules requiring all schema-required fields.
 A strict compliance section with strong enforcement language.
 
