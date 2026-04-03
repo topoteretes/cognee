@@ -126,14 +126,9 @@ def custom_openapi():
     openapi_schema["components"]["securitySchemes"] = {
         "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-Api-Key"},
         "BearerAuth": {"type": "http", "scheme": "bearer"},
-        "CookieAuth": {
-            "type": "apiKey",
-            "in": "cookie",
-            "name": os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"),
-        },
     }
 
-    our_security = [{"BearerAuth": []}, {"CookieAuth": []}, {"ApiKeyAuth": []}]
+    our_security = [{"BearerAuth": []}, {"ApiKeyAuth": []}]
 
     if REQUIRE_AUTHENTICATION:
         # Set global security fallback
