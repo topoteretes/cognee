@@ -99,7 +99,6 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.remember_command", "RememberCommand"),
         ("cognee.cli.commands.recall_command", "RecallCommand"),
         ("cognee.cli.commands.improve_command", "ImproveCommand"),
-        ("cognee.cli.commands.status_command", "StatusCommand"),
         ("cognee.cli.commands.forget_command", "ForgetCommand"),
     ]
 

@@ -81,10 +81,7 @@ async def _fetch_new_edges(
             conditions.append(Edge.created_at > since)
 
         edge_query = (
-            select(Edge)
-            .where(and_(*conditions))
-            .order_by(Edge.created_at.asc())
-            .limit(limit)
+            select(Edge).where(and_(*conditions)).order_by(Edge.created_at.asc()).limit(limit)
         )
         edges = (await session.scalars(edge_query)).all()
 

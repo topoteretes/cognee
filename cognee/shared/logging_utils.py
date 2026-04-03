@@ -19,7 +19,9 @@ def _get_cognee_version() -> str:
     with suppress(FileNotFoundError, StopIteration):
         _pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
         with open(_pyproject, encoding="utf-8") as f:
-            _ver = next(line for line in f if line.startswith("version")).split("=")[1].strip("'\"\n ")
+            _ver = (
+                next(line for line in f if line.startswith("version")).split("=")[1].strip("'\"\n ")
+            )
             return f"{_ver}-local"
     try:
         return _meta.version("cognee")

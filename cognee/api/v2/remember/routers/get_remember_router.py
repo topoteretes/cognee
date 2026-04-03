@@ -8,7 +8,6 @@ from typing import List, Optional, Union, Literal
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
-from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
@@ -79,12 +78,6 @@ def get_remember_router() -> APIRouter:
                 chunks_per_batch=chunks_per_batch,
             )
 
-            # Result comes from cognify which returns a dict
-            if isinstance(result, dict):
-                if any(isinstance(v, PipelineRunErrored) for v in result.values()):
-                    from fastapi.encoders import jsonable_encoder
-
-                    return JSONResponse(status_code=420, content=jsonable_encoder(result))
             return result
         except Exception as error:
             logger.error("Remember endpoint error: %s", error, exc_info=True)

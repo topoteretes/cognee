@@ -454,9 +454,7 @@ class SessionManager:
     def _graph_context_key(user_id: str, session_id: str) -> str:
         return f"graph_knowledge:{user_id}:{session_id}"
 
-    async def get_graph_context(
-        self, *, user_id: str, session_id: Optional[str] = None
-    ) -> str:
+    async def get_graph_context(self, *, user_id: str, session_id: Optional[str] = None) -> str:
         """Return the graph knowledge snapshot for this session, or empty string."""
         if not self.is_available:
             return ""

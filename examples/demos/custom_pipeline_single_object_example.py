@@ -159,12 +159,6 @@ async def main():
 
     print(results[0] if results else "No output")
 
-    # Per-item status: check what was processed
-    print("\n--- Per-item status ---")
-    items = await cognee.status(items=True)
-    for item in items:
-        print(f"  {item.name}: {item.status} (hash={item.content_hash[:12]}...)")
-
     # Search the graph
     print("\n--- Search: 'Who worked on gravity?' ---")
     answer = await cognee.search(

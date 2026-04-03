@@ -20,7 +20,6 @@ COMMAND_DESCRIPTIONS = {
     "remember": "Ingest data and build the knowledge graph in a single call",
     "recall": "Search the knowledge graph for relevant information",
     "improve": "Enrich an existing knowledge graph with additional context and rules",
-    "status": "Check the processing status of datasets",
     "forget": "Remove data from the knowledge graph",
 }
 

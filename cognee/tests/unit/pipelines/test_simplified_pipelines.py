@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 
-from cognee.pipelines.types import Drop, Pipe
+from cognee.pipelines.types import Drop
 from cognee.modules.pipelines.tasks.task import BoundTask
 
 

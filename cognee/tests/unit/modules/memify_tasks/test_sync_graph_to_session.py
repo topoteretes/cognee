@@ -145,7 +145,9 @@ async def test_sync_no_new_edges():
         patch(_PATCH_GET_REL, return_value=db_engine),
     ):
         result = await sync_graph_to_session(
-            user_id="u1", session_id="s1", dataset_id=dataset_id,
+            user_id="u1",
+            session_id="s1",
+            dataset_id=dataset_id,
         )
 
     assert result["synced"] == 0
@@ -167,7 +169,9 @@ async def test_sync_cache_unavailable():
         patch(_PATCH_GET_CACHE, return_value=None),
     ):
         result = await sync_graph_to_session(
-            user_id="u1", session_id="s1", dataset_id=uuid4(),
+            user_id="u1",
+            session_id="s1",
+            dataset_id=uuid4(),
         )
 
     assert result["synced"] == 0
@@ -197,7 +201,9 @@ async def test_sync_merges_with_existing():
         patch(_PATCH_GET_REL, return_value=db_engine),
     ):
         result = await sync_graph_to_session(
-            user_id="u1", session_id="s1", dataset_id=dataset_id,
+            user_id="u1",
+            session_id="s1",
+            dataset_id=dataset_id,
         )
 
     assert result["synced"] == 1
@@ -237,7 +243,10 @@ async def test_sync_caps_at_max_lines():
         patch(_PATCH_GET_REL, return_value=db_engine),
     ):
         result = await sync_graph_to_session(
-            user_id="u1", session_id="s1", dataset_id=dataset_id, max_lines=3,
+            user_id="u1",
+            session_id="s1",
+            dataset_id=dataset_id,
+            max_lines=3,
         )
 
     assert result["total"] == 3
@@ -294,9 +303,7 @@ async def test_session_manager_graph_context_roundtrip():
     ctx = await sm.get_graph_context(user_id="u1", session_id="s1")
     assert ctx == ""
 
-    await sm.set_graph_context(
-        user_id="u1", session_id="s1", context="Alice —[knows]→ Bob"
-    )
+    await sm.set_graph_context(user_id="u1", session_id="s1", context="Alice —[knows]→ Bob")
 
     ctx = await sm.get_graph_context(user_id="u1", session_id="s1")
     assert ctx == "Alice —[knows]→ Bob"
@@ -358,12 +365,8 @@ async def test_graph_context_prepended_to_completion():
         return ("answer", "", None)
 
     with (
-        patch(
-            "cognee.infrastructure.session.session_manager.session_user"
-        ) as mock_session_user,
-        patch(
-            "cognee.infrastructure.session.session_manager.CacheConfig"
-        ) as MockCacheConfig,
+        patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
+        patch("cognee.infrastructure.session.session_manager.CacheConfig") as MockCacheConfig,
         patch(
             "cognee.infrastructure.session.session_manager."
             "generate_session_completion_with_optional_summary",
@@ -707,9 +710,7 @@ class TestRememberResultSessions:
     def test_repr_multiple_sessions(self):
         from cognee.api.v2.remember.remember import RememberResult
 
-        r = RememberResult(
-            status="completed", dataset_name="x", session_ids=["s1", "s2"]
-        )
+        r = RememberResult(status="completed", dataset_name="x", session_ids=["s1", "s2"])
         assert "session_ids=" in repr(r)
 
     @pytest.mark.asyncio
@@ -729,9 +730,7 @@ class TestRememberResultSessions:
         ):
             from cognee.api.v2.remember.remember import remember
 
-            result = await remember(
-                "test data", session_ids=["s1", "s2"], self_improvement=True
-            )
+            result = await remember("test data", session_ids=["s1", "s2"], self_improvement=True)
 
         assert result.session_ids == ["s1", "s2"]
         assert result.session_id is None  # multiple → None

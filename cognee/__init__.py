@@ -44,12 +44,8 @@ _LAZY_IMPORTS = {
     "recall": ".api.v2",
     "improve": ".api.v2",
     "forget": ".api.v2",
-    "status": ".api.v2",
-    "DatasetStatus": ".api.v2",
-    "DataItemInfo": ".api.v2",
     # Pipelines
     "pipelines": ".modules",
-    "Pipe": ".pipelines",
     "Drop": ".pipelines",
     # Migrations
     "run_migrations": "cognee.run_migrations",

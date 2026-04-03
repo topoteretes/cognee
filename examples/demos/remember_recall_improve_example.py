@@ -19,10 +19,7 @@ Requires:
 """
 
 import asyncio
-from datetime import datetime, timezone
-
 import cognee
-from cognee import session
 
 PERMANENT_TEXT = (
     "Albert Einstein developed the theory of general relativity, "
@@ -67,8 +64,6 @@ async def main():
 
     await cognee.forget(everything=True)
 
-    before_ingest = datetime.now(timezone.utc)
-
     # ----------------------------------------------------------------
     # Part 1: Permanent memory -- remember() without session
     # ----------------------------------------------------------------
@@ -78,19 +73,8 @@ async def main():
     await cognee.remember(PERMANENT_TEXT, dataset_name=DATASET)
     print("  Data ingested into permanent graph.")
 
-    cognee.remember( "blalba", session_id='123')
-
-
-    cognee.improve(dataset=DATASET)
-
-    # Per-item status
-    print("\n--- Step 2: status(items=True) -- per-source detail ---")
-    items = await cognee.status(datasets=[DATASET], items=True)
-    for item in items:
-        print(f"  {item.name}: {item.status} (hash={item.content_hash[:12]}...)")
-
     # Query the permanent graph
-    print("\n--- Step 3: recall() -- query permanent memory ---")
+    print("\n--- Step 2: recall() -- query permanent memory ---")
     answer = await cognee.recall(
         "What is the theory of general relativity?",
         datasets=[DATASET],
@@ -103,23 +87,17 @@ async def main():
 
     # Store data in the session cache only. No add/cognify runs.
     # Multiple calls accumulate entries in the same session.
-    print("\n--- Step 4: remember(session_id) -- session memory (entry 1) ---")
+    print("\n--- Step 3: remember(session_id) -- session memory (entry 1) ---")
     await cognee.remember(SESSION_TEXT_1, session_id=SESSION)
     print("  Stored in session cache.")
 
-    print("\n--- Step 5: remember(session_id) -- session memory (entry 2) ---")
+    print("\n--- Step 4: remember(session_id) -- session memory (entry 2) ---")
     await cognee.remember(SESSION_TEXT_2, session_id=SESSION)
     print("  Stored in session cache.")
 
-    # Status still shows only the permanent data -- session data is not in the graph yet
-    print("\n--- Step 6: status() -- only permanent data visible ---")
-    statuses = await cognee.status()
-    for s in statuses:
-        print(f"  {s.dataset_name}: {s.item_count} items, cognify={s.cognify_pipeline_status}")
-
     # Recall with session_id queries the permanent graph but the LLM also
     # sees the session conversation history as context
-    print("\n--- Step 7: recall(session_id) -- session-aware query ---")
+    print("\n--- Step 5: recall(session_id) -- session-aware query ---")
     answer = await cognee.recall(
         "What did the user mention about the Sorbonne?",
         datasets=[DATASET],
@@ -127,7 +105,7 @@ async def main():
     )
     print(f"  Answer: {answer}")
 
-    print("\n--- Step 8: recall(session_id) -- follow-up ---")
+    print("\n--- Step 6: recall(session_id) -- follow-up ---")
     answer = await cognee.recall(
         "Who else was mentioned and what did they work on?",
         datasets=[DATASET],
@@ -141,12 +119,12 @@ async def main():
 
     # improve() reads session entries, runs add + cognify on them,
     # persisting the session content into the permanent graph
-    print("\n--- Step 9: improve(session_ids) -- sync session to permanent ---")
+    print("\n--- Step 7: improve(session_ids) -- sync session to permanent ---")
     await cognee.improve(dataset=DATASET, session_ids=[SESSION])
     print("  Session content synced to permanent graph.")
 
     # Now the graph contains both the original data and the session content
-    print("\n--- Step 10: recall() -- query enriched permanent graph ---")
+    print("\n--- Step 8: recall() -- query enriched permanent graph ---")
     answer = await cognee.recall(
         "What contributions did Einstein and Bohr make?",
         datasets=[DATASET],
@@ -154,20 +132,10 @@ async def main():
     print(f"  Answer: {answer}")
 
     # ----------------------------------------------------------------
-    # Part 4: Freshness check and cleanup
+    # Cleanup
     # ----------------------------------------------------------------
 
-    print("\n--- Step 11: status(since=...) -- time-filtered ---")
-    recent = await cognee.status(items=True, since=before_ingest)
-    print(f"  {len(recent)} item(s) ingested since {before_ingest.isoformat()}")
-
-    print("\n--- Step 12: freshness check via source_content_hash ---")
-    all_items = await cognee.status(items=True)
-    current_hashes = {item.content_hash for item in all_items if item.status == "completed"}
-    print(f"  Current source hashes: {current_hashes}")
-    print("  (At retrieval time, compare node.source_content_hash against these)")
-
-    print("\n--- Step 13: forget(everything) ---")
+    print("\n--- Step 9: forget(everything) ---")
     result = await cognee.forget(everything=True)
     print(f"  {result}")
 

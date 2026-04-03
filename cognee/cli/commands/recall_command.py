@@ -83,10 +83,7 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                 datasets_msg = (
                     f" in datasets {args.datasets}" if args.datasets else " across all datasets"
                 )
-                fmt.echo(
-                    f"Recalling: '{args.query_text}' "
-                    f"(type: {args.query_type}){datasets_msg}"
-                )
+                fmt.echo(f"Recalling: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
 
             async def run_recall():
                 try:
@@ -135,9 +132,7 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                     return
 
                 # Detect session results by _source tag
-                is_session = (
-                    isinstance(results[0], dict) and results[0].get("_source") == "session"
-                )
+                is_session = isinstance(results[0], dict) and results[0].get("_source") == "session"
 
                 if is_session:
                     fmt.echo(f"\nFound {len(results)} session entry(ies):")

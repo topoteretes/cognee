@@ -35,9 +35,7 @@ def _search_entries(entries: list, query_text: str) -> list:
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        entry_text = " ".join(
-            str(entry.get(f, "")) for f in ("question", "context", "answer")
-        )
+        entry_text = " ".join(str(entry.get(f, "")) for f in ("question", "context", "answer"))
         entry_words = _tokenize(entry_text)
         hits = len(query_words & entry_words)
         if hits > 0:

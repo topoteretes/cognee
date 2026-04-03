@@ -15,9 +15,7 @@ Legacy imports (from cognee.pipelines import Task, run_tasks, etc.) also work.
 """
 
 from cognee.pipelines.types import (
-    Pipe,
     Drop,
-    get_pipe_param_name,
 )
 
 # Legacy re-exports are lazy to avoid circular imports with cognee.modules.pipelines
@@ -47,8 +45,5 @@ __all__ = [
     "run_tasks_parallel",
     "run_pipeline",
     # Type annotations
-    "Pipe",
     "Drop",
-    # Introspection helpers
-    "get_pipe_param_name",
 ]

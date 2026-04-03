@@ -88,8 +88,7 @@ async def _search_session(
 
         # Tokenize the searchable fields
         entry_text = " ".join(
-            str(entry.get(field, ""))
-            for field in ("question", "context", "answer")
+            str(entry.get(field, "")) for field in ("question", "context", "answer")
         )
         entry_words = _tokenize(entry_text)
 
@@ -166,9 +165,7 @@ async def recall(
                 session_id,
             )
             return session_results
-        logger.info(
-            "recall: no session entries matched, falling through to graph search"
-        )
+        logger.info("recall: no session entries matched, falling through to graph search")
 
     from cognee.api.v1.search import search
 
