@@ -74,7 +74,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         # Normalize single query to batch for uniform processing
         effective_batch = [query] if query else query_batch
 
-        triplets_batch = await self.get_triplets(query_batch=effective_batch)
+        triplets_batch = await self.get_triplets_batch(effective_batch)
         if not triplets_batch:
             return []
 
@@ -110,7 +110,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             system_prompt=self.system_prompt,
         )
 
-        new_triplets_batch = await self.get_triplets(query_batch=list(completions))
+        new_triplets_batch = await self.get_triplets_batch(list(completions))
         for q, new_triplets in zip(active_queries, new_triplets_batch):
             states[q].merge_triplets(new_triplets)
 
