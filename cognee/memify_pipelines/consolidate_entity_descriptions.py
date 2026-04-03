@@ -76,7 +76,9 @@ def format_edges(edges: List[Any]) -> Dict[str, str]:
             rel_name = edge[1]
         else:
             # Fallback: best-effort extraction
-            target_id = edge[2].get("id", str(edge[2])) if isinstance(edge[2], dict) else str(edge[1])
+            target_id = (
+                edge[2].get("id", str(edge[2])) if isinstance(edge[2], dict) else str(edge[1])
+            )
             rel_name = edge[1] if isinstance(edge[1], str) else str(edge[2])
         result[target_id] = rel_name
     return result
