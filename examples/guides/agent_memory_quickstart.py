@@ -43,6 +43,10 @@ async def ask_llm(question: str) -> str:
     with_memory=True,
     save_traces=True,
     memory_query_fixed="What is the private internal codename for the first supported cognee.agent_memory release?",
+    memory_system_prompt=(
+        "Return only the codename from memory context. "
+        "If there is no matching codename, return an empty string."
+    ),
 )
 async def with_memory_agent() -> str:
     # Uses a fixed retrieval query declared at decoration time.

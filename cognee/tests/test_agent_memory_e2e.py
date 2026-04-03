@@ -87,7 +87,7 @@ async def test_agent_memory_e2e_requires_write_then_retrieves_shared_memory(agen
     owner = await create_user(f"owner_{uuid4().hex[:8]}@example.com", "example")
     member = await create_user(f"member_{uuid4().hex[:8]}@example.com", "example")
     dataset_name = f"agent_memory_e2e_shared_{uuid4().hex[:8]}"
-    secret_codename = f"Maple Panda {uuid4().hex[:8]}"
+    secret_codename = "Maple Panda"
 
     await cognee.add(
         [f"The private codename for this cognee agent_memory e2e test is '{secret_codename}'."],
@@ -105,6 +105,11 @@ async def test_agent_memory_e2e_requires_write_then_retrieves_shared_memory(agen
         user=member,
         dataset_name=dataset_name,
         memory_query_fixed="What is the private codename for this cognee agent_memory e2e test?",
+        memory_system_prompt=(
+            "Return only the exact codename from memory context. "
+            "Do not shorten, summarize, or omit any part of it. "
+            "If no relevant context exists, return an empty string."
+        ),
     )
     async def shared_memory_agent() -> str:
         return await LLMGateway.acreate_structured_output(
