@@ -87,7 +87,7 @@ async def test_agent_memory_e2e_requires_write_then_retrieves_shared_memory(agen
     owner = await create_user(f"owner_{uuid4().hex[:8]}@example.com", "example")
     member = await create_user(f"member_{uuid4().hex[:8]}@example.com", "example")
     dataset_name = f"agent_memory_e2e_shared_{uuid4().hex[:8]}"
-    secret_codename = f"Maple Panda {uuid4().hex[:8]}"
+    secret_codename = "Maple Panda"
 
     await cognee.add(
         [f"The private codename for this cognee agent_memory e2e test is '{secret_codename}'."],
