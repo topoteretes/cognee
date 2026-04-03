@@ -40,7 +40,7 @@ _TYPE_RETRIEVERS: Dict[str, type] = {
 
 # Per-type top_k overrides (retriever defaults used otherwise)
 _TYPE_TOP_K: Dict[str, int] = {
-    "summarization": 20,
+    "summarization": 30,
     "temporal_reasoning": 10,
     "event_ordering": 10,
     "abstention": 10,
@@ -68,6 +68,54 @@ _TYPE_PROMPTS: Dict[str, str] = {
         "Pay close attention to all dates, deadlines, durations, and time intervals mentioned "
         "in the context. Calculate precisely and show your reasoning when computing differences "
         "between dates or deadlines."
+    ),
+    "knowledge_update": (
+        "You are answering a question about a conversation where facts may have changed "
+        "across sessions. Information given earlier may have been corrected, updated, or "
+        "superseded in later sessions. Always identify the most recent version of any fact "
+        "and use that as the current truth. If a value, status, or decision was revised, "
+        "report the updated version, not the original."
+    ),
+    "contradiction_resolution": (
+        "You are answering a question about a conversation where conflicting information "
+        "may have been provided across different sessions. Carefully identify all instances "
+        "where the same topic was discussed with different details. Determine which version "
+        "is the most recent or authoritative, and explain the resolution. If the question "
+        "asks about a specific fact, provide the latest correct value."
+    ),
+    "multi_session_reasoning": (
+        "You are answering a question that requires combining information from multiple "
+        "conversation sessions. Each session may contain different pieces of the answer. "
+        "Carefully synthesize facts, decisions, and details from across all sessions to "
+        "form a complete and accurate answer. Do not rely on a single session — look for "
+        "connections and dependencies between sessions."
+    ),
+    "information_extraction": (
+        "You are extracting specific factual information from a conversation. "
+        "Answer with precise, concrete details — names, numbers, dates, technologies, "
+        "or other specific facts exactly as stated in the conversation. Be direct and "
+        "do not add qualifications or hedging. If the answer is a list, include all items."
+    ),
+    "instruction_following": (
+        "You are answering a question where the user gave specific instructions or constraints "
+        "during the conversation — for example, formatting requirements, preferences, or "
+        "conditions. Pay close attention to any explicit instructions the user stated and "
+        "ensure your answer reflects those constraints exactly. If the question asks what "
+        "the user requested or specified, quote or paraphrase their instructions precisely."
+    ),
+    "abstention": (
+        "You are answering a question about a conversation. If the topic was never discussed "
+        "or the information was not mentioned in any session, you must clearly state that it "
+        "was not discussed or that the information is not available. Do not guess or infer "
+        "answers for topics that were not covered. Only answer based on what is explicitly "
+        "present in the context."
+    ),
+    "event_ordering": (
+        "You are answering a question about the chronological order of events in a conversation. "
+        "List events in strict chronological order based on when they occurred or were discussed. "
+        "Pay close attention to session numbers, turn numbers, dates, and temporal markers "
+        "like 'before', 'after', 'first', 'then', 'finally'. Present the events as a clearly "
+        "ordered sequence."
     ),
 }
 
