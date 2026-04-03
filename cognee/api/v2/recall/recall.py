@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 from typing import Optional
 
@@ -12,6 +13,9 @@ from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("recall")
+
+# Minimum word length to avoid matching noise words like "a", "I"
+_MIN_WORD_LEN = 2
 
 
 class RecallKwargs(TypedDict, total=False):
@@ -32,17 +36,23 @@ class RecallKwargs(TypedDict, total=False):
     user: object
 
 
+def _tokenize(text: str) -> set[str]:
+    """Split text into lowercase word tokens using word boundaries."""
+    return {w for w in re.findall(r"\b\w+\b", text.lower()) if len(w) >= _MIN_WORD_LEN}
+
+
 async def _search_session(
     query_text: str,
     session_id: str,
     top_k: int = 10,
     user=None,
 ) -> list:
-    """Search session cache entries by keyword matching.
+    """Search session cache entries by word-boundary keyword matching.
 
-    Scans all QA entries in the session and returns those whose
-    question, context, or answer contain any word from the query.
-    Results are ranked by number of matching words.
+    Tokenizes both the query and each QA entry's fields, then ranks
+    entries by the number of overlapping words. Returns results tagged
+    with ``_source: "session"`` so callers can distinguish session
+    results from graph results.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.modules.users.methods import get_default_user
@@ -67,8 +77,7 @@ async def _search_session(
     if not isinstance(entries, list) or not entries:
         return []
 
-    # Keyword matching: split query into lowercase words
-    query_words = set(query_text.lower().split())
+    query_words = _tokenize(query_text)
     if not query_words:
         return []
 
@@ -76,19 +85,28 @@ async def _search_session(
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        # Build searchable text from all QA fields
-        searchable = " ".join(
+
+        # Tokenize the searchable fields
+        entry_text = " ".join(
             str(entry.get(field, ""))
             for field in ("question", "context", "answer")
-        ).lower()
+        )
+        entry_words = _tokenize(entry_text)
 
-        hits = sum(1 for w in query_words if w in searchable)
+        hits = len(query_words & entry_words)
         if hits > 0:
             scored.append((hits, entry))
 
-    # Sort by hit count descending, take top_k
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [entry for _, entry in scored[:top_k]]
+
+    # Tag results with source
+    results = []
+    for _, entry in scored[:top_k]:
+        tagged = dict(entry)
+        tagged["_source"] = "session"
+        results.append(tagged)
+
+    return results
 
 
 async def recall(
@@ -105,7 +123,11 @@ async def recall(
     When ``session_id`` is provided without ``datasets`` or
     ``query_type``, searches session cache entries directly by keyword
     matching. This returns matching QA entries from the session without
-    hitting the permanent graph.
+    hitting the permanent graph. If no session entries match, falls
+    through to the permanent graph search.
+
+    Each result dict includes a ``_source`` key (``"session"`` or
+    ``"graph"``) so callers can tell where the result came from.
 
     When ``query_type`` is omitted and ``auto_route`` is True (default),
     a lightweight rule-based classifier picks the best search strategy.
@@ -122,8 +144,8 @@ async def recall(
         **kwargs: Additional options -- see ``RecallKwargs``.
 
     Returns:
-        Search results (same as ``cognee.search()``). When searching
-        session-only, returns a list of matching QA entry dicts.
+        Search results. When searching session-only, returns a list of
+        matching QA entry dicts with ``_source="session"``.
     """
     session_id = kwargs.get("session_id")
 
@@ -144,7 +166,6 @@ async def recall(
                 session_id,
             )
             return session_results
-        # Fall through to graph search if no session results
         logger.info(
             "recall: no session entries matched, falling through to graph search"
         )
@@ -166,10 +187,20 @@ async def recall(
     else:
         query_type = SearchType.GRAPH_COMPLETION
 
-    return await search(
+    graph_results = await search(
         query_text=query_text,
         query_type=query_type,
         datasets=datasets,
         top_k=top_k,
         **kwargs,
     )
+
+    # Tag graph results with source
+    tagged = []
+    for r in graph_results:
+        if isinstance(r, dict):
+            r["_source"] = "graph"
+            tagged.append(r)
+        else:
+            tagged.append(r)
+    return tagged

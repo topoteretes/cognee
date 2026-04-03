@@ -666,4 +666,295 @@ class TestRememberResult:
         assert isinstance(result, RememberResult)
         assert result.status == "session_stored"
         assert result.session_id == "s1"
+        assert result.session_ids == ["s1"]
         assert result.elapsed_seconds is not None
+
+
+# ---------------------------------------------------------------------------
+# RememberResult session_id / session_ids unification
+# ---------------------------------------------------------------------------
+
+
+class TestRememberResultSessions:
+    def test_session_id_property_single(self):
+        from cognee.api.v2.remember.remember import RememberResult
+
+        r = RememberResult(status="completed", dataset_name="x", session_ids=["s1"])
+        assert r.session_id == "s1"
+        assert r.session_ids == ["s1"]
+
+    def test_session_id_property_multiple(self):
+        from cognee.api.v2.remember.remember import RememberResult
+
+        r = RememberResult(status="completed", dataset_name="x", session_ids=["s1", "s2"])
+        assert r.session_id is None
+        assert r.session_ids == ["s1", "s2"]
+
+    def test_session_id_property_none(self):
+        from cognee.api.v2.remember.remember import RememberResult
+
+        r = RememberResult(status="completed", dataset_name="x")
+        assert r.session_id is None
+        assert r.session_ids is None
+
+    def test_repr_single_session(self):
+        from cognee.api.v2.remember.remember import RememberResult
+
+        r = RememberResult(status="completed", dataset_name="x", session_ids=["s1"])
+        assert "session_id='s1'" in repr(r)
+        assert "session_ids" not in repr(r)
+
+    def test_repr_multiple_sessions(self):
+        from cognee.api.v2.remember.remember import RememberResult
+
+        r = RememberResult(
+            status="completed", dataset_name="x", session_ids=["s1", "s2"]
+        )
+        assert "session_ids=" in repr(r)
+
+    @pytest.mark.asyncio
+    async def test_remember_permanent_carries_session_ids(self):
+        """Permanent remember() with session_ids carries them in result."""
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        with (
+            patch("cognee.api.v1.add.add", AsyncMock()),
+            patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={})),
+            patch("cognee.api.v2.improve.improve", AsyncMock()),
+            patch(
+                "cognee.modules.users.methods.get_default_user",
+                AsyncMock(return_value=mock_user),
+            ),
+        ):
+            from cognee.api.v2.remember.remember import remember
+
+            result = await remember(
+                "test data", session_ids=["s1", "s2"], self_improvement=True
+            )
+
+        assert result.session_ids == ["s1", "s2"]
+        assert result.session_id is None  # multiple → None
+
+
+# ---------------------------------------------------------------------------
+# _search_session — word boundary matching
+# ---------------------------------------------------------------------------
+
+
+class TestSearchSession:
+    @pytest.mark.asyncio
+    async def test_word_boundary_matching(self):
+        """'graph' should NOT match 'paragraph'."""
+        from cognee.api.v2.recall.recall import _search_session
+
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        entries = [
+            {"question": "What is a paragraph?", "context": "", "answer": "A block of text."},
+            {"question": "What is a graph?", "context": "", "answer": "Nodes and edges."},
+        ]
+
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_session = AsyncMock(return_value=entries)
+
+        with (
+            patch(
+                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+                return_value=mock_sm,
+            ),
+        ):
+            results = await _search_session("graph", "s1", user=mock_user)
+
+        assert len(results) == 1
+        assert "graph" in results[0]["question"].lower()
+
+    @pytest.mark.asyncio
+    async def test_multiple_word_ranking(self):
+        """Entries matching more query words rank higher."""
+        from cognee.api.v2.recall.recall import _search_session
+
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        entries = [
+            {"question": "Tell me about cats", "context": "", "answer": "Cats are animals."},
+            {
+                "question": "Tell me about cats and dogs",
+                "context": "",
+                "answer": "Both are pets.",
+            },
+        ]
+
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_session = AsyncMock(return_value=entries)
+
+        with (
+            patch(
+                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+                return_value=mock_sm,
+            ),
+        ):
+            results = await _search_session("cats dogs", "s1", user=mock_user)
+
+        # Entry with both "cats" and "dogs" should rank first
+        assert len(results) == 2
+        assert "dogs" in results[0]["question"].lower()
+
+    @pytest.mark.asyncio
+    async def test_source_tagging(self):
+        """Session results should have _source='session'."""
+        from cognee.api.v2.recall.recall import _search_session
+
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        entries = [
+            {"question": "What is Einstein?", "context": "", "answer": "A physicist."},
+        ]
+
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_session = AsyncMock(return_value=entries)
+
+        with (
+            patch(
+                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+                return_value=mock_sm,
+            ),
+        ):
+            results = await _search_session("Einstein", "s1", user=mock_user)
+
+        assert results[0]["_source"] == "session"
+
+    @pytest.mark.asyncio
+    async def test_empty_session(self):
+        """Empty session returns empty list."""
+        from cognee.api.v2.recall.recall import _search_session
+
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_session = AsyncMock(return_value=[])
+
+        with (
+            patch(
+                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+                return_value=mock_sm,
+            ),
+        ):
+            results = await _search_session("anything", "s1", user=mock_user)
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_short_words_ignored(self):
+        """Single-character words like 'a' and 'I' are skipped."""
+        from cognee.api.v2.recall.recall import _search_session
+
+        mock_user = MagicMock()
+        mock_user.id = "u1"
+
+        entries = [
+            {"question": "I have a cat", "context": "", "answer": "Nice."},
+        ]
+
+        mock_sm = MagicMock()
+        mock_sm.is_available = True
+        mock_sm.get_session = AsyncMock(return_value=entries)
+
+        with (
+            patch(
+                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+                return_value=mock_sm,
+            ),
+        ):
+            # Query with only short words → no matches
+            results = await _search_session("a I", "s1", user=mock_user)
+
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# recall() session-only vs graph fallthrough
+# ---------------------------------------------------------------------------
+
+
+class TestRecallSessionMode:
+    @pytest.mark.asyncio
+    async def test_session_only_when_no_datasets_no_type(self):
+        """recall(session_id=X) without datasets/type searches session."""
+        from cognee.api.v2.recall.recall import _search_session
+
+        session_entries = [
+            {
+                "question": "test",
+                "answer": "result",
+                "_source": "session",
+            }
+        ]
+
+        with patch(
+            "cognee.api.v2.recall.recall._search_session",
+            AsyncMock(return_value=session_entries),
+        ):
+            from cognee.api.v2.recall.recall import recall
+
+            results = await recall("test", session_id="s1")
+
+        assert len(results) == 1
+        assert results[0]["_source"] == "session"
+
+    @pytest.mark.asyncio
+    async def test_fallthrough_to_graph_when_session_empty(self):
+        """When session search returns nothing, falls through to graph."""
+        mock_graph_results = ["graph result"]
+
+        with (
+            patch(
+                "cognee.api.v2.recall.recall._search_session",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "cognee.api.v1.search.search",
+                AsyncMock(return_value=mock_graph_results),
+            ),
+            patch(
+                "cognee.api.v2.recall.query_router.route_query",
+                return_value=MagicMock(search_type=MagicMock()),
+            ),
+        ):
+            from cognee.api.v2.recall.recall import recall
+
+            results = await recall("test", session_id="s1")
+
+        # Should get graph results since session was empty
+        assert results == mock_graph_results
+
+    @pytest.mark.asyncio
+    async def test_explicit_query_type_skips_session_search(self):
+        """When query_type is explicit, session search is skipped."""
+        from cognee.modules.search.types import SearchType
+
+        mock_graph_results = ["graph result"]
+
+        with (
+            patch(
+                "cognee.api.v1.search.search",
+                AsyncMock(return_value=mock_graph_results),
+            ),
+        ):
+            from cognee.api.v2.recall.recall import recall
+
+            results = await recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                session_id="s1",
+            )
+
+        assert results == mock_graph_results

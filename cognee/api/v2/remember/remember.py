@@ -143,14 +143,12 @@ class RememberResult:
         status: str,
         dataset_name: str,
         dataset_id: Optional[str] = None,
-        session_id: Optional[str] = None,
         session_ids: Optional[List[str]] = None,
         pipeline_run_id: Optional[str] = None,
     ):
         self.status = status
         self.dataset_name = dataset_name
         self.dataset_id = dataset_id
-        self.session_id = session_id
         self.session_ids: Optional[List[str]] = session_ids
         self.pipeline_run_id = pipeline_run_id
         self.error: Optional[str] = None
@@ -162,12 +160,20 @@ class RememberResult:
         self._task: Optional[asyncio.Task] = None
         self._started_at: float = time.monotonic()
 
+    @property
+    def session_id(self) -> Optional[str]:
+        """The session ID when exactly one session is involved, else None."""
+        if self.session_ids and len(self.session_ids) == 1:
+            return self.session_ids[0]
+        return None
+
     def __repr__(self):
         parts = [f"status={self.status!r}", f"dataset={self.dataset_name!r}"]
-        if self.session_id:
-            parts.append(f"session_id={self.session_id!r}")
-        elif self.session_ids:
-            parts.append(f"session_ids={self.session_ids!r}")
+        if self.session_ids:
+            if len(self.session_ids) == 1:
+                parts.append(f"session_id={self.session_ids[0]!r}")
+            else:
+                parts.append(f"session_ids={self.session_ids!r}")
         if self.dataset_id:
             parts.append(f"dataset_id={self.dataset_id!r}")
         if self.pipeline_run_id:
@@ -378,18 +384,16 @@ async def remember(
         result = RememberResult(
             status="session_stored",
             dataset_name=dataset_name,
-            session_id=session_id,
+            session_ids=[session_id],
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
         return result
 
     # Build the result object — starts as "running"
-    # Carry session_ids so callers know which sessions are involved
     result = RememberResult(
         status="running",
         dataset_name=dataset_name,
         dataset_id=str(dataset_id) if dataset_id else None,
-        session_id=session_ids[0] if session_ids and len(session_ids) == 1 else None,
         session_ids=session_ids,
     )
 

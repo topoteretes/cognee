@@ -14,10 +14,11 @@ class RecallCommand(SupportsCliCommand):
     help_string = "Recall information from the knowledge graph"
     docs_url = DEFAULT_DOCS_URL
     description = """
-Recall information from the knowledge graph.
+Recall information from the knowledge graph or session memory.
 
-This is a memory-oriented alias for `cognee search`. All search types and
-options are supported.
+When --session-id is provided without --datasets or --query-type,
+searches the session cache directly by keyword matching.
+Otherwise, this is a memory-oriented alias for `cognee search`.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -26,8 +27,8 @@ options are supported.
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default=None,
-            help="Search mode (default: auto-route, or session search when -s is used without -d)",
+            default="GRAPH_COMPLETION",
+            help="Search mode (default: GRAPH_COMPLETION)",
         )
         parser.add_argument(
             "--datasets",
@@ -50,7 +51,11 @@ options are supported.
             "--session-id",
             "-s",
             default=None,
-            help="Session ID to include conversation history in the search context",
+            help=(
+                "Session ID. When used without -d or -t, searches session "
+                "memory directly. Otherwise adds session history to the "
+                "search context."
+            ),
         )
         parser.add_argument(
             "--output-format",
@@ -65,16 +70,23 @@ options are supported.
             import cognee
             from cognee.modules.search.types import SearchType
 
-            query_type = SearchType[args.query_type] if args.query_type else None
-            type_label = args.query_type or "auto"
-
-            datasets_msg = (
-                f" in datasets {args.datasets}" if args.datasets else " across all datasets"
+            # Session-only mode: -s without -d and without explicit -t
+            session_only = (
+                args.session_id is not None
+                and not args.datasets
+                and args.query_type == "GRAPH_COMPLETION"  # i.e., the user didn't pass -t
             )
-            if args.session_id and not args.datasets and query_type is None:
+
+            if session_only:
                 fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
             else:
-                fmt.echo(f"Recalling: '{args.query_text}' (type: {type_label}){datasets_msg}")
+                datasets_msg = (
+                    f" in datasets {args.datasets}" if args.datasets else " across all datasets"
+                )
+                fmt.echo(
+                    f"Recalling: '{args.query_text}' "
+                    f"(type: {args.query_type}){datasets_msg}"
+                )
 
             async def run_recall():
                 try:
@@ -86,20 +98,26 @@ options are supported.
                         sid = scoped_session_id(user.id, args.session_id)
                         session_kwargs["session_id"] = sid
 
-                    recall_kwargs = {
-                        "query_text": args.query_text,
-                        "datasets": args.datasets,
-                        "top_k": args.top_k,
-                        **session_kwargs,
-                    }
-                    if query_type is not None:
-                        recall_kwargs["query_type"] = query_type
-                    if args.system_prompt:
-                        recall_kwargs["system_prompt_path"] = args.system_prompt
-                    elif query_type is not None:
-                        recall_kwargs["system_prompt_path"] = "answer_simple_question.txt"
-
-                    results = await cognee.recall(**recall_kwargs)
+                    if session_only:
+                        # Pass query_type=None to trigger session-only search
+                        results = await cognee.recall(
+                            query_text=args.query_text,
+                            top_k=args.top_k,
+                            **session_kwargs,
+                        )
+                    else:
+                        query_type = SearchType[args.query_type]
+                        recall_kwargs = {
+                            "query_text": args.query_text,
+                            "query_type": query_type,
+                            "datasets": args.datasets,
+                            "top_k": args.top_k,
+                            "system_prompt_path": (
+                                args.system_prompt or "answer_simple_question.txt"
+                            ),
+                            **session_kwargs,
+                        }
+                        results = await cognee.recall(**recall_kwargs)
                     return results
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
@@ -116,11 +134,14 @@ options are supported.
                     fmt.warning("No results found for your query.")
                     return
 
-                fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
-                fmt.echo("=" * 60)
+                # Detect session results by _source tag
+                is_session = (
+                    isinstance(results[0], dict) and results[0].get("_source") == "session"
+                )
 
-                if isinstance(results[0], dict) and "question" in results[0]:
-                    # Session QA entries
+                if is_session:
+                    fmt.echo(f"\nFound {len(results)} session entry(ies):")
+                    fmt.echo("=" * 60)
                     for i, entry in enumerate(results, 1):
                         q = entry.get("question", "")
                         a = entry.get("answer", "")
@@ -132,19 +153,23 @@ options are supported.
                             fmt.echo(f"{fmt.bold('A:')} {a}")
                         if i < len(results):
                             fmt.echo("-" * 40)
-                elif args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold('Response:')} {result}")
-                        if i < len(results):
-                            fmt.echo("-" * 40)
-                elif args.query_type == "CHUNKS":
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
-                        fmt.echo()
                 else:
-                    for i, result in enumerate(results, 1):
-                        fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
-                        fmt.echo()
+                    fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
+                    fmt.echo("=" * 60)
+
+                    if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+                        for i, result in enumerate(results, 1):
+                            fmt.echo(f"{fmt.bold('Response:')} {result}")
+                            if i < len(results):
+                                fmt.echo("-" * 40)
+                    elif args.query_type == "CHUNKS":
+                        for i, result in enumerate(results, 1):
+                            fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
+                            fmt.echo()
+                    else:
+                        for i, result in enumerate(results, 1):
+                            fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
+                            fmt.echo()
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
