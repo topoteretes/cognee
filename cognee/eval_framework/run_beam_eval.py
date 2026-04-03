@@ -34,7 +34,7 @@ def _make_eval_params(conversation_index: int) -> dict:
         evaluating_answers=True,
         evaluating_contexts=False,
         evaluation_engine="DeepEval",
-        evaluation_metrics=["rubric", "f1", "EM"],
+        evaluation_metrics=["beam_rubric", "kendall_tau"],
         task_getter_type="Default",
         calculate_metrics=True,
         dashboard=False,
@@ -148,11 +148,17 @@ async def main():
         if score is not None:
             logger.info(f"  {metric}: {score:.3f}")
 
-    logger.info("\nPer question type (rubric):")
+    logger.info("\nPer question type (beam_rubric):")
     for qtype, metrics in avg_per_type.items():
-        rubric = metrics.get("rubric")
-        if rubric is not None:
-            logger.info(f"  {qtype}: {rubric:.3f}")
+        beam_rubric = metrics.get("beam_rubric")
+        kendall = metrics.get("kendall_tau")
+        parts = []
+        if beam_rubric is not None:
+            parts.append(f"beam_rubric={beam_rubric:.3f}")
+        if kendall is not None:
+            parts.append(f"kendall_tau={kendall:.3f}")
+        if parts:
+            logger.info(f"  {qtype}: {', '.join(parts)}")
 
     logger.info("=== Done ===")
 

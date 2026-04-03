@@ -6,6 +6,8 @@ from cognee.eval_framework.evaluation.metrics.exact_match import ExactMatchMetri
 from cognee.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
 from cognee.eval_framework.evaluation.metrics.context_coverage import ContextCoverageMetric
 from cognee.eval_framework.evaluation.metrics.rubric import RubricMetric
+from cognee.eval_framework.evaluation.metrics.beam_rubric import BEAMRubricMetric
+from cognee.eval_framework.evaluation.metrics.kendall_tau import KendallTauMetric
 from typing import Any, Dict, List
 from deepeval.metrics import ContextualRelevancyMetric
 import time
@@ -26,6 +28,8 @@ class DeepEvalAdapter(BaseEvalAdapter):
             "contextual_relevancy": ContextualRelevancyMetric,
             "context_coverage": ContextCoverageMetric,
             "rubric": RubricMetric,
+            "beam_rubric": BEAMRubricMetric,
+            "kendall_tau": KendallTauMetric,
         }
         self.g_eval_metrics: Dict[str, Any] = {}
 
