@@ -36,7 +36,7 @@ class CompanyType(DataPoint):
 
 class Company(DataPoint):
     name: str
-    departments: list[Department]
+    departments: list[Department] = []
     is_type: CompanyType
     # Metadata "index_fields" specifies which DataPoint fields should be embedded for vector search
     metadata: dict = {"index_fields": ["name"]}

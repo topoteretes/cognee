@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import time
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
 
@@ -97,6 +98,176 @@ async def _add_to_session(session_id: str, data, user):
     logger.info("remember: added entry to session '%s'", session_id)
 
 
+class RememberResult:
+    """Promise-like result from ``remember()``.
+
+    Can be printed for a quick summary, awaited to block until the
+    pipeline finishes (background mode), or inspected via attributes.
+
+    Attributes:
+        status: ``"running"``, ``"completed"``, ``"errored"``,
+                or ``"session_stored"``.
+        dataset_name: Target dataset.
+        dataset_id: Dataset UUID (str) when available.
+        session_id: Session ID (session-only mode).
+        pipeline_run_id: Pipeline run UUID (str) when available.
+        error: Error message if the pipeline failed.
+        elapsed_seconds: Wall-clock time from start to completion.
+        content_hash: Content hash of the processed data (first item).
+        items_processed: Number of data items processed.
+        items: List of dicts with per-item info (name, content_hash,
+            token_count) for each data item in the pipeline run.
+        raw_result: The original cognify() return value (dict of
+            dataset_id -> PipelineRunInfo) for advanced inspection.
+
+    Example::
+
+        result = await cognee.remember("Einstein was born in Ulm.")
+        print(result)
+        # RememberResult(status='completed', dataset='main_dataset',
+        #                items=1, elapsed=4.2s)
+
+        result.content_hash   # 'a1b2c3...'
+        result.items          # [{'name': '...', 'content_hash': '...', ...}]
+
+        # Background mode:
+        result = await cognee.remember("data", run_in_background=True)
+        print(result.done)   # False
+        await result          # blocks until done
+        print(result)        # status='completed'
+    """
+
+    def __init__(
+        self,
+        *,
+        status: str,
+        dataset_name: str,
+        dataset_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ):
+        self.status = status
+        self.dataset_name = dataset_name
+        self.dataset_id = dataset_id
+        self.session_id = session_id
+        self.pipeline_run_id = pipeline_run_id
+        self.error: Optional[str] = None
+        self.raw_result: Optional[dict] = None
+        self.elapsed_seconds: Optional[float] = None
+        self.content_hash: Optional[str] = None
+        self.items_processed: int = 0
+        self.items: List[dict] = []
+        self._task: Optional[asyncio.Task] = None
+        self._started_at: float = time.monotonic()
+
+    def __repr__(self):
+        parts = [f"status={self.status!r}", f"dataset={self.dataset_name!r}"]
+        if self.session_id:
+            parts.append(f"session_id={self.session_id!r}")
+        if self.dataset_id:
+            parts.append(f"dataset_id={self.dataset_id!r}")
+        if self.pipeline_run_id:
+            parts.append(f"pipeline_run_id={self.pipeline_run_id!r}")
+        if self.items_processed:
+            parts.append(f"items={self.items_processed}")
+        if self.content_hash:
+            parts.append(f"content_hash={self.content_hash!r}")
+        if self.elapsed_seconds is not None:
+            parts.append(f"elapsed={self.elapsed_seconds:.1f}s")
+        if self.error:
+            parts.append(f"error={self.error!r}")
+        return f"RememberResult({', '.join(parts)})"
+
+    def __str__(self):
+        return repr(self)
+
+    def __bool__(self):
+        """True if status is completed or session_stored."""
+        return self.status in ("completed", "session_stored")
+
+    def __await__(self):
+        return self._await_impl().__await__()
+
+    async def _await_impl(self):
+        """Await the background task if running, then return self.
+
+        The background coroutine handles its own exceptions and writes
+        them to ``self.error`` / ``self.status``, so this method never
+        re-raises — it just waits for the task to finish.
+        """
+        if self._task is not None and not self._task.done():
+            await asyncio.shield(self._task)
+        return self
+
+    @property
+    def done(self) -> bool:
+        """True if the pipeline has finished (success or failure).
+
+        For session-stored results (no pipeline runs), always True.
+        For blocking results (no background task), reflects status.
+        For background results, delegates to the asyncio.Task.
+        """
+        if self._task is not None:
+            return self._task.done()
+        return self.status != "running"
+
+    def _resolve(self, cognify_result):
+        """Extract fields from the cognify() return value.
+
+        Called once when the pipeline finishes. Sets status, dataset_id,
+        pipeline_run_id, elapsed_seconds, item info, and stores the raw
+        result.
+        """
+        self.raw_result = cognify_result
+        self.elapsed_seconds = time.monotonic() - self._started_at
+
+        if not cognify_result or not isinstance(cognify_result, dict):
+            self.status = "completed"
+            return
+
+        # cognify returns {dataset_id: PipelineRunInfo}
+        # remember() always processes a single dataset, so take the first.
+        ds_id, run_info = next(iter(cognify_result.items()))
+        self.dataset_id = str(ds_id)
+
+        if hasattr(run_info, "status"):
+            self.status = "errored" if "Errored" in run_info.status else "completed"
+            if hasattr(run_info, "pipeline_run_id"):
+                self.pipeline_run_id = str(run_info.pipeline_run_id)
+        else:
+            self.status = "completed"
+
+        # Extract per-item details from the payload (list of Data objects)
+        payload = getattr(run_info, "payload", None)
+        if payload and isinstance(payload, list):
+            for data_item in payload:
+                item_info = {}
+                if hasattr(data_item, "id"):
+                    item_info["id"] = str(data_item.id)
+                if hasattr(data_item, "name"):
+                    item_info["name"] = data_item.name
+                if hasattr(data_item, "content_hash"):
+                    item_info["content_hash"] = data_item.content_hash
+                if hasattr(data_item, "token_count"):
+                    item_info["token_count"] = data_item.token_count
+                if hasattr(data_item, "mime_type"):
+                    item_info["mime_type"] = data_item.mime_type
+                if hasattr(data_item, "data_size"):
+                    item_info["data_size"] = data_item.data_size
+                if item_info:
+                    self.items.append(item_info)
+
+            self.items_processed = len(self.items)
+            if self.items and self.items[0].get("content_hash"):
+                self.content_hash = self.items[0]["content_hash"]
+
+    def _fail(self, exc: BaseException):
+        """Mark the result as failed with an error message and elapsed time."""
+        self.status = "errored"
+        self.error = str(exc)
+        self.elapsed_seconds = time.monotonic() - self._started_at
+
+
 async def remember(
     data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
     dataset_name: str = "main_dataset",
@@ -106,8 +277,10 @@ async def remember(
     chunker: Optional[Any] = None,
     custom_prompt: Optional[str] = None,
     run_in_background: bool = False,
+    self_improvement: bool = True,
+    session_ids: Optional[List[str]] = None,
     **kwargs: Unpack[RememberKwargs],
-):
+) -> "RememberResult":
     """Store data in memory.
 
     Two modes depending on whether ``session_id`` is provided:
@@ -129,12 +302,34 @@ async def remember(
         chunker: Text chunking strategy. Defaults to *TextChunker*.
         custom_prompt: Custom prompt for entity extraction.
         run_in_background: If *True*, run as a background task.
+        self_improvement: If *True* (default), automatically runs
+            ``improve()`` after cognify to enrich the graph with
+            triplet embeddings and indexing.
+        session_ids: Session IDs to sync graph knowledge back to.
+            Only used when ``self_improvement=True``. When provided,
+            ``improve()`` will also copy recent graph relationships
+            into these sessions for fast retrieval.
         **kwargs: Additional options -- see ``RememberKwargs``.
 
     Returns:
-        When session_id: dict with session status.
-        When blocking: the result of the cognify step (pipeline run info).
-        When background: a dict with initial pipeline run info.
+        RememberResult: A promise-like object. Print it for a summary,
+        await it to block until background processing finishes, or
+        inspect ``.status``, ``.dataset_name``, ``.elapsed_seconds``, etc.
+
+    Example::
+
+        result = await cognee.remember("Einstein was born in Ulm.")
+        print(result)
+        # RememberResult(status='completed', dataset='main_dataset', elapsed=4.2s)
+
+        # Background mode:
+        result = await cognee.remember("data", run_in_background=True)
+        print(result)        # status='running'
+        await result          # blocks until done
+        print(result)        # status='completed'
+
+        # Access raw pipeline result:
+        result.raw_result    # {dataset_id: PipelineRunInfo}
     """
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
@@ -176,13 +371,22 @@ async def remember(
     # Session memory: store in session cache only, skip permanent graph
     if session_id:
         await _add_to_session(session_id, data, user)
-        return {
-            "status": "session_stored",
-            "session_id": session_id,
-            "dataset_name": dataset_name,
-        }
+        result = RememberResult(
+            status="session_stored",
+            dataset_name=dataset_name,
+            session_id=session_id,
+        )
+        result.elapsed_seconds = time.monotonic() - result._started_at
+        return result
 
-    # Permanent memory: add + cognify into the knowledge graph
+    # Build the result object — starts as "running"
+    result = RememberResult(
+        status="running",
+        dataset_name=dataset_name,
+        dataset_id=str(dataset_id) if dataset_id else None,
+    )
+
+    # Permanent memory: add + cognify (+ optional improve)
     async def _run():
         await add(
             data=data,
@@ -193,7 +397,7 @@ async def remember(
 
         datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
-        return await cognify(
+        cognify_result = await cognify(
             datasets=datasets_arg,
             chunker=chunker,
             chunk_size=chunk_size,
@@ -203,21 +407,34 @@ async def remember(
             **cognify_kwargs,
         )
 
+        result._resolve(cognify_result)
+
+        if self_improvement:
+            from cognee.api.v2.improve import improve
+
+            logger.info("remember: running self-improvement on dataset '%s'", dataset_name)
+            improve_kwargs = {"dataset": dataset_name, "user": user}
+            if session_ids:
+                improve_kwargs["session_ids"] = session_ids
+            await improve(**improve_kwargs)
+
     if run_in_background:
 
         async def _remember_background():
             try:
                 await _run()
-            except Exception:
+            except Exception as exc:
+                result._fail(exc)
                 logger.exception("Background remember failed")
 
-        asyncio.create_task(_remember_background())
+        result._task = asyncio.create_task(_remember_background())
+        return result
 
-        return {
-            "status": "started",
-            "dataset_name": dataset_name,
-            "dataset_id": str(dataset_id) if dataset_id else None,
-            "run_in_background": True,
-        }
+    # Blocking mode
+    try:
+        await _run()
+    except Exception as exc:
+        result._fail(exc)
+        raise
 
-    return await _run()
+    return result

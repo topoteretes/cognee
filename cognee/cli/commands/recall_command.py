@@ -47,6 +47,12 @@ options are supported.
             help="Custom system prompt file for LLM-based search types",
         )
         parser.add_argument(
+            "--session-id",
+            "-s",
+            default=None,
+            help="Session ID to include conversation history in the search context",
+        )
+        parser.add_argument(
             "--output-format",
             "-f",
             choices=OUTPUT_FORMAT_CHOICES,
@@ -68,12 +74,21 @@ options are supported.
 
             async def run_recall():
                 try:
+                    from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+
+                    session_kwargs = {}
+                    if args.session_id is not None:
+                        user = await resolve_cli_user(getattr(args, "user_id", None))
+                        sid = scoped_session_id(user.id, args.session_id)
+                        session_kwargs["session_id"] = sid
+
                     results = await cognee.recall(
                         query_text=args.query_text,
                         query_type=query_type,
                         datasets=args.datasets,
                         system_prompt_path=args.system_prompt or "answer_simple_question.txt",
                         top_k=args.top_k,
+                        **session_kwargs,
                     )
                     return results
                 except Exception as e:

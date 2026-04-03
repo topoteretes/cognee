@@ -33,7 +33,7 @@ from .api.v1.ui import start_ui
 from .api.v1.session import session
 
 # V2 memory-oriented API
-from .api.v2 import remember, recall, improve, forget, status, DatasetStatus, DataItemInfo
+from .api.v2 import remember, RememberResult, recall, improve, forget, status, DatasetStatus, DataItemInfo
 
 # Pipelines (legacy)
 from .modules import pipelines

@@ -64,15 +64,15 @@ class DocumentChunk(DataPoint):
 #
 # After (current, already in this branch):
 
-from cognee.modules.pipelines.tasks.task import Task, task
-from cognee.pipelines.types import Drop
+from cognee.modules.pipelines.tasks.task import Task, task  # noqa: E402
+from cognee.pipelines.types import Drop  # noqa: E402
 
 
 # Option A: Plain function + Task wrapper at pipeline definition
 async def classify_documents(data):
     """Classify input documents by type."""
     # ... classification logic ...
-    return classified_doc
+    return classified_doc  # noqa: F821
 
 
 async def extract_chunks(document):
@@ -84,7 +84,7 @@ async def extract_chunks(document):
 async def extract_entities(chunks, graph_model=None):
     """Extract entities from chunks using LLM."""
     # ... LLM extraction logic ...
-    return entities
+    return entities  # noqa: F821
 
 
 async def filter_low_quality(entity):
@@ -120,7 +120,7 @@ async def run_simple_pipeline(datasets, user):
     tasks = [
         Task(classify_documents),
         Task(extract_chunks, batch_size=5),  # was: task_config={"batch_size": 5}
-        Task(extract_entities, batch_size=20, graph_model=KnowledgeGraph),
+        Task(extract_entities, batch_size=20, graph_model=KnowledgeGraph),  # noqa: F821
         Task(filter_low_quality),  # uses Drop to remove items
         Task(
             add_to_graph, batch_size=50, enriches=True

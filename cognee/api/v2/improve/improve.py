@@ -36,8 +36,8 @@ async def improve(
 ):
     """Enrich an existing knowledge graph with additional context and rules.
 
-    When ``session_ids`` is provided, the improvement pipeline runs three
-    stages before the default enrichment:
+    When ``session_ids`` is provided, the improvement pipeline runs four
+    stages:
 
     1. **Apply feedback weights** -- session entries with feedback scores
        update ``feedback_weight`` on the graph nodes/edges that were used
@@ -50,6 +50,10 @@ async def improve(
 
     3. **Default enrichment** -- triplet embeddings are extracted and
        indexed (same as calling ``improve()`` without sessions).
+
+    4. **Sync graph to session cache** -- incrementally copies new graph
+       relationships back into the session cache as human-readable
+       summaries for fast retrieval during session completions.
 
     Without ``session_ids``, only stage 3 runs.
 
@@ -98,13 +102,23 @@ async def improve(
 
         kwargs["node_type"] = NodeSet
 
-    return await memify(
+    result = await memify(
         dataset=dataset,
         node_name=node_name,
         user=user,
         run_in_background=run_in_background,
         **kwargs,
     )
+
+    # Stage 4: sync enriched graph back to session cache (incremental)
+    if session_ids:
+        await _sync_graph_to_sessions(
+            dataset=dataset,
+            session_ids=session_ids,
+            user=user,
+        )
+
+    return result
 
 
 async def _bridge_sessions(
@@ -148,3 +162,42 @@ async def _bridge_sessions(
         logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
     except Exception as e:
         logger.warning("improve: session persistence failed (non-fatal): %s", e)
+
+
+async def _sync_graph_to_sessions(
+    dataset: Union[str, UUID],
+    session_ids: List[str],
+    user,
+):
+    """Incrementally sync recent graph knowledge into each session cache."""
+    from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+        resolve_authorized_user_datasets,
+    )
+    from cognee.tasks.memify.sync_graph_to_session import sync_graph_to_session
+
+    dataset_name = dataset if isinstance(dataset, str) else "main_dataset"
+
+    try:
+        _, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
+        if not authorized_datasets:
+            logger.warning("improve: no authorized datasets for graph sync")
+            return
+        dataset_obj = authorized_datasets[0]
+        user_id = str(user.id) if hasattr(user, "id") else None
+        if not user_id:
+            return
+
+        for session_id in session_ids:
+            result = await sync_graph_to_session(
+                user_id=user_id,
+                session_id=session_id,
+                dataset_id=dataset_obj.id,
+                dataset_name=dataset_name,
+            )
+            logger.info(
+                "improve: synced %d edges to session '%s'",
+                result.get("synced", 0),
+                session_id,
+            )
+    except Exception as e:
+        logger.warning("improve: graph-to-session sync failed (non-fatal): %s", e)

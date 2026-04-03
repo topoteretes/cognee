@@ -1,4 +1,4 @@
-from .remember import remember
+from .remember import remember, RememberResult
 from .recall import recall
 from .improve import improve
 from .forget import forget

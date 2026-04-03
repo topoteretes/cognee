@@ -22,7 +22,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import cognee
-
+from cognee import session
 
 PERMANENT_TEXT = (
     "Albert Einstein developed the theory of general relativity, "
@@ -77,6 +77,11 @@ async def main():
     print("--- Step 1: remember() -- permanent memory ---")
     await cognee.remember(PERMANENT_TEXT, dataset_name=DATASET)
     print("  Data ingested into permanent graph.")
+
+    cognee.remember( "blalba", session_id='123')
+
+
+    cognee.improve(dataset=DATASET)
 
     # Per-item status
     print("\n--- Step 2: status(items=True) -- per-source detail ---")

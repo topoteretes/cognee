@@ -12,10 +12,10 @@ Store data permanently in the Cognee knowledge graph.
 Run the cognee remember command with the data to store:
 
 ```bash
-cognee-cli remember "$ARGUMENTS" -d "${COGNEE_PLUGIN_DATASET:-claude_sessions}" -b
+cognee-cli remember "$ARGUMENTS" -d "${COGNEE_PLUGIN_DATASET:-claude_sessions}"
 ```
 
-The `-b` flag runs cognify in the background so it does not block.
+**IMPORTANT**: Do NOT use the `-b` (background) flag. Running cognify in the background can result in data not being fully indexed and therefore not searchable. Always run in the foreground to ensure the full pipeline completes before returning.
 
 ## When to use
 
