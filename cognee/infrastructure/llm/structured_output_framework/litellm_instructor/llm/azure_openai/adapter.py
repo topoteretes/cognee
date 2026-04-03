@@ -203,12 +203,12 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     model=self._extract_deployment(self.model),
                     messages=[
                         {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
                             "role": "system",
                             "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
                         },
                     ],
                     response_model=response_model,
@@ -230,12 +230,12 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                         model=self.fallback_model,
                         messages=[
                             {
-                                "role": "user",
-                                "content": f"""{text_input}""",
-                            },
-                            {
                                 "role": "system",
                                 "content": system_prompt,
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
                             },
                         ],
                         api_key=self.fallback_api_key,
