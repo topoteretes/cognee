@@ -52,6 +52,7 @@ async def search(
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[SearchResult]:
     """
 
@@ -103,6 +104,7 @@ async def search(
             triplet_distance_penalty=triplet_distance_penalty,
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
 
         span.set_attribute("cognee.search.result_count", len(search_results))
@@ -141,6 +143,7 @@ async def authorized_search(
     triplet_distance_penalty: Optional[float] = 3.5,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[Tuple[Any, Union[List[Edge], str], List[Dataset]]]:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
@@ -187,6 +190,7 @@ async def search_in_datasets_context(
     triplet_distance_penalty: Optional[float] = 3.5,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -208,6 +212,7 @@ async def search_in_datasets_context(
         triplet_distance_penalty: Optional[float] = 3.5,
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
+        neighborhood_seed_top_k: Optional[int] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         with new_span("cognee.search.dataset") as span:
             span.set_attribute("cognee.search.dataset_name", dataset.name or "")

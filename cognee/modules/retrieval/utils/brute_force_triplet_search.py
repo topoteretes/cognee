@@ -76,6 +76,11 @@ async def get_memory_fragment(
                 depth=neighborhood_depth,
                 triplet_distance_penalty=triplet_distance_penalty,
             )
+        elif neighborhood_depth is not None and not relevant_ids_to_filter:
+            raise ValueError(
+                "neighborhood_depth requires seed node IDs from vector search "
+                "(set wide_search_top_k to a positive integer)"
+            )
         else:
             await memory_fragment.project_graph_from_db(
                 graph_engine,
@@ -140,6 +145,38 @@ async def _get_top_triplet_importances(
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
+
+        # Re-score expansion nodes discovered via neighborhood traversal.
+        # These nodes have no vector scores yet — run an ID-filtered vector
+        # search so they participate in triplet ranking instead of getting
+        # the default penalty score.
+        if (
+            neighborhood_depth is not None
+            and relevant_node_ids
+            and vector_search.query_vector is not None
+        ):
+            seed_set = set(relevant_node_ids)
+            expansion_ids = [nid for nid in memory_fragment.nodes if nid not in seed_set]
+            if expansion_ids:
+                for collection_name in list(vector_search.node_distances.keys()):
+                    try:
+                        extra_scores = await vector_search.vector_engine.search(
+                            collection_name=collection_name,
+                            query_vector=vector_search.query_vector,
+                            limit=len(expansion_ids),
+                            node_name=expansion_ids,
+                        )
+                        if extra_scores:
+                            if vector_search.query_list_length is None:
+                                vector_search.node_distances[collection_name].extend(extra_scores)
+                            else:
+                                for qi, per_query in enumerate(extra_scores):
+                                    if qi < len(vector_search.node_distances[collection_name]):
+                                        vector_search.node_distances[collection_name][qi].extend(
+                                            per_query
+                                        )
+                    except CollectionNotFoundError:
+                        pass
 
     await memory_fragment.map_vector_distances_to_graph_nodes(
         node_distances=vector_search.node_distances, query_list_length=query_list_length

@@ -254,8 +254,8 @@ class CogneeGraph(CogneeAbstractGraph):
                 triplet_distance_penalty,
             )
 
-        except Exception as e:
-            logger.error(f"Error during graph projection: {str(e)}")
+        except Exception:
+            logger.error("Error during graph projection", exc_info=True)
             raise
 
     async def project_neighborhood_from_db(
@@ -279,6 +279,10 @@ class CogneeGraph(CogneeAbstractGraph):
         """
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
+        if depth < 1:
+            raise ValueError("depth must be >= 1")
+        if not seed_node_ids:
+            raise ValueError("seed_node_ids must not be empty")
         try:
             logger.info(f"Retrieving {depth}-hop neighborhood for {len(seed_node_ids)} seed nodes.")
             nodes_data, edges_data = await adapter.get_neighborhood(
@@ -287,8 +291,9 @@ class CogneeGraph(CogneeAbstractGraph):
                 edge_types=edge_types,
             )
 
-            if not nodes_data or not edges_data:
+            if not nodes_data:
                 raise EntityNotFoundError(message="Empty neighborhood projected from the database.")
+            edges_data = edges_data or []
 
             self._process_nodes_and_edges(
                 nodes_data,
@@ -301,8 +306,8 @@ class CogneeGraph(CogneeAbstractGraph):
                 triplet_distance_penalty,
             )
 
-        except Exception as e:
-            logger.error(f"Error during neighborhood projection: {str(e)}")
+        except Exception:
+            logger.error("Error during neighborhood projection", exc_info=True)
             raise
 
     async def map_vector_distances_to_graph_nodes(

@@ -692,13 +692,13 @@ class NeptuneGraphDB(GraphDBInterface):
                 path_query = f"""
                 MATCH (seed:{self._GRAPH_NODE_LABEL})-[:{allowed}*1..{depth}]-(neighbor:{self._GRAPH_NODE_LABEL})
                 WHERE seed.`~id` IN $node_ids
-                RETURN DISTINCT id(neighbor) AS nid
+                RETURN DISTINCT neighbor.`~id` AS nid
                 """
             else:
                 path_query = f"""
                 MATCH (seed:{self._GRAPH_NODE_LABEL})-[*1..{depth}]-(neighbor:{self._GRAPH_NODE_LABEL})
                 WHERE seed.`~id` IN $node_ids
-                RETURN DISTINCT id(neighbor) AS nid
+                RETURN DISTINCT neighbor.`~id` AS nid
                 """
 
             result = await self.query(path_query, {"node_ids": node_ids})
@@ -709,8 +709,8 @@ class NeptuneGraphDB(GraphDBInterface):
             # Step 2: Fetch all nodes
             nodes_query = f"""
             MATCH (n:{self._GRAPH_NODE_LABEL})
-            WHERE id(n) IN $ids
-            RETURN id(n) AS node_id, properties(n) AS properties
+            WHERE n.`~id` IN $ids
+            RETURN n.`~id` AS node_id, properties(n) AS properties
             """
             nodes_result = await self.query(nodes_query, {"ids": all_ids})
             nodes = [(r["node_id"], r["properties"]) for r in nodes_result]
@@ -718,8 +718,8 @@ class NeptuneGraphDB(GraphDBInterface):
             # Step 3: Fetch all edges between collected nodes
             edges_query = f"""
             MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
-            WHERE id(source) IN $ids AND id(target) IN $ids
-            RETURN id(source) AS source_id, id(target) AS target_id,
+            WHERE source.`~id` IN $ids AND target.`~id` IN $ids
+            RETURN source.`~id` AS source_id, target.`~id` AS target_id,
                    type(r) AS relationship_name, properties(r) AS properties
             """
             edges_result = await self.query(edges_query, {"ids": all_ids})
