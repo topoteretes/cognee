@@ -1,4 +1,5 @@
 import os
+import uuid
 import asyncio
 import pytest
 from unittest.mock import patch
@@ -32,14 +33,14 @@ class TestApiKeyAuthFlow:
             yield client
 
     def test_register_login_create_api_key_and_authenticate(self, client):
-        # 1. Register a new user
+        # Register a new user (ignore if already exists)
         register_response = client.post(
             "/api/v1/auth/register",
             json={"email": TEST_USER_EMAIL, "password": TEST_USER_PASSWORD},
         )
-        assert register_response.status_code == 201
+        assert register_response.status_code in (201, 400)
 
-        # 2. Login and retrieve JWT bearer token
+        # Login and retrieve JWT bearer token
         login_response = client.post(
             "/api/v1/auth/login",
             data={"username": TEST_USER_EMAIL, "password": TEST_USER_PASSWORD},
@@ -48,7 +49,7 @@ class TestApiKeyAuthFlow:
         access_token = login_response.json()["access_token"]
         assert access_token
 
-        # 3. Create an API key using the bearer token
+        # Create an API key using the bearer token
         create_key_response = client.post(
             "/api/v1/auth/api-keys",
             json={"name": "integration test key"},
@@ -58,7 +59,10 @@ class TestApiKeyAuthFlow:
         api_key = create_key_response.json()["key"]
         assert api_key
 
-        # 4. Use only the API key on an authenticated endpoint and confirm it succeeds
+        # Note: we have to logout so Cookies don't interfere with API key authentication in the next step
+        client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {access_token}"})
+
+        # Use only the API key on an authenticated endpoint and confirm it succeeds
         me_response = client.get(
             "/api/v1/auth/me",
             headers={"X-Api-Key": api_key},
@@ -87,7 +91,7 @@ class TestHashApiKey:
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.users.api_key.hash_api_key import hash_api_key as compute_hash
 
-        # Register and login
+        # Register (ignore if already exists) and login
         client.post(
             "/api/v1/auth/register",
             json={"email": HASH_TEST_USER_EMAIL, "password": HASH_TEST_USER_PASSWORD},
@@ -100,6 +104,7 @@ class TestHashApiKey:
         access_token = login_response.json()["access_token"]
 
         # Create an API key with HASH_API_KEY=True active
+        # Note: There is a maximum number of API keys allowed per user (10)
         with patch("cognee.modules.users.api_key.hash_api_key.HASH_API_KEY", True):
             create_key_response = client.post(
                 "/api/v1/auth/api-keys",
@@ -109,7 +114,7 @@ class TestHashApiKey:
         assert create_key_response.status_code == 200
 
         raw_key = create_key_response.json()["key"]
-        key_id = create_key_response.json()["id"]
+        key_id = uuid.UUID(create_key_response.json()["id"])
 
         # Query the database directly to verify the stored value is hashed
         async def get_stored_api_key():
