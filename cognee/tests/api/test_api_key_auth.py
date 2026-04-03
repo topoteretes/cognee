@@ -50,16 +50,18 @@ class TestApiKeyAuthFlow:
         assert access_token
 
         # Create an API key using the bearer token
+        # Note: There is a maximum number of API keys allowed per user (10)
         create_key_response = client.post(
             "/api/v1/auth/api-keys",
             json={"name": "integration test key"},
             headers={"Authorization": f"Bearer {access_token}"},
         )
         assert create_key_response.status_code == 200
+        api_key_id = create_key_response.json()["id"]
         api_key = create_key_response.json()["key"]
         assert api_key
 
-        # Note: we have to logout so Cookies don't interfere with API key authentication in the next step
+        # Note: we have to log out so Cookies don't interfere with API key authentication in the next step
         client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {access_token}"})
 
         # Use only the API key on an authenticated endpoint and confirm it succeeds
@@ -69,6 +71,18 @@ class TestApiKeyAuthFlow:
         )
         assert me_response.status_code == 200
         assert me_response.json()["email"] == TEST_USER_EMAIL
+
+        delete_response = client.delete(
+            f"/api/v1/auth/api-keys/{api_key_id}", headers={"X-Api-Key": api_key}
+        )
+
+        assert delete_response.status_code == 200, "API key deletion should succeed"
+
+        me_response = client.get(
+            "/api/v1/auth/me",
+            headers={"X-Api-Key": api_key},
+        )
+        assert me_response.status_code == 401, "Deleted API key should no longer authenticate"
 
 
 class TestHashApiKey:

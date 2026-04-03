@@ -19,10 +19,6 @@ class ApiKeyCreationPayload(InDTO):
     name: Optional[str] = None
 
 
-class ApiKeyDeletionPayload(InDTO):
-    api_key_id: UUID
-
-
 def get_api_key_management_router():
     api_key_management_router = APIRouter()
 
@@ -86,9 +82,9 @@ def get_api_key_management_router():
         except ApiKeyCreationError as error:
             return JSONResponse(status_code=400, content={"error": {"message": error.message}})
 
-    @api_key_management_router.delete("/api-keys")
+    @api_key_management_router.delete("/api-keys/{api_key_id}")
     async def delete_api_key_for_user(
-        api_key_payload: ApiKeyDeletionPayload,
+        api_key_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
         send_telemetry(
@@ -98,7 +94,7 @@ def get_api_key_management_router():
                 "endpoint": "DELETE /v1/auth/api-keys",
             },
         )
-        status = await delete_api_key(user, api_key_payload.api_key_id)
+        status = await delete_api_key(user, api_key_id)
 
         return status
 
