@@ -8,7 +8,7 @@
   Cognee - Build AI memory with a Knowledge Engine that learns
 
   <p align="center">
-  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
+  <a href="https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s">Demo</a>
   .
   <a href="https://docs.cognee.ai/">Docs</a>
   .
@@ -32,10 +32,6 @@
   <a href="https://github.com/sponsors/topoteretes"><img src="https://img.shields.io/badge/Sponsor-❤️-ff69b4.svg" alt="Sponsor"></a>
 
 <p>
-  <a href="https://www.producthunt.com/posts/cognee?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_souce=badge-cognee" target="_blank" style="display:inline-block; margin-right:10px;">
-    <img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=946346&theme=light&period=daily&t=1744472480704" alt="cognee - Memory&#0032;for&#0032;AI&#0032;Agents&#0032;&#0032;in&#0032;5&#0032;lines&#0032;of&#0032;code | Product Hunt" width="250" height="54" />
-  </a>
-
   <a href="https://trendshift.io/repositories/13955" target="_blank" style="display:inline-block;">
     <img src="https://trendshift.io/api/badge/repositories/13955" alt="topoteretes%2Fcognee | Trendshift" width="250" height="55" />
   </a>
@@ -59,7 +55,7 @@ Use our knowledge engine to build personalized and dynamic memory for AI Agents.
 
 
 <div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
+  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="80%" />
 </div>
 </div>
 
@@ -68,22 +64,28 @@ Use our knowledge engine to build personalized and dynamic memory for AI Agents.
 
 ## About Cognee
 
-Cognee is an open-source knowledge engine that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search, graph databases and self-improvement to make your documents both searchable by meaning and connected by relationships as they change and evolve.
+Cognee is an open-source knowledge engine that lets you ingest data in any format or structure and continuously learns to provide the right context for AI agents. It combines vector search, graph databases and cognitive science approaches to make your documents both searchable by meaning and connected by relationships as they change and evolve.
 
-Cognee offers default knowledge creation and search which we describe bellow. But with Cognee you can build your modular knowledge blocks!
 
 
 :star: _Help us reach more developers and grow the cognee community. Star this repo!_
 
+:books: _Check our detailed [documentation](https://docs.cognee.ai/getting-started/installation#environment-configuration) for setup and configuration._
 
-### Cognee Open Source:
+:crab: _Available as a plugin for your OpenClaw — [cognee-openclaw](https://www.npmjs.com/package/@cognee/cognee-openclaw)_
 
-- Interconnects any type of data — including past conversations, files, images, and audio transcriptions
-- Replaces traditional database lookups with a unified knowledge engine built with graphs and vectors
-- Reduces developer effort and infrastructure cost while improving quality and precision
-- Provides Pythonic data pipelines for ingestion from 30+ data sources
-- Offers high customizability through user-defined tasks, modular pipelines, and built-in search endpoints
 
+### Why use Cognee:
+
+- Knowledge infrastructure — unified ingestion, graph/vector search, runs locally, ontology grounding, multimodal
+- Persistent and Learning Agents - learn from feedback, context management, cross-agent knowledge sharing
+- Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
+
+### Product Features
+
+<p align="center">
+  <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
+</p>
 
 ## Basic Usage & Feature Guide
 
@@ -93,7 +95,7 @@ To learn more, [check out this short, end-to-end Colab walkthrough](https://cola
 
 ## Quickstart
 
-Let’s try Cognee in just a few lines of code. For detailed setup and configuration, see the [Cognee Docs](https://docs.cognee.ai/getting-started/installation#environment-configuration).
+Let’s try Cognee in just a few lines of code.
 
 ### Prerequisites
 
@@ -118,7 +120,7 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 ### Step 3: Run the Pipeline
 
-Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships.
+Cognee will take your documents, load them into the knowledge angine and search combined vector/graph relationships.
 
 Now, run a minimal pipeline:
 
@@ -132,11 +134,8 @@ async def main():
     # Add text to cognee
     await cognee.add("Cognee turns documents into AI memory.")
 
-    # Generate the knowledge graph
+    # Add to knowledge engine
     await cognee.cognify()
-
-    # Add memory algorithms to the graph
-    await cognee.memify()
 
     # Query the knowledge graph
     results = await cognee.search("What does Cognee do?")
@@ -176,21 +175,72 @@ To open the local UI, run:
 cognee-cli -ui
 ```
 
-## Demos & Examples
+## Examples
 
-See Cognee in action:
+Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations.
 
-### Persistent Agent Memory
+**Use Case 1 — Customer Support Agent**
 
-[Cognee Memory for LangGraph Agents](https://github.com/user-attachments/assets/e113b628-7212-4a2b-b288-0be39a93a1c3)
+```python
+Goal: Resolve customer issues using their personal data across finance, support, and product history.
 
-### Simple GraphRAG
+User: "My invoice looks wrong and the issue is still not resolved."
 
-[Watch Demo](https://github.com/user-attachments/assets/f2186b2e-305a-42b0-9c2d-9f4473f15df8)
+Cognee tracks: past interactions, failed actions, resolved cases, product history
 
-### Cognee with Ollama
+# Agent response:
+Agent: "I found 2 similar billing cases resolved last month.
+        The issue was caused by a sync delay between payment
+        and invoice systems — a fix was applied on your account."
 
-[Watch Demo](https://github.com/user-attachments/assets/39672858-f774-4136-b957-1e2de67b8981)
+# What happens under the hood:
+- Unifies data sources from various company channels
+- Reconstructs the interaction timeline and tracks outcomes
+- Retrieves similar resolved cases
+- Maps to the best resolution strategy
+- Updates memory after execution so the agent never repeats the same mistake
+```
+
+**Use Case 2 — Expert Knowledge Distillation (SQL Copilot)**
+
+```python
+Goal: Help junior analysts solve tasks by reusing expert-level queries, patterns, and reasoning.
+
+User: "How do I calculate customer retention for this dataset?"
+
+Cognee tracks: expert SQL queries, workflow patterns, schema structures, successful implementations
+
+# Agent response:
+Agent: "Here's how senior analysts solved a similar retention query.
+        Cognee matched your schema to a known structure and adapted
+        the expert's logic to fit your dataset."
+
+# What happens under the hood:
+- Extracts and stores patterns from expert SQL queries and workflows
+- Maps the current schema to previously seen structures
+- Retrieves similar tasks and their successful implementations
+- Adapts expert reasoning to the current context
+- Updates memory with new successful patterns so junior analysts perform at near-expert level
+```
+
+## Deploy Cognee
+
+Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or self-host with one of the 1-click deployment configurations below.
+
+| Platform | Best For | Command |
+|----------|----------|---------|
+| **Cognee Cloud** | Managed service, no infrastructure to maintain | [Sign up](https://www.cognee.ai) |
+| **Modal** | Serverless, auto-scaling, GPU workloads | `bash distributed/deploy/modal-deploy.sh` |
+| **Railway** | Simplest PaaS, native Postgres | `railway init && railway up` |
+| **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
+| **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
+| **Daytona** | Cloud sandboxes (SDK or CLI) | See `distributed/deploy/daytona_sandbox.py` |
+
+See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
+
+## Latest News
+
+[![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
 
 ## Community & Support

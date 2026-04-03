@@ -41,6 +41,7 @@ def create_edge_type_datapoints(edges_data) -> list[EdgeType]:
 
 async def index_graph_edges(
     edges_data: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]] = None,
+    vector_engine=None,
 ):
     """
     Indexes graph edges by creating and managing vector indexes for relationship types.
@@ -72,6 +73,6 @@ async def index_graph_edges(
         raise RuntimeError("Initialization error") from e
 
     edge_type_datapoints = create_edge_type_datapoints(edges_data)
-    await index_data_points(edge_type_datapoints)
+    await index_data_points(edge_type_datapoints, vector_engine=vector_engine)
 
     return None

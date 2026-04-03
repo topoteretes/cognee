@@ -1,9 +1,11 @@
 import json
 import os
+import re
 import sys
 import argparse
 import asyncio
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
@@ -15,6 +17,7 @@ import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
 from mcp.server import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from cognee.modules.storage.utils import JSONEncoder
 from starlette.responses import JSONResponse
 from starlette.middleware import Middleware
@@ -45,13 +48,112 @@ logger = get_logger()
 
 cognee_client: Optional[CogneeClient] = None
 
+# Stores background task errors so cognify_status can report them
+_task_errors: dict[str, str] = {}
+
+
+def _configure_transport_security(host: str) -> None:
+    """Configure MCP transport security based on env vars and bind host.
+
+    Must be called before run_sse_with_cors() or run_http_with_cors(), since
+    the SDK reads mcp.settings.transport_security lazily when creating the app.
+
+    Env vars:
+        MCP_DISABLE_DNS_REBINDING_PROTECTION: Set to "true" to disable all
+            Host/Origin header validation. Useful for LAN or Docker deployments.
+        MCP_ALLOWED_HOSTS: Comma-separated additional Host header patterns
+            (e.g. "192.168.1.50:*,myserver.local:*"). Appended to the
+            localhost defaults. Requires the ":*" port glob suffix.
+    """
+    disable = os.getenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "false").lower() == "true"
+
+    if disable:
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+        )
+        logger.info("MCP transport security: DNS rebinding protection disabled")
+        return
+
+    extra_hosts = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+
+    # The SDK only auto-populates localhost defaults when transport_security is
+    # None AND host is a loopback address. When the user binds to 0.0.0.0 or a
+    # LAN IP, we must provide the full allowed list ourselves.
+    localhost_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    localhost_origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+
+    allowed_hosts = localhost_hosts + extra_hosts
+    # Derive origins from extra hosts so users don't need to set both.
+    allowed_origins = localhost_origins + [f"http://{h}" for h in extra_hosts]
+
+    if host not in ("127.0.0.1", "localhost", "::1") or extra_hosts:
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
+        )
+        logger.info(
+            "MCP transport security: allowed_hosts=%s",
+            allowed_hosts,
+        )
+    else:
+        # Loopback-only with no extra hosts — let the SDK use its own defaults.
+        logger.info("MCP transport security: using SDK defaults (localhost only)")
+
+
+def _is_running_in_docker() -> bool:
+    """Check if the process is running inside a Docker container."""
+    return os.path.exists("/.dockerenv") or os.path.isdir("/app")
+
+
+def _looks_like_file_path(data: str) -> bool:
+    """Check if the data string looks like a local file path."""
+    data = data.strip()
+    # Unix absolute path, Windows drive letter path, or file:// URI
+    if data.startswith("/") or re.match(r"^[A-Za-z]:\\", data) or data.startswith("file://"):
+        return True
+    return False
+
+
+def _validate_file_path(data: str) -> Optional[str]:
+    """
+    If data looks like a file path, validate it exists.
+    Returns an error message string if invalid, or None if OK.
+    """
+    if not _looks_like_file_path(data):
+        return None
+
+    path = data.strip()
+    if path.startswith("file://"):
+        path = path[7:]
+
+    if not os.path.exists(path):
+        msg = f"File not found: {path}"
+        if _is_running_in_docker():
+            msg += (
+                "\n\nIt looks like you're running inside Docker. Host file paths are not "
+                "accessible inside the container. To ingest local files, mount a volume in "
+                "docker-compose.yml:\n"
+                "  volumes:\n"
+                "    - /path/to/your/data:/data\n"
+                "Then reference the file as /data/<filename> instead."
+            )
+        return msg
+    return None
+
+
+def _get_cors_origins() -> list[str]:
+    """Parse CORS allowed origins from MCP_CORS_ALLOW_ORIGINS env var."""
+    raw = os.getenv("MCP_CORS_ALLOW_ORIGINS", "http://localhost:3000")
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
 
 async def run_sse_with_cors():
     """Custom SSE transport with CORS middleware."""
     sse_app = mcp.sse_app()
     sse_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=_get_cors_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -72,7 +174,7 @@ async def run_http_with_cors():
     http_app = mcp.streamable_http_app()
     http_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=_get_cors_origins(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -204,6 +306,16 @@ async def cognify(
 
     """
 
+    # Validate file paths before launching background task
+    file_error = _validate_file_path(data)
+    if file_error:
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Error: {file_error}",
+            )
+        ]
+
     async def cognify_task(
         data: str,
         graph_model_file: str = None,
@@ -234,8 +346,17 @@ async def cognify(
                 logger.error("Cognify process failed.")
                 raise ValueError(f"Failed to cognify: {str(e)}")
 
+    async def cognify_task_wrapper(**kwargs):
+        """Wrapper that captures errors from the background task."""
+        try:
+            await cognify_task(**kwargs)
+        except Exception as e:
+            timestamp = datetime.now(timezone.utc).isoformat()
+            _task_errors[timestamp] = str(e)
+            logger.error(f"Background cognify task failed: {e}")
+
     asyncio.create_task(
-        cognify_task(
+        cognify_task_wrapper(
             data=data,
             graph_model_file=graph_model_file,
             graph_model_name=graph_model_name,
@@ -793,13 +914,28 @@ async def cognify_status():
             status = await cognee_client.get_pipeline_status(
                 [await get_unique_dataset_id("main_dataset", user)], "cognify_pipeline"
             )
-            return [types.TextContent(type="text", text=str(status))]
+
+            # Append any background task errors
+            status_text = str(status)
+            if _task_errors:
+                error_lines = ["\n\nBackground task errors:"]
+                for ts, err in sorted(_task_errors.items(), reverse=True):
+                    error_lines.append(f"  [{ts}] {err}")
+                status_text += "\n".join(error_lines)
+
+            return [types.TextContent(type="text", text=status_text)]
         except NotImplementedError:
             error_msg = "❌ Pipeline status is not available in API mode"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
             error_msg = f"❌ Failed to get cognify status: {str(e)}"
+            # Still report background errors even if pipeline status fails
+            if _task_errors:
+                error_lines = ["\n\nBackground task errors:"]
+                for ts, err in sorted(_task_errors.items(), reverse=True):
+                    error_lines.append(f"  [{ts}] {err}")
+                error_msg += "\n".join(error_lines)
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
@@ -901,6 +1037,7 @@ async def main():
 
     mcp.settings.host = args.host
     mcp.settings.port = int(args.port)
+    _configure_transport_security(args.host)
 
     # Skip migrations when in API mode (the API server handles its own database)
     if not args.no_migration and not args.api_url:

@@ -8,8 +8,8 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager
-from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine
-
+from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
@@ -33,8 +33,17 @@ from .neo4j_metrics_utils import (
 )
 from .deadlock_retry import deadlock_retry
 
+from cognee.modules.observability import new_span
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_SYSTEM,
+    COGNEE_DB_QUERY,
+    COGNEE_DB_ROW_COUNT,
+    redact_secrets,
+)
+
 
 logger = get_logger("Neo4jAdapter")
+
 
 BASE_LABEL = "__Node__"
 
@@ -52,15 +61,20 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_username: Optional[str] = None,
         graph_database_password: Optional[str] = None,
         graph_database_name: Optional[str] = None,
+        graph_database_allow_anonymous: bool = False,
         driver: Optional[Any] = None,
     ):
         # Only use auth if both username and password are provided
         auth = None
+
         if graph_database_username and graph_database_password:
             auth = (graph_database_username, graph_database_password)
-        elif graph_database_username or graph_database_password:
-            logger = get_logger(__name__)
-            logger.warning("Neo4j credentials incomplete – falling back to anonymous connection.")
+        elif not graph_database_allow_anonymous:
+            raise ValueError(
+                "Neo4j credentials incomplete. Set GRAPH_DATABASE_USERNAME and "
+                "GRAPH_DATABASE_PASSWORD in your .env file, or configure them programmatically."
+            )
+
         self.graph_database_name = graph_database_name
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
@@ -117,14 +131,21 @@ class Neo4jAdapter(GraphDBInterface):
             - List[Dict[str, Any]]: A list of dictionaries representing the result of the query
               execution.
         """
-        try:
-            async with self.get_session() as session:
-                result = await session.run(query, parameters=params)
-                data = await result.data()
-                return data
-        except Neo4jError as error:
-            logger.error("Neo4j query error: %s", error, exc_info=True)
-            raise error
+        with new_span("cognee.db.graph.query") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "neo4j")
+            otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
+
+            try:
+                async with self.get_session() as session:
+                    result = await session.run(query, parameters=params)
+                    data = await result.data()
+                    otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(data))
+                    return data
+            except Neo4jError as error:
+                otel_span.set_status(StatusCode.ERROR, str(error))
+                otel_span.record_exception(error)
+                logger.error("Neo4j query error: %s", error, exc_info=True)
+                raise error
 
     async def has_node(self, node_id: str) -> bool:
         """
@@ -746,6 +767,117 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, {"node_ids": node_ids})
         return [result["node"] for result in results]
 
+    def _build_node_feedback_items(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for node feedback weight updates."""
+        return [
+            {"node_id": node_id, "feedback_weight": float(weight)}
+            for node_id, weight in node_feedback_weights.items()
+            if isinstance(node_id, str) and node_id
+        ]
+
+    async def _execute_node_feedback_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
+        """Run node feedback weight UNWIND/SET; return set of updated node_ids."""
+        if not items:
+            return set()
+        query = """
+        UNWIND $items AS item
+        MATCH (n:`__Node__` {id: item.node_id})
+        SET n.feedback_weight = item.feedback_weight, n.updated_at = timestamp()
+        RETURN n.id AS node_id
+        """
+        results = await self.query(query, {"items": items})
+        return {str(r["node_id"]) for r in results if r.get("node_id") is not None}
+
+    def _build_edge_feedback_items(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for edge feedback weight updates."""
+        return [
+            {"edge_object_id": edge_object_id, "feedback_weight": float(weight)}
+            for edge_object_id, weight in edge_feedback_weights.items()
+            if isinstance(edge_object_id, str) and edge_object_id
+        ]
+
+    async def _execute_edge_feedback_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
+        """Run edge feedback weight UNWIND/SET; return set of updated edge_object_ids."""
+        if not items:
+            return set()
+        query = """
+        UNWIND $items AS item
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = item.edge_object_id
+        SET r.feedback_weight = item.feedback_weight, r.updated_at = timestamp()
+        RETURN r.edge_object_id AS edge_object_id
+        """
+        results = await self.query(query, {"items": items})
+        return {str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None}
+
+    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        if not node_ids:
+            return {}
+        valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
+        if not valid_node_ids:
+            return {}
+        query = """
+        UNWIND $node_ids AS node_id
+        MATCH (n:`__Node__` {id: node_id})
+        RETURN n.id AS node_id, coalesce(n.feedback_weight, $default_weight) AS feedback_weight
+        """
+        results = await self.query(query, {"node_ids": valid_node_ids, "default_weight": 0.5})
+        return {
+            str(row["node_id"]): float(row["feedback_weight"])
+            for row in results
+            if row.get("node_id") is not None
+        }
+
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        if not node_feedback_weights:
+            return {}
+        node_ids = list(node_feedback_weights.keys())
+        items = self._build_node_feedback_items(node_feedback_weights)
+        if not items:
+            return {nid: False for nid in node_ids}
+        updated_ids = await self._execute_node_feedback_updates(items)
+        return {nid: (nid in updated_ids) for nid in node_ids}
+
+    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        if not edge_object_ids:
+            return {}
+        valid_edge_ids = [eid for eid in edge_object_ids if isinstance(eid, str) and eid]
+        if not valid_edge_ids:
+            return {}
+        query = """
+        UNWIND $edge_object_ids AS edge_object_id
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = edge_object_id
+        RETURN r.edge_object_id AS edge_object_id, coalesce(r.feedback_weight, $default_weight) AS feedback_weight
+        """
+        results = await self.query(
+            query,
+            {"edge_object_ids": valid_edge_ids, "default_weight": 0.5},
+        )
+        return {
+            str(row["edge_object_id"]): float(row["feedback_weight"])
+            for row in results
+            if row.get("edge_object_id") is not None
+        }
+
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        if not edge_feedback_weights:
+            return {}
+        edge_ids = list(edge_feedback_weights.keys())
+        items = self._build_edge_feedback_items(edge_feedback_weights)
+        if not items:
+            return {eid: False for eid in edge_ids}
+        updated_ids = await self._execute_edge_feedback_updates(items)
+        return {eid: (eid in updated_ids) for eid in edge_ids}
+
     async def get_connections(self, node_id: UUID) -> list:
         """
         Retrieve all connections (predecessors and successors) for a specified node.
@@ -974,6 +1106,91 @@ class Neo4jAdapter(GraphDBInterface):
             logger.error(f"Error during graph data retrieval: {str(e)}")
             raise
 
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        """
+        Get the k-hop neighborhood subgraph around a set of seed nodes.
+
+        Returns all nodes and edges within `depth` hops of any seed node,
+        in the same format as get_graph_data().
+        """
+        import time
+
+        start_time = time.time()
+
+        try:
+            if not node_ids:
+                logger.warning("No node IDs provided for neighborhood retrieval.")
+                return [], []
+
+            # Collect all node IDs within depth hops, then fetch nodes and edges
+            if edge_types:
+                path_query = f"""
+                MATCH path = (seed)-[*1..{depth}]-(neighbor)
+                WHERE seed.id IN $node_ids
+                  AND ALL(r IN relationships(path) WHERE TYPE(r) IN $edge_types)
+                RETURN DISTINCT neighbor.id AS nid
+                """
+            else:
+                path_query = f"""
+                MATCH (seed)-[*1..{depth}]-(neighbor)
+                WHERE seed.id IN $node_ids
+                RETURN DISTINCT neighbor.id AS nid
+                """
+
+            params = {"node_ids": node_ids}
+            if edge_types:
+                params["edge_types"] = edge_types
+
+            result = await self.query(path_query, params)
+            neighbor_ids = [record["nid"] for record in result if record.get("nid")]
+
+            all_ids = list(set(node_ids) | set(neighbor_ids))
+
+            # Step 2: Fetch all nodes
+            nodes_query = """
+            MATCH (n)
+            WHERE n.id IN $ids
+            RETURN n.id AS id, properties(n) AS properties
+            """
+            nodes_result = await self.query(nodes_query, {"ids": all_ids})
+            nodes = []
+            for record in nodes_result:
+                nodes.append((record["properties"]["id"], record["properties"]))
+
+            # Step 3: Fetch all edges between collected nodes
+            edges_query = """
+            MATCH (n)-[r]->(m)
+            WHERE n.id IN $ids AND m.id IN $ids
+            RETURN properties(r) AS properties, TYPE(r) AS type
+            """
+            edges_result = await self.query(edges_query, {"ids": all_ids})
+            edges = []
+            for record in edges_result:
+                edges.append(
+                    (
+                        record["properties"]["source_node_id"],
+                        record["properties"]["target_node_id"],
+                        record["type"],
+                        record["properties"],
+                    )
+                )
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"Neighborhood retrieval ({depth}-hop): {len(nodes)} nodes and "
+                f"{len(edges)} edges in {retrieval_time:.2f}s"
+            )
+            return (nodes, edges)
+
+        except Exception as e:
+            logger.error(f"Error during neighborhood retrieval: {str(e)}")
+            raise
+
     async def get_id_filtered_graph_data(self, target_ids: list[str]):
         """
         Retrieve graph data filtered by specific node IDs, including their direct neighbors
@@ -1032,7 +1249,7 @@ class Neo4jAdapter(GraphDBInterface):
             raise
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """
         Retrieve a subgraph based on specified node names and type, including their
@@ -1057,28 +1274,50 @@ class Neo4jAdapter(GraphDBInterface):
         try:
             label = node_type.__name__
 
-            query = f"""
-            UNWIND $names AS wantedName
-            MATCH (n:`{label}`)
-            WHERE n.name = wantedName
-            WITH collect(DISTINCT n) AS primary
-            UNWIND primary AS p
-            OPTIONAL MATCH (p)--(nbr)
-            WITH primary, collect(DISTINCT nbr) AS nbrs
-            WITH primary + nbrs AS nodelist
-            UNWIND nodelist AS node
-            WITH collect(DISTINCT node) AS nodes
-            MATCH (a)-[r]-(b)
-            WHERE a IN nodes AND b IN nodes
-            WITH nodes, collect(DISTINCT r) AS rels
-            RETURN
-              [n IN nodes |
-                 {{ id: n.id,
-                    properties: properties(n) }}] AS rawNodes,
-              [r IN rels  |
-                 {{ type: type(r),
-                    properties: properties(r) }}] AS rawRels
-            """
+            if node_name_filter_operator == "OR":
+                query = f"""
+                UNWIND $names AS wantedName
+                MATCH (n:`{label}`)
+                WHERE n.name = wantedName
+                WITH collect(DISTINCT n) AS primary
+                UNWIND primary AS p
+                OPTIONAL MATCH (p)--(nbr)
+                WITH primary, collect(DISTINCT nbr) AS nbrs
+                WITH primary + nbrs AS nodelist
+                UNWIND nodelist AS node
+                WITH collect(DISTINCT node) AS nodes
+                MATCH (a)-[r]-(b)
+                WHERE a IN nodes AND b IN nodes
+                WITH nodes, collect(DISTINCT r) AS rels
+                RETURN
+                  [n IN nodes |
+                     {{ id: n.id,
+                        properties: properties(n) }}] AS rawNodes,
+                  [r IN rels  |
+                     {{ type: type(r),
+                        properties: properties(r) }}] AS rawRels
+                """
+            else:
+                query = f"""
+                UNWIND $names AS wantedName
+                MATCH (n:`{label}`)
+                WHERE n.name = wantedName
+                WITH collect(DISTINCT n) AS primary
+                UNWIND primary AS p
+                MATCH (p)--(nbr)
+                WITH primary, nbr, COUNT(DISTINCT p) AS matched_count
+                WHERE matched_count = size(primary)
+                WITH primary, collect(DISTINCT nbr) AS nbrs
+                WITH primary + nbrs AS nodelist
+                UNWIND nodelist AS node
+                WITH collect(DISTINCT node) AS nodes
+                MATCH (a)-[r]-(b)
+                WHERE a IN nodes AND b IN nodes
+                WITH nodes, collect(DISTINCT r) AS rels
+                RETURN
+                  [n IN nodes | {{ id: n.id, properties: properties(n) }}] AS rawNodes,
+                  [r IN rels  | {{ type: type(r), properties: properties(r) }}] AS rawRels
+                """
 
             result = await self.query(query, {"names": node_name})
 

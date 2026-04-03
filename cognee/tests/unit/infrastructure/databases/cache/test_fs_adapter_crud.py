@@ -4,7 +4,13 @@ import tempfile
 import pytest
 from unittest.mock import patch
 
-from cognee.infrastructure.databases.exceptions import SessionQAEntryValidationError
+from cognee.infrastructure.databases.exceptions import (
+    CacheConnectionError,
+    SessionQAEntryValidationError,
+)
+from cognee.tasks.memify.feedback_weights_constants import (
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+)
 
 
 @pytest.fixture
@@ -29,6 +35,34 @@ async def test_create_and_get(adapter):
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
     entries = await adapter.get_all_qa_entries("u1", "s1")
     assert len(entries) == 1 and entries[0]["qa_id"] == "id1"
+
+
+@pytest.mark.asyncio
+async def test_create_qa_entry_with_used_graph_element_ids_round_trip(adapter):
+    """create_qa_entry with used_graph_element_ids stores and returns it."""
+    used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
+    await adapter.create_qa_entry(
+        "u1", "s1", "Q", "C", "A", qa_id="id1", used_graph_element_ids=used_ids
+    )
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert len(entries) == 1
+    assert entries[0]["used_graph_element_ids"] == used_ids
+
+
+@pytest.mark.asyncio
+async def test_create_qa_entry_invalid_used_graph_element_ids_raises(adapter):
+    """create_qa_entry with invalid used_graph_element_ids (disallowed keys) raises."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    with pytest.raises(CacheConnectionError):
+        await adapter.create_qa_entry(
+            "u1",
+            "s1",
+            "Q2",
+            "C2",
+            "A2",
+            qa_id="id2",
+            used_graph_element_ids={"invalid_key": ["x"]},
+        )
 
 
 @pytest.mark.asyncio
@@ -63,6 +97,32 @@ async def test_delete_feedback(adapter):
 
 
 @pytest.mark.asyncio
+async def test_update_memify_metadata_merges_existing_keys(adapter):
+    """update_qa_entry merges memify_metadata keys instead of replacing the map."""
+    await adapter.create_qa_entry(
+        "u1",
+        "s1",
+        "Q",
+        "C",
+        "A",
+        qa_id="id1",
+        memify_metadata={"persist_sessions_in_knowledge_graph": True},
+    )
+    ok = await adapter.update_qa_entry(
+        "u1",
+        "s1",
+        "id1",
+        memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False},
+    )
+    assert ok
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert entries[0]["memify_metadata"] == {
+        "persist_sessions_in_knowledge_graph": True,
+        MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_delete_entry(adapter):
     """Delete a single QA entry by qa_id."""
     await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
@@ -85,9 +145,6 @@ async def test_prune(adapter):
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
     await adapter.prune()
     assert await adapter.get_all_qa_entries("u1", "s1") == []
-
-
-# Backward-compatibility tests (add_qa, get_latest_qa, get_all_qas):TODO: Can be deleted after session manager integration into retrievers
 
 
 @pytest.mark.asyncio

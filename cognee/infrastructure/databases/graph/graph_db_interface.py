@@ -250,7 +250,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """
         Fetch a subgraph consisting of a specific set of nodes and their relationships.
@@ -278,6 +278,30 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Node], List[EdgeData]]:
+        """
+        Get the k-hop neighborhood subgraph around a set of seed nodes.
+
+        Returns all nodes and edges within `depth` hops of any seed node,
+        in the same format as get_graph_data().
+        Optional edge_type filtering to constrain traversal paths.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): Seed node identifiers to start traversal from.
+            - depth (int): Number of hops to traverse from each seed node. (default 1)
+            - edge_types (Optional[List[str]]): If provided, only traverse edges of these
+              relationship types. (default None)
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Node], List[EdgeData]]:
@@ -291,3 +315,35 @@ class GraphDBInterface(ABC):
               are lists of attribute values to filter by.
         """
         raise NotImplementedError
+
+    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve node feedback weights for multiple node ids.
+        Returns only found node ids.
+        """
+        raise NotImplementedError("get_node_feedback_weights is not implemented for this adapter")
+
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist node feedback weights for multiple node ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_node_feedback_weights is not implemented for this adapter")
+
+    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve edge feedback weights for multiple edge_object_ids.
+        Returns only found edge ids.
+        """
+        raise NotImplementedError("get_edge_feedback_weights is not implemented for this adapter")
+
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist edge feedback weights for multiple edge_object_ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_edge_feedback_weights is not implemented for this adapter")
