@@ -96,12 +96,22 @@ After completion, use `cognee recall` (or `cognee search`) to query the graph.
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to remember: {str(e)}") from e
 
-            asyncio.run(run_remember())
+            result = asyncio.run(run_remember())
 
             if args.background:
                 fmt.success("Data ingested and cognification started in background!")
             else:
                 fmt.success("Data ingested and knowledge graph built successfully!")
+
+            if result:
+                if result.dataset_id:
+                    fmt.echo(f"  Dataset ID: {result.dataset_id}")
+                if result.items_processed:
+                    fmt.echo(f"  Items processed: {result.items_processed}")
+                if result.content_hash:
+                    fmt.echo(f"  Content hash: {result.content_hash}")
+                if result.elapsed_seconds is not None:
+                    fmt.echo(f"  Elapsed: {result.elapsed_seconds:.1f}s")
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

@@ -42,11 +42,17 @@ async def _store(text: str):
     """Call cognee.remember with session_id for lightweight session storage."""
     import cognee
 
-    await cognee.remember(
+    result = await cognee.remember(
         data=text,
         dataset_name=DATASET,
         session_id=SESSION_ID,
     )
+
+    if not result:
+        print(
+            f"cognee-session: store failed (status={result.status})",
+            file=sys.stderr,
+        )
 
 
 def main():

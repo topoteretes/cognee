@@ -5,6 +5,7 @@ Calls cognee.improve(session_ids=[...]) to run:
   1. Apply feedback weights from session scores
   2. Persist session Q&A into the permanent graph
   3. Default enrichment (triplet embeddings)
+  4. Sync graph knowledge back into session cache
 
 Reads SessionEnd hook payload from stdin for session_id context.
 
@@ -25,11 +26,19 @@ SESSION_ID = os.environ.get("COGNEE_SESSION_ID", "claude_code_session")
 async def _sync():
     import cognee
 
-    await cognee.improve(
+    result = await cognee.improve(
         dataset=DATASET,
         session_ids=[SESSION_ID],
         run_in_background=False,
     )
+
+    # Log summary to stderr (visible in hook output, not in Claude's context)
+    if result and isinstance(result, dict):
+        for ds_id, run_info in result.items():
+            status = getattr(run_info, "status", "unknown")
+            print(f"cognee-sync: dataset={ds_id} status={status}", file=sys.stderr)
+    else:
+        print(f"cognee-sync: dataset={DATASET} session={SESSION_ID} completed", file=sys.stderr)
 
 
 def main():
@@ -38,9 +47,9 @@ def main():
 
     try:
         asyncio.run(_sync())
-    except Exception:
+    except Exception as exc:
         # Non-fatal: session sync failure should not crash Claude Code
-        pass
+        print(f"cognee-sync: failed ({exc})", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -23,8 +23,15 @@ cognee-cli improve -d "${COGNEE_PLUGIN_DATASET:-claude_sessions}" -s "${COGNEE_S
 
 ## What this does
 
-1. Applies feedback weights from session scores to graph nodes/edges
-2. Persists session Q&A text into the permanent graph
-3. Runs default enrichment (triplet embeddings)
+1. **Apply feedback weights** -- session entries with feedback scores update graph node/edge weights
+2. **Persist session Q&A** -- cognifies session text into the permanent graph
+3. **Enrich triplets** -- extracts and indexes triplet embeddings for vector search
+4. **Sync graph to session** -- copies new graph relationships back into the session cache as a knowledge snapshot, so subsequent completions have instant access to the enriched graph context
 
-After this, session entries become searchable via `/cognee-memory:cognee-search`.
+After this, session entries become searchable via `/cognee-memory:cognee-search`, and the graph knowledge is automatically included in session completion prompts.
+
+## When to use
+
+- Before searching for session content that hasn't been synced yet
+- When you want to force an early sync without waiting for session end
+- This runs automatically at session end via the SessionEnd hook

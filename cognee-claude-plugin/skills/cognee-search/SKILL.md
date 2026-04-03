@@ -28,8 +28,9 @@ cognee-cli recall "$ARGUMENTS" -d "${COGNEE_PLUGIN_DATASET:-claude_sessions}" -k
 
 ## Note on memory types
 
-Cognee has two memory paths:
-- **Session memory** (lightweight): tool calls and responses stored during the session. Available immediately but not in the permanent graph until `cognee-cli improve` is run.
-- **Permanent memory**: data ingested via `cognee-cli remember` (without --session-id). This builds the full knowledge graph via add + cognify.
+Cognee has two memory layers:
 
-This search queries the **permanent** knowledge graph. Session entries are only searchable after running `cognee-cli improve`.
+- **Session memory** (lightweight, fast): tool calls and responses stored during the session via hooks. Available immediately for session completions. After `cognee-cli improve` runs, graph knowledge is also synced back into the session as a background knowledge snapshot that is automatically included in completion prompts.
+- **Permanent memory** (indexed, searchable): data ingested via `cognee-cli remember`. Builds the full knowledge graph via add + cognify + improve.
+
+This search queries the **permanent** knowledge graph. Session entries are only searchable after running `cognee-cli improve` (which happens automatically at session end).
