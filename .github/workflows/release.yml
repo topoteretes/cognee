@@ -192,16 +192,28 @@ jobs:
     name: Send Release to Discord
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Github Releases To Discord
-        uses: SethCohen/github-releases-to-discord@v1.19.0
-        with:
-          webhook_url: ${{ secrets.WEBHOOK_URL }}
-          color: "2105893"
-          username: "Release Changelog"
-          avatar_url: "https://cdn.discordapp.com/avatars/487431320314576937/bd64361e4ba6313d561d54e78c9e7171.png"
-          content: "||@everyone||"
-          footer_title: "Changelog"
-          footer_icon_url: "https://cdn.discordapp.com/avatars/487431320314576937/bd64361e4ba6313d561d54e78c9e7171.png"
-          footer_timestamp: true
+      - name: Send Discord notification
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          TAG: ${{ needs.release-github.outputs.tag }}
+          VERSION: ${{ needs.release-github.outputs.version }}
+        run: |
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          PAYLOAD=$(jq -n \
+            --arg content "||@everyone|| **${TAG}** has been released!" \
+            --arg title "Release ${TAG}" \
+            --arg url "$RELEASE_URL" \
+            --arg description "Version ${VERSION} released from \`${{ github.ref_name }}\`. [View release notes](${RELEASE_URL})" \
+            --argjson color 2105893 \
+            '{
+              content: $content,
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $description,
+                color: $color,
+                footer: { text: "Changelog" },
+                timestamp: (now | todate)
+              }]
+            }')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
