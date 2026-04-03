@@ -23,7 +23,7 @@ jobs:
             // 1. Check if user is an org member via author_association
             //    (available on the PR payload without extra API calls or permissions)
             //    OWNER, MEMBER, and COLLABORATOR are trusted roles.
-            const trustedRoles = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+            const trustedRoles = ['OWNER', 'MEMBER', 'COLLABORATOR', 'CONTRIBUTOR'];
             const isTrusted = trustedRoles.includes(authorAssociation);
 
             if (isTrusted) {
