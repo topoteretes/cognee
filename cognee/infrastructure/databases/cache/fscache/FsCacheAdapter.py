@@ -1,7 +1,7 @@
 import json
 import uuid
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import diskcache as dc
 
 from pydantic import ValidationError
@@ -48,7 +48,7 @@ class FSCacheAdapter(CacheDBInterface):
         memify_metadata: dict | None = None,
     ) -> dict:
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,

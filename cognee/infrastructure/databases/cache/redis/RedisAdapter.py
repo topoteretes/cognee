@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 import redis
@@ -98,7 +98,7 @@ class RedisAdapter(CacheDBInterface):
         memify_metadata: dict | None = None,
     ) -> dict:
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
