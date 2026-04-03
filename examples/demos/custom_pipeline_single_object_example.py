@@ -167,13 +167,6 @@ async def main():
     )
     print(f"  {answer}")
 
-    # Freshness check: compare source_content_hash from search results
-    # against current hashes from status()
-    print("\n--- Freshness check ---")
-    current_hashes = {item.content_hash for item in items if item.status == "completed"}
-    print(f"  Known fresh hashes: {current_hashes}")
-    print("  Compare node.source_content_hash against these to verify freshness")
-
     # Clean up
     print("\n--- Forget everything ---")
     result = await cognee.forget(everything=True)
