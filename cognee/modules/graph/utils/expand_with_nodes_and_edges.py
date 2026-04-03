@@ -47,6 +47,7 @@ def _process_ontology_nodes(
                     name=ont_node_name,
                     description=ont_node_name,
                     ontology_valid=True,
+                    importance_weight=data_chunk.importance_weight,
                 )
 
         elif ontology_node.category == "individuals":
@@ -58,6 +59,7 @@ def _process_ontology_nodes(
                     description=ont_node_name,
                     ontology_valid=True,
                     belongs_to_set=data_chunk.belongs_to_set,
+                    importance_weight=data_chunk.importance_weight,
                 )
 
 
@@ -132,6 +134,7 @@ def _create_type_node(
         type=node_name,
         description=node_name,
         ontology_valid=ontology_validated,
+        importance_weight=data_chunk.importance_weight,
     )
 
     added_nodes_map[type_node_key] = type_node
@@ -191,6 +194,8 @@ def _create_entity_node(
         description=node_description,
         ontology_valid=ontology_validated,
         belongs_to_set=data_chunk.belongs_to_set,
+        # TODO add importance_weight calculation if an entity with that id already exits
+        importance_weight=data_chunk.importance_weight,
     )
 
     added_nodes_map[entity_node_key] = entity_node
