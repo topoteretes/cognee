@@ -9,6 +9,7 @@ class Document(DataPoint):
     external_metadata: Optional[str]
     mime_type: str
     metadata: dict = {"index_fields": ["name"]}
+    importance_weight: Optional[float] = 0.5
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int) -> str:
         pass
