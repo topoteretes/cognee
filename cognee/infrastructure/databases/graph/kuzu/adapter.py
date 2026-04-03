@@ -10,7 +10,7 @@ from kuzu.database import Database
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List, Union, Optional, Tuple, Type
+from typing import Dict, Any, List, Union, Optional, Tuple, Type, Set
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.exceptions import CogneeValidationError
 from cognee.shared.logging_utils import get_logger
@@ -966,6 +966,224 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to get nodes: {e}")
             return []
 
+    def _rows_to_dicts(self, rows: List, column_names: List[str]) -> List[Dict[str, Any]]:
+        """Convert query result rows to a list of dicts keyed by column names."""
+        result = []
+        for row in rows:
+            if not row or len(row) < len(column_names):
+                continue
+            result.append(dict(zip(column_names, row)))
+        return result
+
+    @staticmethod
+    def _resolve_edge_object_id(
+        properties: Dict[str, Any], edge_object_id_json: Optional[str]
+    ) -> Optional[str]:
+        """Resolve edge_object_id from properties or from edge_object_id_json string."""
+        edge_object_id = properties.get("edge_object_id")
+        if (not isinstance(edge_object_id, str) or not edge_object_id) and isinstance(
+            edge_object_id_json, str
+        ):
+            try:
+                parsed = json.loads(edge_object_id_json)
+                edge_object_id = parsed if isinstance(parsed, str) else None
+            except (TypeError, json.JSONDecodeError):
+                edge_object_id = None
+        return edge_object_id if isinstance(edge_object_id, str) and edge_object_id else None
+
+    _EDGE_BY_OBJECT_ID_COLUMNS = [
+        "from_id",
+        "to_id",
+        "relationship_name",
+        "edge_object_id_json",
+        "properties",
+    ]
+
+    async def _fetch_edge_rows_by_object_ids(
+        self, edge_object_ids: Set[str]
+    ) -> List[Dict[str, Any]]:
+        """Fetch edge rows (as dicts) for the given edge_object_ids."""
+        if not edge_object_ids:
+            return []
+        requested_ids_json = [json.dumps(eid) for eid in edge_object_ids]
+        query = """
+        MATCH (from:Node)-[r:EDGE]->(to:Node)
+        WITH from, to, r, CAST(json_extract(r.properties, '$.edge_object_id') AS STRING) AS edge_object_id_json
+        WHERE edge_object_id_json IN $edge_object_ids_json
+        RETURN from.id AS from_id, to.id AS to_id, r.relationship_name AS relationship_name,
+               edge_object_id_json AS edge_object_id_json, r.properties AS properties
+        """
+        rows = await self.query(query, {"edge_object_ids_json": requested_ids_json})
+        return self._rows_to_dicts(rows, self._EDGE_BY_OBJECT_ID_COLUMNS)
+
+    def _build_node_feedback_updates(
+        self,
+        nodes: List[Dict[str, Any]],
+        node_feedback_weights: Dict[str, float],
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for node feedback weight updates."""
+        updates = []
+        for node in nodes:
+            node_id = node.get("id")
+            if not isinstance(node_id, str) or node_id not in node_feedback_weights:
+                continue
+            properties = {
+                k: v
+                for k, v in node.items()
+                if k not in {"id", "name", "type", "created_at", "updated_at"}
+            }
+            properties["feedback_weight"] = float(node_feedback_weights[node_id])
+            updates.append(
+                {"node_id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)}
+            )
+        return updates
+
+    async def _execute_node_feedback_updates(self, updates: List[Dict[str, Any]]) -> Set[str]:
+        """Run node feedback weight UNWIND/SET; return set of updated node_ids."""
+        if not updates:
+            return set()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+        query = """
+        UNWIND $items AS item
+        MATCH (n:Node)
+        WHERE n.id = item.node_id
+        SET n.properties = item.properties,
+            n.updated_at = timestamp($updated_at)
+        RETURN n.id AS node_id
+        """
+        result = await self.query(query, {"items": updates, "updated_at": now})
+        rows_dicts = self._rows_to_dicts(result, ["node_id"])
+        return {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
+
+    def _build_edge_feedback_updates(
+        self,
+        edge_rows: List[Dict[str, Any]],
+        edge_feedback_weights: Dict[str, float],
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for edge feedback weight updates."""
+        edge_updates = []
+        for row in edge_rows:
+            properties_raw = row.get("properties")
+            if not properties_raw:
+                continue
+            try:
+                properties = json.loads(properties_raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            edge_object_id = self._resolve_edge_object_id(
+                properties, row.get("edge_object_id_json")
+            )
+            if not edge_object_id or edge_object_id not in edge_feedback_weights:
+                continue
+            properties["feedback_weight"] = float(edge_feedback_weights[edge_object_id])
+            edge_updates.append(
+                {
+                    "edge_object_id": edge_object_id,
+                    "from_id": str(row.get("from_id")),
+                    "to_id": str(row.get("to_id")),
+                    "relationship_name": str(row.get("relationship_name")),
+                    "properties": json.dumps(properties, cls=JSONEncoder),
+                }
+            )
+        return edge_updates
+
+    async def _execute_edge_feedback_updates(self, edge_updates: List[Dict[str, Any]]) -> Set[str]:
+        """Run edge feedback weight UNWIND/SET; return set of updated edge_object_ids."""
+        if not edge_updates:
+            return set()
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+        query = """
+        UNWIND $items AS item
+        MATCH (from:Node)-[r:EDGE]->(to:Node)
+        WHERE from.id = item.from_id
+          AND to.id = item.to_id
+          AND r.relationship_name = item.relationship_name
+        SET r.properties = item.properties,
+            r.updated_at = timestamp($updated_at)
+        RETURN item.edge_object_id AS edge_object_id
+        """
+        result = await self.query(query, {"items": edge_updates, "updated_at": now})
+        rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
+        return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
+
+    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        if not node_ids:
+            return {}
+        valid_node_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
+        if not valid_node_ids:
+            return {}
+        nodes = await self.get_nodes(valid_node_ids)
+        result: Dict[str, float] = {}
+        for node in nodes:
+            node_id = node.get("id")
+            if not isinstance(node_id, str):
+                continue
+            value = node.get("feedback_weight", 0.5)
+            try:
+                result[node_id] = float(value)
+            except (TypeError, ValueError):
+                result[node_id] = 0.5
+        return result
+
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        if not node_feedback_weights:
+            return {}
+        node_ids = list(node_feedback_weights.keys())
+        valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
+        if not valid_node_ids:
+            return {nid: False for nid in node_ids}
+        nodes = await self.get_nodes(valid_node_ids)
+        updates = self._build_node_feedback_updates(nodes, node_feedback_weights)
+        if not updates:
+            return {nid: False for nid in node_ids}
+        updated_ids = await self._execute_node_feedback_updates(updates)
+        return {nid: (nid in updated_ids) for nid in node_ids}
+
+    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        if not edge_object_ids:
+            return {}
+        requested_ids = {eid for eid in edge_object_ids if isinstance(eid, str) and eid}
+        if not requested_ids:
+            return {}
+        edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
+        result: Dict[str, float] = {}
+        for row in edge_rows:
+            properties_raw = row.get("properties")
+            if not properties_raw:
+                continue
+            try:
+                properties = json.loads(properties_raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            edge_object_id = self._resolve_edge_object_id(
+                properties, row.get("edge_object_id_json")
+            )
+            if not edge_object_id or edge_object_id not in requested_ids:
+                continue
+            value = properties.get("feedback_weight", 0.5)
+            try:
+                result[edge_object_id] = float(value)
+            except (TypeError, ValueError):
+                result[edge_object_id] = 0.5
+        return result
+
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        if not edge_feedback_weights:
+            return {}
+        requested_ids = {eid for eid in edge_feedback_weights if isinstance(eid, str) and eid}
+        if not requested_ids:
+            return {eid: False for eid in edge_feedback_weights}
+        edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
+        edge_updates = self._build_edge_feedback_updates(edge_rows, edge_feedback_weights)
+        if not edge_updates:
+            return {eid: False for eid in edge_feedback_weights}
+        updated_ids = await self._execute_edge_feedback_updates(edge_updates)
+        return {eid: (eid in updated_ids) for eid in edge_feedback_weights}
+
     async def get_predecessors(
         self, node_id: Union[str, UUID], edge_label: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -1364,7 +1582,7 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
         """
         Get subgraph for a set of nodes based on type and names.
@@ -1397,12 +1615,24 @@ class KuzuAdapter(GraphDBInterface):
         if not primary_ids:
             return [], []
 
-        neighbor_query = """
-            MATCH (n:Node)-[:EDGE]-(nbr:Node)
-            WHERE n.id IN $ids
-            RETURN DISTINCT nbr.id
-        """
-        nbr_rows = await self.query(neighbor_query, {"ids": primary_ids})
+        if node_name_filter_operator == "OR":
+            neighbor_query = """
+                MATCH (n:Node)-[:EDGE]-(nbr:Node)
+                WHERE n.id IN $ids
+                RETURN DISTINCT nbr.id
+            """
+            params = {"ids": primary_ids}
+        else:
+            neighbor_query = """
+                MATCH (n:Node)-[:EDGE]-(nbr:Node)
+                WHERE n.id IN $ids
+                WITH nbr.id AS nbr_id, COUNT(DISTINCT n.id) AS matched_count
+                WHERE matched_count = $primary_count
+                RETURN nbr_id
+            """
+            params = {"ids": primary_ids, "primary_count": len(primary_ids)}
+
+        nbr_rows = await self.query(neighbor_query, params)
         neighbor_ids = [row[0] for row in nbr_rows]
 
         all_ids = list({*primary_ids, *neighbor_ids})

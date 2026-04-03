@@ -4,7 +4,7 @@ import base64
 import mimetypes
 import litellm
 import instructor
-from typing import Type, Optional
+from typing import Any, Dict, Type, Optional
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
@@ -84,6 +84,7 @@ class GenericAPIAdapter(LLMInterface):
         fallback_model: str = None,
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
+        llm_args: Optional[Dict[str, Any]] = None,
     ):
         self.name = name
         self.model = model
@@ -96,6 +97,7 @@ class GenericAPIAdapter(LLMInterface):
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
+        self.llm_args = llm_args
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -139,24 +141,26 @@ class GenericAPIAdapter(LLMInterface):
               output from the language model.
         """
 
+        merged_kwargs = {**self.llm_args, **kwargs}
         try:
             async with llm_rate_limiter_context_manager():
                 result = await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=[
                         {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
                             "role": "system",
                             "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
                         },
                     ],
                     max_retries=2,
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     response_model=response_model,
+                    **merged_kwargs,
                 )
                 _enrich_llm_span(self.model, self.name)
                 return result
@@ -182,18 +186,19 @@ class GenericAPIAdapter(LLMInterface):
                         model=self.fallback_model,
                         messages=[
                             {
-                                "role": "user",
-                                "content": f"""{text_input}""",
-                            },
-                            {
                                 "role": "system",
                                 "content": system_prompt,
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
                             },
                         ],
                         max_retries=2,
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
+                        **merged_kwargs,
                     )
             except (
                 ContentFilterFinishReasonError,

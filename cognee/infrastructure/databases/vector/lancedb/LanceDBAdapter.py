@@ -10,12 +10,13 @@ from cognee.infrastructure.databases.exceptions import MissingQueryParameterErro
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.modules.storage.utils import copy_model, get_own_properties
+from cognee.modules.storage.utils import copy_model
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
+from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
-from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
 from cognee.modules.observability import new_span
@@ -24,6 +25,8 @@ from cognee.modules.observability.tracing import (
     COGNEE_VECTOR_COLLECTION,
     COGNEE_VECTOR_RESULT_COUNT,
 )
+
+logger = get_logger("LanceDBAdapter")
 
 
 class IndexSchema(DataPoint):
@@ -188,8 +191,10 @@ class LanceDBAdapter(VectorDBInterface):
             payload: PayloadSchema
 
         def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
-            properties = get_own_properties(data_point)
-            properties["id"] = str(properties["id"])
+            payload_model = self.get_data_point_schema(type(data_point))
+            properties = payload_model.model_validate(
+                serialize_data(data_point.model_dump())
+            ).model_dump()
 
             return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
                 id=str(data_point.id),
@@ -204,13 +209,97 @@ class LanceDBAdapter(VectorDBInterface):
 
         lance_data_points = list({dp.id: dp for dp in lance_data_points}.values())
 
+        try:
+            async with self.VECTOR_DB_LOCK:
+                await (
+                    collection.merge_insert("id")
+                    .when_matched_update_all()
+                    .when_not_matched_insert_all()
+                    .execute(lance_data_points)
+                )
+        except (ValueError, OSError, RuntimeError) as e:
+            if "not found in target schema" not in str(e):
+                raise
+            logger.warning(
+                "Schema mismatch detected for collection '%s', migrating table: %s",
+                collection_name,
+                e,
+            )
+            await self._migrate_collection_schema(
+                collection_name, collection, payload_schema, lance_data_points
+            )
+
+    async def _migrate_collection_schema(
+        self,
+        collection_name: str,
+        old_collection,
+        payload_schema: type,
+        new_lance_data_points: list,
+    ):
+        """Migrate a LanceDB table to a new schema, preserving existing data."""
+        rows = (await old_collection.to_arrow()).to_pylist()
+
+        vector_size = self.embedding_engine.get_vector_size()
+        schema_model = self.get_data_point_schema(payload_schema)
+        data_point_types = get_type_hints(schema_model)
+        valid_payload_fields = set(schema_model.model_fields.keys())
+        defaults = self._get_payload_defaults(payload_schema)
+
+        new_ids = {dp.id for dp in new_lance_data_points}
+        old_rows = []
+        for row in rows:
+            if row.get("id") in new_ids:
+                continue
+            if isinstance(row.get("payload"), dict):
+                # Strip payload to only fields in the new schema
+                row["payload"] = {
+                    k: v for k, v in row["payload"].items() if k in valid_payload_fields
+                }
+                # Fill in defaults for any new fields
+                for key, val in defaults.items():
+                    row["payload"].setdefault(key, val)
+            old_rows.append(row)
+
+        class MigrationLanceDataPoint(LanceModel):
+            id: data_point_types["id"]
+            vector: Vector(vector_size)
+            payload: schema_model
+
         async with self.VECTOR_DB_LOCK:
+            connection = await self.get_connection()
+            await connection.drop_table(collection_name)
+            await connection.create_table(
+                name=collection_name,
+                schema=MigrationLanceDataPoint,
+            )
+            collection = await connection.open_table(collection_name)
+
+            if old_rows:
+                await collection.add(old_rows)
+
             await (
                 collection.merge_insert("id")
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
-                .execute(lance_data_points)
+                .execute(new_lance_data_points)
             )
+
+        logger.info(
+            "Migrated collection '%s' schema (%d existing rows preserved)",
+            collection_name,
+            len(old_rows),
+        )
+
+    def _get_payload_defaults(self, payload_schema: type) -> dict:
+        """Extract default values from the Pydantic payload model."""
+        schema_model = self.get_data_point_schema(payload_schema)
+        defaults = {}
+        for name, field_info in schema_model.model_fields.items():
+            if field_info.default is not None and not (
+                hasattr(field_info, "is_required") and field_info.is_required()
+            ):
+                defaults[name] = field_info.default
+        return defaults
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         try:
@@ -243,9 +332,9 @@ class LanceDBAdapter(VectorDBInterface):
         query_vector: List[float] = None,
         limit: Optional[int] = 15,
         with_vector: bool = False,
-        normalized: bool = True,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
@@ -282,9 +371,19 @@ class LanceDBAdapter(VectorDBInterface):
                     "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
                 )
 
+                if node_name_filter_operator == "AND":
+                    node_name_filter_string = (
+                        f"array_has_all(payload.belongs_to_set, {literal_node_names})"
+                    )
+                else:
+                    node_name_filter_string = (
+                        f"array_has_any(payload.belongs_to_set, {literal_node_names})"
+                    )
+
                 result_values = (
                     await collection.vector_search(query_vector)
-                    .where(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
+                    .distance_type("cosine")
+                    .where(node_name_filter_string)
                     .select(select_columns)
                     .limit(limit)
                     .to_list()
@@ -292,6 +391,7 @@ class LanceDBAdapter(VectorDBInterface):
             else:
                 result_values = (
                     await collection.vector_search(query_vector)
+                    .distance_type("cosine")
                     .select(select_columns)
                     .limit(limit)
                     .to_list()
@@ -301,15 +401,13 @@ class LanceDBAdapter(VectorDBInterface):
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
-            normalized_values = normalize_distances(result_values)
-
             results = [
                 ScoredResult(
                     id=parse_id(result["id"]),
                     payload=result["payload"] if include_payload else None,
-                    score=normalized_values[value_index],
+                    score=float(result["_distance"]),
                 )
-                for value_index, result in enumerate(result_values)
+                for result in result_values
             ]
 
             otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, len(results))
@@ -388,6 +486,7 @@ class LanceDBAdapter(VectorDBInterface):
 
     def get_data_point_schema(self, model_type: BaseModel):
         related_models_fields = []
+
         for field_name, field_config in model_type.model_fields.items():
             if hasattr(field_config, "model_fields"):
                 related_models_fields.append(field_name)
@@ -418,6 +517,7 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
+                "belongs_to_set": (Optional[List[str]], None),
             },
             exclude_fields=["metadata"] + related_models_fields,
         )

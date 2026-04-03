@@ -61,7 +61,8 @@ def new_span(name: str):
     """Context manager that creates an OTEL span if tracing is enabled, or yields None."""
     if is_tracing_enabled():
         tracer = get_tracer()
-        with tracer.start_as_current_span(name) as span:
-            yield span
-    else:
-        yield _NullSpan()
+        if tracer is not None:
+            with tracer.start_as_current_span(name) as span:
+                yield span
+                return
+    yield _NullSpan()

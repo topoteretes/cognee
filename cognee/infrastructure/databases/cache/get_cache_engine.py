@@ -6,8 +6,6 @@ from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
 
-config = get_cache_config()
-
 
 @lru_cache
 def create_cache_engine(
@@ -19,6 +17,7 @@ def create_cache_engine(
     log_key: str,
     agentic_lock_expire: int = 240,
     agentic_lock_timeout: int = 300,
+    session_ttl_seconds: int | None = 604800,
 ):
     """
     Factory function to instantiate a cache coordination backend (currently Redis).
@@ -38,6 +37,7 @@ def create_cache_engine(
     --------
     - CacheDBInterface: An instance of the appropriate cache adapter.
     """
+    config = get_cache_config()
     if config.caching or config.usage_logging:
         from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
@@ -51,6 +51,7 @@ def create_cache_engine(
                 log_key=log_key,
                 timeout=agentic_lock_expire,
                 blocking_timeout=agentic_lock_timeout,
+                session_ttl_seconds=session_ttl_seconds,
             )
         elif config.cache_backend == "fs":
             return FSCacheAdapter()
@@ -70,6 +71,7 @@ def get_cache_engine(
     """
     Returns a cache adapter instance using current context configuration.
     """
+    config = get_cache_config()
 
     return create_cache_engine(
         cache_host=config.cache_host,
@@ -80,4 +82,5 @@ def get_cache_engine(
         log_key=log_key,
         agentic_lock_expire=config.agentic_lock_expire,
         agentic_lock_timeout=config.agentic_lock_timeout,
+        session_ttl_seconds=config.session_ttl_seconds,
     )

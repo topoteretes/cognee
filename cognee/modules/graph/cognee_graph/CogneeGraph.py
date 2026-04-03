@@ -29,13 +29,15 @@ class CogneeGraph(CogneeAbstractGraph):
     edges_by_distance_key: Dict[str, List[Edge]]
     directed: bool
     triplet_distance_penalty: float
+    feedback_influence: float
 
     def __init__(self, directed: bool = True):
         self.nodes = {}
         self.edges = []
         self.edges_by_distance_key = {}
         self.directed = directed
-        self.triplet_distance_penalty = 3.5
+        self.triplet_distance_penalty = 6.5
+        self.feedback_influence = 0.0
 
     def add_node(self, node: Node) -> None:
         if node.id not in self.nodes:
@@ -96,16 +98,13 @@ class CogneeGraph(CogneeAbstractGraph):
             )
         return per_query_lists
 
-    async def _get_nodeset_subgraph(
-        self,
-        adapter,
-        node_type,
-        node_name,
-    ):
+    async def _get_nodeset_subgraph(self, adapter, node_type, node_name, node_name_filter_operator):
         """Retrieve subgraph based on node type and name."""
         logger.info("Retrieving graph filtered by node type and node name (NodeSet).")
         nodes_data, edges_data = await adapter.get_nodeset_subgraph(
-            node_type=node_type, node_name=node_name
+            node_type=node_type,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
         )
         if not nodes_data or not edges_data:
             raise EntityNotFoundError(
@@ -224,15 +223,17 @@ class CogneeGraph(CogneeAbstractGraph):
         memory_fragment_filter=[],
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
         relevant_ids_to_filter: Optional[List[str]] = None,
-        triplet_distance_penalty: float = 3.5,
+        triplet_distance_penalty: float = 6.5,
+        feedback_influence: float = 0.0,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
         try:
             if node_type is not None and node_name not in [None, [], ""]:
                 nodes_data, edges_data = await self._get_nodeset_subgraph(
-                    adapter, node_type, node_name
+                    adapter, node_type, node_name, node_name_filter_operator
                 )
             elif len(memory_fragment_filter) == 0:
                 nodes_data, edges_data = await self._get_full_or_id_filtered_graph(
@@ -243,15 +244,50 @@ class CogneeGraph(CogneeAbstractGraph):
                     adapter, memory_fragment_filter
                 )
 
-            self._process_nodes_and_edges(
-                nodes_data,
-                edges_data,
-                node_properties_to_project,
-                edge_properties_to_project,
-                directed,
-                node_dimension,
-                edge_dimension,
-                triplet_distance_penalty,
+            self.triplet_distance_penalty = triplet_distance_penalty
+            self.feedback_influence = feedback_influence
+
+            start_time = time.time()
+            # Process nodes
+            for node_id, properties in nodes_data:
+                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
+                self.add_node(
+                    Node(
+                        str(node_id),
+                        node_attributes,
+                        dimension=node_dimension,
+                        node_penalty=triplet_distance_penalty,
+                    )
+                )
+
+            # Process edges
+            for source_id, target_id, relationship_type, properties in edges_data:
+                source_node = self.get_node(str(source_id))
+                target_node = self.get_node(str(target_id))
+                if source_node and target_node:
+                    edge_attributes = {
+                        key: properties.get(key) for key in edge_properties_to_project
+                    }
+                    edge_attributes["relationship_type"] = relationship_type
+
+                    edge = Edge(
+                        source_node,
+                        target_node,
+                        attributes=edge_attributes,
+                        directed=directed,
+                        dimension=edge_dimension,
+                        edge_penalty=triplet_distance_penalty,
+                    )
+                    self.add_edge(edge)
+                else:
+                    raise EntityNotFoundError(
+                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                    )
+
+            # Final statistics
+            projection_time = time.time() - start_time
+            logger.info(
+                f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
             )
 
         except Exception:
@@ -269,7 +305,8 @@ class CogneeGraph(CogneeAbstractGraph):
         directed: bool = True,
         node_dimension: int = 1,
         edge_dimension: int = 1,
-        triplet_distance_penalty: float = 3.5,
+        triplet_distance_penalty: float = 6.5,
+        feedback_influence: float = 0.0,
     ) -> None:
         """
         Project a neighborhood subgraph from the database around seed nodes.
@@ -295,15 +332,49 @@ class CogneeGraph(CogneeAbstractGraph):
                 raise EntityNotFoundError(message="Empty neighborhood projected from the database.")
             edges_data = edges_data or []
 
-            self._process_nodes_and_edges(
-                nodes_data,
-                edges_data,
-                node_properties_to_project,
-                edge_properties_to_project,
-                directed,
-                node_dimension,
-                edge_dimension,
-                triplet_distance_penalty,
+            self.triplet_distance_penalty = triplet_distance_penalty
+            self.feedback_influence = feedback_influence
+
+            start_time = time.time()
+            # Process nodes
+            for node_id, properties in nodes_data:
+                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
+                self.add_node(
+                    Node(
+                        str(node_id),
+                        node_attributes,
+                        dimension=node_dimension,
+                        node_penalty=triplet_distance_penalty,
+                    )
+                )
+
+            # Process edges
+            for source_id, target_id, relationship_type, properties in edges_data:
+                source_node = self.get_node(str(source_id))
+                target_node = self.get_node(str(target_id))
+                if source_node and target_node:
+                    edge_attributes = {
+                        key: properties.get(key) for key in edge_properties_to_project
+                    }
+                    edge_attributes["relationship_type"] = relationship_type
+
+                    edge = Edge(
+                        source_node,
+                        target_node,
+                        attributes=edge_attributes,
+                        directed=directed,
+                        dimension=edge_dimension,
+                        edge_penalty=triplet_distance_penalty,
+                    )
+                    self.add_edge(edge)
+                else:
+                    raise EntityNotFoundError(
+                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                    )
+
+            projection_time = time.time() - start_time
+            logger.info(
+                f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
             )
 
         except Exception:
@@ -379,8 +450,36 @@ class CogneeGraph(CogneeAbstractGraph):
         self,
         k: int,
         query_index: int = 0,
+        feedback_influence: Optional[float] = None,
     ) -> List[Edge]:
         """Calculate top k triplet importances for a specific query index."""
+        active_feedback_influence = (
+            self.feedback_influence if feedback_influence is None else feedback_influence
+        )
+
+        def _effective_distance(distance: float, feedback_weight: Any) -> float:
+            if active_feedback_influence <= 0.0:
+                return distance
+
+            # Only blend real cosine distances in [0, 2].
+            # Fallback penalties and out-of-range values must remain unchanged so
+            # missing components stay ranked below valid matches.
+            if distance >= self.triplet_distance_penalty or distance < 0.0 or distance > 2.0:
+                return distance
+
+            try:
+                normalized_feedback_weight = float(feedback_weight)
+            except (TypeError, ValueError):
+                normalized_feedback_weight = 0.5
+
+            normalized_feedback_weight = max(0.0, min(1.0, normalized_feedback_weight))
+            # Blend in a normalized space (cosine distance in [0, 2] -> [0, 1]),
+            # then project back to distance scale so score magnitudes stay consistent.
+            normalized_distance = distance / 2.0
+            blended_normalized = (1.0 - active_feedback_influence) * normalized_distance + (
+                active_feedback_influence * (1.0 - normalized_feedback_weight)
+            )
+            return blended_normalized * 2.0
 
         def score(edge: Edge) -> float:
             elements = (
@@ -400,24 +499,31 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                 value = distances[query_index]
                 try:
-                    importances.append(float(value))
+                    distance = float(value)
                 except (TypeError, ValueError):
                     raise ValueError(
                         f"{label}: vector_distance[{query_index}] must be float-like, "
                         f"got {type(value).__name__}"
                     )
+                feedback_weight = element.attributes.get("feedback_weight", 0.5)
+                importances.append(_effective_distance(distance, feedback_weight))
 
             return sum(importances)
 
         return heapq.nsmallest(k, self.edges, key=score)
 
     async def calculate_top_triplet_importances(
-        self, k: int, query_list_length: Optional[int] = None
+        self,
+        k: int,
+        query_list_length: Optional[int] = None,
+        feedback_influence: Optional[float] = None,
     ) -> Union[List[Edge], List[List[Edge]]]:
         """Calculate top k triplet importances, supporting both single and multi-query modes."""
         query_count = query_list_length or 1
         results = [
-            self._calculate_query_top_triplet_importances(k=k, query_index=i)
+            self._calculate_query_top_triplet_importances(
+                k=k, query_index=i, feedback_influence=feedback_influence
+            )
             for i in range(query_count)
         ]
 

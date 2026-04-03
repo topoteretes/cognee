@@ -1,6 +1,6 @@
 import litellm
 import instructor
-from typing import Type
+from typing import Any, Dict, Type, Optional
 from pydantic import BaseModel
 from litellm.exceptions import ContentPolicyViolationError
 from instructor.exceptions import InstructorRetryException
@@ -47,6 +47,7 @@ class BedrockAdapter(LLMInterface):
         max_completion_tokens: int = 16384,
         streaming: bool = False,
         instructor_mode: str = None,
+        llm_args: Optional[Dict[str, Any]] = None,
     ):
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -58,24 +59,26 @@ class BedrockAdapter(LLMInterface):
         self.api_key = api_key
         self.max_completion_tokens = max_completion_tokens
         self.streaming = streaming
+        self.llm_args = llm_args
 
     def _create_bedrock_request(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> dict:
         """Create Bedrock request with authentication."""
 
+        merged_kwargs = {**self.llm_args, **kwargs}
         request_params = {
             "model": self.model,
             "custom_llm_provider": "bedrock",
             "drop_params": True,
             "messages": [
-                {"role": "user", "content": text_input},
                 {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text_input},
             ],
             "response_model": response_model,
             "max_retries": self.MAX_RETRIES,
-            "max_completion_tokens": self.max_completion_tokens,
             "stream": self.streaming,
+            **merged_kwargs,
         }
 
         s3_config = get_s3_config()
@@ -104,12 +107,14 @@ class BedrockAdapter(LLMInterface):
     @sleep_and_retry_async()
     @rate_limit_async
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> BaseModel:
         """Generate structured output from AWS Bedrock API."""
 
         try:
-            request_params = self._create_bedrock_request(text_input, system_prompt, response_model)
+            request_params = self._create_bedrock_request(
+                text_input, system_prompt, response_model, **kwargs
+            )
             return await self.aclient.chat.completions.create(**request_params)
 
         except (

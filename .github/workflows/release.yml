@@ -73,8 +73,9 @@ jobs:
         with:
           tag_name: ${{ steps.create_tag.outputs.tag }}
           body: ${{ steps.generate_notes.outputs.RELEASE_NOTES }}
+          prerelease: ${{ github.ref_name == 'dev' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 
   release-pypi-package:
     needs: release-github
@@ -185,3 +186,22 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/topoteretes/cognee-community/dispatches \
             -d '{"event_type":"new-main-release","client_payload":{"caller_repo":"'"${GITHUB_REPOSITORY}"'"}}'
+
+  notify-discord:
+    needs: release-github
+    name: Send Release to Discord
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Github Releases To Discord
+        uses: SethCohen/github-releases-to-discord@v1.19.0
+        with:
+          webhook_url: ${{ secrets.WEBHOOK_URL }}
+          color: "2105893"
+          username: "Release Changelog"
+          avatar_url: "https://cdn.discordapp.com/avatars/487431320314576937/bd64361e4ba6313d561d54e78c9e7171.png"
+          content: "||@everyone||"
+          footer_title: "Changelog"
+          footer_icon_url: "https://cdn.discordapp.com/avatars/487431320314576937/bd64361e4ba6313d561d54e78c9e7171.png"
+          footer_timestamp: true
