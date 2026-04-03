@@ -6,6 +6,7 @@ import cognee
 
 from common import (
     AGENTIC_TRACES_DATASET,
+    MEMORY_RETRIEVAL_PROMPT,
     check_eligibility,
     propose_offer,
     run_stream_impl,
@@ -17,11 +18,12 @@ from common import (
     with_memory=True,
     save_traces=False,
     dataset_name=AGENTIC_TRACES_DATASET,
-    memory_query_fixed="What are the feedbacks that are expressing acceptance?",
+    memory_query_from_method="email",
+    memory_system_prompt=MEMORY_RETRIEVAL_PROMPT,
     memory_top_k=20
 )
-async def _subagent_propose_offer(payload: dict) -> dict:
-    return await propose_offer(payload)
+async def _subagent_propose_offer(payload: dict, email: dict) -> dict:
+    return await propose_offer(payload, email)
 
 
 @cognee.agent_memory(

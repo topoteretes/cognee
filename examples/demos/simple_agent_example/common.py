@@ -28,6 +28,11 @@ RULES_DATA = [
     "Startups belong to the startup user class and can receive only OFFER_PLUS.",
 ]
 
+MEMORY_RETRIEVAL_PROMPT = (
+    'You get a user email. List ONLY the packages that are allowed/supported to the current user based on the context based on the feedbacks.'
+    ' Dont include the requested packages. If context is empty, return empty string'
+)
+
 PROPOSER_PROMPT = (
     "You propose one package for the user.\n"
     "First identify the user based on the e-mail, users can be student or startup.\n"
@@ -71,7 +76,8 @@ class EligibilityOutput(BaseModel):
     feedback: str
 
 
-RootFn = Callable[[dict], Awaitable[dict]]
+ProposalFn = Callable[[dict, dict], Awaitable[dict]]
+CheckFn = Callable[[dict], Awaitable[dict]]
 
 
 class ToolName(str, Enum):
@@ -89,10 +95,10 @@ class NextToolDecision(BaseModel):
     stop_reason: Optional[str] = None
 
 
-def build_proposal_input(payload: dict) -> str:
+def build_proposal_input(payload: dict, email: dict) -> str:
     return (
-        f"Email id: {payload['email_id']}\n"
-        f"Email text:\n{payload['email_text']}\n\n"
+        f"Email id: {email['email_id']}\n"
+        f"Email text:\n{email['email_text']}\n\n"
         f"Feedback history: {payload['feedback_history']}\n"
         f"Proposal history: {payload['proposal_history']}\n"
         f"Rejected packages: {payload['rejected_offers']}\n"
@@ -221,9 +227,9 @@ def resolve_final_state(
     return last_proposal, last_check
 
 
-async def propose_offer(payload: dict) -> dict:
+async def propose_offer(payload: dict, email: dict) -> dict:
     result = await LLMGateway.acreate_structured_output(
-        text_input=build_proposal_input(payload),
+        text_input=build_proposal_input(payload, email),
         system_prompt=PROPOSER_PROMPT,
         response_model=ProposalOutput,
     )
@@ -316,8 +322,8 @@ async def setup_runtime() -> None:
 
 async def run_stream_impl(
     *,
-    subagent_propose_offer: RootFn,
-    subagent_check_eligibility: RootFn,
+    subagent_propose_offer: ProposalFn,
+    subagent_check_eligibility: CheckFn,
 ) -> None:
     for email in load_emails():
         feedback_history: list[str] = []
@@ -346,12 +352,11 @@ async def run_stream_impl(
             if next_step.tool_name == ToolName.PROPOSE_OFFER:
                 proposal_payload = await subagent_propose_offer(
                     {
-                        "email_id": email["email_id"],
-                        "email_text": email["email_text"],
                         "feedback_history": feedback_history,
                         "proposal_history": proposal_history,
                         "rejected_offers": sorted(rejected_offers),
-                    }
+                    },
+                    email,
                 )
                 current_proposal = ProposalOutput.model_validate(proposal_payload)
                 last_proposal = current_proposal

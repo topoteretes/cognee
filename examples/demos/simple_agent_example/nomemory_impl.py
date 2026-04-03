@@ -5,8 +5,8 @@ from __future__ import annotations
 from common import check_eligibility, propose_offer, run_stream_impl, setup_runtime
 
 
-async def _subagent_propose_offer(payload: dict) -> dict:
-    return await propose_offer(payload)
+async def _subagent_propose_offer(payload: dict, email: dict) -> dict:
+    return await propose_offer(payload, email)
 
 
 async def _subagent_check_eligibility(payload: dict) -> dict:
