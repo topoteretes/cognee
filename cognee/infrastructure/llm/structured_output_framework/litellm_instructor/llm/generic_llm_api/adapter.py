@@ -148,12 +148,12 @@ class GenericAPIAdapter(LLMInterface):
                     model=self.model,
                     messages=[
                         {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
                             "role": "system",
                             "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
                         },
                     ],
                     max_retries=2,
@@ -186,12 +186,12 @@ class GenericAPIAdapter(LLMInterface):
                         model=self.fallback_model,
                         messages=[
                             {
-                                "role": "user",
-                                "content": f"""{text_input}""",
-                            },
-                            {
                                 "role": "system",
                                 "content": system_prompt,
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
                             },
                         ],
                         max_retries=2,
