@@ -26,8 +26,8 @@ options are supported.
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION)",
+            default=None,
+            help="Search mode (default: auto-route, or session search when -s is used without -d)",
         )
         parser.add_argument(
             "--datasets",
@@ -65,12 +65,16 @@ options are supported.
             import cognee
             from cognee.modules.search.types import SearchType
 
-            query_type = SearchType[args.query_type]
+            query_type = SearchType[args.query_type] if args.query_type else None
+            type_label = args.query_type or "auto"
 
             datasets_msg = (
                 f" in datasets {args.datasets}" if args.datasets else " across all datasets"
             )
-            fmt.echo(f"Recalling: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
+            if args.session_id and not args.datasets and query_type is None:
+                fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
+            else:
+                fmt.echo(f"Recalling: '{args.query_text}' (type: {type_label}){datasets_msg}")
 
             async def run_recall():
                 try:
@@ -82,14 +86,20 @@ options are supported.
                         sid = scoped_session_id(user.id, args.session_id)
                         session_kwargs["session_id"] = sid
 
-                    results = await cognee.recall(
-                        query_text=args.query_text,
-                        query_type=query_type,
-                        datasets=args.datasets,
-                        system_prompt_path=args.system_prompt or "answer_simple_question.txt",
-                        top_k=args.top_k,
+                    recall_kwargs = {
+                        "query_text": args.query_text,
+                        "datasets": args.datasets,
+                        "top_k": args.top_k,
                         **session_kwargs,
-                    )
+                    }
+                    if query_type is not None:
+                        recall_kwargs["query_type"] = query_type
+                    if args.system_prompt:
+                        recall_kwargs["system_prompt_path"] = args.system_prompt
+                    elif query_type is not None:
+                        recall_kwargs["system_prompt_path"] = "answer_simple_question.txt"
+
+                    results = await cognee.recall(**recall_kwargs)
                     return results
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
@@ -109,7 +119,20 @@ options are supported.
                 fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
                 fmt.echo("=" * 60)
 
-                if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+                if isinstance(results[0], dict) and "question" in results[0]:
+                    # Session QA entries
+                    for i, entry in enumerate(results, 1):
+                        q = entry.get("question", "")
+                        a = entry.get("answer", "")
+                        t = entry.get("time", "")
+                        header = f"[{t}] " if t else ""
+                        if q:
+                            fmt.echo(f"{fmt.bold(f'{header}Q:')} {q}")
+                        if a:
+                            fmt.echo(f"{fmt.bold('A:')} {a}")
+                        if i < len(results):
+                            fmt.echo("-" * 40)
+                elif args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
                     for i, result in enumerate(results, 1):
                         fmt.echo(f"{fmt.bold('Response:')} {result}")
                         if i < len(results):
