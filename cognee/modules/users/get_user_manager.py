@@ -3,6 +3,7 @@ import re
 import json
 import uuid
 import logging
+from sqlalchemy import select
 from typing import Optional
 from fastapi import Depends, Request, Response
 from fastapi_users import BaseUserManager, UUIDIDMixin
@@ -11,6 +12,9 @@ from contextlib import asynccontextmanager
 
 from .models import User
 from .get_user_db import get_user_db
+from cognee.modules.users.models.UserApiKey import UserApiKey
+from cognee.modules.users.api_key.hash_api_key import prepare_api_key
+from cognee.infrastructure.databases.relational import get_relational_engine
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +28,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_login(
         self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
     ):
-        access_token_cookie = response.headers.get("Set-Cookie")
-        match = re.search(
-            r"(?i)\bSet-Cookie:\s*([^=]+)=([^;]+)", f"Set-Cookie: {access_token_cookie}"
-        )
-        if match:
-            access_token = match.group(2)
-            response.status_code = 200
-            response.body = json.dumps(
-                {"access_token": access_token, "token_type": "bearer"}
-            ).encode(encoding="utf-8")
-            response.headers.append("Content-Type", "application/json")
+        logger.info("User %s has logged in.", user.id)
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         logger.info("User %s has registered.", user.id)
@@ -48,6 +42,20 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         self, user: User, token: str, request: Optional[Request] = None
     ):
         logger.info("Verification requested for user %s. Verification token: %s", user.id, token)
+
+    async def get_by_token(self, token: str) -> Optional[User]:
+        relational_engine = get_relational_engine()
+        prepared_api_key = prepare_api_key(token)
+
+        async with relational_engine.get_async_session() as session:
+            user_api_key = (
+                await session.execute(select(UserApiKey).filter_by(api_key=prepared_api_key))
+            ).scalar()
+
+            if user_api_key:
+                user = await self.get(user_api_key.user_id)
+
+                return user
 
 
 async def get_user_manager(user_db: SQLAlchemyUserDatabase = Depends(get_user_db)):

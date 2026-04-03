@@ -56,6 +56,7 @@ class DataPoint(BaseModel):
     source_user: Optional[str] = None
     source_content_hash: Optional[str] = None
     feedback_weight: float = 0.5
+    importance_weight: Optional[float] = 0.5
 
     def __init__(self, **data):
         if "id" not in data:

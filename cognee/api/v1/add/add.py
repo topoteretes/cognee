@@ -38,6 +38,7 @@ async def add(
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
+    importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
     **kwargs,
 ):
@@ -198,6 +199,7 @@ async def add(
             node_set,
             dataset_id,
             preferred_loaders,
+            importance_weight,
         ),
     ]
 
