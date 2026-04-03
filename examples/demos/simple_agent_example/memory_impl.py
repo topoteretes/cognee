@@ -20,7 +20,7 @@ from common import (
     dataset_name=AGENTIC_TRACES_DATASET,
     memory_query_from_method="email",
     memory_system_prompt=MEMORY_RETRIEVAL_PROMPT,
-    memory_top_k=20
+    memory_top_k=20,
 )
 async def _subagent_propose_offer(payload: dict, email: dict) -> dict:
     return await propose_offer(payload, email)

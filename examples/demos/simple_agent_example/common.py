@@ -29,8 +29,8 @@ RULES_DATA = [
 ]
 
 MEMORY_RETRIEVAL_PROMPT = (
-    'You get a user email. List ONLY the packages that are allowed/supported to the current user based on the context based on the feedbacks.'
-    ' Dont include the requested packages. If context is empty, return empty string'
+    "You get a user email. List ONLY the packages that are allowed/supported to the current user based on the context based on the feedbacks."
+    " Dont include the requested packages. If context is empty, return empty string"
 )
 
 PROPOSER_PROMPT = (
@@ -308,9 +308,7 @@ def load_emails() -> list[dict]:
 
 async def setup_runtime() -> None:
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "").lower() != "true":
-        raise RuntimeError(
-            "This demo requires ENABLE_BACKEND_ACCESS_CONTROL=true."
-        )
+        raise RuntimeError("This demo requires ENABLE_BACKEND_ACCESS_CONTROL=true.")
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await setup()
