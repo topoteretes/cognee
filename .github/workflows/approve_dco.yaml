@@ -15,7 +15,7 @@ jobs:
           # In GitHub Enterprise or private orgs, you might need a PAT (personal access token) with read:org scope.
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const orgName = 'YOUR_ORGANIZATION_NAME'; // Replace with your org
+            const orgName = 'topoteretes';
             const prUser = context.payload.pull_request.user.login;
             const prBody = context.payload.pull_request.body || '';
 
