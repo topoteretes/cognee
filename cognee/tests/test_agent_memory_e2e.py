@@ -105,6 +105,11 @@ async def test_agent_memory_e2e_requires_write_then_retrieves_shared_memory(agen
         user=member,
         dataset_name=dataset_name,
         memory_query_fixed="What is the private codename for this cognee agent_memory e2e test?",
+        memory_system_prompt=(
+            "Return only the exact codename from memory context. "
+            "Do not shorten, summarize, or omit any part of it. "
+            "If no relevant context exists, return an empty string."
+        ),
     )
     async def shared_memory_agent() -> str:
         return await LLMGateway.acreate_structured_output(
