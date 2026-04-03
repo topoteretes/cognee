@@ -54,4 +54,4 @@ async def create_api_key(user: User, name: str = None):
 
 
 def generate_api_key():
-    return secrets.token_hex(24)
+    return secrets.token_hex(32)
