@@ -32,6 +32,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         context_extension_rounds: int = 4,
         session_id: Optional[str] = None,
         response_model: Type = str,
+        neighborhood_depth: Optional[int] = None,
+        neighborhood_seed_top_k: Optional[int] = 10,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -46,6 +48,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             feedback_influence=feedback_influence,
             session_id=session_id,
             response_model=response_model,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
         self.context_extension_rounds = context_extension_rounds
 
