@@ -1,36 +1,55 @@
 ---
 name: cognee-search
-description: Search the Cognee knowledge graph for relevant context from previous sessions, stored reasoning, and ingested data. Use when you need to recall information from prior conversations or look up domain knowledge.
+description: Search Cognee memory. Session memory is automatically searched on every prompt via hooks. Use this skill explicitly for permanent knowledge graph search or when you need more results than the automatic lookup provides.
 ---
 
-# Cognee Knowledge Graph Search
+# Cognee Memory Search
 
-Search the Cognee knowledge graph to retrieve relevant context.
+Search both session memory and the permanent knowledge graph.
+
+## Automatic session search
+
+Session memory is searched **automatically on every user prompt** via the `UserPromptSubmit` hook. Relevant context from tool calls and responses in this session is injected into your context window without any manual action. You do not need to run this skill to access current-session context.
+
+## When to use this skill explicitly
+
+Use this skill when you need to:
+- Search the **permanent knowledge graph** (cross-session, ingested data)
+- Get **more results** than the automatic lookup provides (auto returns top 3)
+- Search with a **different query** than the user's prompt
 
 ## Instructions
 
-1. Run the cognee recall command:
+### Search session memory (current session, more results)
+
+```bash
+cognee-cli recall "$ARGUMENTS" -s "${COGNEE_SESSION_ID:-claude_code_session}" -k 10 -f json
+```
+
+### Search permanent graph (cross-session, ingested data)
 
 ```bash
 cognee-cli recall "$ARGUMENTS" -d "${COGNEE_PLUGIN_DATASET:-claude_sessions}" -k 5 -f json
 ```
 
-2. Parse the JSON results.
+### Search both (session first, fallback to graph)
 
-3. Present the relevant findings to the user clearly. If no results are found, say so.
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/cognee-search.sh "$ARGUMENTS"
+```
 
-## When to use
+## Understanding results
 
-- The user asks to recall something from a previous session
-- The user asks "what do you know about X" referring to stored knowledge
-- You need context from prior reasoning or tool calls
-- The user explicitly asks to search cognee
+Results include a `_source` field:
+- `"session"` — from the session cache (current conversation)
+- `"graph"` — from the permanent knowledge graph
 
-## Note on memory types
+## Decision table
 
-Cognee has two memory layers:
-
-- **Session memory** (lightweight, fast): tool calls and responses stored during the session via hooks. Available immediately for session completions. After `cognee-cli improve` runs, graph knowledge is also synced back into the session as a background knowledge snapshot that is automatically included in completion prompts.
-- **Permanent memory** (indexed, searchable): data ingested via `cognee-cli remember`. Builds the full knowledge graph via add + cognify + improve.
-
-This search queries the **permanent** knowledge graph. Session entries are only searchable after running `cognee-cli improve` (which happens automatically at session end).
+| Signal | Action |
+|--------|--------|
+| Need current session context | Already automatic, no action needed |
+| "from last time" / "previous session" | Search permanent graph with `-d` |
+| "what do you know about X" | Try auto context first, then permanent graph |
+| User explicitly says "search cognee" | Search permanent graph with `-d` |
+| Auto context insufficient | Search session with `-s -k 10` for more results |

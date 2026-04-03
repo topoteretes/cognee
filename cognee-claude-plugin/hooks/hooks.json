@@ -1,12 +1,25 @@
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/session-context-lookup.py",
+            "timeout": 10,
+            "statusMessage": "Searching session memory..."
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Bash|Agent|Read|Write|Edit|Grep|Glob",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/store-to-session.py &"
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/store-to-session.py",
+            "async": true
           }
         ]
       }
@@ -16,7 +29,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/store-to-session.py --stop &"
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/store-to-session.py --stop",
+            "async": true
           }
         ]
       }
