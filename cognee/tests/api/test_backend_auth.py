@@ -19,7 +19,7 @@ HASH_TEST_USER_EMAIL = "hash_test_user@example.com"
 HASH_TEST_USER_PASSWORD = "securepassword123!"
 
 
-class TestApiKeyAuthFlow:
+class TestAuthFlow:
     """
     End-to-end test: register account, login with JWT, create API key,
     and confirm a request authenticated with that API key succeeds.
@@ -61,8 +61,16 @@ class TestApiKeyAuthFlow:
         api_key = create_key_response.json()["key"]
         assert api_key
 
+        # Test if Cookie authentication works on an authenticated endpoint
+        me_response = client.get("/api/v1/auth/me")
+        assert me_response.status_code == 200
+
         # Note: we have to log out so Cookies don't interfere with API key authentication in the next step
         client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {access_token}"})
+
+        # Test if Cookie authentication doesn't work anymore after logging out
+        me_response = client.get("/api/v1/auth/me")
+        assert me_response.status_code == 401
 
         # Use only the API key on an authenticated endpoint and confirm it succeeds
         me_response = client.get(
@@ -83,6 +91,16 @@ class TestApiKeyAuthFlow:
             headers={"X-Api-Key": api_key},
         )
         assert me_response.status_code == 401, "Deleted API key should no longer authenticate"
+
+        # Test if Bearer token works after logging out and deleting API key
+        me_response = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert me_response.status_code == 200, (
+            "Bearer token should still work after logging out and deleting API key"
+        )
 
 
 class TestHashApiKey:
