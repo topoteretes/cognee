@@ -31,6 +31,7 @@ class AgentMemoryConfig:
     save_traces: bool
     memory_query_fixed: Optional[str]
     memory_query_from_method: Optional[str]
+    memory_system_prompt: Optional[str]
     memory_top_k: int
     user: Optional[User]
     dataset_name: Optional[str]
@@ -87,6 +88,7 @@ def validate_agent_memory_config(
     save_traces: bool,
     memory_query_fixed: Optional[str],
     memory_query_from_method: Optional[str],
+    memory_system_prompt: Optional[str],
     memory_top_k: int,
     user: Optional[User],
     dataset_name: Optional[str],
@@ -103,6 +105,11 @@ def validate_agent_memory_config(
             "memory_query_from_method must be a string when provided.",
             log=False,
         )
+    if memory_system_prompt is not None and not isinstance(memory_system_prompt, str):
+        raise CogneeValidationError(
+            "memory_system_prompt must be a string when provided.",
+            log=False,
+        )
     if memory_query_fixed is not None and not memory_query_fixed.strip():
         raise CogneeValidationError(
             "memory_query_fixed must not be blank when provided.",
@@ -111,6 +118,11 @@ def validate_agent_memory_config(
     if memory_query_from_method is not None and not memory_query_from_method.strip():
         raise CogneeValidationError(
             "memory_query_from_method must not be blank when provided.",
+            log=False,
+        )
+    if memory_system_prompt is not None and not memory_system_prompt.strip():
+        raise CogneeValidationError(
+            "memory_system_prompt must not be blank when provided.",
             log=False,
         )
     if memory_query_fixed is not None and memory_query_from_method is not None:
@@ -134,6 +146,9 @@ def validate_agent_memory_config(
         ),
         memory_query_from_method=(
             memory_query_from_method.strip() if isinstance(memory_query_from_method, str) else None
+        ),
+        memory_system_prompt=(
+            memory_system_prompt.strip() if isinstance(memory_system_prompt, str) else None
         ),
         memory_top_k=memory_top_k,
         user=user,
@@ -269,10 +284,7 @@ async def retrieve_memory_context(context: AgentMemoryContext) -> str:
                 query_type=SearchType.GRAPH_COMPLETION,
                 user=context.scope.user,
                 dataset_ids=[context.scope.dataset_id],
-                system_prompt=(
-                    "Return only the relevant memory context for the query. "
-                    "If no relevant context exists, return an empty string."
-                ),
+                system_prompt=context.config.memory_system_prompt,
                 top_k=context.config.memory_top_k,
             )
         except Exception as error:

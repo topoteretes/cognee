@@ -43,6 +43,7 @@ def _make_config(**overrides):
         "save_traces": False,
         "memory_query_fixed": None,
         "memory_query_from_method": None,
+        "memory_system_prompt": None,
         "memory_top_k": 5,
         "user": None,
         "dataset_name": None,
@@ -112,6 +113,8 @@ def test_agent_memory_rejects_sync_functions():
         {"dataset_name": ""},
         {"memory_query_fixed": "   "},
         {"memory_query_from_method": "   "},
+        {"memory_system_prompt": "   "},
+        {"memory_system_prompt": 123},
         {"memory_query_fixed": "Fixed query", "memory_query_from_method": "question"},
     ],
 )
@@ -249,7 +252,23 @@ async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
     assert context.memory_query == "Find memory"
     assert search_mock.await_args.kwargs["user"] == scope.user
     assert search_mock.await_args.kwargs["dataset_ids"] == [scope.dataset_id]
+    assert search_mock.await_args.kwargs["system_prompt"] is None
     assert search_mock.await_args.kwargs["top_k"] == 7
+
+
+@pytest.mark.asyncio
+async def test_retrieve_memory_context_passes_custom_memory_system_prompt(monkeypatch):
+    search_mock = AsyncMock(return_value=["Relevant memory"])
+    monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
+
+    context = _make_context(
+        method_params={"question": "ignored"},
+        memory_query_fixed="Find memory",
+        memory_system_prompt="Return only product codenames.",
+    )
+
+    assert await retrieve_memory_context(context) == "Relevant memory"
+    assert search_mock.await_args.kwargs["system_prompt"] == "Return only product codenames."
 
 
 @pytest.mark.asyncio
