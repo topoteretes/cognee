@@ -1,14 +1,14 @@
 """add dataset_configuration table
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: d4e5f6a7b8c9
 Revises:
-Create Date: 2026-04-03
+Create Date: 2026-04-04
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "a1b2c3d4e5f6"
+revision = "d4e5f6a7b8c9"
 down_revision = None
 branch_labels = None
 depends_on = None
