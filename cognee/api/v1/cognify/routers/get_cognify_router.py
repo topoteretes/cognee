@@ -150,11 +150,35 @@ def get_cognify_router() -> APIRouter:
                     }
                 }
 
-            if not payload.graph_model:
+            # Resolve graph model and custom prompt: use payload values,
+            # fall back to stored DatasetConfiguration, then defaults.
+            graph_model_schema = payload.graph_model
+            custom_prompt = payload.custom_prompt
+
+            if not graph_model_schema or not custom_prompt:
+                from cognee.modules.data.models import DatasetConfiguration
+                from cognee.infrastructure.databases.relational import get_relational_engine
+                from sqlalchemy import select
+
+                db_engine = get_relational_engine()
+                for ds in datasets:
+                    async with db_engine.get_async_session() as session:
+                        config = await session.scalar(
+                            select(DatasetConfiguration).where(
+                                DatasetConfiguration.dataset_id == ds
+                            )
+                        )
+                    if config:
+                        if not graph_model_schema and config.graph_schema:
+                            graph_model_schema = config.graph_schema
+                        if not custom_prompt and config.custom_prompt:
+                            custom_prompt = config.custom_prompt
+                    break  # use first dataset's config
+
+            if not graph_model_schema:
                 graph_model = KnowledgeGraph
             else:
-                # If a custom graph model is provided, convert it from dict to a Pydantic model class
-                graph_model = graph_schema_to_graph_model(payload.graph_model)
+                graph_model = graph_schema_to_graph_model(graph_model_schema)
 
             cognify_run = await cognee_cognify(
                 datasets,
@@ -162,9 +186,41 @@ def get_cognify_router() -> APIRouter:
                 graph_model=graph_model,
                 config=config_to_use,
                 run_in_background=payload.run_in_background,
-                custom_prompt=payload.custom_prompt,
+                custom_prompt=custom_prompt,
                 chunks_per_batch=payload.chunks_per_batch,
             )
+
+            # Persist schema and prompt to DatasetConfiguration for future use
+            if graph_model_schema or custom_prompt:
+                try:
+                    from cognee.modules.data.models import DatasetConfiguration
+                    from cognee.infrastructure.databases.relational import get_relational_engine
+                    from sqlalchemy import select
+
+                    db_engine = get_relational_engine()
+                    for ds in datasets:
+                        async with db_engine.get_async_session() as session:
+                            config = await session.scalar(
+                                select(DatasetConfiguration).where(
+                                    DatasetConfiguration.dataset_id == ds
+                                )
+                            )
+                            if config:
+                                if graph_model_schema:
+                                    config.graph_schema = graph_model_schema
+                                if custom_prompt:
+                                    config.custom_prompt = custom_prompt
+                            else:
+                                session.add(
+                                    DatasetConfiguration(
+                                        dataset_id=ds,
+                                        graph_schema=graph_model_schema,
+                                        custom_prompt=custom_prompt,
+                                    )
+                                )
+                            await session.commit()
+                except Exception as persist_err:
+                    logger.warning("Failed to persist dataset configuration: %s", persist_err)
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):

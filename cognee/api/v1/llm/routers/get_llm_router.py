@@ -31,6 +31,18 @@ class CustomPromptGenerationResponseDTO(OutDTO):
     custom_prompt: str
 
 
+class InferSchemaPayloadDTO(InDTO):
+    text: str = Field(..., description="Sample text to analyze for entity types and relationships.")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional kwargs forwarded to LLMGateway.",
+    )
+
+
+class InferSchemaResponseDTO(OutDTO):
+    graph_schema: Dict[str, Any]
+
+
 def get_llm_router() -> APIRouter:
     router = APIRouter()
 
@@ -79,6 +91,63 @@ def get_llm_router() -> APIRouter:
             return JSONResponse(status_code=400, content={"error": str(error)})
         except Exception as error:
             logger.error("LLM custom prompt generation request failed")
+            return JSONResponse(status_code=409, content={"error": str(error)})
+
+    @router.post("/infer-schema", response_model=InferSchemaResponseDTO)
+    @log_usage(function_name="POST /v1/llm/infer-schema", log_type="api_endpoint")
+    async def infer_schema(
+        payload: InferSchemaPayloadDTO,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Analyze sample text and propose a JSON Schema describing the entity types
+        and relationships present. The returned schema can be passed directly to
+        ``/v1/llm/custom-prompt`` or ``/v1/cognify``.
+        """
+        send_telemetry(
+            "LLM Infer Schema Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/llm/infer-schema",
+                "text_length": len(payload.text),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        try:
+            user_prompt = render_prompt(
+                "infer_schema_user.txt",
+                {"SAMPLE_TEXT": payload.text},
+            )
+
+            system_prompt = render_prompt(
+                "infer_schema_system.txt",
+                {},
+            )
+
+            llm_output = await LLMGateway.acreate_structured_output(
+                text_input=user_prompt,
+                system_prompt=system_prompt,
+                response_model=str,
+                **payload.parameters,
+            )
+
+            # Parse the LLM output as JSON
+            schema_dict = json.loads(llm_output)
+
+            # Validate by attempting conversion — raises if schema is invalid
+            from cognee.shared.graph_model_utils import graph_schema_to_graph_model
+
+            graph_schema_to_graph_model(schema_dict)
+
+            return InferSchemaResponseDTO(graph_schema=schema_dict)
+        except json.JSONDecodeError as error:
+            return JSONResponse(
+                status_code=422,
+                content={"error": f"LLM output is not valid JSON: {error}"},
+            )
+        except Exception as error:
+            logger.error("LLM schema inference failed: %s", error)
             return JSONResponse(status_code=409, content={"error": str(error)})
 
     return router

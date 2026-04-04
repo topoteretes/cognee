@@ -514,4 +514,52 @@ def get_datasets_router() -> APIRouter:
             detail=f"Storage scheme '{parsed_uri.scheme}' not supported for direct download.",
         )
 
+    @router.get("/{dataset_id}/schema", response_model=dict)
+    async def get_dataset_schema(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+        """Return the stored graph schema and custom prompt for a dataset."""
+        from cognee.modules.data.models import DatasetConfiguration
+        from sqlalchemy import select
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            config = await session.scalar(
+                select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
+            )
+        if not config:
+            return {"graph_schema": None, "custom_prompt": None}
+        return {
+            "graph_schema": config.graph_schema,
+            "custom_prompt": config.custom_prompt,
+        }
+
+    @router.put("/{dataset_id}/schema", response_model=dict)
+    async def update_dataset_schema(
+        dataset_id: UUID,
+        payload: dict,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Store or update the graph schema and custom prompt for a dataset."""
+        from cognee.modules.data.models import DatasetConfiguration
+        from sqlalchemy import select
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            config = await session.scalar(
+                select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
+            )
+            if config:
+                if "graph_schema" in payload:
+                    config.graph_schema = payload["graph_schema"]
+                if "custom_prompt" in payload:
+                    config.custom_prompt = payload["custom_prompt"]
+            else:
+                config = DatasetConfiguration(
+                    dataset_id=dataset_id,
+                    graph_schema=payload.get("graph_schema"),
+                    custom_prompt=payload.get("custom_prompt"),
+                )
+                session.add(config)
+            await session.commit()
+        return {"status": "ok"}
+
     return router
