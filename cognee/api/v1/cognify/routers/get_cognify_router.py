@@ -155,25 +155,33 @@ def get_cognify_router() -> APIRouter:
             graph_model_schema = payload.graph_model
             custom_prompt = payload.custom_prompt
 
-            if not graph_model_schema or not custom_prompt:
-                from cognee.modules.data.models import DatasetConfiguration
-                from cognee.infrastructure.databases.relational import get_relational_engine
-                from sqlalchemy import select
+            if datasets and (not graph_model_schema or not custom_prompt):
+                try:
+                    from uuid import UUID as _UUID
+                    from cognee.modules.data.models import DatasetConfiguration
+                    from cognee.infrastructure.databases.relational import get_relational_engine
+                    from sqlalchemy import select
 
-                db_engine = get_relational_engine()
-                for ds in datasets:
-                    async with db_engine.get_async_session() as session:
-                        config = await session.scalar(
-                            select(DatasetConfiguration).where(
-                                DatasetConfiguration.dataset_id == ds
+                    db_engine = get_relational_engine()
+                    for ds in datasets:
+                        try:
+                            ds_uuid = ds if isinstance(ds, _UUID) else _UUID(str(ds))
+                        except (ValueError, AttributeError):
+                            break
+                        async with db_engine.get_async_session() as session:
+                            config = await session.scalar(
+                                select(DatasetConfiguration).where(
+                                    DatasetConfiguration.dataset_id == ds_uuid
+                                )
                             )
-                        )
-                    if config:
-                        if not graph_model_schema and config.graph_schema:
-                            graph_model_schema = config.graph_schema
-                        if not custom_prompt and config.custom_prompt:
-                            custom_prompt = config.custom_prompt
-                    break  # use first dataset's config
+                        if config:
+                            if not graph_model_schema and config.graph_schema:
+                                graph_model_schema = config.graph_schema
+                            if not custom_prompt and config.custom_prompt:
+                                custom_prompt = config.custom_prompt
+                        break  # use first dataset's config
+                except Exception:
+                    pass  # config lookup is best-effort
 
             if not graph_model_schema:
                 graph_model = KnowledgeGraph
@@ -191,18 +199,23 @@ def get_cognify_router() -> APIRouter:
             )
 
             # Persist schema and prompt to DatasetConfiguration for future use
-            if graph_model_schema or custom_prompt:
+            if datasets and (graph_model_schema or custom_prompt):
                 try:
+                    from uuid import UUID as _UUID
                     from cognee.modules.data.models import DatasetConfiguration
                     from cognee.infrastructure.databases.relational import get_relational_engine
                     from sqlalchemy import select
 
                     db_engine = get_relational_engine()
                     for ds in datasets:
+                        try:
+                            ds_uuid = ds if isinstance(ds, _UUID) else _UUID(str(ds))
+                        except (ValueError, AttributeError):
+                            continue
                         async with db_engine.get_async_session() as session:
                             config = await session.scalar(
                                 select(DatasetConfiguration).where(
-                                    DatasetConfiguration.dataset_id == ds
+                                    DatasetConfiguration.dataset_id == ds_uuid
                                 )
                             )
                             if config:
@@ -213,7 +226,7 @@ def get_cognify_router() -> APIRouter:
                             else:
                                 session.add(
                                     DatasetConfiguration(
-                                        dataset_id=ds,
+                                        dataset_id=ds_uuid,
                                         graph_schema=graph_model_schema,
                                         custom_prompt=custom_prompt,
                                     )

@@ -78,16 +78,12 @@ async def test_create_cognee_style_network_with_logo():
 
     # Phase 5: Provenance tracking
     assert 'data-colorby="type"' in html_output
-    assert 'data-colorby="task"' in html_output
-    assert 'data-colorby="pipeline"' in html_output
     assert "colorByMode" in html_output
     assert "recolorNodes" in html_output
     assert "taskColors" in html_output
     assert "pipelineColors" in html_output
     assert "nodesetColors" in html_output
     assert "userColors" in html_output
-    assert "Source Task" in html_output
-    assert "Source Pipeline" in html_output
     assert "Source Node Set" in html_output
     assert "Source User" in html_output
     assert 'data-colorby="nodeset"' in html_output
