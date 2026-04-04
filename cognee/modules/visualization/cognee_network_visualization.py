@@ -35,7 +35,7 @@ async def cognee_network_visualization(
         "SchemaTable": "#A550FF",
         "DatabaseSchema": "#6510F4",
         "SchemaRelationship": "#323332",
-        "default": "#DBD8D8",
+        "default": "#7c3aed",
     }
 
     nodes_list = []
@@ -199,7 +199,15 @@ def _get_html_template():
   --bg:#000000;--bg2:#323332;--surface:rgba(255,255,255,0.06);
   --border:rgba(219,216,216,0.12);--text:#F4F4F4;--text2:#DBD8D8;
   --accent:#6510F4;--accent2:#A550FF;--green:#0DFF00;
+  --schema-node:#1a1a2e;--schema-stroke:#A550FF;--schema-link:#555;
 }
+html.light{
+  --bg:#f5f5f5;--bg2:#e8e8e8;--surface:rgba(0,0,0,0.04);
+  --border:rgba(0,0,0,0.12);--text:#1a1a1a;--text2:#555555;
+  --accent:#6510F4;--accent2:#7c3aed;--green:#16a34a;
+  --schema-node:#ffffff;--schema-stroke:#6510F4;--schema-link:#999;
+}
+html.light body,html.light{background:var(--bg);color:var(--text)}
 @font-face{font-family:'Inter';src:local('Inter'),local('Inter-Regular');font-display:swap}
 body,html{width:100%;height:100%;overflow:hidden;background:#000000;color:#F4F4F4;font-family:'Inter',system-ui,-apple-system,sans-serif}
 canvas{display:block;width:100vw;height:100vh;cursor:grab}
@@ -209,7 +217,7 @@ canvas:active{cursor:grabbing}
   position:fixed;top:0;left:0;right:0;height:48px;
   display:flex;align-items:center;justify-content:space-between;
   padding:0 20px;z-index:100;
-  background:linear-gradient(180deg,rgba(0,0,0,0.95) 0%,rgba(0,0,0,0) 100%);
+  background:none;
   pointer-events:none;
 }
 #header>*{pointer-events:auto}
@@ -268,14 +276,9 @@ canvas:active{cursor:grabbing}
 .panel-row .k{color:var(--text2);flex-shrink:0}
 .panel-row .v{color:var(--text);text-align:right;word-break:break-word;max-width:200px}
 
-#legend{
-  position:fixed;bottom:64px;left:20px;z-index:100;
-  display:flex;flex-wrap:wrap;gap:6px 12px;
-  padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;
-  max-width:400px;
-}
-.legend-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);white-space:nowrap}
-.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+#legend{display:none}
+.legend-item{display:none}
+.legend-dot{display:none}
 
 .empty-state{
   position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
@@ -310,10 +313,12 @@ canvas:active{cursor:grabbing}
 </head>
 <body>
 
-<div id="view-tabs" style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:1100;display:flex;gap:2px;background:rgba(0,0,0,0.85);border-radius:0 0 8px 8px;padding:2px 6px;">
+<div id="view-tabs" style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:1100;display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.85);border-radius:0 0 8px 8px;padding:2px 6px;">
   <button class="tab-btn active" data-view="graph" style="background:var(--accent);color:#fff;border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Graph</button>
   <button class="tab-btn" data-view="schema" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Schema</button>
 </div>
+
+<button id="theme-toggle" style="position:fixed;top:12px;right:20px;z-index:1200;background:var(--bg2);border:1px solid var(--border);cursor:pointer;font-size:12px;padding:6px 14px;border-radius:8px;color:var(--text);font-family:inherit;font-weight:500;transition:all 0.15s;">Light mode</button>
 
 <div id="graph-view">
 <div id="header">
@@ -337,8 +342,6 @@ canvas:active{cursor:grabbing}
   <div class="ctrl-sep"></div>
   <span style="font-size:10px;color:var(--text2);padding:6px 4px">Color:</span>
   <button class="ctrl-btn active" data-colorby="type">Type</button>
-  <button class="ctrl-btn" data-colorby="task">Task</button>
-  <button class="ctrl-btn" data-colorby="pipeline">Pipeline</button>
   <button class="ctrl-btn" data-colorby="nodeset">Node Set</button>
   <button class="ctrl-btn" data-colorby="user">User</button>
   <div class="ctrl-sep"></div>
@@ -362,11 +365,34 @@ canvas:active{cursor:grabbing}
 <canvas id="canvas"></canvas>
 </div><!-- end graph-view -->
 
-<div id="schema-view" style="display:none;position:fixed;inset:0;background:var(--bg);padding:60px 40px 40px;overflow:auto;z-index:900;">
-  <div id="schema-container" style="max-width:900px;margin:0 auto;"></div>
+<div id="schema-view" style="display:none;position:fixed;inset:0;background:var(--bg);padding:48px 0 0;overflow:hidden;z-index:900;">
+  <svg id="schema-svg" style="width:100%;height:100%;"></svg>
+  <div id="schema-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;">
+    <div style="color:var(--text2);text-align:center;font-size:16px;">No schema configured for this dataset.</div>
+  </div>
 </div>
 
 <script>
+// Theme toggle
+(function(){
+  const btn = document.getElementById('theme-toggle');
+  // Expose for canvas draw() to read
+  window._isLightMode = false;
+  btn.addEventListener('click', () => {
+    document.documentElement.classList.toggle('light');
+    const isLight = document.documentElement.classList.contains('light');
+    window._isLightMode = isLight;
+    btn.textContent = isLight ? 'Dark mode' : 'Light mode';
+    // Update tab bar background
+    const tabBar = document.getElementById('view-tabs');
+    tabBar.style.background = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)';
+    // Re-render schema if visible
+    if (document.getElementById('schema-view').style.display !== 'none' && window._renderSchemaGraph) {
+      window._renderSchemaGraph();
+    }
+  });
+})();
+
 // Tab switching logic
 (function(){
   const tabs = document.querySelectorAll('.tab-btn');
@@ -379,52 +405,183 @@ canvas:active{cursor:grabbing}
       const view = btn.dataset.view;
       graphView.style.display = view === 'graph' ? '' : 'none';
       schemaView.style.display = view === 'schema' ? '' : 'none';
+      if (view === 'schema' && window._renderSchemaGraph) window._renderSchemaGraph();
     });
   });
-  // Render schema tree
+})();
+
+// Schema force-directed graph
+(function(){
   const schemaData = __SCHEMA_DATA__;
-  const container = document.getElementById('schema-container');
   if (!schemaData) {
-    container.innerHTML = '<div style="color:var(--text2);text-align:center;padding:80px 0;font-size:16px;">No schema configured for this dataset.<br><br><span style="font-size:13px;opacity:0.6;">Use POST /api/v1/llm/infer-schema to auto-detect a schema,<br>or POST /api/v1/cognify with a graph_model to set one.</span></div>';
-  } else {
-    function renderSchema(schema) {
-      const defs = schema.$defs || schema['$defs'] || {};
-      let html = '<h2 style="color:var(--accent);margin-bottom:20px;">' + (schema.title || 'Schema') + '</h2>';
-      // Root entity
-      html += renderType(schema.title || 'Root', schema, defs);
-      // All $defs types
-      for (const [name, def] of Object.entries(defs)) {
-        if (name === schema.title) continue;
-        html += renderType(name, def, defs);
-      }
-      return html;
-    }
-    function renderType(name, def, defs) {
-      const props = def.properties || {};
-      const required = new Set(def.required || []);
-      let html = '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:16px;margin-bottom:12px;">';
-      html += '<div style="font-size:15px;font-weight:700;color:#A550FF;margin-bottom:8px;">' + name + '</div>';
-      for (const [field, fieldDef] of Object.entries(props)) {
-        const isReq = required.has(field);
-        let typeStr = fieldDef.type || '';
-        if (fieldDef.$ref || fieldDef['$ref']) {
-          const ref = fieldDef.$ref || fieldDef['$ref'];
-          typeStr = '→ ' + ref.split('/').pop();
-        } else if (fieldDef.type === 'array' && fieldDef.items) {
-          const itemRef = fieldDef.items.$ref || fieldDef.items['$ref'];
-          typeStr = itemRef ? '[→ ' + itemRef.split('/').pop() + ']' : 'array';
-        }
-        html += '<div style="padding:3px 0 3px 16px;font-size:13px;color:' + (isReq ? '#fff' : 'var(--text2)') + ';">';
-        html += '<span style="color:#6510F4;font-weight:600;">' + field + '</span>';
-        html += ' <span style="opacity:0.5;font-size:11px;">' + typeStr + '</span>';
-        if (isReq) html += ' <span style="color:#0DFF00;font-size:10px;">required</span>';
-        html += '</div>';
-      }
-      html += '</div>';
-      return html;
-    }
-    container.innerHTML = renderSchema(schemaData);
+    var emptyEl = document.getElementById('schema-empty');
+    emptyEl.style.display = 'flex';
+    document.getElementById('schema-svg').style.display = 'none';
+    return;
   }
+
+  const defs = schemaData.$defs || schemaData['$defs'] || {};
+  // Build nodes: root + all $defs types
+  const typeNames = new Set();
+  typeNames.add(schemaData.title || 'Root');
+  Object.keys(defs).forEach(n => typeNames.add(n));
+
+  const schemaNodes = [];
+  const schemaLinks = [];
+  const nodeMap = {};
+
+  function addNode(name, def) {
+    if (nodeMap[name]) return;
+    const props = def ? def.properties || {} : {};
+    const required = new Set(def ? def.required || [] : []);
+    const fields = Object.entries(props)
+      .filter(([,v]) => !v.$ref && !v['$ref'] && !(v.type === 'array' && v.items && (v.items.$ref || v.items['$ref'])))
+      .map(([k,v]) => ({ name: k, type: v.type || 'any', required: required.has(k) }));
+    const node = { id: name, fields: fields };
+    nodeMap[name] = node;
+    schemaNodes.push(node);
+  }
+
+  // Add root
+  addNode(schemaData.title || 'Root', schemaData);
+  // Add $defs
+  for (const [name, def] of Object.entries(defs)) {
+    addNode(name, def);
+  }
+
+  // Extract relationships
+  function extractRels(sourceName, def) {
+    const props = def ? def.properties || {} : {};
+    for (const [field, fieldDef] of Object.entries(props)) {
+      let targetName = null;
+      let isArray = false;
+      if (fieldDef.$ref || fieldDef['$ref']) {
+        targetName = (fieldDef.$ref || fieldDef['$ref']).split('/').pop();
+      } else if (fieldDef.type === 'array' && fieldDef.items) {
+        const ref = fieldDef.items.$ref || fieldDef.items['$ref'];
+        if (ref) { targetName = ref.split('/').pop(); isArray = true; }
+      }
+      if (targetName && nodeMap[targetName]) {
+        schemaLinks.push({ source: sourceName, target: targetName, label: field, isArray: isArray });
+      }
+    }
+  }
+
+  extractRels(schemaData.title || 'Root', schemaData);
+  for (const [name, def] of Object.entries(defs)) {
+    extractRels(name, def);
+  }
+
+  var _schemaRendered = false;
+  window._renderSchemaGraph = function() {
+    const svg = d3.select('#schema-svg');
+    svg.selectAll('*').remove();
+    // Use actual viewport dimensions
+    const width = Math.max(window.innerWidth, 800);
+    const height = Math.max(window.innerHeight - 48, 500);
+    const isLight = document.documentElement.classList.contains('light');
+    _schemaRendered = true;
+
+    const colors = {
+      nodeFill: isLight ? '#ffffff' : '#1a1a2e',
+      nodeStroke: isLight ? '#6510F4' : '#A550FF',
+      text: isLight ? '#1a1a1a' : '#F4F4F4',
+      textDim: isLight ? '#666' : '#999',
+      link: isLight ? '#999' : '#555',
+      linkLabel: isLight ? '#6510F4' : '#A550FF',
+      fieldReq: isLight ? '#333' : '#fff',
+      fieldOpt: isLight ? '#888' : '#aaa',
+      bg: isLight ? '#f5f5f5' : '#000000',
+    };
+
+    svg.attr('width', width).attr('height', height)
+       .style('background', colors.bg);
+
+    const g = svg.append('g');
+
+    // Zoom
+    svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', (e) => g.attr('transform', e.transform)));
+
+    // Arrow marker
+    svg.append('defs').append('marker')
+      .attr('id', 'schema-arrow').attr('viewBox', '0 -5 10 10')
+      .attr('refX', 20).attr('refY', 0).attr('markerWidth', 8).attr('markerHeight', 8)
+      .attr('orient', 'auto')
+      .append('path').attr('d', 'M0,-4L10,0L0,4').attr('fill', colors.link);
+
+    const simulation = d3.forceSimulation(schemaNodes)
+      .force('link', d3.forceLink(schemaLinks).id(d => d.id).distance(200))
+      .force('charge', d3.forceManyBody().strength(-600))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collision', d3.forceCollide(80));
+
+    // Links
+    const link = g.selectAll('.schema-link').data(schemaLinks).enter().append('g');
+    const linkLine = link.append('line')
+      .attr('stroke', colors.link).attr('stroke-width', 1.5)
+      .attr('marker-end', 'url(#schema-arrow)');
+    const linkLabel = link.append('text')
+      .attr('text-anchor', 'middle').attr('font-size', 10).attr('fill', colors.linkLabel)
+      .attr('font-weight', 600).attr('dy', -6)
+      .text(d => d.isArray ? d.label + ' []' : d.label);
+
+    // Nodes
+    const node = g.selectAll('.schema-node').data(schemaNodes).enter().append('g')
+      .attr('cursor', 'grab')
+      .call(d3.drag()
+        .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+      );
+
+    // Node rectangles
+    const nodeW = 160, lineH = 16, padY = 10, headerH = 24;
+    node.append('rect')
+      .attr('width', nodeW)
+      .attr('height', d => headerH + padY + d.fields.length * lineH + padY)
+      .attr('rx', 8).attr('ry', 8)
+      .attr('fill', colors.nodeFill)
+      .attr('stroke', colors.nodeStroke).attr('stroke-width', 2)
+      .attr('filter', isLight ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' : 'drop-shadow(0 2px 8px rgba(101,16,244,0.3))');
+
+    // Header
+    node.append('text')
+      .attr('x', nodeW / 2).attr('y', 18)
+      .attr('text-anchor', 'middle').attr('font-size', 13).attr('font-weight', 700)
+      .attr('fill', colors.nodeStroke)
+      .text(d => d.id);
+
+    // Header divider
+    node.append('line')
+      .attr('x1', 8).attr('x2', nodeW - 8).attr('y1', headerH).attr('y2', headerH)
+      .attr('stroke', colors.link).attr('stroke-opacity', 0.3);
+
+    // Fields
+    node.each(function(d) {
+      const g = d3.select(this);
+      d.fields.forEach((f, i) => {
+        const y = headerH + padY + i * lineH + 12;
+        g.append('text')
+          .attr('x', 12).attr('y', y)
+          .attr('font-size', 11).attr('fill', f.required ? colors.fieldReq : colors.fieldOpt)
+          .text(f.name + (f.required ? ' *' : ''));
+        g.append('text')
+          .attr('x', nodeW - 12).attr('y', y)
+          .attr('text-anchor', 'end').attr('font-size', 9).attr('fill', colors.textDim)
+          .text(f.type);
+      });
+    });
+
+    simulation.on('tick', () => {
+      linkLine
+        .attr('x1', d => d.source.x + nodeW / 2).attr('y1', d => d.source.y + headerH / 2)
+        .attr('x2', d => d.target.x + nodeW / 2).attr('y2', d => d.target.y + headerH / 2);
+      linkLabel
+        .attr('x', d => (d.source.x + d.target.x) / 2 + nodeW / 2)
+        .attr('y', d => (d.source.y + d.target.y) / 2 + headerH / 2);
+      node.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+    });
+  };
 })();
 </script>
 
@@ -1245,13 +1402,14 @@ function draw(){
   ctx.clearRect(0,0,W,H);
 
   // Background
-  ctx.fillStyle="#000000";
+  var _light = window._isLightMode;
+  ctx.fillStyle=_light ? "#f5f5f5" : "#000000";
   ctx.fillRect(0,0,W,H);
 
   // Subtle grid
   ctx.save();
   ctx.globalAlpha=0.03;
-  ctx.strokeStyle="#fff";
+  ctx.strokeStyle=_light ? "#000" : "#fff";
   ctx.lineWidth=1;
   var gridSize=60*scale;
   if(gridSize>10){
@@ -1363,8 +1521,8 @@ function draw(){
           ctx.moveTo(e.l.source.x,e.l.source.y);
           ctx.lineTo(e.l.target.x,e.l.target.y);
         });
-        ctx.strokeStyle="rgba(219,216,216,"+nAlpha+")";
-        ctx.lineWidth=0.5/scale;
+        ctx.strokeStyle=_light ? "rgba(80,80,80,"+Math.min(nAlpha*3,0.3)+")" : "rgba(219,216,216,"+nAlpha+")";
+        ctx.lineWidth=(_light ? 0.8 : 0.5)/scale;
         ctx.stroke();
       }
 
@@ -1373,7 +1531,7 @@ function draw(){
         ctx.beginPath();
         ctx.moveTo(e.l.source.x,e.l.source.y);
         ctx.lineTo(e.l.target.x,e.l.target.y);
-        ctx.strokeStyle="rgba(219,216,216,"+e.alpha+")";
+        ctx.strokeStyle=_light ? "rgba(60,60,60,"+e.alpha+")" : "rgba(219,216,216,"+e.alpha+")";
         ctx.lineWidth=e.lineW/scale;
         ctx.stroke();
       });
@@ -1383,7 +1541,7 @@ function draw(){
         ctx.beginPath();
         ctx.moveTo(e.l.source.x,e.l.source.y);
         ctx.lineTo(e.l.target.x,e.l.target.y);
-        ctx.strokeStyle="rgba(219,216,216,"+e.alpha+")";
+        ctx.strokeStyle=_light ? "rgba(60,60,60,"+e.alpha+")" : "rgba(219,216,216,"+e.alpha+")";
         ctx.lineWidth=e.lineW/scale;
         ctx.stroke();
       });
@@ -1424,7 +1582,7 @@ function draw(){
       if(sid===hoveredNode.id||tid===hoveredNode.id){
         var mx2=(l.source.x+l.target.x)/2;
         var my2=(l.source.y+l.target.y)/2;
-        ctx.fillStyle="rgba(219,216,216,0.7)";
+        ctx.fillStyle=_light ? "rgba(30,30,30,0.9)" : "rgba(219,216,216,0.7)";
         ctx.fillText(truncate(l.relation||"",30),mx2,my2-6/scale);
       }
     });
@@ -1488,7 +1646,7 @@ function draw(){
 
       // Subtle border (skip for medium+ graphs)
       if(!skipBorder){
-        ctx.strokeStyle="rgba(244,244,244,0.2)";
+        ctx.strokeStyle=_light ? "rgba(0,0,0,0.15)" : "rgba(244,244,244,0.2)";
         ctx.lineWidth=0.5;
         ctx.stroke();
       }
@@ -1549,10 +1707,10 @@ function draw(){
         var yOff=n._r+fontSize*0.8;
 
         // Text shadow
-        ctx.fillStyle="rgba(0,0,0,"+alpha2*0.8+")";
+        ctx.fillStyle=_light ? "rgba(255,255,255,"+alpha2*0.8+")" : "rgba(0,0,0,"+alpha2*0.8+")";
         ctx.fillText(label,n.x+0.5,n.y+yOff+0.5);
 
-        ctx.fillStyle="rgba(244,244,244,"+alpha2+")";
+        ctx.fillStyle=_light ? "rgba(30,30,30,"+alpha2+")" : "rgba(244,244,244,"+alpha2+")";
         ctx.fillText(label,n.x,n.y+yOff);
       });
     }else if(hoveredNode){
@@ -1560,9 +1718,9 @@ function draw(){
       var hn=hoveredNode;
       var label2=truncate(hn.name||"",30);
       var yOff2=hn._r+fontSize*0.8;
-      ctx.fillStyle="rgba(0,0,0,0.8)";
+      ctx.fillStyle=_light ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.8)";
       ctx.fillText(label2,hn.x+0.5,hn.y+yOff2+0.5);
-      ctx.fillStyle="rgba(244,244,244,1)";
+      ctx.fillStyle=_light ? "rgba(30,30,30,1)" : "rgba(244,244,244,1)";
       ctx.fillText(label2,hn.x,hn.y+yOff2);
     }
   }
