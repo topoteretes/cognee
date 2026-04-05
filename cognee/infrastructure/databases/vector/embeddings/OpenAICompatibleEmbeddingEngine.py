@@ -34,6 +34,7 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.databases.vector.embeddings.utils import sanitize_embedding_text_inputs
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
 
@@ -103,7 +104,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((ValueError, EmbeddingException)),
+        retry=retry_if_not_exception_type((TypeError, ValueError, EmbeddingException)),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -124,15 +125,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
             - List[List[float]]: A list of vectors representing the embedded texts.
         """
+        sanitized_text = sanitize_embedding_text_inputs(text)
+
         if self.mock:
-            return [[0.0] * (self.dimensions or 1) for _ in text]
+            return [[0.0] * (self.dimensions or 1) for _ in sanitized_text]
 
         try:
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
                     self._client.embeddings.create(
                         model=self.model,
-                        input=text,
+                        input=sanitized_text,
                         encoding_format="float",
                     ),
                     timeout=30.0,

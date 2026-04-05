@@ -271,3 +271,31 @@ async def test_node_edge_vector_search_has_results_batch_edges_only():
     vector_search.node_distances = {}
 
     assert vector_search.has_results() is True
+
+
+@pytest.mark.asyncio
+async def test_embed_query_rejects_non_string_query():
+    """Test that _embed_query raises TypeError when query is not a string (e.g. a list)."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
+
+    with pytest.raises(TypeError, match="query must be a string"):
+        await vector_search._embed_query(["test"])
+
+    with pytest.raises(TypeError, match="query must be a string"):
+        await vector_search._embed_query(None)
+
+
+@pytest.mark.asyncio
+async def test_embed_query_accepts_string_query():
+    """Test that _embed_query works correctly with a string query."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
+
+    await vector_search._embed_query("test query")
+
+    mock_vector_engine.embedding_engine.embed_text.assert_called_once_with(["test query"])
+    assert vector_search.query_vector == [0.1, 0.2, 0.3]
