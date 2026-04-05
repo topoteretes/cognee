@@ -129,6 +129,9 @@ class datasets:
         delete_dataset_if_empty: bool = False,  # if this flag is True, delete the whole dataset if it is left empty after data deletion
     ):
         from cognee.modules.data.methods import delete_data, get_data, delete_dataset
+        from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
+            reset_dataset_pipeline_run_status,
+        )
 
         if not user:
             user = await get_default_user()
@@ -150,6 +153,8 @@ class datasets:
             await set_database_global_context_variables(dataset_id, dataset.owner_id)
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
+            await reset_dataset_pipeline_run_status(dataset_id, user)
+
             dataset_data = await get_dataset_data(dataset.id)
             if not dataset_data and delete_dataset_if_empty:
                 await delete_dataset(dataset)
@@ -167,6 +172,10 @@ class datasets:
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
         await delete_data(data, dataset_id)
+
+        # Reset pipeline run status so that re-adding and re-cognifying the
+        # same data will not be skipped as "already completed".
+        await reset_dataset_pipeline_run_status(dataset_id, user)
 
         dataset_data = await get_dataset_data(dataset.id)
         if not dataset_data and delete_dataset_if_empty:

@@ -174,6 +174,13 @@ async def ingest_data(
                 if str(data_point.id) in dataset_data_map:
                     existing_data_points.append(data_point)
                 else:
+                    # Data exists but is being (re-)added to this dataset
+                    # (e.g. after deletion). Clear per-dataset pipeline status
+                    # so that pipelines like cognify will re-process it.
+                    for pname in list(data_point.pipeline_status.keys()):
+                        statuses = data_point.pipeline_status[pname]
+                        if isinstance(statuses, dict):
+                            statuses.pop(str(dataset.id), None)
                     dataset_new_data_points.append(data_point)
                     dataset_data_map[str(data_point.id)] = True
             else:
