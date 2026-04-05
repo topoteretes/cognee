@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import logging.handlers
 import tempfile
 import structlog
 import traceback
@@ -132,6 +133,10 @@ def resolve_logs_dir():
 # Maximum number of log files to keep
 MAX_LOG_FILES = 10
 
+# Log rotation defaults — override via COGNEE_LOG_MAX_BYTES / COGNEE_LOG_BACKUP_COUNT
+LOG_MAX_BYTES = int(os.getenv("COGNEE_LOG_MAX_BYTES", 50 * 1024 * 1024))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("COGNEE_LOG_BACKUP_COUNT", 5))  # 5 backups → 300 MB cap
+
 # Version information
 PYTHON_VERSION = platform.python_version()
 STRUCTLOG_VERSION = structlog.__version__
@@ -140,8 +145,12 @@ COGNEE_VERSION = cognee_version
 OS_INFO = f"{platform.system()} {platform.release()} ({platform.version()})"
 
 
-class PlainFileHandler(logging.FileHandler):
-    """A custom file handler that writes simpler plain text log entries."""
+class PlainFileHandler(logging.handlers.RotatingFileHandler):
+    """A rotating file handler that writes simpler plain text log entries.
+
+    Inherits from RotatingFileHandler so log files are automatically rotated
+    when they reach maxBytes, keeping at most backupCount old files.
+    """
 
     def emit(self, record):
         try:
@@ -490,29 +499,42 @@ def setup_logging(log_level=None, name=None):
     # can define their own levels.
     root_logger.setLevel(logging.NOTSET)
 
-    # Resolve logs directory with env and safe fallbacks
-    logs_dir = resolve_logs_dir()
+    # --- File logging (opt-out via COGNEE_LOG_FILE=false) ---
+    # Set COGNEE_LOG_FILE=false to disable file logging entirely.
+    log_file_enabled = os.getenv("COGNEE_LOG_FILE", "true").lower() not in ("false", "0", "no")
+    log_file_path = None
 
-    # Check if we already have a log file path from the environment
-    # NOTE: environment variable must be used here as it allows us to
-    # log to a single file with a name based on a timestamp in a multiprocess setting.
-    # Without it, we would have a separate log file for every process.
-    log_file_path = os.environ.get("LOG_FILE_NAME")
-    if not log_file_path and logs_dir is not None:
-        # Create a new log file name with the cognee start time
-        start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file_path = str((logs_dir / f"{start_time}.log").resolve())
-        os.environ["LOG_FILE_NAME"] = log_file_path
+    if log_file_enabled:
+        # Resolve logs directory with env and safe fallbacks
+        logs_dir = resolve_logs_dir()
 
-    try:
-        # Create a file handler that uses our custom PlainFileHandler
-        file_handler = PlainFileHandler(log_file_path, encoding="utf-8")
-        file_handler.setLevel(DEBUG)
-        root_logger.addHandler(file_handler)
-    except Exception as e:
-        # Note: Exceptions happen in case of read only file systems or log file path poiting to location where it does
-        # not have write permission. Logging to file is not mandatory so we just log a warning to console.
-        root_logger.warning(f"Warning: Could not create log file handler at {log_file_path}: {e}")
+        # Check if we already have a log file path from the environment
+        # NOTE: environment variable must be used here as it allows us to
+        # log to a single file with a name based on a timestamp in a multiprocess setting.
+        # Without it, we would have a separate log file for every process.
+        log_file_path = os.environ.get("LOG_FILE_NAME")
+        if not log_file_path and logs_dir is not None:
+            # Create a new log file name with the cognee start time
+            start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            log_file_path = str((logs_dir / f"{start_time}.log").resolve())
+            os.environ["LOG_FILE_NAME"] = log_file_path
+
+        try:
+            # Rotating file handler: caps each file at LOG_MAX_BYTES,
+            # keeps LOG_BACKUP_COUNT old files (default 50 MB × 5 = 250 MB total).
+            file_handler = PlainFileHandler(
+                log_file_path,
+                maxBytes=LOG_MAX_BYTES,
+                backupCount=LOG_BACKUP_COUNT,
+                encoding="utf-8",
+            )
+            file_handler.setLevel(log_level)
+            root_logger.addHandler(file_handler)
+        except Exception as e:
+            # Logging to file is not mandatory — warn on console and continue.
+            root_logger.warning(
+                f"Warning: Could not create log file handler at {log_file_path}: {e}"
+            )
 
     if log_level > logging.DEBUG:
         import warnings
@@ -527,7 +549,7 @@ def setup_logging(log_level=None, name=None):
         )
 
     # Clean up old log files, keeping only the most recent ones
-    if logs_dir is not None:
+    if log_file_enabled and logs_dir is not None:
         cleanup_old_logs(logs_dir, MAX_LOG_FILES)
 
     # Mark logging as configured
@@ -536,7 +558,7 @@ def setup_logging(log_level=None, name=None):
     # Get a configured logger
     logger = structlog.get_logger(name if name else __name__)
 
-    if logs_dir is not None:
+    if log_file_path is not None:
         logger.info(f"Log file created at: {log_file_path}", log_file=log_file_path)
 
     # Defer heavy database config logging to first actual pipeline use.
