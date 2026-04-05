@@ -2,7 +2,7 @@ from uuid import UUID
 from typing import Optional, Union, List, Any
 from datetime import datetime
 from pydantic import Field
-from fastapi import Depends, APIRouter
+from fastapi import Depends, APIRouter, status
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 
@@ -17,6 +17,7 @@ from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.exceptions import CogneeValidationError
+from cognee.api.DTO import ErrorResponse
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
@@ -44,7 +45,15 @@ def get_search_router() -> APIRouter:
         user: str
         created_at: datetime
 
-    @router.get("", response_model=list[SearchHistoryItem])
+    @router.get(
+        "",
+        response_model=Union[List[SearchResult], List],
+        responses={
+            403: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     async def get_search_history(user: User = Depends(get_authenticated_user)):
         """
         Get search history for the authenticated user.
@@ -73,9 +82,23 @@ def get_search_router() -> APIRouter:
 
             return history
         except Exception as error:
-            return JSONResponse(status_code=500, content={"error": str(error)})
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    detail=str(error),
+                ).model_dump(),
+            )
 
-    @router.post("", response_model=Union[List[SearchResult], List])
+    @router.post(
+        "",
+        response_model=Union[List[SearchResult], List],
+        responses={
+            403: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     @log_usage(function_name="POST /v1/search", log_type="api_endpoint")
     async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
@@ -142,20 +165,32 @@ def get_search_router() -> APIRouter:
             )
 
             return jsonable_encoder(results)
+        except PermissionDeniedError as e:
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content=ErrorResponse(
+                    error="Permission denied",
+                    detail=str(e),
+                ).model_dump(),
+            )
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            # Return a clear 422 with actionable guidance instead of leaking a stacktrace
-            status_code = getattr(e, "status_code", 422)
+            status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_ENTITY)
             return JSONResponse(
                 status_code=status_code,
-                content={
-                    "error": "Search prerequisites not met",
-                    "detail": str(e),
-                    "hint": "Run `await cognee.add(...)` then `await cognee.cognify()` before searching.",
-                },
+                content=ErrorResponse(
+                    error="Search prerequisites not met, hint: Run `await cognee.add(...)` then `await cognee.cognify()` before searching.",
+                    detail=str(e),
+                    # Previous hint not matching "Error Response" structure defined in cognee.api.DTO, included in error.
+                ).model_dump(),
             )
-        except PermissionDeniedError:
-            return []
+
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    detail=str(error),
+                ).model_dump(),
+            )
 
     return router
