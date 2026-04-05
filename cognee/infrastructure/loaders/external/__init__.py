@@ -34,3 +34,10 @@ try:
     __all__.append("BeautifulSoupLoader")
 except ImportError:
     pass
+
+try:
+    from .docling_loader import DoclingLoader
+
+    __all__.append("DoclingLoader")
+except ImportError:
+    pass
