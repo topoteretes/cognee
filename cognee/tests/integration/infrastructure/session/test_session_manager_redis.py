@@ -12,6 +12,8 @@ class _InMemoryRedisList:
 
     def __init__(self):
         self.data: dict[str, list[str]] = {}
+        self.ttls: dict[str, int] = {}
+        self.expire_calls: list[tuple[str, int]] = []
 
     async def rpush(self, key: str, *vals: str):
         self.data.setdefault(key, []).extend(vals)
@@ -30,13 +32,22 @@ class _InMemoryRedisList:
         self.data[key][idx] = val
 
     async def delete(self, key: str):
+        self.ttls.pop(key, None)
         return 1 if self.data.pop(key, None) is not None else 0
 
     async def expire(self, key: str, ttl: int):
-        pass
+        self.ttls[key] = ttl
+        self.expire_calls.append((key, ttl))
+
+    async def ttl(self, key: str):
+        if key not in self.data:
+            return -2
+        return self.ttls.get(key, -1)
 
     async def flushdb(self):
         self.data.clear()
+        self.ttls.clear()
+        self.expire_calls.clear()
 
 
 @pytest.fixture
@@ -72,6 +83,48 @@ async def test_add_qa_and_get_session(session_manager):
     assert entries[0]["question"] == "Q1?"
     assert entries[0]["answer"] == "A1."
     assert entries[0]["qa_id"] == qa_id
+
+
+@pytest.mark.asyncio
+async def test_add_qa_sets_session_ttl(session_manager, redis_adapter):
+    """Session writes through SessionManager apply Redis TTL to the session key."""
+    await session_manager.add_qa(
+        user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
+    )
+
+    assert await redis_adapter.async_redis.ttl("agent_sessions:u1:s1") == 604800
+
+
+@pytest.mark.asyncio
+async def test_get_session_does_not_refresh_session_ttl(session_manager, redis_adapter):
+    """Read-only session access should not refresh TTL."""
+    await session_manager.add_qa(
+        user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
+    )
+    redis_adapter.async_redis.expire_calls.clear()
+
+    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+
+    assert len(entries) == 1
+    assert redis_adapter.async_redis.expire_calls == []
+
+
+@pytest.mark.asyncio
+async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
+    """add_qa with used_graph_element_ids stores and returns it via get_session."""
+    used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
+    qa_id = await session_manager.add_qa(
+        user_id="u1",
+        question="Q?",
+        context="C",
+        answer="A",
+        session_id="s1",
+        used_graph_element_ids=used_ids,
+    )
+    assert qa_id is not None
+    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    assert len(entries) == 1
+    assert entries[0]["used_graph_element_ids"] == used_ids
 
 
 @pytest.mark.asyncio
@@ -184,12 +237,14 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
         mock_config.caching = True
         mock_config_cls.return_value = mock_config
 
+        used_ids = {"node_ids": ["n1"]}
         result = await session_manager.generate_completion_with_session(
             session_id="s1",
             query="What is X?",
             context="Context about X.",
             user_prompt_path="user.txt",
             system_prompt_path="sys.txt",
+            used_graph_element_ids=used_ids,
         )
 
     assert result == "Integration test answer"
@@ -197,6 +252,7 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
     assert len(entries) == 1
     assert entries[0]["question"] == "What is X?"
     assert entries[0]["answer"] == "Integration test answer"
+    assert entries[0]["used_graph_element_ids"] == used_ids
 
 
 @pytest.mark.asyncio

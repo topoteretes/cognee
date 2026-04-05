@@ -26,6 +26,11 @@ from cognee.modules.data.methods.get_authorized_existing_datasets import (
 )
 from cognee import __version__ as cognee_version
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_SEARCH_TYPE,
+    COGNEE_SEARCH_QUERY,
+)
 
 logger = get_logger()
 
@@ -40,12 +45,16 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
+    feedback_influence: float = 0.0,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[SearchResult]:
     """
 
@@ -72,22 +81,37 @@ async def search(
         },
     )
 
-    search_results = await authorized_search(
-        query_type=query_type,
-        query_text=query_text,
-        user=user,
-        dataset_ids=dataset_ids,
-        system_prompt_path=system_prompt_path,
-        system_prompt=system_prompt,
-        top_k=top_k,
-        node_type=node_type,
-        node_name=node_name,
-        only_context=only_context,
-        session_id=session_id,
-        wide_search_top_k=wide_search_top_k,
-        triplet_distance_penalty=triplet_distance_penalty,
-        retriever_specific_config=retriever_specific_config,
-    )
+    with new_span("cognee.search.authorize") as span:
+        span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
+        span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
+        span.set_attribute("cognee.search.top_k", top_k)
+        span.set_attribute(
+            "cognee.search.dataset_count",
+            len(dataset_ids) if dataset_ids else 0,
+        )
+
+        search_results = await authorized_search(
+            query_type=query_type,
+            query_text=query_text,
+            user=user,
+            dataset_ids=dataset_ids,
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
+            only_context=only_context,
+            session_id=session_id,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
+            retriever_specific_config=retriever_specific_config,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
+        )
+
+        span.set_attribute("cognee.search.result_count", len(search_results))
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
@@ -117,11 +141,15 @@ async def authorized_search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
+    feedback_influence: float = 0.0,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[Tuple[Any, Union[List[Edge], str], List[Dataset]]]:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
@@ -142,11 +170,15 @@ async def authorized_search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
+        node_name_filter_operator=node_name_filter_operator,
         only_context=only_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
+        feedback_influence=feedback_influence,
         retriever_specific_config=retriever_specific_config,
+        neighborhood_depth=neighborhood_depth,
+        neighborhood_seed_top_k=neighborhood_seed_top_k,
     )
 
     return search_results
@@ -161,11 +193,15 @@ async def search_in_datasets_context(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
+    feedback_influence: float = 0.0,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -181,50 +217,64 @@ async def search_in_datasets_context(
         top_k: int = 10,
         node_type: Optional[Type] = NodeSet,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
         only_context: bool = False,
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 3.5,
+        triplet_distance_penalty: Optional[float] = 6.5,
+        feedback_influence: float = 0.0,
         retriever_specific_config: Optional[dict] = None,
+        neighborhood_depth: Optional[int] = None,
+        neighborhood_seed_top_k: Optional[int] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
-        # Set database configuration in async context for each dataset user has access for
-        await set_database_global_context_variables(dataset.id, dataset.owner_id)
+        with new_span("cognee.search.dataset") as span:
+            span.set_attribute("cognee.search.dataset_name", dataset.name or "")
+            span.set_attribute("cognee.search.dataset_id", str(dataset.id))
 
-        # Check if graph for dataset is empty and log warnings if necessary
-        graph_engine = await get_graph_engine()
-        is_empty = await graph_engine.is_empty()
-        if is_empty:
-            # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
-            from cognee.modules.data.methods import get_dataset_data
+            # Set database configuration in async context for each dataset user has access for
+            await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
-            dataset_data = await get_dataset_data(dataset.id)
+            # Check if graph for dataset is empty and log warnings if necessary
+            graph_engine = await get_graph_engine()
+            is_empty = await graph_engine.is_empty()
+            if is_empty:
+                # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
+                from cognee.modules.data.methods import get_dataset_data
 
-            if len(dataset_data) > 0:
-                logger.warning(
-                    f"Dataset '{dataset.name}' has {len(dataset_data)} data item(s) but the knowledge graph is empty. "
-                    "Please run cognify to process the data before searching."
-                )
-            else:
-                logger.warning(
-                    f"Search attempt on an empty knowledge graph - no data has been added to this dataset: {dataset.name}"
-                )
+                dataset_data = await get_dataset_data(dataset.id)
 
-        # Get retriever output in the context of the current dataset
-        return await get_retriever_output(
-            query_type=query_type,
-            query_text=query_text,
-            dataset=dataset,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            only_context=only_context,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-            retriever_specific_config=retriever_specific_config,
-        )
+                if len(dataset_data) > 0:
+                    logger.warning(
+                        f"Dataset '{dataset.name}' has {len(dataset_data)} data item(s) but the knowledge graph is empty. "
+                        "Please run cognify to process the data before searching."
+                    )
+                else:
+                    logger.warning(
+                        f"Search attempt on an empty knowledge graph - no data has been added to this dataset: {dataset.name}"
+                    )
+
+                span.set_attribute("cognee.search.graph_empty", True)
+
+            # Get retriever output in the context of the current dataset
+            return await get_retriever_output(
+                query_type=query_type,
+                query_text=query_text,
+                dataset=dataset,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
+                only_context=only_context,
+                session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+                retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+            )
 
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
@@ -240,11 +290,15 @@ async def search_in_datasets_context(
                     top_k=top_k,
                     node_type=node_type,
                     node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
+                    feedback_influence=feedback_influence,
                     retriever_specific_config=retriever_specific_config,
+                    neighborhood_depth=neighborhood_depth,
+                    neighborhood_seed_top_k=neighborhood_seed_top_k,
                 )
             )
     else:
@@ -260,11 +314,15 @@ async def search_in_datasets_context(
                 top_k=top_k,
                 node_type=node_type,
                 node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
                 only_context=only_context,
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
                 retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
             )
         )
 

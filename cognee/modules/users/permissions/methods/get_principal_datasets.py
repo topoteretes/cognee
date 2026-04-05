@@ -32,4 +32,4 @@ async def get_principal_datasets(principal: Principal, permission_type: str) -> 
             .where(ACL.permission.has(name=permission_type))
         )
         acls = result.unique().scalars().all()
-        return [acl.dataset for acl in acls]
+        return [acl.dataset for acl in acls if acl.dataset is not None]

@@ -72,12 +72,12 @@ def run_graphiti_benchmark(config_params: dict, dir_suffix: str):
 async def launch_neo4j_and_run_benchmark(config_params: dict, dir_suffix: str):
     """Launches Neo4j and then triggers the Graphiti benchmark."""
     print("Starting Neo4j server process...")
-    password = neo4j_env_dict["NEO4J_AUTH"].split("/")[1]
-    set_password_command = f"neo4j-admin dbms set-initial-password {password}"
+    user, sep, password = neo4j_env_dict["NEO4J_AUTH"].partition("/")
+    if not sep or not user or not password:
+        raise ValueError("NEO4J_AUTH must be in the format 'username/password'")
     try:
         subprocess.run(
-            f"su-exec neo4j:neo4j {set_password_command}",
-            shell=True,
+            ["su-exec", "neo4j:neo4j", "neo4j-admin", "dbms", "set-initial-password", password],
             check=True,
             capture_output=True,
             text=True,
@@ -92,8 +92,7 @@ async def launch_neo4j_and_run_benchmark(config_params: dict, dir_suffix: str):
             raise
 
     neo4j_process = subprocess.Popen(
-        "su-exec neo4j:neo4j neo4j console",
-        shell=True,
+        ["su-exec", "neo4j:neo4j", "neo4j", "console"],
     )
 
     print("Waiting for Neo4j server to become available on port 7474...")
@@ -117,7 +116,7 @@ async def launch_neo4j_and_run_benchmark(config_params: dict, dir_suffix: str):
 
         bolt_host, bolt_port = bolt_tunnel.tcp_socket
         bolt_addr = f"bolt://{bolt_host}:{bolt_port}"
-        user, password = neo4j_env_dict["NEO4J_AUTH"].split("/")
+        user, _, password = neo4j_env_dict["NEO4J_AUTH"].partition("/")
 
         print(f"🔌 Bolt address for this run: {bolt_addr}")
 

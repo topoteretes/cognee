@@ -1,5 +1,6 @@
 from cognee.modules.data.models import Data
 import json
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.data.processing.document_types import (
     Document,
     PdfDocument,
@@ -8,10 +9,12 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
     CsvDocument,
+    DltRowDocument,
 )
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.documents.exceptions import WrongDataDocumentInputError
+from cognee.tasks.ingestion.dlt_utils import is_dlt_sourced
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
@@ -92,6 +95,7 @@ def update_node_set(document):
     document.source_node_set = ", ".join(node_set)
 
 
+@task_summary("Classified {n} document(s)")
 async def classify_documents(data_documents: list[Data]) -> list[Document]:
     """
     Classifies a list of data items into specific document types based on their file
@@ -120,13 +124,21 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
 
     documents = []
     for data_item in data_documents:
-        document = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension](
+        if is_dlt_sourced(data_item):
+            doc_class = DltRowDocument
+        else:
+            doc_class = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension]
+
+        document = doc_class(
             id=data_item.id,
             title=f"{data_item.name}.{data_item.extension}",
             raw_data_location=data_item.raw_data_location,
             name=data_item.name,
             mime_type=data_item.mime_type,
             external_metadata=json.dumps(data_item.external_metadata, indent=4),
+            importance_weight=data_item.importance_weight
+            if data_item.importance_weight is not None
+            else 0.5,
         )
         update_node_set(document)
         documents.append(document)
