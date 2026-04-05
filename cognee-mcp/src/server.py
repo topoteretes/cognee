@@ -29,6 +29,11 @@ try:
 except ImportError:
     from cognee_client import CogneeClient
 
+try:
+    from .strip_vectors import strip_vectors
+except ImportError:
+    from strip_vectors import strip_vectors
+
 
 try:
     from cognee.tasks.codingagents.coding_rule_associations import (
@@ -616,6 +621,10 @@ async def search(
                 top_k=top_k,
                 datasets=datasets_list,
             )
+
+            # Strip embedding vectors from results to save LLM context
+            # text_vector contains raw floats (~92KB per result), useless for clients
+            search_results = strip_vectors(search_results)
 
             # Handle different result formats based on API vs direct mode
             if cognee_client.use_api:
