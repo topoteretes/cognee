@@ -72,8 +72,8 @@ class BedrockAdapter(LLMInterface):
             "custom_llm_provider": "bedrock",
             "drop_params": True,
             "messages": [
-                {"role": "user", "content": text_input},
                 {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text_input},
             ],
             "response_model": response_model,
             "max_retries": self.MAX_RETRIES,

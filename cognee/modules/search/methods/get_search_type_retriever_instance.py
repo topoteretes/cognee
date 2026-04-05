@@ -56,10 +56,13 @@ async def get_search_type_retriever_instance(
     system_prompt = kwargs.get("system_prompt")
     node_type = kwargs.get("node_type", NodeSet)
     node_name = kwargs.get("node_name")
+    node_name_filter_operator = kwargs.get("node_name_filter_operator", "OR")
     wide_search_top_k = kwargs.get("wide_search_top_k", 100)
-    triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 3.5)
+    triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 6.5)
     feedback_influence = kwargs.get("feedback_influence", 0.0)
     session_id = kwargs.get("session_id")
+    neighborhood_depth = kwargs.get("neighborhood_depth")
+    neighborhood_seed_top_k = kwargs.get("neighborhood_seed_top_k")
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
@@ -95,12 +98,15 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_type": node_type,
                 "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
+                "neighborhood_depth": neighborhood_depth,
+                "neighborhood_seed_top_k": neighborhood_seed_top_k,
             },
         ),
         SearchType.GRAPH_COMPLETION_COT: (
@@ -110,6 +116,7 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_type": node_type,
                 "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
@@ -129,6 +136,8 @@ async def get_search_type_retriever_instance(
                 ),
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
+                "neighborhood_depth": neighborhood_depth,
+                "neighborhood_seed_top_k": neighborhood_seed_top_k,
             },
         ),
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: (
@@ -138,6 +147,7 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_type": node_type,
                 "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
@@ -147,6 +157,8 @@ async def get_search_type_retriever_instance(
                 ),
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
+                "neighborhood_depth": neighborhood_depth,
+                "neighborhood_seed_top_k": neighborhood_seed_top_k,
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (
@@ -156,6 +168,7 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_type": node_type,
                 "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
@@ -208,6 +221,7 @@ async def get_search_type_retriever_instance(
                 ),
                 "node_type": node_type,
                 "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
             },
         ),
         SearchType.CHUNKS_LEXICAL: (JaccardChunksRetriever, {"top_k": top_k}),

@@ -61,12 +61,15 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 3.5,
+        triplet_distance_penalty: Optional[float] = 6.5,
         feedback_influence: float = 0.0,
         max_iter: int = 4,
         session_id: Optional[str] = None,
         response_model: Type = str,
+        neighborhood_depth: Optional[int] = None,
+        neighborhood_seed_top_k: Optional[int] = 10,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -75,11 +78,14 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
             session_id=session_id,
             response_model=response_model,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
         self.validation_system_prompt_path = validation_system_prompt_path
         self.validation_user_prompt_path = validation_user_prompt_path
@@ -174,7 +180,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     async def _fetch_initial_triplets_and_context(self, states: dict):
         """Fetch triplets and resolve context text for all queries."""
         queries = list(states.keys())
-        triplets_batch = await self.get_triplets(query_batch=queries)
+        triplets_batch = await self.get_triplets_batch(queries)
         context_batch = await asyncio.gather(
             *[self.resolve_edges_to_text(t) for t in triplets_batch]
         )
@@ -245,7 +251,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     async def _merge_followup_triplets(self, states: dict, followup_questions: List[str]):
         """Fetch triplets for follow-up questions and merge with existing state."""
         queries = list(states.keys())
-        new_triplets_batch = await self.get_triplets(query_batch=followup_questions)
+        new_triplets_batch = await self.get_triplets_batch(followup_questions)
 
         for q, new_triplets in zip(queries, new_triplets_batch):
             states[q].merge_triplets(new_triplets)

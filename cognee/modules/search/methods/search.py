@@ -45,13 +45,16 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[SearchResult]:
     """
 
@@ -97,12 +100,15 @@ async def search(
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
             retriever_specific_config=retriever_specific_config,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
 
         span.set_attribute("cognee.search.result_count", len(search_results))
@@ -135,12 +141,15 @@ async def authorized_search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[Tuple[Any, Union[List[Edge], str], List[Dataset]]]:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
@@ -161,12 +170,15 @@ async def authorized_search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
+        node_name_filter_operator=node_name_filter_operator,
         only_context=only_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
         feedback_influence=feedback_influence,
         retriever_specific_config=retriever_specific_config,
+        neighborhood_depth=neighborhood_depth,
+        neighborhood_seed_top_k=neighborhood_seed_top_k,
     )
 
     return search_results
@@ -181,12 +193,15 @@ async def search_in_datasets_context(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
+    triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -202,12 +217,15 @@ async def search_in_datasets_context(
         top_k: int = 10,
         node_type: Optional[Type] = NodeSet,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
         only_context: bool = False,
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 3.5,
+        triplet_distance_penalty: Optional[float] = 6.5,
         feedback_influence: float = 0.0,
         retriever_specific_config: Optional[dict] = None,
+        neighborhood_depth: Optional[int] = None,
+        neighborhood_seed_top_k: Optional[int] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         with new_span("cognee.search.dataset") as span:
             span.set_attribute("cognee.search.dataset_name", dataset.name or "")
@@ -247,12 +265,15 @@ async def search_in_datasets_context(
                 top_k=top_k,
                 node_type=node_type,
                 node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
                 only_context=only_context,
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,
                 feedback_influence=feedback_influence,
                 retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
             )
 
     # Search every dataset async based on query and appropriate database configuration
@@ -269,12 +290,15 @@ async def search_in_datasets_context(
                     top_k=top_k,
                     node_type=node_type,
                     node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
                     feedback_influence=feedback_influence,
                     retriever_specific_config=retriever_specific_config,
+                    neighborhood_depth=neighborhood_depth,
+                    neighborhood_seed_top_k=neighborhood_seed_top_k,
                 )
             )
     else:
@@ -290,12 +314,15 @@ async def search_in_datasets_context(
                 top_k=top_k,
                 node_type=node_type,
                 node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
                 only_context=only_context,
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,
                 feedback_influence=feedback_influence,
                 retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
             )
         )
 

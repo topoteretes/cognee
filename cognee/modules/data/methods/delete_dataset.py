@@ -55,4 +55,14 @@ async def delete_dataset(dataset: Dataset):
 
         await session.commit()
 
-    return await db_engine.delete_entity_by_id(dataset.__tablename__, dataset.id)
+    # Use ORM session.delete() instead of raw table reflection with hardcoded
+    # schema.  The previous ``delete_entity_by_id`` call reflected the table
+    # using ``schema_name="public"`` by default, which fails when PostgreSQL
+    # tables live in a non-public schema (e.g. ``cognee``).  session.delete()
+    # resolves the table through SQLAlchemy metadata and triggers ORM cascades
+    # (e.g. deleting related ACL rows via cascade="all, delete-orphan").
+    async with db_engine.get_async_session() as session:
+        dataset = await session.get(Dataset, dataset.id)
+        if dataset:
+            await session.delete(dataset)
+            await session.commit()

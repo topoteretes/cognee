@@ -669,6 +669,75 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to get graph data: {error_msg}")
             raise Exception(f"Failed to get graph data: {error_msg}") from e
 
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Node], List[EdgeData]]:
+        """
+        Get the k-hop neighborhood subgraph around a set of seed nodes.
+
+        Returns all nodes and edges within `depth` hops of any seed node,
+        in the same format as get_graph_data().
+        """
+        try:
+            if not node_ids:
+                logger.warning("No node IDs provided for neighborhood retrieval.")
+                return [], []
+
+            # Step 1: Find all neighbor node IDs within depth hops
+            if edge_types:
+                allowed = "|".join(edge_types)
+                path_query = f"""
+                MATCH (seed:{self._GRAPH_NODE_LABEL})-[:{allowed}*1..{depth}]-(neighbor:{self._GRAPH_NODE_LABEL})
+                WHERE seed.`~id` IN $node_ids
+                RETURN DISTINCT neighbor.`~id` AS nid
+                """
+            else:
+                path_query = f"""
+                MATCH (seed:{self._GRAPH_NODE_LABEL})-[*1..{depth}]-(neighbor:{self._GRAPH_NODE_LABEL})
+                WHERE seed.`~id` IN $node_ids
+                RETURN DISTINCT neighbor.`~id` AS nid
+                """
+
+            result = await self.query(path_query, {"node_ids": node_ids})
+            neighbor_ids = [record["nid"] for record in result if record.get("nid")]
+
+            all_ids = list(set(node_ids) | set(neighbor_ids))
+
+            # Step 2: Fetch all nodes
+            nodes_query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            WHERE n.`~id` IN $ids
+            RETURN n.`~id` AS node_id, properties(n) AS properties
+            """
+            nodes_result = await self.query(nodes_query, {"ids": all_ids})
+            nodes = [(r["node_id"], r["properties"]) for r in nodes_result]
+
+            # Step 3: Fetch all edges between collected nodes
+            edges_query = f"""
+            MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
+            WHERE source.`~id` IN $ids AND target.`~id` IN $ids
+            RETURN source.`~id` AS source_id, target.`~id` AS target_id,
+                   type(r) AS relationship_name, properties(r) AS properties
+            """
+            edges_result = await self.query(edges_query, {"ids": all_ids})
+            edges = [
+                (r["source_id"], r["target_id"], r["relationship_name"], r["properties"])
+                for r in edges_result
+            ]
+
+            logger.debug(
+                f"Neighborhood retrieval ({depth}-hop): {len(nodes)} nodes and {len(edges)} edges"
+            )
+            return (nodes, edges)
+
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to get neighborhood: {error_msg}")
+            raise Exception(f"Failed to get neighborhood: {error_msg}") from e
+
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """
         Fetch metrics and statistics of the graph, possibly including optional details.
