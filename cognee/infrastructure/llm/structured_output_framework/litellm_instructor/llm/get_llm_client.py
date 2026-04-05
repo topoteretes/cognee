@@ -175,6 +175,7 @@ def get_llm_client(raise_api_key_error: bool = True):
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
             GeminiAdapter,
         )
+
         return GeminiAdapter(
             api_key=llm_config.llm_api_key,
             model=llm_config.llm_model,
