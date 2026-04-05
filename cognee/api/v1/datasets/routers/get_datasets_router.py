@@ -1,7 +1,7 @@
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from typing_extensions import Annotated
 from fastapi import status
 from fastapi import APIRouter
@@ -75,6 +75,11 @@ class GraphDTO(OutDTO):
 
 class DatasetCreationPayload(InDTO):
     name: str
+
+
+class DatasetSchemaPayloadDTO(InDTO):
+    graph_schema: Optional[Dict[str, Any]] = None
+    custom_prompt: Optional[str] = None
 
 
 def get_datasets_router() -> APIRouter:
@@ -520,6 +525,10 @@ def get_datasets_router() -> APIRouter:
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
 
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
+        if not dataset:
+            return JSONResponse(status_code=404, content={"error": "Dataset not found"})
+
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             config = await session.scalar(
@@ -535,12 +544,16 @@ def get_datasets_router() -> APIRouter:
     @router.put("/{dataset_id}/schema", response_model=dict)
     async def update_dataset_schema(
         dataset_id: UUID,
-        payload: dict,
+        payload: DatasetSchemaPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
         """Store or update the graph schema and custom prompt for a dataset."""
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
+
+        dataset = await get_authorized_existing_datasets([dataset_id], "write", user)
+        if not dataset:
+            return JSONResponse(status_code=404, content={"error": "Dataset not found"})
 
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
@@ -548,15 +561,15 @@ def get_datasets_router() -> APIRouter:
                 select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
             )
             if config:
-                if "graph_schema" in payload:
-                    config.graph_schema = payload["graph_schema"]
-                if "custom_prompt" in payload:
-                    config.custom_prompt = payload["custom_prompt"]
+                if payload.graph_schema is not None:
+                    config.graph_schema = payload.graph_schema
+                if payload.custom_prompt is not None:
+                    config.custom_prompt = payload.custom_prompt
             else:
                 config = DatasetConfiguration(
                     dataset_id=dataset_id,
-                    graph_schema=payload.get("graph_schema"),
-                    custom_prompt=payload.get("custom_prompt"),
+                    graph_schema=payload.graph_schema,
+                    custom_prompt=payload.custom_prompt,
                 )
                 session.add(config)
             await session.commit()

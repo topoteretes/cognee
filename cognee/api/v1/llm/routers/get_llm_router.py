@@ -1,5 +1,4 @@
 import json
-import pathlib
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends
@@ -17,6 +16,12 @@ from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("api.llm")
+
+_ALLOWED_LLM_PARAMS = {"temperature", "max_tokens", "top_p", "seed"}
+
+
+def _safe_params(params: dict) -> dict:
+    return {k: v for k, v in params.items() if k in _ALLOWED_LLM_PARAMS}
 
 
 class CustomPromptGenerationPayloadDTO(InDTO):
@@ -82,8 +87,8 @@ def get_llm_router() -> APIRouter:
             llm_output = await LLMGateway.acreate_structured_output(
                 text_input=user_prompt,
                 system_prompt=system_prompt,
-                response_model=str,
-                **payload.parameters,
+                response_model=str,  # type: ignore[arg-type]
+                **_safe_params(payload.parameters),
             )
 
             return CustomPromptGenerationResponseDTO(custom_prompt=llm_output)
@@ -128,8 +133,8 @@ def get_llm_router() -> APIRouter:
             llm_output = await LLMGateway.acreate_structured_output(
                 text_input=user_prompt,
                 system_prompt=system_prompt,
-                response_model=str,
-                **payload.parameters,
+                response_model=str,  # type: ignore[arg-type]
+                **_safe_params(payload.parameters),
             )
 
             # Parse the LLM output as JSON

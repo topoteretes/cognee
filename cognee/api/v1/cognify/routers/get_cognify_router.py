@@ -162,12 +162,14 @@ def get_cognify_router() -> APIRouter:
                     from cognee.infrastructure.databases.relational import get_relational_engine
                     from sqlalchemy import select
 
-                    db_engine = get_relational_engine()
-                    for ds in datasets:
-                        try:
-                            ds_uuid = ds if isinstance(ds, _UUID) else _UUID(str(ds))
-                        except (ValueError, AttributeError):
-                            break
+                    first_ds = datasets[0]
+                    try:
+                        ds_uuid = first_ds if isinstance(first_ds, _UUID) else _UUID(str(first_ds))
+                    except (ValueError, AttributeError):
+                        ds_uuid = None
+
+                    if ds_uuid:
+                        db_engine = get_relational_engine()
                         async with db_engine.get_async_session() as session:
                             config = await session.scalar(
                                 select(DatasetConfiguration).where(
@@ -179,9 +181,8 @@ def get_cognify_router() -> APIRouter:
                                 graph_model_schema = config.graph_schema
                             if not custom_prompt and config.custom_prompt:
                                 custom_prompt = config.custom_prompt
-                        break  # use first dataset's config
-                except Exception:
-                    pass  # config lookup is best-effort
+                except Exception as config_err:
+                    logger.debug("DatasetConfiguration lookup skipped: %s", config_err)
 
             if not graph_model_schema:
                 graph_model = KnowledgeGraph
@@ -198,7 +199,7 @@ def get_cognify_router() -> APIRouter:
                 chunks_per_batch=payload.chunks_per_batch,
             )
 
-            # Persist schema and prompt to DatasetConfiguration for future use
+            # Persist schema and prompt to DatasetConfiguration for first dataset
             if datasets and (graph_model_schema or custom_prompt):
                 try:
                     from uuid import UUID as _UUID
@@ -206,12 +207,14 @@ def get_cognify_router() -> APIRouter:
                     from cognee.infrastructure.databases.relational import get_relational_engine
                     from sqlalchemy import select
 
-                    db_engine = get_relational_engine()
-                    for ds in datasets:
-                        try:
-                            ds_uuid = ds if isinstance(ds, _UUID) else _UUID(str(ds))
-                        except (ValueError, AttributeError):
-                            continue
+                    first_ds = datasets[0]
+                    try:
+                        ds_uuid = first_ds if isinstance(first_ds, _UUID) else _UUID(str(first_ds))
+                    except (ValueError, AttributeError):
+                        ds_uuid = None
+
+                    if ds_uuid:
+                        db_engine = get_relational_engine()
                         async with db_engine.get_async_session() as session:
                             config = await session.scalar(
                                 select(DatasetConfiguration).where(
