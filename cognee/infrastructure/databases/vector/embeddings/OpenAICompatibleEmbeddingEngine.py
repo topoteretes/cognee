@@ -34,7 +34,10 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector.embeddings.utils import sanitize_embedding_text_inputs
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    sanitize_embedding_text_inputs,
+    handle_embedding_response,
+)
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
 
@@ -140,7 +143,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     ),
                     timeout=30.0,
                 )
-            return [item.embedding for item in response.data]
+            embedding_response = [item.embedding for item in response.data]
+            return handle_embedding_response(text, embedding_response, self.dimensions)
 
         except Exception as error:
             error_str = str(error).lower()
