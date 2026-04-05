@@ -198,3 +198,20 @@ class SharedKuzuLockRequiresRedisError(CogneeConfigurationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class DatabaseCredentialsError(CogneeConfigurationError):
+    """
+    Raised when database credentials are incomplete or invalid.
+
+    This error indicates that required authentication parameters (e.g., username
+    or password) are missing or malformed for a database connection.
+    """
+
+    def __init__(
+        self,
+        message: str = "Database credentials are incomplete or invalid. Please check your configuration.",
+        name: str = "DatabaseCredentialsError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
