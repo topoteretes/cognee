@@ -87,7 +87,7 @@ class TestAddEndpoint:
         )
         assert resp.status_code == 400
 
-    def test_add_pipeline_errored_returns_422(self, client):
+    def test_add_pipeline_errored_returns_500(self, client):
         import cognee.api.v1.add as add_pkg
 
         add_pkg.add = AsyncMock(return_value=_make_errored())
@@ -97,7 +97,7 @@ class TestAddEndpoint:
             data={"datasetName": "test_dataset"},
             files={"data": ("x.txt", b"hello", "text/plain")},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 500
         body = resp.json()
         assert body["error"] == "Pipeline run errored"
         assert "detail" in body
@@ -142,7 +142,7 @@ class TestCognifyEndpoint:
         resp = client.post("/cognify", json={})
         assert resp.status_code == 400
 
-    def test_cognify_pipeline_errored_returns_422(self, client):
+    def test_cognify_pipeline_errored_returns_500(self, client):
         import cognee.api.v1.cognify as cognify_pkg
 
         cognify_pkg.cognify = AsyncMock(return_value={"run": _make_errored()})
@@ -151,7 +151,7 @@ class TestCognifyEndpoint:
             "/cognify",
             json={"datasets": ["test_dataset"], "run_in_background": False},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 500
         body = resp.json()
         assert body["error"] == "Pipeline run errored"
 
@@ -250,7 +250,7 @@ class TestMemifyEndpoint:
         resp = client.post("/memify", json={})
         assert resp.status_code == 400
 
-    def test_memify_pipeline_errored_returns_422(self, client):
+    def test_memify_pipeline_errored_returns_500(self, client):
         import cognee.modules.memify as memify_pkg
 
         memify_pkg.memify = AsyncMock(return_value=_make_errored(error="memify failed"))
@@ -259,7 +259,7 @@ class TestMemifyEndpoint:
             "/memify",
             json={"dataset_name": "test_dataset", "run_in_background": False},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 500
         body = resp.json()
         assert body["error"] == "Pipeline run errored"
 
@@ -296,7 +296,7 @@ class TestMemifyEndpoint:
 
 
 class TestUpdateEndpoint:
-    def test_update_pipeline_errored_returns_422(self, client):
+    def test_update_pipeline_errored_returns_500(self, client):
         import cognee.api.v1.update as update_pkg
 
         update_pkg.update = AsyncMock(return_value={"run": _make_errored(error="update failed")})
@@ -307,7 +307,7 @@ class TestUpdateEndpoint:
             files={"data": ("x.txt", b"hello", "text/plain")},
             data={"node_set": ""},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 500
         body = resp.json()
         assert body["error"] == "Pipeline run errored"
 
