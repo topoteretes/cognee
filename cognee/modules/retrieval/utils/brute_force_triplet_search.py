@@ -60,7 +60,7 @@ async def get_memory_fragment(
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
-        properties_to_project = ["id", "description", "name", "type", "text"]
+        properties_to_project = ["id", "description", "name", "type", "text", "importance_weight"]
 
     node_properties_to_project = list(properties_to_project)
     edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
