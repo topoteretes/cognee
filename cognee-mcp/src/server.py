@@ -198,7 +198,11 @@ async def health_check(request):
 @mcp.tool()
 @log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
-    data: str, dataset_name: str = "main_dataset", graph_model_file: str = None, graph_model_name: str = None, custom_prompt: str = None
+    data: str,
+    dataset_name: str = "main_dataset",
+    graph_model_file: str = None,
+    graph_model_name: str = None,
+    custom_prompt: str = None,
 ) -> list:
     """
     Transform ingested data into a structured knowledge graph.
@@ -341,7 +345,9 @@ async def cognify(
             await cognee_client.add(data, dataset_name=dataset_name)
 
             try:
-                await cognee_client.cognify(datasets=[dataset_name], custom_prompt=custom_prompt, graph_model=graph_model)
+                await cognee_client.cognify(
+                    datasets=[dataset_name], custom_prompt=custom_prompt, graph_model=graph_model
+                )
                 logger.info("Cognify process finished.")
             except Exception as e:
                 logger.error("Cognify process failed.")
@@ -352,7 +358,7 @@ async def cognify(
         try:
             await cognify_task(**kwargs)
         except Exception as e:
-            dataset = kwargs.get('dataset_name', 'main_dataset')
+            dataset = kwargs.get("dataset_name", "main_dataset")
             timestamp = datetime.now(timezone.utc).isoformat()
             _task_errors.setdefault(dataset, []).append((timestamp, str(e)))
             logger.error(f"Background cognify task failed for dataset '{dataset}': {e}")
@@ -460,7 +466,9 @@ async def save_interaction(data: str) -> list:
 
 @mcp.tool()
 @log_usage(function_name="MCP search", log_type="mcp_tool")
-async def search(search_query: str, search_type: str, top_k: int = 10, datasets: str = None) -> list:
+async def search(
+    search_query: str, search_type: str, top_k: int = 10, datasets: str = None
+) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -576,7 +584,9 @@ async def search(search_query: str, search_type: str, top_k: int = 10, datasets:
 
     """
 
-    async def search_task(search_query: str, search_type: str, top_k: int, datasets_list: list = None) -> str:
+    async def search_task(
+        search_query: str, search_type: str, top_k: int, datasets_list: list = None
+    ) -> str:
         """
         Internal task to execute knowledge graph search with result formatting.
 
@@ -601,7 +611,9 @@ async def search(search_query: str, search_type: str, top_k: int = 10, datasets:
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
             search_results = await cognee_client.search(
-                query_text=search_query, query_type=search_type, top_k=top_k,
+                query_text=search_query,
+                query_type=search_type,
+                top_k=top_k,
                 datasets=datasets_list,
             )
 
@@ -637,7 +649,7 @@ async def search(search_query: str, search_type: str, top_k: int = 10, datasets:
                     return str(search_results)
 
     # Parse comma-separated datasets into list
-    datasets_list = [d.strip() for d in datasets.split(',') if d.strip()] if datasets else None
+    datasets_list = [d.strip() for d in datasets.split(",") if d.strip()] if datasets else None
     datasets_list = datasets_list or None  # collapse empty list to None
     search_results = await search_task(search_query, search_type, top_k, datasets_list)
     return [types.TextContent(type="text", text=search_results)]
@@ -794,10 +806,12 @@ async def delete_dataset(dataset_name: str) -> list:
     with redirect_stdout(sys.stderr):
         try:
             if cognee_client.use_api:
-                return [types.TextContent(
-                    type="text",
-                    text="❌ delete_dataset is not available in API mode. Use the API directly.",
-                )]
+                return [
+                    types.TextContent(
+                        type="text",
+                        text="❌ delete_dataset is not available in API mode. Use the API directly.",
+                    )
+                ]
 
             from cognee.modules.users.methods import get_default_user
             from cognee.modules.data.methods import delete_dataset as _delete_dataset
@@ -811,14 +825,21 @@ async def delete_dataset(dataset_name: str) -> list:
                 return [types.TextContent(type="text", text=f"Dataset '{dataset_name}' not found.")]
 
             if len(matching) > 1:
-                ids = ', '.join(str(ds.id) for ds in matching)
-                return [types.TextContent(
-                    type="text",
-                    text=f"Multiple datasets named '{dataset_name}' found (IDs: {ids}). Please delete by ID instead.",
-                )]
+                ids = ", ".join(str(ds.id) for ds in matching)
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=f"Multiple datasets named '{dataset_name}' found (IDs: {ids}). Please delete by ID instead.",
+                    )
+                ]
 
             await _delete_dataset(matching[0])
-            return [types.TextContent(type="text", text=f"Dataset '{dataset_name}' deleted successfully. Graph, vectors, and metadata removed.")]
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Dataset '{dataset_name}' deleted successfully. Graph, vectors, and metadata removed.",
+                )
+            ]
         except Exception as e:
             return [types.TextContent(type="text", text=f"Error deleting dataset: {str(e)}")]
 
