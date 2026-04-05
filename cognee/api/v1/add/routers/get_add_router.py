@@ -111,7 +111,7 @@ def get_add_router() -> APIRouter:
 
             if isinstance(add_run, PipelineRunErrored):
                 return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     content=ErrorResponse(
                         error="Pipeline run errored",
                         detail=getattr(add_run, "error", None) or str(add_run),
