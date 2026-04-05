@@ -106,12 +106,12 @@ class OllamaAPIAdapter(LLMInterface):
                 model=self.model,
                 messages=[
                     {
-                        "role": "user",
-                        "content": f"{text_input}",
-                    },
-                    {
                         "role": "system",
                         "content": system_prompt,
+                    },
+                    {
+                        "role": "user",
+                        "content": f"{text_input}",
                     },
                 ],
                 max_retries=2,

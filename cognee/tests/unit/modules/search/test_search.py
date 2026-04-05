@@ -2,7 +2,6 @@ import types
 from uuid import uuid4, uuid5, NAMESPACE_OID
 
 import pytest
-
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
 
@@ -174,3 +173,38 @@ async def test_authorized_search_delegates_to_search_in_datasets_context(monkeyp
     )
 
     assert out == expected
+
+
+@pytest.mark.asyncio
+async def test_search_passes_retriever_specific_config_to_authorized_search(
+    monkeypatch, search_mod
+):
+    user = _make_user()
+    ds = _make_dataset(name="ds1", tenant_id="t1")
+
+    async def dummy_authorized_search(**_kwargs):
+        assert _kwargs["feedback_influence"] == 0.25
+        return [
+            SearchResultPayload(
+                result_object="object",
+                context=["ctx"],
+                completion=["r"],
+                search_type=SearchType.CHUNKS,
+                dataset_name=ds.name,
+                dataset_id=ds.id,
+                dataset_tenant_id=ds.tenant_id,
+            )
+        ]
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+
+    out = await search_mod.search(
+        query_text="q",
+        query_type=SearchType.CHUNKS,
+        dataset_ids=[ds.id],
+        user=user,
+        feedback_influence=0.25,
+    )
+
+    assert out

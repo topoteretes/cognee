@@ -51,6 +51,7 @@ async def test_init_custom_params():
         node_name=["node1"],
         wide_search_top_k=200,
         triplet_distance_penalty=5.0,
+        feedback_influence=0.2,
     )
 
     assert retriever.top_k == 10
@@ -61,6 +62,7 @@ async def test_init_custom_params():
     assert retriever.node_name == ["node1"]
     assert retriever.wide_search_top_k == 200
     assert retriever.triplet_distance_penalty == 5.0
+    assert retriever.feedback_influence == 0.2
 
 
 @pytest.mark.asyncio
@@ -237,7 +239,7 @@ async def test_get_completion_context_extension_stops_early(mock_edge):
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             new_callable=AsyncMock,
-            side_effect=[[[mock_edge]], [[mock_edge]]],
+            side_effect=[[mock_edge], [mock_edge]],
         ) as mock_brute_force_triplet_search,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",

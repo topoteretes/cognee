@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import List, Union, Optional
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
@@ -33,4 +33,5 @@ class DocumentChunk(DataPoint):
     cut_type: str
     is_part_of: Document
     contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
+    importance_weight: Optional[float] = 0.5
     metadata: dict = {"index_fields": ["text"]}

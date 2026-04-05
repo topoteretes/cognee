@@ -186,3 +186,34 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/topoteretes/cognee-community/dispatches \
             -d '{"event_type":"new-main-release","client_payload":{"caller_repo":"'"${GITHUB_REPOSITORY}"'"}}'
+
+  notify-discord:
+    needs: release-github
+    name: Send Release to Discord
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Send Discord notification
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          TAG: ${{ needs.release-github.outputs.tag }}
+          VERSION: ${{ needs.release-github.outputs.version }}
+        run: |
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          PAYLOAD=$(jq -n \
+            --arg content "||@everyone|| **${TAG}** has been released!" \
+            --arg title "Release ${TAG}" \
+            --arg url "$RELEASE_URL" \
+            --arg description "Version ${VERSION} released from \`${{ github.ref_name }}\`. [View release notes](${RELEASE_URL})" \
+            --argjson color 2105893 \
+            '{
+              content: $content,
+              embeds: [{
+                title: $title,
+                url: $url,
+                description: $description,
+                color: $color,
+                footer: { text: "Changelog" },
+                timestamp: (now | todate)
+              }]
+            }')
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"

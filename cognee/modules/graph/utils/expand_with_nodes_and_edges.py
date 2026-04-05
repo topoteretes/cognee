@@ -47,6 +47,7 @@ def _process_ontology_nodes(
                     name=ont_node_name,
                     description=ont_node_name,
                     ontology_valid=True,
+                    importance_weight=data_chunk.importance_weight,
                 )
 
         elif ontology_node.category == "individuals":
@@ -58,6 +59,7 @@ def _process_ontology_nodes(
                     description=ont_node_name,
                     ontology_valid=True,
                     belongs_to_set=data_chunk.belongs_to_set,
+                    importance_weight=data_chunk.importance_weight,
                 )
 
 
@@ -132,6 +134,7 @@ def _create_type_node(
         type=node_name,
         description=node_name,
         ontology_valid=ontology_validated,
+        importance_weight=data_chunk.importance_weight,
     )
 
     added_nodes_map[type_node_key] = type_node
@@ -191,6 +194,8 @@ def _create_entity_node(
         description=node_description,
         ontology_valid=ontology_validated,
         belongs_to_set=data_chunk.belongs_to_set,
+        # TODO add importance_weight calculation if an entity with that id already exits
+        importance_weight=data_chunk.importance_weight,
     )
 
     added_nodes_map[entity_node_key] = entity_node
@@ -271,9 +276,9 @@ def _process_graph_edges(
 ) -> None:
     """Process edges in a knowledge graph"""
     for edge in graph.edges:
-        # Apply name mapping if exists
-        source_id = name_mapping.get(edge.source_node_id, edge.source_node_id)
-        target_id = name_mapping.get(edge.target_node_id, edge.target_node_id)
+        # Normalize before lookup so case differences don't cause misses
+        source_id = name_mapping.get(generate_node_name(edge.source_node_id), edge.source_node_id)
+        target_id = name_mapping.get(generate_node_name(edge.target_node_id), edge.target_node_id)
 
         source_node_id = generate_node_id(source_id)
         target_node_id = generate_node_id(target_id)
@@ -295,6 +300,24 @@ def _process_graph_edges(
                 )
             )
             existing_edges_map[edge_key] = True
+
+
+def _resolve_node(node_id: str, all_nodes: dict, key_mapping: dict):
+    entity_key = key_mapping.get(f"{node_id}_entity", f"{node_id}_entity")
+    type_key = key_mapping.get(f"{node_id}_type", f"{node_id}_type")
+    return all_nodes.get(entity_key) or all_nodes.get(type_key)
+
+
+def _populate_node_relations(all_nodes: dict, relationships: list, key_mapping: dict) -> None:
+    """Attach edges to nodes via .relations for downstream traversal and persistence."""
+    for src_id, tgt_id, rel_name, _ in relationships:
+        src_node = _resolve_node(src_id, all_nodes, key_mapping)
+        tgt_node = _resolve_node(tgt_id, all_nodes, key_mapping)
+
+        if src_node is None or tgt_node is None:
+            continue
+
+        src_node.relations.append((Edge(relationship_type=rel_name), tgt_node))
 
 
 def expand_with_nodes_and_edges(
@@ -381,8 +404,10 @@ def expand_with_nodes_and_edges(
         # Then process edges
         _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
 
-    # Return combined results
-    graph_nodes = data_chunks + list(added_ontology_nodes_map.values())
-    graph_edges = relationships + ontology_relationships
+    all_nodes = {**added_nodes_map, **added_ontology_nodes_map}
+    all_relationships = relationships + ontology_relationships
+    _populate_node_relations(all_nodes, all_relationships, key_mapping)
 
-    return graph_nodes, graph_edges
+    entity_nodes = list(added_nodes_map.values()) + list(added_ontology_nodes_map.values())
+
+    return data_chunks, entity_nodes
