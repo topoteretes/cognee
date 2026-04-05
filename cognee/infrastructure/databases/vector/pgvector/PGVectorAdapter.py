@@ -23,7 +23,6 @@ from cognee.context_global_variables import backend_access_control_enabled
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..utils import normalize_distances
 from ..models.ScoredResult import ScoredResult
 from ..exceptions import CollectionNotFoundError
 from ..vector_db_interface import VectorDBInterface
@@ -402,10 +401,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if len(vector_list) == 0:
             return []
 
-        # Normalize vector distance and add this as score information to vector_list
-        normalized_values = normalize_distances(vector_list)
-        for i in range(0, len(normalized_values)):
-            vector_list[i]["score"] = normalized_values[i]
+        # Return backend raw cosine distance as score (lower is better)
+        for i in range(0, len(vector_list)):
+            vector_list[i]["score"] = float(vector_list[i]["_distance"])
 
         # Create and return ScoredResult objects
         return [

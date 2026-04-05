@@ -19,7 +19,9 @@ def _generate_provenance_colors(values):
     return color_map
 
 
-async def cognee_network_visualization(graph_data, destination_file_path: str = None):
+async def cognee_network_visualization(
+    graph_data, destination_file_path: str = None, schema_data: dict = None
+):
     nodes_data, edges_data = graph_data
 
     color_map = {
@@ -33,7 +35,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         "SchemaTable": "#A550FF",
         "DatabaseSchema": "#6510F4",
         "SchemaRelationship": "#323332",
-        "default": "#DBD8D8",
+        "default": "#7c3aed",
     }
 
     nodes_list = []
@@ -92,6 +94,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         pipeline_color_map,
         node_set_color_map,
         user_color_map,
+        schema_data,
     )
 
     if not destination_file_path:
@@ -160,6 +163,7 @@ def _build_html(
     pipeline_color_map=None,
     node_set_color_map=None,
     user_color_map=None,
+    schema_data=None,
 ):
     def _safe_json_embed(obj):
         return json.dumps(obj).replace("</", "<\\/")
@@ -175,6 +179,9 @@ def _build_html(
         "__NODESET_COLORS__", _safe_json_embed(node_set_color_map or {})
     )
     html_content = html_content.replace("__USER_COLORS__", _safe_json_embed(user_color_map or {}))
+    html_content = html_content.replace(
+        "__SCHEMA_DATA__", _safe_json_embed(schema_data) if schema_data else "null"
+    )
     return html_content
 
 
@@ -192,7 +199,15 @@ def _get_html_template():
   --bg:#000000;--bg2:#323332;--surface:rgba(255,255,255,0.06);
   --border:rgba(219,216,216,0.12);--text:#F4F4F4;--text2:#DBD8D8;
   --accent:#6510F4;--accent2:#A550FF;--green:#0DFF00;
+  --schema-node:#1a1a2e;--schema-stroke:#A550FF;--schema-link:#555;
 }
+html.light{
+  --bg:#f5f5f5;--bg2:#e8e8e8;--surface:rgba(0,0,0,0.04);
+  --border:rgba(0,0,0,0.12);--text:#1a1a1a;--text2:#555555;
+  --accent:#6510F4;--accent2:#7c3aed;--green:#16a34a;
+  --schema-node:#ffffff;--schema-stroke:#6510F4;--schema-link:#999;
+}
+html.light body,html.light{background:var(--bg);color:var(--text)}
 @font-face{font-family:'Inter';src:local('Inter'),local('Inter-Regular');font-display:swap}
 body,html{width:100%;height:100%;overflow:hidden;background:#000000;color:#F4F4F4;font-family:'Inter',system-ui,-apple-system,sans-serif}
 canvas{display:block;width:100vw;height:100vh;cursor:grab}
@@ -202,7 +217,7 @@ canvas:active{cursor:grabbing}
   position:fixed;top:0;left:0;right:0;height:48px;
   display:flex;align-items:center;justify-content:space-between;
   padding:0 20px;z-index:100;
-  background:linear-gradient(180deg,rgba(0,0,0,0.95) 0%,rgba(0,0,0,0) 100%);
+  background:none;
   pointer-events:none;
 }
 #header>*{pointer-events:auto}
@@ -261,14 +276,9 @@ canvas:active{cursor:grabbing}
 .panel-row .k{color:var(--text2);flex-shrink:0}
 .panel-row .v{color:var(--text);text-align:right;word-break:break-word;max-width:200px}
 
-#legend{
-  position:fixed;bottom:64px;left:20px;z-index:100;
-  display:flex;flex-wrap:wrap;gap:6px 12px;
-  padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;
-  max-width:400px;
-}
-.legend-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);white-space:nowrap}
-.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+#legend{display:none}
+.legend-item{display:none}
+.legend-dot{display:none}
 
 .empty-state{
   position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
@@ -303,6 +313,14 @@ canvas:active{cursor:grabbing}
 </head>
 <body>
 
+<div id="view-tabs" style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:1100;display:flex;gap:2px;align-items:center;background:rgba(0,0,0,0.85);border-radius:0 0 8px 8px;padding:2px 6px;">
+  <button class="tab-btn active" data-view="graph" style="background:var(--accent);color:#fff;border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Graph</button>
+  <button class="tab-btn" data-view="schema" style="background:transparent;color:var(--text2);border:none;padding:6px 18px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-weight:600;">Schema</button>
+</div>
+
+<button id="theme-toggle" style="position:fixed;top:12px;right:20px;z-index:1200;background:var(--bg2);border:1px solid var(--border);cursor:pointer;font-size:12px;padding:6px 14px;border-radius:8px;color:var(--text);font-family:inherit;font-weight:500;transition:all 0.15s;">Light mode</button>
+
+<div id="graph-view">
 <div id="header">
   <div class="logo">
     <img src="data:image/png;base64,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" alt="Cognee">
@@ -324,8 +342,6 @@ canvas:active{cursor:grabbing}
   <div class="ctrl-sep"></div>
   <span style="font-size:10px;color:var(--text2);padding:6px 4px">Color:</span>
   <button class="ctrl-btn active" data-colorby="type">Type</button>
-  <button class="ctrl-btn" data-colorby="task">Task</button>
-  <button class="ctrl-btn" data-colorby="pipeline">Pipeline</button>
   <button class="ctrl-btn" data-colorby="nodeset">Node Set</button>
   <button class="ctrl-btn" data-colorby="user">User</button>
   <div class="ctrl-sep"></div>
@@ -347,6 +363,227 @@ canvas:active{cursor:grabbing}
 <div id="fps-counter"></div>
 
 <canvas id="canvas"></canvas>
+</div><!-- end graph-view -->
+
+<div id="schema-view" style="display:none;position:fixed;inset:0;background:var(--bg);padding:48px 0 0;overflow:hidden;z-index:900;">
+  <svg id="schema-svg" style="width:100%;height:100%;"></svg>
+  <div id="schema-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;">
+    <div style="color:var(--text2);text-align:center;font-size:16px;">No schema configured for this dataset.</div>
+  </div>
+</div>
+
+<script>
+// Theme toggle
+(function(){
+  const btn = document.getElementById('theme-toggle');
+  // Expose for canvas draw() to read
+  window._isLightMode = false;
+  btn.addEventListener('click', () => {
+    document.documentElement.classList.toggle('light');
+    const isLight = document.documentElement.classList.contains('light');
+    window._isLightMode = isLight;
+    btn.textContent = isLight ? 'Dark mode' : 'Light mode';
+    // Update tab bar background
+    const tabBar = document.getElementById('view-tabs');
+    tabBar.style.background = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)';
+    // Re-render schema if visible
+    if (document.getElementById('schema-view').style.display !== 'none' && window._renderSchemaGraph) {
+      window._renderSchemaGraph();
+    }
+  });
+})();
+
+// Tab switching logic
+(function(){
+  const tabs = document.querySelectorAll('.tab-btn');
+  const graphView = document.getElementById('graph-view');
+  const schemaView = document.getElementById('schema-view');
+  tabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabs.forEach(t => { t.style.background='transparent'; t.style.color='var(--text2)'; t.classList.remove('active'); });
+      btn.style.background='var(--accent)'; btn.style.color='#fff'; btn.classList.add('active');
+      const view = btn.dataset.view;
+      graphView.style.display = view === 'graph' ? '' : 'none';
+      schemaView.style.display = view === 'schema' ? '' : 'none';
+      if (view === 'schema' && window._renderSchemaGraph) window._renderSchemaGraph();
+    });
+  });
+})();
+
+// Schema force-directed graph
+(function(){
+  const schemaData = __SCHEMA_DATA__;
+  if (!schemaData) {
+    var emptyEl = document.getElementById('schema-empty');
+    emptyEl.style.display = 'flex';
+    document.getElementById('schema-svg').style.display = 'none';
+    return;
+  }
+
+  const defs = schemaData.$defs || schemaData['$defs'] || {};
+  // Build nodes: root + all $defs types
+  const typeNames = new Set();
+  typeNames.add(schemaData.title || 'Root');
+  Object.keys(defs).forEach(n => typeNames.add(n));
+
+  const schemaNodes = [];
+  const schemaLinks = [];
+  const nodeMap = {};
+
+  function addNode(name, def) {
+    if (nodeMap[name]) return;
+    const props = def ? def.properties || {} : {};
+    const required = new Set(def ? def.required || [] : []);
+    const fields = Object.entries(props)
+      .filter(([,v]) => !v.$ref && !v['$ref'] && !(v.type === 'array' && v.items && (v.items.$ref || v.items['$ref'])))
+      .map(([k,v]) => ({ name: k, type: v.type || 'any', required: required.has(k) }));
+    const node = { id: name, fields: fields };
+    nodeMap[name] = node;
+    schemaNodes.push(node);
+  }
+
+  // Add root
+  addNode(schemaData.title || 'Root', schemaData);
+  // Add $defs
+  for (const [name, def] of Object.entries(defs)) {
+    addNode(name, def);
+  }
+
+  // Extract relationships
+  function extractRels(sourceName, def) {
+    const props = def ? def.properties || {} : {};
+    for (const [field, fieldDef] of Object.entries(props)) {
+      let targetName = null;
+      let isArray = false;
+      if (fieldDef.$ref || fieldDef['$ref']) {
+        targetName = (fieldDef.$ref || fieldDef['$ref']).split('/').pop();
+      } else if (fieldDef.type === 'array' && fieldDef.items) {
+        const ref = fieldDef.items.$ref || fieldDef.items['$ref'];
+        if (ref) { targetName = ref.split('/').pop(); isArray = true; }
+      }
+      if (targetName && nodeMap[targetName]) {
+        schemaLinks.push({ source: sourceName, target: targetName, label: field, isArray: isArray });
+      }
+    }
+  }
+
+  extractRels(schemaData.title || 'Root', schemaData);
+  for (const [name, def] of Object.entries(defs)) {
+    extractRels(name, def);
+  }
+
+  var _schemaRendered = false;
+  window._renderSchemaGraph = function() {
+    const svg = d3.select('#schema-svg');
+    svg.selectAll('*').remove();
+    // Use actual viewport dimensions
+    const width = Math.max(window.innerWidth, 800);
+    const height = Math.max(window.innerHeight - 48, 500);
+    const isLight = document.documentElement.classList.contains('light');
+    _schemaRendered = true;
+
+    const colors = {
+      nodeFill: isLight ? '#ffffff' : '#1a1a2e',
+      nodeStroke: isLight ? '#6510F4' : '#A550FF',
+      text: isLight ? '#1a1a1a' : '#F4F4F4',
+      textDim: isLight ? '#666' : '#999',
+      link: isLight ? '#999' : '#555',
+      linkLabel: isLight ? '#6510F4' : '#A550FF',
+      fieldReq: isLight ? '#333' : '#fff',
+      fieldOpt: isLight ? '#888' : '#aaa',
+      bg: isLight ? '#f5f5f5' : '#000000',
+    };
+
+    svg.attr('width', width).attr('height', height)
+       .style('background', colors.bg);
+
+    const g = svg.append('g');
+
+    // Zoom
+    svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', (e) => g.attr('transform', e.transform)));
+
+    // Arrow marker
+    svg.append('defs').append('marker')
+      .attr('id', 'schema-arrow').attr('viewBox', '0 -5 10 10')
+      .attr('refX', 20).attr('refY', 0).attr('markerWidth', 8).attr('markerHeight', 8)
+      .attr('orient', 'auto')
+      .append('path').attr('d', 'M0,-4L10,0L0,4').attr('fill', colors.link);
+
+    const simulation = d3.forceSimulation(schemaNodes)
+      .force('link', d3.forceLink(schemaLinks).id(d => d.id).distance(200))
+      .force('charge', d3.forceManyBody().strength(-600))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collision', d3.forceCollide(80));
+
+    // Links
+    const link = g.selectAll('.schema-link').data(schemaLinks).enter().append('g');
+    const linkLine = link.append('line')
+      .attr('stroke', colors.link).attr('stroke-width', 1.5)
+      .attr('marker-end', 'url(#schema-arrow)');
+    const linkLabel = link.append('text')
+      .attr('text-anchor', 'middle').attr('font-size', 10).attr('fill', colors.linkLabel)
+      .attr('font-weight', 600).attr('dy', -6)
+      .text(d => d.isArray ? d.label + ' []' : d.label);
+
+    // Nodes
+    const node = g.selectAll('.schema-node').data(schemaNodes).enter().append('g')
+      .attr('cursor', 'grab')
+      .call(d3.drag()
+        .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+      );
+
+    // Node rectangles
+    const nodeW = 160, lineH = 16, padY = 10, headerH = 24;
+    node.append('rect')
+      .attr('width', nodeW)
+      .attr('height', d => headerH + padY + d.fields.length * lineH + padY)
+      .attr('rx', 8).attr('ry', 8)
+      .attr('fill', colors.nodeFill)
+      .attr('stroke', colors.nodeStroke).attr('stroke-width', 2)
+      .attr('filter', isLight ? 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' : 'drop-shadow(0 2px 8px rgba(101,16,244,0.3))');
+
+    // Header
+    node.append('text')
+      .attr('x', nodeW / 2).attr('y', 18)
+      .attr('text-anchor', 'middle').attr('font-size', 13).attr('font-weight', 700)
+      .attr('fill', colors.nodeStroke)
+      .text(d => d.id);
+
+    // Header divider
+    node.append('line')
+      .attr('x1', 8).attr('x2', nodeW - 8).attr('y1', headerH).attr('y2', headerH)
+      .attr('stroke', colors.link).attr('stroke-opacity', 0.3);
+
+    // Fields
+    node.each(function(d) {
+      const g = d3.select(this);
+      d.fields.forEach((f, i) => {
+        const y = headerH + padY + i * lineH + 12;
+        g.append('text')
+          .attr('x', 12).attr('y', y)
+          .attr('font-size', 11).attr('fill', f.required ? colors.fieldReq : colors.fieldOpt)
+          .text(f.name + (f.required ? ' *' : ''));
+        g.append('text')
+          .attr('x', nodeW - 12).attr('y', y)
+          .attr('text-anchor', 'end').attr('font-size', 9).attr('fill', colors.textDim)
+          .text(f.type);
+      });
+    });
+
+    simulation.on('tick', () => {
+      linkLine
+        .attr('x1', d => d.source.x + nodeW / 2).attr('y1', d => d.source.y + headerH / 2)
+        .attr('x2', d => d.target.x + nodeW / 2).attr('y2', d => d.target.y + headerH / 2);
+      linkLabel
+        .attr('x', d => (d.source.x + d.target.x) / 2 + nodeW / 2)
+        .attr('y', d => (d.source.y + d.target.y) / 2 + headerH / 2);
+      node.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+    });
+  };
+})();
+</script>
 
 <script>
 (function(){
@@ -1165,13 +1402,14 @@ function draw(){
   ctx.clearRect(0,0,W,H);
 
   // Background
-  ctx.fillStyle="#000000";
+  var _light = window._isLightMode;
+  ctx.fillStyle=_light ? "#f5f5f5" : "#000000";
   ctx.fillRect(0,0,W,H);
 
   // Subtle grid
   ctx.save();
   ctx.globalAlpha=0.03;
-  ctx.strokeStyle="#fff";
+  ctx.strokeStyle=_light ? "#000" : "#fff";
   ctx.lineWidth=1;
   var gridSize=60*scale;
   if(gridSize>10){
@@ -1283,8 +1521,8 @@ function draw(){
           ctx.moveTo(e.l.source.x,e.l.source.y);
           ctx.lineTo(e.l.target.x,e.l.target.y);
         });
-        ctx.strokeStyle="rgba(219,216,216,"+nAlpha+")";
-        ctx.lineWidth=0.5/scale;
+        ctx.strokeStyle=_light ? "rgba(80,80,80,"+Math.min(nAlpha*3,0.3)+")" : "rgba(219,216,216,"+nAlpha+")";
+        ctx.lineWidth=(_light ? 0.8 : 0.5)/scale;
         ctx.stroke();
       }
 
@@ -1293,7 +1531,7 @@ function draw(){
         ctx.beginPath();
         ctx.moveTo(e.l.source.x,e.l.source.y);
         ctx.lineTo(e.l.target.x,e.l.target.y);
-        ctx.strokeStyle="rgba(219,216,216,"+e.alpha+")";
+        ctx.strokeStyle=_light ? "rgba(60,60,60,"+e.alpha+")" : "rgba(219,216,216,"+e.alpha+")";
         ctx.lineWidth=e.lineW/scale;
         ctx.stroke();
       });
@@ -1303,7 +1541,7 @@ function draw(){
         ctx.beginPath();
         ctx.moveTo(e.l.source.x,e.l.source.y);
         ctx.lineTo(e.l.target.x,e.l.target.y);
-        ctx.strokeStyle="rgba(219,216,216,"+e.alpha+")";
+        ctx.strokeStyle=_light ? "rgba(60,60,60,"+e.alpha+")" : "rgba(219,216,216,"+e.alpha+")";
         ctx.lineWidth=e.lineW/scale;
         ctx.stroke();
       });
@@ -1344,7 +1582,7 @@ function draw(){
       if(sid===hoveredNode.id||tid===hoveredNode.id){
         var mx2=(l.source.x+l.target.x)/2;
         var my2=(l.source.y+l.target.y)/2;
-        ctx.fillStyle="rgba(219,216,216,0.7)";
+        ctx.fillStyle=_light ? "rgba(30,30,30,0.9)" : "rgba(219,216,216,0.7)";
         ctx.fillText(truncate(l.relation||"",30),mx2,my2-6/scale);
       }
     });
@@ -1408,7 +1646,7 @@ function draw(){
 
       // Subtle border (skip for medium+ graphs)
       if(!skipBorder){
-        ctx.strokeStyle="rgba(244,244,244,0.2)";
+        ctx.strokeStyle=_light ? "rgba(0,0,0,0.15)" : "rgba(244,244,244,0.2)";
         ctx.lineWidth=0.5;
         ctx.stroke();
       }
@@ -1469,10 +1707,10 @@ function draw(){
         var yOff=n._r+fontSize*0.8;
 
         // Text shadow
-        ctx.fillStyle="rgba(0,0,0,"+alpha2*0.8+")";
+        ctx.fillStyle=_light ? "rgba(255,255,255,"+alpha2*0.8+")" : "rgba(0,0,0,"+alpha2*0.8+")";
         ctx.fillText(label,n.x+0.5,n.y+yOff+0.5);
 
-        ctx.fillStyle="rgba(244,244,244,"+alpha2+")";
+        ctx.fillStyle=_light ? "rgba(30,30,30,"+alpha2+")" : "rgba(244,244,244,"+alpha2+")";
         ctx.fillText(label,n.x,n.y+yOff);
       });
     }else if(hoveredNode){
@@ -1480,9 +1718,9 @@ function draw(){
       var hn=hoveredNode;
       var label2=truncate(hn.name||"",30);
       var yOff2=hn._r+fontSize*0.8;
-      ctx.fillStyle="rgba(0,0,0,0.8)";
+      ctx.fillStyle=_light ? "rgba(255,255,255,0.8)" : "rgba(0,0,0,0.8)";
       ctx.fillText(label2,hn.x+0.5,hn.y+yOff2+0.5);
-      ctx.fillStyle="rgba(244,244,244,1)";
+      ctx.fillStyle=_light ? "rgba(30,30,30,1)" : "rgba(244,244,244,1)";
       ctx.fillText(label2,hn.x,hn.y+yOff2);
     }
   }

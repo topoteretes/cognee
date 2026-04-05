@@ -383,4 +383,6 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_add_docling_document.py
+        run: |
+          uv sync --extra docling
+          uv run python ./cognee/tests/test_add_docling_document.py
