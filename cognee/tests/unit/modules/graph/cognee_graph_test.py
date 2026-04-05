@@ -910,8 +910,12 @@ async def test_feedback_blend_uses_cosine_distance_scale(setup_graph):
     graph.add_node(node3)
     graph.add_node(node4)
 
-    edge_high_feedback = Edge(node1, node2, attributes={"feedback_weight": 1.0, "importance_weight": 1.0})
-    edge_low_feedback = Edge(node3, node4, attributes={"feedback_weight": 0.0, "importance_weight": 1.0})
+    edge_high_feedback = Edge(
+        node1, node2, attributes={"feedback_weight": 1.0, "importance_weight": 1.0}
+    )
+    edge_low_feedback = Edge(
+        node3, node4, attributes={"feedback_weight": 0.0, "importance_weight": 1.0}
+    )
     graph.add_edge(edge_high_feedback)
     graph.add_edge(edge_low_feedback)
 
