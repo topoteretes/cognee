@@ -15,6 +15,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
@@ -78,54 +79,53 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
-        """
-        Generate embedding vectors for a list of text prompts.
-
-        If mocking is enabled, returns a list of zero vectors instead of actual embeddings.
-
-        Parameters:
-        -----------
-
-            - text (List[str]): A list of text prompts for which to generate embeddings.
-
-        Returns:
-        --------
-
-            - List[List[float]]: A list of embedding vectors corresponding to the text prompts.
-        """
-        sanitized_text_input = sanitize_embedding_text_inputs(text)
-        if self.mock:
-            return [[0.0] * self.dimensions for _ in sanitized_text_input]
-
-        # Handle case when a single string is passed instead of a list
-        if not isinstance(sanitized_text_input, list):
-            text = [sanitized_text_input]
-
-        embeddings = await asyncio.gather(
-            *[self._get_embedding(prompt) for prompt in sanitized_text_input]
-        )
-        return handle_embedding_response(text, embeddings, self.dimensions)
-
-    def _truncate_text_to_token_limit(self, text: str, max_tokens: int = 2048) -> str:
-        """
-        Truncate text to fit within the embedding model's context length.
-        Uses character-based truncation (roughly 4 chars per token).
-        """
-        char_limit = max_tokens * 4
-        if len(text) > char_limit:
-            logger.warning(
-                f"Text exceeds character limit ({len(text)} > {char_limit}), truncating..."
-            )
-            # TODO: Refactor to better handle truncation, handle it the same as it is handled in LiteLLMEmbeddingEngine
-            #       when the ContextWindowExceededError happens.
-            #       Also max_tokens is never provided to function call so it will always default to 2048, we should make
-            #       it so that it is provided based on the model's context length.
-            #       The char_limit is not a good estimate based on the average number of characters per token, and
-            #       actual value should be based on actual token count using the tokenizer or when the ContextWindowExceededError happens.
-            return text[:char_limit]
-        return text
-
+    async def embed_text(self, text: List[str]) -> List[List[float]]:  
+        """  
+        Generate embedding vectors for a list of text prompts.  
+  
+        If mocking is enabled, returns a list of zero vectors instead of actual embeddings.  
+  
+        Parameters:  
+        -----------  
+  
+            - text (List[str]): A list of text prompts for which to generate embeddings.  
+  
+        Returns:  
+        --------  
+  
+            - List[List[float]]: A list of embedding vectors corresponding to the text prompts.  
+        """  
+        if self.mock:  
+            return [[0.0] * self.dimensions for _ in text]  
+  
+        # Handle case when a single string is passed instead of a list  
+        if not isinstance(text, list):  
+            text = [text]  
+  
+        try:  
+            embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])  
+            return embeddings  
+        except Exception as error:  
+            # Handle context window errors using shared handler  
+            if "context" in str(error).lower() or "token" in str(error).lower():  
+                from .context_window_handler import handle_context_window_exceeded  
+                return await handle_context_window_exceeded(self._raw_embed_text, text)  
+              
+            logger.error(f"Embedding error in OllamaEmbeddingEngine: {str(error)}")  
+            raise EmbeddingException(  
+                f"Failed to index data points using model {self.model}"  
+            ) from error  
+  
+    async def _raw_embed_text(self, text: List[str]) -> List[List[float]]:  
+        """Raw embedding without context handling."""  
+        if self.mock:  
+            return [[0.0] * self.dimensions for _ in text]  
+          
+        if not isinstance(text, list):  
+            text = [text]  
+          
+        embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])  
+        return embeddings  
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),

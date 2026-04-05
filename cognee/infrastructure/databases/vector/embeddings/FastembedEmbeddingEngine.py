@@ -86,44 +86,61 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
-        """
-        Embed the given text into numerical vectors.
-
-        This method generates embeddings for a list of text strings. If mocking is enabled, it
-        returns zero vectors instead. It handles exceptions by logging the error and raising an
-        `EmbeddingException` on failure.
-
-        Parameters:
-        -----------
-
-            - text (List[str]): A list of strings to be embedded.
-
-        Returns:
-        --------
-
-            - List[List[float]]: A list of embeddings, where each embedding is a list of floats
-              representing the vector form of the input text.
-        """
-        sanitized_text_input = sanitize_embedding_text_inputs(text)
-        try:
-            if self.mock:
-                return [[0.0] * self.dimensions for _ in sanitized_text_input]
-            else:
-                async with embedding_rate_limiter_context_manager():
-                    embeddings = self.embedding_model.embed(
-                        sanitized_text_input,
-                        batch_size=len(text),
-                        parallel=None,
-                    )
-                embeddings = list(embeddings)
-                return handle_embedding_response(text, embeddings, self.dimensions)
-
-        except Exception as error:
-            logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")
-            raise EmbeddingException(
-                f"Failed to index data points using model {self.model}"
-            ) from error
+    async def embed_text(self, text: List[str]) -> List[List[float]]:  
+        """  
+        Embed the given text into numerical vectors.  
+  
+        This method generates embeddings for a list of text strings. If mocking is enabled, it  
+        returns zero vectors instead. It handles exceptions by logging the error and raising an  
+        `EmbeddingException` on failure.  
+  
+        Parameters:  
+        -----------  
+  
+            - text (List[str]): A list of strings to be embedded.  
+  
+        Returns:  
+        --------  
+  
+            - List[List[float]]: A list of embeddings, where each embedding is a list of floats  
+              representing the vector form of the input text.  
+        """  
+        try:  
+            if self.mock:  
+                return [[0.0] * self.dimensions for _ in text]  
+            else:  
+                async with embedding_rate_limiter_context_manager():  
+                    embeddings = self.embedding_model.embed(  
+                        text,  
+                        batch_size=len(text),  
+                        parallel=None,  
+                    )  
+  
+                return list(embeddings)  
+  
+        except Exception as error:  
+            # Handle context window errors using shared handler  
+            if "context" in str(error).lower() or "token" in str(error).lower():  
+                from .context_window_handler import handle_context_window_exceeded  
+                return await handle_context_window_exceeded(self._raw_embed_text, text)  
+              
+            logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")  
+            raise EmbeddingException(  
+                f"Failed to index data points using model {self.model}"  
+            ) from error  
+  
+    async def _raw_embed_text(self, text: List[str]) -> List[List[float]]:  
+        """Raw embedding without context handling."""  
+        if self.mock:  
+            return [[0.0] * self.dimensions for _ in text]  
+          
+        async with embedding_rate_limiter_context_manager():  
+            embeddings = self.embedding_model.embed(  
+                text,  
+                batch_size=len(text),  
+                parallel=None,  
+            )  
+        return list(embeddings)
 
     def get_vector_size(self) -> int:
         """
