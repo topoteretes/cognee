@@ -169,7 +169,9 @@ class OpenAIAdapter(GenericAPIAdapter):
             if not (self.fallback_model and self.fallback_api_key):
                 raise e
             try:
-                async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
+                async with llm_rate_limiter_context_manager(
+                    estimate_tokens(text_input, system_prompt)
+                ):
                     return await self.aclient.chat.completions.create(
                         model=self.fallback_model,
                         messages=[

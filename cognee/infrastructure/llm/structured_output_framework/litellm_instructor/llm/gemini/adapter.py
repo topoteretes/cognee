@@ -155,7 +155,9 @@ class GeminiAdapter(GenericAPIAdapter):
                 )
 
             try:
-                async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
+                async with llm_rate_limiter_context_manager(
+                    estimate_tokens(text_input, system_prompt)
+                ):
                     return await self.aclient.chat.completions.create(
                         model=self.fallback_model,
                         messages=[

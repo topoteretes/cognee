@@ -111,7 +111,9 @@ class MistralAdapter(GenericAPIAdapter):
             ]
             merged_kwargs = {**self.llm_args, **kwargs}
             try:
-                async with llm_rate_limiter_context_manager(estimate_tokens(text_input, system_prompt)):
+                async with llm_rate_limiter_context_manager(
+                    estimate_tokens(text_input, system_prompt)
+                ):
                     response = await self.aclient.chat.completions.create(
                         model=self.model,
                         max_retries=2,
