@@ -71,6 +71,18 @@ def chunk_by_word(data: str) -> Iterator[Tuple[str, str]]:
             i += 1
             continue
 
+        if re.match(PARAGRAPH_ENDINGS, character):
+            # Standalone newline without preceding sentence ending — treat as paragraph boundary
+            next_i = i + 1
+            while next_i < len(data) and re.match(PARAGRAPH_ENDINGS, data[next_i]):
+                current_chunk += data[next_i]
+                next_i += 1
+
+            yield (current_chunk, "paragraph_end")
+            current_chunk = ""
+            i = next_i
+            continue
+
         if re.match(SENTENCE_ENDINGS, character):
             # Look ahead for whitespace
             next_i = i + 1
