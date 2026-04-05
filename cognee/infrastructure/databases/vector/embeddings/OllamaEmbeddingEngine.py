@@ -137,11 +137,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
-        truncated_prompt = self._truncate_text_to_token_limit(prompt)
 
         payload = {
             "model": self.model,
-            "input": truncated_prompt,
+            "input": prompt,
             "dimensions": self.dimensions,
         }
 
