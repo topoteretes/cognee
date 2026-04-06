@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.modules.engine.utils import generate_edge_name, generate_node_id
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import _create_edge_key
 from cognee.shared.data_models import Edge as KGEdge
 from cognee.shared.data_models import KnowledgeGraph, Node
@@ -39,28 +40,50 @@ async def test_retrieve_existing_edges_queries_graph_edges_from_all_chunks(mock_
 
     data_chunks = [_make_chunk("chunk-1"), _make_chunk("chunk-2")]
     chunk_graphs = [
-        _make_graph("source-1", "target-1", "knows"),
-        _make_graph("source-2", "target-2", "works_with"),
+        _make_graph("Source 1", "Target 1", "Knows"),
+        _make_graph("Source 2", "Target 2", "Works With"),
     ]
 
     await retrieve_module.retrieve_existing_edges(data_chunks, chunk_graphs)
 
     queried_edges = graph_engine.has_edges.await_args.args[0]
 
-    assert ("source-1", "target-1", "knows") in queried_edges
-    assert ("source-2", "target-2", "works_with") in queried_edges
+    assert (
+        generate_node_id("Source 1"),
+        generate_node_id("Target 1"),
+        generate_edge_name("Knows"),
+    ) in queried_edges
+    assert (
+        generate_node_id("Source 2"),
+        generate_node_id("Target 2"),
+        generate_edge_name("Works With"),
+    ) in queried_edges
 
 
 @pytest.mark.asyncio
 @patch.object(retrieve_module, "get_graph_engine", new_callable=AsyncMock)
 async def test_retrieve_existing_edges_uses_same_key_format_as_expand(mock_get_graph_engine):
     graph_engine = MagicMock()
-    graph_engine.has_edges = AsyncMock(return_value=[("source", "target", "works_with")])
+    graph_engine.has_edges = AsyncMock(
+        return_value=[
+            (
+                generate_node_id("Source Node"),
+                generate_node_id("Target Node"),
+                generate_edge_name("Works With"),
+            )
+        ]
+    )
     mock_get_graph_engine.return_value = graph_engine
 
     existing_edges_map = await retrieve_module.retrieve_existing_edges(
         [_make_chunk("chunk-1")],
-        [_make_graph("source", "target", "works_with")],
+        [_make_graph("Source Node", "Target Node", "Works With")],
     )
 
-    assert existing_edges_map == {_create_edge_key("source", "target", "works_with"): True}
+    expected_key = _create_edge_key(
+        generate_node_id("Source Node"),
+        generate_node_id("Target Node"),
+        generate_edge_name("Works With"),
+    )
+
+    assert existing_edges_map == {expected_key: True}

@@ -1,6 +1,6 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.engine.utils import generate_edge_name, generate_node_id
 from cognee.shared.data_models import KnowledgeGraph
 
 
@@ -67,7 +67,11 @@ async def retrieve_existing_edges(
                 processed_nodes[str(entity_node_id)] = True
 
         graph_node_edges.extend(
-            (edge.source_node_id, edge.target_node_id, edge.relationship_name)
+            (
+                generate_node_id(edge.source_node_id),
+                generate_node_id(edge.target_node_id),
+                generate_edge_name(edge.relationship_name),
+            )
             for edge in graph.edges
         )
 
