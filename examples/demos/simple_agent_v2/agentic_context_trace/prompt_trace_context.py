@@ -15,6 +15,7 @@ class AgentContextTrace(DataPoint):
     with_memory: bool = False
     save_traces: bool = False
     task_query: str = ""
+    feedback_influence: float = 0.0
     memory_context: str = ""
     method_params: dict[str, Any] = Field(default_factory=dict)
     method_return_value: Any = None
@@ -38,8 +39,10 @@ class AgentContextTrace(DataPoint):
             memory_results = await search(
                 query_text=memory_query,
                 query_type=SearchType.GRAPH_COMPLETION,
-                system_prompt='Answer the query, in a case of empty context return empty string.',
-                top_k=5
+                system_prompt="Answer the query, in a case of empty context return empty string.",
+                top_k=5,
+                feedback_influence=self.feedback_influence,
+                only_context=True,
             )
             self.memory_context = str(memory_results)
         except NoDataError:

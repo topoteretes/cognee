@@ -4,7 +4,7 @@ import contextvars
 import functools
 import inspect
 import json
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 from .prompt_trace_context import AgentContextTrace
 from examples.demos.simple_agent_v2.agentic_trace_persistance import (
@@ -28,7 +28,11 @@ def _trace_text_payload(trace: AgentContextTrace) -> str:
 
 
 def agentic_trace_root(
-    *, with_memory: bool = False, save_traces: bool = False, task_query: str = ""
+    *,
+    with_memory: bool = False,
+    save_traces: bool = False,
+    task_query: Union[str, Callable[[dict], str]] = "",
+    feedback_influence: float = 0.0,
 ) -> Callable[
     [Callable[..., Any]], Callable[..., Any]
 ]:
@@ -42,18 +46,25 @@ def agentic_trace_root(
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             bound_args = inspect.signature(fn).bind_partial(*args, **kwargs)
             bound_args.apply_defaults()
+            task_query_value = (
+                task_query(dict(bound_args.arguments))
+                if callable(task_query)
+                else task_query
+            )
             trace = AgentContextTrace(
                 origin_function=fn.__qualname__,
                 with_memory=with_memory,
                 save_traces=save_traces,
-                task_query=task_query,
+                task_query=task_query_value,
+                feedback_influence=feedback_influence,
             )
             # TODO: Later we can add a decorator parameter to control which method params are persisted, it is safer like that.
             trace.method_params = dict(bound_args.arguments)
             trace.method_params["decorator_params"] = {
                 "with_memory": with_memory,
                 "save_traces": save_traces,
-                "task_query": task_query,
+                "task_query": task_query_value,
+                "feedback_influence": feedback_influence,
             }
             token = _agent_context_trace_var.set(trace)
             try:

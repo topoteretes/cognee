@@ -815,64 +815,42 @@ _ALL_LEADS = [
     ),
 ]
 
-# Interleaved order: one from each archetype per round, then repeat.
-# This ensures the agent sees diverse personas and must recall across gaps.
-# 8 rounds of 6 archetypes = 48 leads.
-LEADS: list[BuyingProfile] = [
-    # Round 1
-    _ALL_LEADS[0],   # L01 scaling_ai
-    _ALL_LEADS[4],   # L05 data_quality
-    _ALL_LEADS[8],   # L09 ai_personalization
-    _ALL_LEADS[12],  # L13 search_improvement
-    _ALL_LEADS[16],  # L17 team_collaboration
-    _ALL_LEADS[20],  # L21 ai_reliability
-    # Round 2
-    _ALL_LEADS[1],   # L02 scaling_ai
-    _ALL_LEADS[5],   # L06 data_quality
-    _ALL_LEADS[9],   # L10 ai_personalization
-    _ALL_LEADS[13],  # L14 search_improvement
-    _ALL_LEADS[17],  # L18 team_collaboration
-    _ALL_LEADS[21],  # L22 ai_reliability
-    # Round 3
-    _ALL_LEADS[2],   # L03 scaling_ai
-    _ALL_LEADS[6],   # L07 data_quality
-    _ALL_LEADS[10],  # L11 ai_personalization
-    _ALL_LEADS[14],  # L15 search_improvement
-    _ALL_LEADS[18],  # L19 team_collaboration
-    _ALL_LEADS[22],  # L23 ai_reliability
-    # Round 4
-    _ALL_LEADS[3],   # L04 scaling_ai
-    _ALL_LEADS[7],   # L08 data_quality
-    _ALL_LEADS[11],  # L12 ai_personalization
-    _ALL_LEADS[15],  # L16 search_improvement
-    _ALL_LEADS[19],  # L20 team_collaboration
-    _ALL_LEADS[23],  # L24 ai_reliability
-    # Round 5
-    _ALL_LEADS[24],  # L25 scaling_ai
-    _ALL_LEADS[28],  # L29 data_quality
-    _ALL_LEADS[32],  # L33 ai_personalization
-    _ALL_LEADS[36],  # L37 search_improvement
-    _ALL_LEADS[40],  # L41 team_collaboration
-    _ALL_LEADS[44],  # L45 ai_reliability
-    # Round 6
-    _ALL_LEADS[25],  # L26 scaling_ai
-    _ALL_LEADS[29],  # L30 data_quality
-    _ALL_LEADS[33],  # L34 ai_personalization
-    _ALL_LEADS[37],  # L38 search_improvement
-    _ALL_LEADS[41],  # L42 team_collaboration
-    _ALL_LEADS[45],  # L46 ai_reliability
-    # Round 7
-    _ALL_LEADS[26],  # L27 scaling_ai
-    _ALL_LEADS[30],  # L31 data_quality
-    _ALL_LEADS[34],  # L35 ai_personalization
-    _ALL_LEADS[38],  # L39 search_improvement
-    _ALL_LEADS[42],  # L43 team_collaboration
-    _ALL_LEADS[46],  # L47 ai_reliability
-    # Round 8
-    _ALL_LEADS[27],  # L28 scaling_ai
-    _ALL_LEADS[31],  # L32 data_quality
-    _ALL_LEADS[35],  # L36 ai_personalization
-    _ALL_LEADS[39],  # L40 search_improvement
-    _ALL_LEADS[43],  # L44 team_collaboration
-    _ALL_LEADS[47],  # L48 ai_reliability
+# Group leads by archetype for interleaving
+_ARCHETYPES = [
+    [lead for lead in _ALL_LEADS if lead.persona_tag == "scaling_ai"],
+    [lead for lead in _ALL_LEADS if lead.persona_tag == "data_quality"],
+    [lead for lead in _ALL_LEADS if lead.persona_tag == "ai_personalization"],
+    [lead for lead in _ALL_LEADS if lead.persona_tag == "search_improvement"],
+    [lead for lead in _ALL_LEADS if lead.persona_tag == "team_collaboration"],
+    [lead for lead in _ALL_LEADS if lead.persona_tag == "ai_reliability"],
 ]
+
+TARGET_LEADS = 204  # 34 rounds of 6 archetypes
+_LEADS_PER_ARCHETYPE = TARGET_LEADS // len(_ARCHETYPES)  # 34 each
+
+
+def _generate_leads() -> list[BuyingProfile]:
+    """Generate TARGET_LEADS leads by cycling through existing ones with new IDs.
+
+    Interleaved: one from each archetype per round, then repeat.
+    This ensures the agent sees diverse personas and must recall across gaps.
+    """
+    # Expand each archetype to _LEADS_PER_ARCHETYPE by cycling
+    expanded: list[list[BuyingProfile]] = []
+    for group in _ARCHETYPES:
+        archetype_leads = []
+        for i in range(_LEADS_PER_ARCHETYPE):
+            source = group[i % len(group)]
+            new_id = f"L{len(expanded) * _LEADS_PER_ARCHETYPE + i + 1:03d}"
+            archetype_leads.append(source.model_copy(update={"lead_id": new_id}))
+        expanded.append(archetype_leads)
+
+    # Interleave: round-robin across archetypes
+    leads = []
+    for round_idx in range(_LEADS_PER_ARCHETYPE):
+        for arch_leads in expanded:
+            leads.append(arch_leads[round_idx])
+    return leads
+
+
+LEADS: list[BuyingProfile] = _generate_leads()

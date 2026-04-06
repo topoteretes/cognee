@@ -20,7 +20,7 @@ from .catalog import FEATURE_DESCRIPTIONS, CogneeFeature
 from .leads import BuyingProfile, LEADS
 from .models import ConversationResult, CustomerHint, SalesResponse
 
-MAX_ROUNDS = 3
+MAX_ROUNDS = 2
 
 # Sales function signature: (history, lead_intro, round_num, memory_context) -> SalesResponse
 SalesFn = Callable[[list, str, int, str], Awaitable[SalesResponse]]
@@ -122,25 +122,15 @@ def _evaluate_round(
     """Deterministic outcome evaluation. Returns (outcome, sentiment).
 
     Rules:
-    - Right feature + right angle on any round → CLOSED_WON
-    - Right feature for 2+ cumulative rounds → CLOSED_WON
-    - Right feature but not enough → CONTINUE/interested
+    - Right feature on R1 → CLOSED_WON (feature match is enough)
+    - Right feature on R2+ → CLOSED_WON (recovery possible)
     - Wrong feature → CONTINUE/skeptical
-    - Last round without close → CLOSED_LOST
+    - Last round without right feature → CLOSED_LOST
     """
     right_feature = sales_resp.lead_feature == profile.must_have_feature
-    right_angle = sales_resp.pitch_angle == profile.preferred_framing
-
-    if right_feature and right_angle:
-        return "CLOSED_WON", "ready_to_buy"
-
-    if right_feature and rounds_with_right_feature >= 2:
-        return "CLOSED_WON", "ready_to_buy"
 
     if right_feature:
-        if round_num == MAX_ROUNDS:
-            return "CLOSED_LOST", "interested"
-        return "CONTINUE", "interested"
+        return "CLOSED_WON", "ready_to_buy"
 
     # Wrong feature
     if round_num == MAX_ROUNDS:
@@ -166,7 +156,11 @@ async def run_conversation(
             conversation_history, profile.initial_message, round_num, memory_context
         )
         features_pitched.append(sales_resp.lead_feature)
-        conversation_history.append({"role": "sales", "message": sales_resp.message_to_customer})
+        conversation_history.append({
+            "role": "sales",
+            "message": sales_resp.message_to_customer,
+            "feature": sales_resp.lead_feature,
+        })
 
         # Track right feature count
         pitched_right = sales_resp.lead_feature == profile.must_have_feature

@@ -29,7 +29,7 @@ _summary: str = ""
 def _format_full_transcript(lead: BuyingProfile, result: ConversationResult) -> str:
     """Format the full conversation transcript for context stuffing."""
     lines = [
-        f"=== Lead {lead.lead_id}: {lead.persona_tag} ({lead.company_context}) ===",
+        f"=== Lead {lead.lead_id} ===",
         f"Customer opening: {lead.initial_message}",
     ]
     for msg in result.conversation_history:
