@@ -19,3 +19,4 @@ from .delete_dataset_related_edges import delete_dataset_related_edges
 from .delete_dataset_nodes_and_edges import delete_dataset_nodes_and_edges
 
 from .legacy_delete import legacy_delete
+from .update_event_status import update_event_status

@@ -891,6 +891,29 @@ class Neo4jAdapter(GraphDBInterface):
         updated_ids = await self._execute_edge_feedback_updates(items)
         return {eid: (eid in updated_ids) for eid in edge_ids}
 
+    async def update_node_properties(
+        self, node_properties: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, bool]:
+        if not node_properties:
+            return {}
+        node_ids = list(node_properties.keys())
+        items = [
+            {"node_id": nid, "props": props}
+            for nid, props in node_properties.items()
+            if isinstance(nid, str) and nid
+        ]
+        if not items:
+            return {nid: False for nid in node_ids}
+        query = """
+        UNWIND $items AS item
+        MATCH (n:`__Node__` {id: item.node_id})
+        SET n += item.props, n.updated_at = timestamp()
+        RETURN n.id AS node_id
+        """
+        results = await self.query(query, {"items": items})
+        updated = {str(r["node_id"]) for r in results if r.get("node_id") is not None}
+        return {nid: (nid in updated) for nid in node_ids}
+
     async def get_connections(self, node_id: UUID) -> list:
         """
         Retrieve all connections (predecessors and successors) for a specified node.

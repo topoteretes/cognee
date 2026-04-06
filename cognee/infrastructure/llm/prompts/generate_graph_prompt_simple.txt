@@ -23,5 +23,12 @@ You are an advanced algorithm that extracts structured data into a knowledge gra
    - Avoid vague or generic labels like isA, relatesTo, has.
    - Avoid duplicated relationships like produces, produced by.
 
-5. **Strict Compliance**
+5. **Temporal Events**
+   - When actions or occurrences are tied to a date, time, or temporal reference, extract them as **events**.
+   - Events have: `name`, `description`, `status`, optional `time_from`/`time_to` timestamps, optional `location`, and `participant_node_ids` referencing node IDs from the same graph.
+   - Only extract events with clear temporal grounding. Keep names concise.
+   - **Status is critical**: use `"completed"`, `"planned"`, `"in_progress"`, `"hypothetical"`, `"cancelled"`, or `"unknown"` to distinguish intent from fact (e.g., "plans to invest" → planned, "invested" → completed).
+   - **Supersedes**: When text updates a prior event ("cancelled the planned investment"), set `supersedes` to a description of the prior event. Leave null for standalone events.
+
+6. **Strict Compliance**
    - Follow these rules exactly. Non-compliance results in termination.

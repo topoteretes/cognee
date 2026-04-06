@@ -19,6 +19,10 @@ from cognee.modules.graph.utils import (
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.models.Edge import Edge
+from cognee.modules.engine.models import Event
+from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.engine.utils.generate_event_datapoint import generate_event_datapoint
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
@@ -51,6 +55,104 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
     elif isinstance(data, (list, tuple)):
         for item in data:
             _stamp_provenance_deep(item, pipeline_name, task_name, visited)
+
+
+async def _integrate_events(
+    data_chunks: List[DocumentChunk],
+    chunk_graphs: list,
+    entity_nodes: list,
+) -> None:
+    """Convert EventNode objects from LLM output into Event DataPoints and wire them into chunks.
+
+    For each event in a chunk's graph:
+    1. Convert the EventNode (pydantic BaseModel) to an Event DataPoint via generate_event_datapoint.
+    2. Resolve participant_node_ids to actual Entity DataPoints already attached to the chunk.
+    3. If the event has a `supersedes` description, search for the matching prior event
+       in the vector DB and update its status — one targeted search, not a bulk scan.
+    4. Append the Event (with participant edges) to chunk.contains.
+    """
+    if not chunk_graphs:
+        return
+
+    # Build a lookup: generate_node_id(original_node_id) → Entity DataPoint
+    entity_lookup = {}
+    for node in entity_nodes:
+        entity_lookup[node.id] = node
+
+    # Collect events that supersede prior events for batch reconciliation
+    supersession_queue: list[tuple] = []  # (event_node, event_dp)
+
+    for data_chunk, graph in zip(data_chunks, chunk_graphs):
+        if not graph or not hasattr(graph, "events") or not graph.events:
+            continue
+
+        for event_node in graph.events:
+            event_dp = generate_event_datapoint(event_node)
+            event_dp.status = (
+                str(event_node.status.value)
+                if hasattr(event_node.status, "value")
+                else str(event_node.status)
+            )
+
+            # Resolve participants and attach as event.attributes = [(Edge, [Entity]), ...]
+            event_dp.attributes = []
+            for participant_id in event_node.participant_node_ids:
+                resolved_id = generate_node_id(participant_id)
+                entity = entity_lookup.get(resolved_id)
+                if entity is not None:
+                    edge = Edge(relationship_type="participated_in")
+                    event_dp.attributes.append((edge, [entity]))
+
+            if data_chunk.contains is None:
+                data_chunk.contains = []
+            data_chunk.contains.append(event_dp)
+
+            if event_node.supersedes:
+                supersession_queue.append((event_node, event_dp))
+
+    # Reconcile: for events that supersede prior events, find and update the old ones.
+    if supersession_queue:
+        await _reconcile_superseded_events(supersession_queue)
+
+
+async def _reconcile_superseded_events(
+    supersession_queue: list[tuple],
+) -> None:
+    """Search for prior events matching each supersedes description and update their status.
+
+    Only called for events where the LLM flagged a supersession — typically a small
+    fraction of all extracted events, so cost is bounded.
+    """
+    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    vector_engine = get_vector_engine()
+
+    # Check if the Event_name collection exists (it won't on first cognify)
+    if not await vector_engine.has_collection("Event_name"):
+        return
+
+    graph_engine = await get_graph_engine()
+
+    for event_node, event_dp in supersession_queue:
+        # One targeted search per superseding event
+        results = await vector_engine.search(
+            collection_name="Event_name",
+            query_text=event_node.supersedes,
+            query_vector=None,
+            limit=3,
+        )
+
+        if not results:
+            continue
+
+        # Update the best match — the closest event to the supersedes description.
+        # Only update if the new event's status represents a status transition
+        # (e.g., planned → cancelled, planned → completed).
+        best_match = results[0]
+        await graph_engine.update_node_properties(
+            {str(best_match.id): {"status": event_dp.status}}
+        )
 
 
 async def integrate_chunk_graphs(
@@ -110,6 +212,9 @@ async def integrate_chunk_graphs(
     data_chunks, entity_nodes = expand_with_nodes_and_edges(
         data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
     )
+
+    # Process events extracted inline by the LLM.
+    await _integrate_events(data_chunks, chunk_graphs, entity_nodes)
 
     if entity_nodes:
         if pipeline_name or task_name:

@@ -39,6 +39,7 @@ if get_llm_config().llm_provider.lower() == "gemini":
         description: str
         nodes: List[Node] = Field(..., default_factory=list)
         edges: List[Edge] = Field(..., default_factory=list)
+        events: List["EventNode"] = Field(default_factory=list)
 else:
 
     class Node(BaseModel):
@@ -66,6 +67,55 @@ else:
 
         nodes: List[Node] = Field(..., default_factory=list)
         edges: List[Edge] = Field(..., default_factory=list)
+        events: List["EventNode"] = Field(default_factory=list)
+
+
+class EventTimestamp(BaseModel):
+    """Timestamp for events extracted during graph construction."""
+
+    year: int = Field(..., ge=1, le=9999, description="Year (required)")
+    month: int = Field(1, ge=1, le=12, description="Month, default 1 if unknown")
+    day: int = Field(1, ge=1, le=31, description="Day, default 1 if unknown")
+    hour: int = Field(0, ge=0, le=23, description="Hour, default 0 if unknown")
+    minute: int = Field(0, ge=0, le=59, description="Minute, default 0 if unknown")
+    second: int = Field(0, ge=0, le=59, description="Second, default 0 if unknown")
+
+
+class EventStatus(str, Enum):
+    """Aspectual status distinguishing planned from completed actions."""
+
+    COMPLETED = "completed"
+    PLANNED = "planned"
+    IN_PROGRESS = "in_progress"
+    HYPOTHETICAL = "hypothetical"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
+
+
+class EventNode(BaseModel):
+    """An event identified during knowledge graph extraction."""
+
+    name: str
+    description: str
+    status: EventStatus = Field(
+        default=EventStatus.UNKNOWN,
+        description="Whether this event is completed, planned, in_progress, hypothetical, cancelled, or unknown",
+    )
+    time_from: Optional[EventTimestamp] = None
+    time_to: Optional[EventTimestamp] = None
+    location: Optional[str] = None
+    participant_node_ids: List[str] = Field(
+        default_factory=list,
+        description="IDs of nodes in the same graph that participate in this event",
+    )
+    supersedes: Optional[str] = Field(
+        default=None,
+        description=(
+            "When this event updates or invalidates a previously known event, "
+            "describe the prior event here (e.g. 'the planned AI investment by Company X'). "
+            "Leave null when this is a standalone event."
+        ),
+    )
 
 
 class GraphQLQuery(BaseModel):

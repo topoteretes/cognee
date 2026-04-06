@@ -347,3 +347,19 @@ class GraphDBInterface(ABC):
         Returns per-id update success.
         """
         raise NotImplementedError("set_edge_feedback_weights is not implemented for this adapter")
+
+    async def update_node_properties(
+        self, node_properties: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, bool]:
+        """
+        Update arbitrary properties on graph nodes.
+
+        Parameters:
+        -----------
+            node_properties: Mapping of node_id -> dict of properties to set/update.
+                             Existing properties not in the dict are left unchanged.
+
+        Returns:
+            Dict mapping each node_id to True if updated, False otherwise.
+        """
+        raise NotImplementedError("update_node_properties is not implemented for this adapter")

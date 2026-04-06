@@ -65,7 +65,21 @@ Use **basic atomic types** for node labels. Always prefer general types over spe
 - Keep relationship types semantically clear and consistent.
 - Avoid vague or ambiguous relation names like "related_to" or "connected_with" unless no better alternative exists.
 
-5. Strict Compliance
+5. Temporal Events
+------------------
+
+When actions or occurrences are tied to a date, time, or temporal reference, extract them as **events** in addition to the regular nodes and edges.
+- Events have: `name`, `description`, `status`, optional `time_from`/`time_to` timestamps, optional `location`, and `participant_node_ids` referencing node IDs from the same graph.
+- Only extract events with clear temporal grounding (a date, year, time period, or references like "after the war", "in the 1990s").
+- **Status is critical** — distinguishes intent from fact:
+  - `"completed"` — already happened. `"planned"` — intended but not done. `"in_progress"` — ongoing.
+  - `"hypothetical"` — conditional/speculative. `"cancelled"` — abandoned. `"unknown"` — unclear.
+  - Example: "plans to invest $10M" → status=planned. "invested $10M in 2023" → status=completed.
+- **Supersedes**: When the text updates a prior event ("cancelled the planned investment", "completed the announced merger"), set `supersedes` to a brief description of the prior event. Leave null for standalone events. Example: "cancelled its AI investment" → supersedes="the planned AI investment by Company X".
+- Keep event names concise (e.g., "Founded OpenAI", "Battle of Waterloo").
+- Link participants via their node IDs so events connect to the entity graph.
+
+6. Strict Compliance
 --------------------
 
 - Follow all rules exactly. No assumptions.

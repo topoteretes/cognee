@@ -103,12 +103,21 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         return time_from, time_to
 
+    # Statuses that should be excluded from retrieval results by default.
+    # Agents can still query for these explicitly.
+    EXCLUDED_STATUSES = {"cancelled", "hypothetical"}
+
     async def filter_top_k_events(self, relevant_events, scored_results):
         # Build a score lookup from vector search results
         score_lookup = {res.id: res.score for res in scored_results}
 
         events_with_scores = []
         for event in relevant_events[0]["events"]:
+            # Filter out cancelled/hypothetical events to prevent
+            # planning-vs-completion contamination in agent context.
+            event_status = event.get("status", "unknown")
+            if event_status in self.EXCLUDED_STATUSES:
+                continue
             score = score_lookup.get(event["id"], float("inf"))
             events_with_scores.append({**event, "score": score})
 

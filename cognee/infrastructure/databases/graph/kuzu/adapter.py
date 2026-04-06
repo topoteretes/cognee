@@ -1184,6 +1184,50 @@ class KuzuAdapter(GraphDBInterface):
         updated_ids = await self._execute_edge_feedback_updates(edge_updates)
         return {eid: (eid in updated_ids) for eid in edge_feedback_weights}
 
+    async def update_node_properties(
+        self, node_properties: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, bool]:
+        if not node_properties:
+            return {}
+        node_ids = list(node_properties.keys())
+        valid_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
+        if not valid_ids:
+            return {nid: False for nid in node_ids}
+
+        # Kuzu stores properties in a JSON column — fetch, merge, write back.
+        nodes = await self.get_nodes(valid_ids)
+        updates = []
+        for node in nodes:
+            nid = node.get("id")
+            if not isinstance(nid, str) or nid not in node_properties:
+                continue
+            existing = {
+                k: v
+                for k, v in node.items()
+                if k not in {"id", "name", "type", "created_at", "updated_at"}
+            }
+            existing.update(node_properties[nid])
+            updates.append(
+                {"node_id": nid, "properties": json.dumps(existing, cls=JSONEncoder)}
+            )
+
+        if not updates:
+            return {nid: False for nid in node_ids}
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+        query = """
+        UNWIND $items AS item
+        MATCH (n:Node)
+        WHERE n.id = item.node_id
+        SET n.properties = item.properties,
+            n.updated_at = timestamp($updated_at)
+        RETURN n.id AS node_id
+        """
+        result = await self.query(query, {"items": updates, "updated_at": now})
+        rows_dicts = self._rows_to_dicts(result, ["node_id"])
+        updated = {str(r["node_id"]) for r in rows_dicts if r.get("node_id") is not None}
+        return {nid: (nid in updated) for nid in node_ids}
+
     async def get_predecessors(
         self, node_id: Union[str, UUID], edge_label: Optional[str] = None
     ) -> List[Dict[str, Any]]:

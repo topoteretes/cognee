@@ -8,6 +8,7 @@ from cognee.modules.engine.models.Interval import Interval
 class Event(DataPoint):
     name: str
     description: Optional[str] = None
+    status: str = "unknown"
     at: Optional[Timestamp] = None
     during: Optional[Interval] = None
     location: Optional[str] = None
