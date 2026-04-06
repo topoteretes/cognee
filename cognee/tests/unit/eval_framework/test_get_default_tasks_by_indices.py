@@ -34,3 +34,22 @@ async def test_get_no_summary_tasks_passes_ontology_resolver_via_config(
         "ontology_config": {"ontology_resolver": ontology_resolver}
     }
     assert "ontology_adapter" not in graph_task.default_params["kwargs"]
+
+
+@pytest.mark.asyncio
+@patch.object(task_getter_module, "get_default_tasks", new_callable=AsyncMock)
+async def test_get_no_summary_tasks_omits_config_when_no_ontology_file(
+    mock_get_default_tasks,
+):
+    mock_get_default_tasks.return_value = [
+        Task(lambda: None),
+        Task(lambda: None),
+        Task(lambda: None),
+    ]
+
+    tasks = await task_getter_module.get_no_summary_tasks()
+
+    graph_task = tasks[2]
+
+    assert graph_task.executable is task_getter_module.extract_graph_from_data
+    assert "config" not in graph_task.default_params["kwargs"]
