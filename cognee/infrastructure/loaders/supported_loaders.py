@@ -31,3 +31,10 @@ try:
     supported_loaders[BeautifulSoupLoader.loader_name] = BeautifulSoupLoader
 except ImportError:
     pass
+
+try:
+    from cognee.infrastructure.loaders.external import DoclingLoader
+
+    supported_loaders[DoclingLoader.loader_name] = DoclingLoader
+except ImportError:
+    pass

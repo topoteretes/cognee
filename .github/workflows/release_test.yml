@@ -30,6 +30,34 @@ jobs:
     with:
       cognee_version: ${{ inputs.cognee_version }}
 
+  cot-retriever-test:
+    name: COT Retriever Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.cognee_version }}" = "local" ] || [ -z "${{ inputs.cognee_version }}" ]; then
+            uv sync --locked --all-extras
+          else
+            uv sync --locked --all-extras
+            uv pip install cognee==${{ inputs.cognee_version }}
+          fi
+
+      - name: Run COT retriever integration test
+        env:
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          uv run pytest cognee/tests/integration/retrieval/test_graph_completion_retriever_cot.py -v --timeout=300
+
   load-tests:
     if: false
     name: Load Tests
