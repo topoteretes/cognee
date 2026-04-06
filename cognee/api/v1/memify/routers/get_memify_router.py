@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from fastapi import Depends
+from fastapi import Depends, status
 from pydantic import Field
 from typing import List, Optional, Union, Literal
 
@@ -14,6 +14,7 @@ from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse
 
 logger = get_logger()
 
@@ -35,7 +36,16 @@ class MemifyPayloadDTO(InDTO):
 def get_memify_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post(
+        "",
+        response_model=dict,
+        responses={
+            400: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     @log_usage(function_name="POST /v1/memify", log_type="api_endpoint")
     async def memify(payload: MemifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
@@ -80,7 +90,12 @@ def get_memify_router() -> APIRouter:
         )
 
         if not payload.dataset_id and not payload.dataset_name:
-            raise ValueError("Either datasetId or datasetName must be provided.")
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponse(
+                    error="Either datasetId or datasetName must be provided.",
+                ).model_dump(),
+            )
 
         try:
             from cognee.modules.memify import memify as cognee_memify
@@ -96,9 +111,24 @@ def get_memify_router() -> APIRouter:
             )
 
             if isinstance(memify_run, PipelineRunErrored):
-                return JSONResponse(status_code=420, content=memify_run)
+                detail = getattr(memify_run, "error", None) or str(memify_run)
+
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content=ErrorResponse(
+                        error="Pipeline run errored",
+                        detail=detail,
+                    ).model_dump(),
+                )
             return memify_run
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.exception("Memify failed")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    detail=str(error),
+                ).model_dump(),
+            )
 
     return router

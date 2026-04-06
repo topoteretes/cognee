@@ -28,6 +28,7 @@ _LAZY_IMPORTS = {
     "memify": ".modules.memify",
     "run_custom_pipeline": ".modules.run_custom_pipeline",
     "update": ".api.v1.update",
+    "invalidate": ".api.v1.invalidate",
     "config": ".api.v1.config.config",
     "datasets": ".api.v1.datasets.datasets",
     "prune": ".api.v1.prune",

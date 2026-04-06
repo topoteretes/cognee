@@ -4,6 +4,13 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 
+try:
+    from unstructured.partition.auto import partition
+except ImportError as e:
+    raise ImportError(
+        "unstructured is required for document processing. Install with: pip install unstructured"
+    ) from e
+
 logger = get_logger(__name__)
 
 
@@ -81,14 +88,6 @@ class UnstructuredLoader(LoaderInterface):
             ImportError: If unstructured is not installed
             Exception: If document processing fails
         """
-        try:
-            from unstructured.partition.auto import partition
-        except ImportError as e:
-            raise ImportError(
-                "unstructured is required for document processing. "
-                "Install with: pip install unstructured"
-            ) from e
-
         try:
             logger.info(f"Processing document: {file_path}")
 

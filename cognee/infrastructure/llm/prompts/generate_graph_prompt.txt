@@ -24,5 +24,20 @@ The aim is to achieve simplicity and clarity in the knowledge graph.
   If an entity, is mentioned multiple times in the text but is referred to by different names or pronouns,
   always use the most complete identifier for that entity throughout the knowledge graph.
 Remember, the knowledge graph should be coherent and easily understandable, so maintaining consistency in entity references is crucial.
-# 4. Strict Compliance
+# 4. Temporal Events
+When you encounter actions, occurrences, or state changes that are tied to a specific time or date, extract them as **events** in addition to the regular nodes and edges.
+  - An event has: `name`, `description`, `status`, optional `time_from`/`time_to` timestamps, optional `location`, and `participant_node_ids` referencing node IDs from the same graph.
+  - Only extract events that have clear temporal grounding (a date, year, time period, or temporal reference like "after the war", "in the 1990s").
+  - **Status is critical**: Set `status` to distinguish the aspectual state of the event:
+    - `"completed"` — the action has already happened ("invested $10M", "acquired the company")
+    - `"planned"` — the action is intended but not yet done ("plans to invest", "will acquire")
+    - `"in_progress"` — the action is ongoing ("is investing", "currently expanding")
+    - `"hypothetical"` — conditional or speculative ("would invest if...", "could lead to")
+    - `"cancelled"` — was planned but abandoned ("cancelled the merger", "dropped plans to")
+    - `"unknown"` — temporal aspect is unclear from context
+  - **Supersedes**: When the text describes an update to a previously known event (e.g., "cancelled the planned investment", "completed the merger that was announced last year"), set `supersedes` to a brief description of the prior event being updated (e.g., "the planned AI investment by Company X"). Leave null for standalone events.
+  - Do not duplicate information: if a date is already captured as a Date node, you may still create an event for the action that occurred on that date.
+  - Keep event names concise (e.g., "Founded OpenAI", "Battle of Waterloo", "Hired as CTO").
+  - Link participants via their node IDs so events connect to the entity graph.
+# 5. Strict Compliance
 Adhere to the rules strictly. Non-compliance will result in termination

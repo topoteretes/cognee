@@ -575,4 +575,61 @@ def get_datasets_router() -> APIRouter:
             await session.commit()
         return {"status": "ok"}
 
+    class UpdateEventStatusDTO(InDTO):
+        status: str
+
+    @router.patch(
+        "/{dataset_id}/events/{event_id}",
+        response_model=dict,
+        responses={
+            400: {"description": "Invalid status value"},
+            404: {"description": "Event not found"},
+        },
+    )
+    async def update_event_status_endpoint(
+        dataset_id: UUID,
+        event_id: str,
+        payload: UpdateEventStatusDTO,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Update the status of an event node in the knowledge graph.
+
+        Use this to mark events as cancelled, completed, planned, etc.
+        This is the primary mechanism for agents to invalidate or correct
+        temporal information without deleting the event.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): Dataset containing the event
+        - **event_id** (str): Graph node ID of the event
+
+        ## Request Body
+        - **status** (str): New status value. One of: completed, planned,
+          in_progress, hypothetical, cancelled, unknown
+
+        ## Response
+        Returns update success per event ID.
+        """
+        from cognee.modules.graph.methods import update_event_status
+
+        try:
+            result = await update_event_status(
+                event_ids=[event_id],
+                new_status=payload.status,
+                user=user,
+                dataset_id=dataset_id,
+            )
+        except ValueError as e:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"error": str(e)},
+            )
+
+        if not result.get(event_id, False):
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": f"Event {event_id} not found in dataset {dataset_id}"},
+            )
+
+        return {"event_id": event_id, "status": payload.status, "updated": True}
+
     return router
