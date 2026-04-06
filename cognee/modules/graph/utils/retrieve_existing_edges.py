@@ -5,6 +5,7 @@ from cognee.shared.data_models import KnowledgeGraph
 
 
 def _create_existing_edge_key(source_id: str, target_id: str, relationship_name: str) -> str:
+    """Build a lookup key matching the format used by expand_with_nodes_and_edges."""
     return f"{source_id}_{target_id}_{relationship_name}"
 
 
