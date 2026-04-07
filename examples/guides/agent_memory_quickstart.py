@@ -50,9 +50,7 @@ async def ask_llm(question: str) -> str:
 )
 async def with_memory_agent() -> str:
     # Uses a fixed retrieval query declared at decoration time.
-    return await ask_llm(
-        "What animal does cognee internal name refer to?"
-    )
+    return await ask_llm("What animal does cognee internal name refer to?")
 
 
 @cognee.agent_memory(
@@ -68,9 +66,7 @@ async def with_dynamic_memory_agent(question: str) -> str:
 @cognee.agent_memory(with_memory=False, save_traces=True)
 async def without_memory_agent() -> str:
     # Same downstream LLM call shape, but memory retrieval is disabled.
-    return await ask_llm(
-        "What animal does cognee internal name refer to?"
-    )
+    return await ask_llm("What animal does cognee internal name refer to?")
 
 
 @cognee.agent_memory(with_memory=False, save_traces=True)
