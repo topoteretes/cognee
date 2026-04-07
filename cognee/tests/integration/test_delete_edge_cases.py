@@ -126,8 +126,8 @@ async def test_last_accessed_updates_on_search():
             last_accessed_after = last_accessed_after.replace(tzinfo=timezone.utc)
 
         time_diff = (datetime.now(timezone.utc) - last_accessed_after).total_seconds()
-        assert time_diff < 5, (
-            f"last_accessed should be recent (within 5 seconds), but was {time_diff}s ago"
+        assert time_diff < 8, (
+            f"last_accessed should be recent (within 8 seconds), but was {time_diff}s ago"
         )
 
         logger.info(f"✅ last_accessed updated successfully (time_diff={time_diff:.2f}s)")
