@@ -40,13 +40,16 @@ _TYPE_RETRIEVERS: Dict[str, type] = {
 
 # Per-type top_k overrides (retriever defaults used otherwise)
 _TYPE_TOP_K: Dict[str, int] = {
-    "summarization": 30,
-    "temporal_reasoning": 10,
-    "event_ordering": 10,
-    "abstention": 10,
-    "information_extraction": 10,
-    "contradiction_resolution": 10,
-    "knowledge_update": 10,
+    "summarization": 50,
+    "temporal_reasoning": 20,
+    "event_ordering": 20,
+    "abstention": 20,
+    "information_extraction": 20,
+    "contradiction_resolution": 20,
+    "knowledge_update": 20,
+    "multi_session_reasoning": 20,
+    "instruction_following": 20,
+    "preference_following": 20,
 }
 
 _DEFAULT_PROMPT = (
@@ -117,6 +120,13 @@ _TYPE_PROMPTS: Dict[str, str] = {
         "like 'before', 'after', 'first', 'then', 'finally'. Present the events as a clearly "
         "ordered sequence."
     ),
+    "preference_following": (
+        "You are answering a question about a user's stated preferences, choices, or "
+        "likes/dislikes from a conversation. Focus on what the user explicitly expressed "
+        "they prefer, want, or chose. Quote or paraphrase their exact preferences rather "
+        "than inferring. If the user changed their preference across sessions, report the "
+        "most recent one."
+    ),
 }
 
 
@@ -127,18 +137,60 @@ class BEAMRouter:
 
         router = BEAMRouter()
         answers = await router.answer_questions(questions)
+
+        # For 10M-scale benchmarks with higher retrieval budgets:
+        router = BEAMRouter(
+            top_k_overrides={"summarization": 150, "DEFAULT": 50},
+            context_extension_rounds=8,
+        )
     """
 
-    def __init__(self, fallback_retriever: Optional[type] = None):
+    def __init__(
+        self,
+        fallback_retriever: Optional[type] = None,
+        top_k_overrides: Optional[Dict[str, int]] = None,
+        context_extension_rounds: Optional[int] = None,
+        wide_search_top_k: Optional[int] = None,
+        triplet_distance_penalty: Optional[float] = None,
+    ):
         self._fallback_retriever = fallback_retriever or GraphCompletionRetriever
+        self._top_k_overrides = top_k_overrides or {}
+        self._context_extension_rounds = context_extension_rounds
+        self._wide_search_top_k = wide_search_top_k
+        self._triplet_distance_penalty = triplet_distance_penalty
+
+    def _get_top_k(self, question_type: str) -> Optional[int]:
+        """Resolve top_k: instance overrides > per-type defaults."""
+        if question_type in self._top_k_overrides:
+            return self._top_k_overrides[question_type]
+        if "DEFAULT" in self._top_k_overrides:
+            return self._top_k_overrides["DEFAULT"]
+        return _TYPE_TOP_K.get(question_type)
 
     def _make_retriever(self, question_type: str) -> BaseRetriever:
         """Create a fresh retriever instance for parallel use."""
         retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
         prompt = _TYPE_PROMPTS.get(question_type, _DEFAULT_PROMPT)
         kwargs: Dict[str, Any] = {"system_prompt": prompt}
-        if question_type in _TYPE_TOP_K:
-            kwargs["top_k"] = _TYPE_TOP_K[question_type]
+        top_k = self._get_top_k(question_type)
+        if top_k is not None:
+            kwargs["top_k"] = top_k
+        # Graph retriever params — only passed when explicitly set (None = use retriever defaults)
+        if self._wide_search_top_k is not None and retriever_cls in (
+            GraphCompletionRetriever,
+            GraphCompletionContextExtensionRetriever,
+        ):
+            kwargs["wide_search_top_k"] = self._wide_search_top_k
+        if self._triplet_distance_penalty is not None and retriever_cls in (
+            GraphCompletionRetriever,
+            GraphCompletionContextExtensionRetriever,
+        ):
+            kwargs["triplet_distance_penalty"] = self._triplet_distance_penalty
+        if (
+            self._context_extension_rounds is not None
+            and retriever_cls is GraphCompletionContextExtensionRetriever
+        ):
+            kwargs["context_extension_rounds"] = self._context_extension_rounds
         return retriever_cls(**kwargs)
 
     async def _answer_single(
@@ -196,7 +248,7 @@ class BEAMRouter:
             return answer
 
     async def answer_questions(
-        self, questions: List[Dict[str, Any]], max_concurrent: int = 5
+        self, questions: List[Dict[str, Any]], max_concurrent: int = 10
     ) -> List[Dict[str, Any]]:
         """Answer a list of BEAM probing questions using type-based routing.
 

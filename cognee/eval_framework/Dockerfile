@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Set environment variables
 ENV PIP_NO_CACHE_DIR=true
@@ -27,3 +27,10 @@ RUN poetry install --extras distributed --extras evals --extras deepeval --no-ro
 
 COPY cognee/ /app/cognee
 COPY distributed/ /app/distributed
+
+# Force-upgrade packages that poetry pins too old
+# pydantic_core requires typing_extensions >= 4.12 (Sentinel)
+RUN pip install --force-reinstall --no-deps "typing_extensions>=4.14" && \
+    pip install datasets && \
+    python -c "from typing_extensions import Sentinel; print('typing_extensions OK')" && \
+    python -c "import pydantic; print(f'pydantic {pydantic.__version__} OK')"

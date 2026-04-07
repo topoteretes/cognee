@@ -49,6 +49,7 @@ class CorpusBuilderExecutor:
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
         chunks_per_batch: Optional[int] = None,
         custom_prompt: Optional[str] = None,
+        skip_prune: bool = False,
     ) -> List[str]:
         self.load_corpus(
             limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
@@ -58,6 +59,7 @@ class CorpusBuilderExecutor:
             chunker=chunker,
             chunks_per_batch=chunks_per_batch,
             custom_prompt=custom_prompt,
+            skip_prune=skip_prune,
         )
         return self.questions
 
@@ -67,9 +69,11 @@ class CorpusBuilderExecutor:
         chunker=TextChunker,
         chunks_per_batch: Optional[int] = None,
         custom_prompt: Optional[str] = None,
+        skip_prune: bool = False,
     ) -> None:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
+        if not skip_prune:
+            await cognee.prune.prune_data()
+            await cognee.prune.prune_system(metadata=True)
 
         await cognee.add(self.raw_corpus)
 

@@ -51,14 +51,26 @@ async def run_corpus_builder(
         benchmark_arg = params["benchmark"]
         beam_max_batches = params.get("_beam_max_batches")
         beam_conv_index = params.get("_beam_conversation_index")
+        beam_split = params.get("_beam_split", "100K")
         if benchmark_arg == "BEAM" and (
             beam_max_batches is not None or beam_conv_index is not None
         ):
             from cognee.eval_framework.benchmark_adapters.beam_adapter import BEAMAdapter
 
             benchmark_arg = BEAMAdapter(
+                split=beam_split,
                 max_batches=beam_max_batches,
                 conversation_index=beam_conv_index or 0,
+            )
+        elif benchmark_arg == "BEAM-10M":
+            from cognee.eval_framework.benchmark_adapters.beam_10m_adapter import (
+                BEAM10MAdapter,
+            )
+
+            benchmark_arg = BEAM10MAdapter(
+                conversation_index=beam_conv_index or 0,
+                plans=params.get("_beam_plans"),
+                max_batches_per_plan=beam_max_batches,
             )
 
         corpus_builder = CorpusBuilderExecutor(
@@ -73,6 +85,7 @@ async def run_corpus_builder(
             instance_filter=instance_filter,
             chunks_per_batch=params.get("chunks_per_batch"),
             custom_prompt=params.get("custom_prompt"),
+            skip_prune=params.get("_skip_prune", False),
         )
         with open(params["questions_path"], "w", encoding="utf-8") as f:
             json.dump(questions, f, ensure_ascii=False, indent=4)

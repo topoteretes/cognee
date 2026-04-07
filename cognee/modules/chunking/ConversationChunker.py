@@ -17,7 +17,10 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 # Matches lines like "User: ...", "[March-15-2024] User: ...", "Assistant: ..."
 _TURN_START = re.compile(r"^(?:\[.*?\]\s*)?(?:User|Assistant):\s", re.MULTILINE)
-_SESSION_MARKER = re.compile(r"^--- Session \d+ ---$", re.MULTILINE)
+_SESSION_MARKER = re.compile(r"^--- Session \d+.*---$", re.MULTILINE)
+
+# Matches BEAM-10M plan headers like "=== PLAN-1 ==="
+_PLAN_MARKER = re.compile(r"^===\s*PLAN-\d+\s*===$", re.MULTILINE | re.IGNORECASE)
 
 # Matches fenced code blocks (```...```) including the language tag
 _CODE_BLOCK = re.compile(r"```[\w]*\n.*?```", re.DOTALL)
@@ -75,6 +78,11 @@ def _split_into_turn_pairs(text: str) -> list[tuple[str, int, int]]:
             turns_in_pair = 0
 
     for line in lines:
+        # Skip BEAM-10M plan headers (=== PLAN-X ===)
+        if _PLAN_MARKER.match(line.strip()):
+            _flush()
+            continue
+
         # Detect session boundaries
         session_match = _SESSION_MARKER.match(line.strip())
         if session_match:
@@ -112,11 +120,70 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+# Max chars per chunk — keeps chunks within embedding model token limits.
+# 30000 chars ≈ 7500 tokens, safely under the 8191 token limit.
+_MAX_CHUNK_CHARS = 30000
+
+
+def _split_oversized(text: str, session: int, turn: int) -> list[tuple[str, int, int]]:
+    """Split a chunk that exceeds _MAX_CHUNK_CHARS into smaller pieces.
+
+    Tries paragraph boundaries first, then falls back to newline boundaries.
+    """
+    if len(text) <= _MAX_CHUNK_CHARS:
+        return [(text, session, turn)]
+
+    # Try splitting on paragraph boundaries first
+    parts = _split_on_separator(text, "\n\n")
+
+    # If any part is still too large, split on single newlines
+    final = []
+    for part in parts:
+        if len(part) > _MAX_CHUNK_CHARS:
+            final.extend(_split_on_separator(part, "\n"))
+        else:
+            final.append(part)
+
+    # Last resort: hard split at max size
+    result = []
+    for part in final:
+        while len(part) > _MAX_CHUNK_CHARS:
+            result.append(part[:_MAX_CHUNK_CHARS])
+            part = part[_MAX_CHUNK_CHARS:]
+        if part:
+            result.append(part)
+
+    return [(r, session, turn) for r in result]
+
+
+def _split_on_separator(text: str, sep: str) -> list[str]:
+    """Split text on separator, grouping pieces to stay under _MAX_CHUNK_CHARS."""
+    segments = text.split(sep)
+    parts = []
+    current = []
+    current_len = 0
+    sep_len = len(sep)
+
+    for seg in segments:
+        if current_len + len(seg) + sep_len > _MAX_CHUNK_CHARS and current:
+            parts.append(sep.join(current))
+            current = []
+            current_len = 0
+        current.append(seg)
+        current_len += len(seg) + sep_len
+
+    if current:
+        parts.append(sep.join(current))
+
+    return parts
+
+
 class ConversationChunker(Chunker):
     """Chunks conversation text by user-assistant turn pairs.
 
     Code blocks, HTML, and inline code are stripped to reduce noise
     for graph extraction. BEAM metadata annotations are also removed.
+    Chunks exceeding the embedding token limit are split further.
     """
 
     async def read(self):
@@ -126,23 +193,28 @@ class ConversationChunker(Chunker):
 
         turn_pairs = _split_into_turn_pairs(full_text)
 
-        for idx, (pair_text, session_num, turn_num) in enumerate(turn_pairs):
+        idx = 0
+        for pair_text, session_num, turn_num in turn_pairs:
             cleaned = _clean_text(pair_text)
-            chunk_size = _estimate_tokens(cleaned)
+            sub_chunks = _split_oversized(cleaned, session_num, turn_num)
 
-            yield DocumentChunk(
-                id=uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{idx}"),
-                text=cleaned,
-                chunk_size=chunk_size,
-                is_part_of=self.document,
-                chunk_index=idx,
-                cut_type="conversation_turn_pair",
-                contains=[],
-                metadata={
-                    "index_fields": ["text"],
-                    "session": session_num,
-                    "turn": turn_num,
-                },
-            )
+            for sub_text, sess, turn in sub_chunks:
+                chunk_size = _estimate_tokens(sub_text)
 
-        self.chunk_index = len(turn_pairs)
+                yield DocumentChunk(
+                    id=uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{idx}"),
+                    text=sub_text,
+                    chunk_size=chunk_size,
+                    is_part_of=self.document,
+                    chunk_index=idx,
+                    cut_type="conversation_turn_pair",
+                    contains=[],
+                    metadata={
+                        "index_fields": ["text"],
+                        "session": sess,
+                        "turn": turn,
+                    },
+                )
+                idx += 1
+
+        self.chunk_index = idx
