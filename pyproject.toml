@@ -136,7 +136,7 @@ evals = [
     "scikit-learn>=1.6.1,<2",
 ]
 
-graphiti = ["graphiti-core>=0.7.0,<0.8"]
+graphiti = ["graphiti-core>=0.7.0,<0.29"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
