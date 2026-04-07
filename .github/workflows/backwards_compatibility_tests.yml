@@ -1,0 +1,161 @@
+name: Backwards Compatibility Tests
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+env:
+  ENV: dev
+  LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+  LLM_MODEL: ${{ secrets.LLM_MODEL }}
+  LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+  LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+  LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+
+  EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER }}
+  EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+  EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+  EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+  EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+  EMBEDDING_DIMENSIONS: 300
+
+jobs:
+  # ── Job 1: SQLite + LanceDB (default stack) ──────────────────────────────────
+  backwards-compatibility-sqlite:
+    name: Backwards compatibility — SQLite + LanceDB
+    runs-on: ubuntu-22.04
+
+    env:
+      # Outside the repo dir so DB files survive git checkouts
+      DATA_ROOT_DIRECTORY: ${{ github.workspace }}/cognee_compat_data
+      SYSTEM_ROOT_DIRECTORY: ${{ github.workspace }}/cognee_compat_system
+
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      # Save test scripts — they won't exist on the v0.5.7 tag
+      - name: Save compatibility test scripts
+        run: cp -r cognee/tests/backwards_compatibility /tmp/compat_scripts
+
+      # ── Phase 1: v0.5.7 ────────────────────────────────────────────────────
+      - name: Switch to cognee v0.5.7
+        run: git checkout v0.5.7
+
+      - name: Install cognee v0.5.7 dependencies
+        run: uv sync --extra api --extra docs --extra dev
+
+      - name: "Phase 1 — add, cognify, search (cognee v0.5.7)"
+        run: uv run python /tmp/compat_scripts/phase1_seed.py
+
+      # ── Alembic migrations ─────────────────────────────────────────────────
+      - name: Switch back to current branch
+        run: git checkout ${{ github.sha }}
+
+      - name: Install current branch dependencies
+        run: uv sync --extra api --extra docs --extra dev
+
+      - name: Run Alembic migrations (current branch schema → v0.5.7 databases)
+        run: |
+          alembic upgrade head
+
+      # ── Phase 2: current branch ────────────────────────────────────────────
+      - name: "Phase 2 — search v0.5.7 data (compat), then add, cognify, search (current branch)"
+        run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py
+
+  # ── Job 2: PostgreSQL + PGVector ─────────────────────────────────────────────
+  backwards-compatibility-postgres:
+    name: Backwards compatibility — PostgreSQL + PGVector
+    runs-on: ubuntu-22.04
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      # Relational DB — PostgreSQL
+      DB_PROVIDER: postgres
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: cognee
+      DB_PASSWORD: cognee
+      DB_NAME: cognee_db
+
+      # Vector DB — PGVector (same postgres instance)
+      VECTOR_DB_PROVIDER: pgvector
+      VECTOR_DB_URL: postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+
+      # Graph DB — Kuzu (file-based; outside repo dir so it survives git checkouts)
+      DATA_ROOT_DIRECTORY: ${{ github.workspace }}/cognee_compat_data
+      SYSTEM_ROOT_DIRECTORY: ${{ github.workspace }}/cognee_compat_system
+
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      # Save test scripts — they won't exist on the v0.5.7 tag
+      - name: Save compatibility test scripts
+        run: cp -r cognee/tests/backwards_compatibility /tmp/compat_scripts
+
+      # ── Phase 1: v0.5.7 ────────────────────────────────────────────────────
+      - name: Switch to cognee v0.5.7
+        run: git checkout v0.5.7
+
+      - name: Install cognee v0.5.7 dependencies (with postgres extra)
+        run: uv sync --extra api --extra docs --extra dev --extra postgres
+
+      - name: "Phase 1 — add, cognify, search (cognee v0.5.7 / postgres)"
+        run: uv run python /tmp/compat_scripts/phase1_seed.py
+
+      # ── Alembic migrations ─────────────────────────────────────────────────
+      - name: Switch back to current branch
+        run: git checkout ${{ github.sha }}
+
+      - name: Install current branch dependencies (with postgres extra)
+        run: uv sync --extra api --extra docs --extra dev --extra postgres
+
+      - name: Run Alembic migrations (current branch schema → v0.5.7 databases)
+        run: |
+          alembic upgrade head
+
+      # ── Phase 2: current branch ────────────────────────────────────────────
+      - name: "Phase 2 — search v0.5.7 data (compat), then add, cognify, search (current branch)"
+        run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py
