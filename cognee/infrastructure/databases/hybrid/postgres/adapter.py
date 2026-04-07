@@ -245,12 +245,11 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         """Insert nodes into graph and their embeddings into vector tables
         in a single database transaction.
 
-        For each data point:
-        1. Insert/upsert into graph_node
-        2. For each index field, embed the text and insert into the
-           corresponding vector collection table
-
-        All inserts share one transaction for atomicity.
+        All graph node rows are inserted in one batched statement, and each
+        vector collection's rows are inserted in one batched statement per
+        collection. This keeps the transaction short (one statement per table)
+        and avoids deadlocks when multiple concurrent callers write to the
+        same tables.
         """
         if not data_points:
             return
@@ -290,15 +289,41 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 collection.rsplit("_", 1)[0], collection.rsplit("_", 1)[1]
             )
 
-        # Single transaction: graph nodes + vector embeddings
-        # Future optimization: batch multiple rows per INSERT if profiling shows benefit
+        # Build all rows in Python, then one INSERT per table inside the transaction.
+        core_keys = {"id", "name", "type"}
+        node_rows = []
+        for dp in data_points:
+            props = dp.model_dump() if hasattr(dp, "model_dump") else vars(dp)
+            extra = {k: v for k, v in props.items() if k not in core_keys}
+            node_rows.append({
+                "id": str(props.get("id", "")),
+                "name": str(props.get("name", "")),
+                "type": str(props.get("type", "")),
+                "properties": json.dumps(extra, cls=JSONEncoder),
+                "now": now,
+            })
+
+        vector_rows_by_table: Dict[str, List[Dict]] = {}
+        for collection, items in embeddings_by_collection.items():
+            table = _validate_table_name(collection)
+            rows = []
+            for dp, vector, embed_text in items:
+                index_point = IndexSchema(
+                    id=dp.id,
+                    text=embed_text,
+                    belongs_to_set=(dp.belongs_to_set or []),
+                )
+                payload = serialize_data(index_point.model_dump())
+                rows.append({
+                    "id": str(dp.id),
+                    "payload": json.dumps(payload),
+                    "vector": str(vector),
+                })
+            vector_rows_by_table[table] = rows
+
+        # Single transaction: one batched INSERT per table
         async with self._graph._session() as session:
-            # Insert graph nodes
-            core_keys = {"id", "name", "type"}
-            for dp in data_points:
-                props = dp.model_dump() if hasattr(dp, "model_dump") else vars(dp)
-                extra = {k: v for k, v in props.items() if k not in core_keys}
-                extra_json = json.dumps(extra, cls=JSONEncoder)
+            if node_rows:
                 await session.execute(
                     text("""
                         INSERT INTO graph_node (id, name, type, properties, created_at, updated_at)
@@ -309,25 +334,11 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                             properties = EXCLUDED.properties,
                             updated_at = EXCLUDED.updated_at
                     """),
-                    {
-                        "id": str(props.get("id", "")),
-                        "name": str(props.get("name", "")),
-                        "type": str(props.get("type", "")),
-                        "properties": extra_json,
-                        "now": now,
-                    },
+                    node_rows,
                 )
 
-            # Insert vector embeddings into each collection table
-            for collection, items in embeddings_by_collection.items():
-                table = _validate_table_name(collection)
-                for dp, vector, embed_text in items:
-                    index_point = IndexSchema(
-                        id=dp.id,
-                        text=embed_text,
-                        belongs_to_set=(dp.belongs_to_set or []),
-                    )
-                    payload = serialize_data(index_point.model_dump())
+            for table, rows in vector_rows_by_table.items():
+                if rows:
                     await session.execute(
                         text(f"""
                             INSERT INTO {table} (id, payload, vector)
@@ -336,11 +347,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                                 payload = EXCLUDED.payload,
                                 vector = EXCLUDED.vector
                         """),
-                        {
-                            "id": str(dp.id),
-                            "payload": json.dumps(payload),
-                            "vector": str(vector),
-                        },
+                        rows,
                     )
 
             await session.commit()
@@ -351,13 +358,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         """Insert edges into graph and their type embeddings into vector
         tables in a single database transaction.
 
-        For each edge:
-        1. Insert/upsert into graph_edge
-        2. Collect unique edge types and embed them
-        3. Insert EdgeType embeddings into the EdgeType_relationship_name
-           vector collection
-
-        All inserts share one transaction for atomicity.
+        All graph edge rows are inserted in one batched statement, and
+        edge type vector rows in one batched statement. This keeps the
+        transaction short and avoids deadlocks.
         """
         if not edges:
             return
@@ -386,14 +389,47 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         collection = "EdgeType_relationship_name"
         await self._vector.create_vector_index("EdgeType", "relationship_name")
 
-        # Single transaction: graph edges + edge type vectors
-        async with self._graph._session() as session:
-            # Insert graph edges
-            for edge in edges:
-                source_id, target_id, rel_name = str(edge[0]), str(edge[1]), edge[2]
-                props = edge[3] if len(edge) > 3 and edge[3] else {}
-                props_json = json.dumps(props, cls=JSONEncoder)
+        # Build all rows in Python, then one INSERT per table.
+        edge_rows = []
+        for edge in edges:
+            source_id, target_id, rel_name = str(edge[0]), str(edge[1]), edge[2]
+            props = edge[3] if len(edge) > 3 and edge[3] else {}
+            props_json = json.dumps(props, cls=JSONEncoder)
+            edge_rows.append({
+                "src": source_id,
+                "tgt": target_id,
+                "rel": rel_name,
+                "props": props_json,
+                "now": now,
+            })
 
+        vector_rows = []
+        table = _validate_table_name(collection)
+        for edge_text, count in edge_type_counts.items():
+            edge_id = generate_edge_id(edge_id=edge_text)
+            vector = text_to_vector.get(edge_text)
+            if vector is None:
+                continue
+            edge_type_dp = EdgeType(
+                id=edge_id,
+                relationship_name=edge_text,
+                number_of_edges=count,
+            )
+            index_point = IndexSchema(
+                id=edge_id,
+                text=edge_text,
+                belongs_to_set=(edge_type_dp.belongs_to_set or []),
+            )
+            payload = json.dumps(serialize_data(index_point.model_dump()))
+            vector_rows.append({
+                "id": str(edge_id),
+                "payload": payload,
+                "vector": str(vector),
+            })
+
+        # Single transaction: one batched INSERT per table
+        async with self._graph._session() as session:
+            if edge_rows:
                 await session.execute(
                     text("""
                         INSERT INTO graph_edge
@@ -404,33 +440,10 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                             properties = EXCLUDED.properties,
                             updated_at = EXCLUDED.updated_at
                     """),
-                    {
-                        "src": source_id,
-                        "tgt": target_id,
-                        "rel": rel_name,
-                        "props": props_json,
-                        "now": now,
-                    },
+                    edge_rows,
                 )
 
-            # Insert edge type vectors
-            table = _validate_table_name(collection)
-            for edge_text, count in edge_type_counts.items():
-                edge_id = generate_edge_id(edge_id=edge_text)
-                vector = text_to_vector.get(edge_text)
-                if vector is None:
-                    continue
-                edge_type_dp = EdgeType(
-                    id=edge_id,
-                    relationship_name=edge_text,
-                    number_of_edges=count,
-                )
-                index_point = IndexSchema(
-                    id=edge_id,
-                    text=edge_text,
-                    belongs_to_set=(edge_type_dp.belongs_to_set or []),
-                )
-                payload = json.dumps(serialize_data(index_point.model_dump()))
+            if vector_rows:
                 await session.execute(
                     text(f"""
                         INSERT INTO {table} (id, payload, vector)
@@ -439,7 +452,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                             payload = EXCLUDED.payload,
                             vector = EXCLUDED.vector
                     """),
-                    {"id": str(edge_id), "payload": payload, "vector": str(vector)},
+                    vector_rows,
                 )
 
             await session.commit()

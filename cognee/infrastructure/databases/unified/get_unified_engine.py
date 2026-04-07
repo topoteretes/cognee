@@ -23,7 +23,12 @@ def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
 
 
 async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
-    """Create a single adapter instance for a hybrid backend."""
+    """Create a single adapter instance for a hybrid backend.
+
+    For pghybrid, reuses the cached PGVectorAdapter from get_vector_engine()
+    (requires VECTOR_DB_PROVIDER=pgvector) so that metadata caches persist
+    across calls.
+    """
     import os
 
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
@@ -62,40 +67,14 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
         from cognee.infrastructure.databases.relational.get_relational_engine import (
             get_relational_engine,
         )
-        from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
-        from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
-            PGVectorAdapter,
-        )
-        from cognee.infrastructure.databases.relational import get_relational_config
 
         # Graph adapter reuses the relational engine
         relational_engine = get_relational_engine()
         graph_adapter = PostgresAdapter(relational_engine=relational_engine)
 
-        # Vector adapter: build connection string from relational config
-        relational_config = get_relational_config()
-        required = {
-            "DB_HOST": relational_config.db_host,
-            "DB_PORT": relational_config.db_port,
-            "DB_USERNAME": relational_config.db_username,
-            "DB_PASSWORD": relational_config.db_password,
-        }
-        missing = [name for name, value in required.items() if not value]
-        if missing:
-            raise EnvironmentError(
-                f"Missing relational settings for pghybrid: {', '.join(missing)}"
-            )
-        connection_string = (
-            f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
-            f"@{relational_config.db_host}:{relational_config.db_port}"
-            f"/{relational_config.db_name}"
-        )
-        embedding_engine = get_embedding_engine()
-        vector_adapter = PGVectorAdapter(
-            connection_string=connection_string,
-            api_key=None,
-            embedding_engine=embedding_engine,
-        )
+        # Vector adapter: reuse the cached PGVectorAdapter from the
+        # vector engine factory. This requires VECTOR_DB_PROVIDER=pgvector.
+        vector_adapter = get_vector_engine()
 
         return PostgresHybridAdapter(
             graph_adapter=graph_adapter,
