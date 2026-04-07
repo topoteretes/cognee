@@ -25,7 +25,7 @@ async def setup_memory() -> None:
         (
             "Internal product note for the Cognee agentic memory feature: "
             "the private internal codename for the first supported `cognee.agent_memory` release "
-            "is 'Maple Panda'"
+            "is Maple Panda"
         ),
     )
     await cognee.cognify()
@@ -42,7 +42,7 @@ async def ask_llm(question: str) -> str:
 @cognee.agent_memory(
     with_memory=True,
     save_traces=True,
-    memory_query_fixed="What is the private internal codename for the first supported cognee.agent_memory release?",
+    memory_query_fixed="What animal does cognee internal name refer to?",
     memory_system_prompt=(
         "Return only the codename from memory context. "
         "If there is no matching codename, return an empty string."
@@ -51,7 +51,7 @@ async def ask_llm(question: str) -> str:
 async def with_memory_agent() -> str:
     # Uses a fixed retrieval query declared at decoration time.
     return await ask_llm(
-        "What is the private internal codename for the first supported cognee.agent_memory release?"
+        "What animal does cognee internal name refer to?"
     )
 
 
@@ -69,7 +69,7 @@ async def with_dynamic_memory_agent(question: str) -> str:
 async def without_memory_agent() -> str:
     # Same downstream LLM call shape, but memory retrieval is disabled.
     return await ask_llm(
-        "What is the private internal codename for the first supported cognee.agent_memory release?"
+        "What animal does cognee internal name refer to?"
     )
 
 
