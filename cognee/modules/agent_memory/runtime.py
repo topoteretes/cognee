@@ -281,7 +281,7 @@ async def retrieve_memory_context(context: AgentMemoryContext) -> str:
 
             results = await search(
                 query_text=query_text,
-                query_type=SearchType.GRAPH_COMPLETION,
+                query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
                 user=context.scope.user,
                 dataset_ids=[context.scope.dataset_id],
                 system_prompt=context.config.memory_system_prompt,
