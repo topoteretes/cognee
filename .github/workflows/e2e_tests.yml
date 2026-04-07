@@ -1471,7 +1471,11 @@ jobs:
 
       # Vector DB — PGVector (same postgres instance)
       VECTOR_DB_PROVIDER: pgvector
-      VECTOR_DB_URL: postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+      VECTOR_DB_HOST: localhost
+      VECTOR_DB_PORT: 5432
+      VECTOR_DB_USERNAME: cognee
+      VECTOR_DB_PASSWORD: cognee
+      VECTOR_DATASET_DATABASE_HANDLER: "pgvector"
 
       ENV: dev
       LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
