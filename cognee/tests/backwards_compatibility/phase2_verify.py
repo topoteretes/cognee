@@ -1,9 +1,14 @@
 """
-Phase 2 - Backwards Compatibility Test (run with current branch)
+Backwards Compatibility Test
 
-1. Search the data written by v0.5.7 (backwards compatibility check).
-2. Add and cognify the same data with the current branch.
-3. Search again to confirm the current branch works end-to-end.
+Phase 1 -  run with cognee v0.5.7
+
+Seeds the database with Lorem Ipsum data: add → cognify → search.
+
+Phase 2 - run with current Cognee branch
+
+Verifies that the current branch can search the v0.5.7 cognified data, then adds + cognifies new Lorem Ipsum data with
+the current branch and verifies search again.
 """
 
 import asyncio
