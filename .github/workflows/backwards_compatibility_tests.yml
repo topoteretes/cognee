@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
+      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.7
+
       # Outside the repo dir so DB files survive git checkouts
       DATA_ROOT_DIRECTORY: ${{ github.workspace }}/cognee_compat_data
       SYSTEM_ROOT_DIRECTORY: ${{ github.workspace }}/cognee_compat_system
@@ -54,13 +56,13 @@ jobs:
         run: cp -r cognee/tests/backwards_compatibility /tmp/compat_scripts
 
       # ── Phase 1: v0.5.7 ────────────────────────────────────────────────────
-      - name: Switch to cognee v0.5.7
-        run: git checkout v0.5.7
+      - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+        run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
-      - name: Install cognee v0.5.7 dependencies
+      - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies
         run: uv sync --extra api --extra docs --extra dev
 
-      - name: "Phase 1 — add, cognify, search (cognee v0.5.7)"
+      - name: "Phase 1 — add, cognify, search (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
         run: uv run python /tmp/compat_scripts/phase1_seed.py
 
       # ── Alembic migrations ─────────────────────────────────────────────────
@@ -99,6 +101,8 @@ jobs:
           - 5432:5432
 
     env:
+      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.7
+
       # Relational DB — PostgreSQL
       DB_PROVIDER: postgres
       DB_HOST: localhost
@@ -136,13 +140,13 @@ jobs:
         run: cp -r cognee/tests/backwards_compatibility /tmp/compat_scripts
 
       # ── Phase 1: v0.5.7 ────────────────────────────────────────────────────
-      - name: Switch to cognee v0.5.7
-        run: git checkout v0.5.7
+      - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+        run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
-      - name: Install cognee v0.5.7 dependencies (with postgres extra)
+      - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies (with postgres extra)
         run: uv sync --extra api --extra docs --extra dev --extra postgres
 
-      - name: "Phase 1 — add, cognify, search (cognee v0.5.7 / postgres)"
+      - name: "Phase 1 — add, cognify, search (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} / postgres)"
         run: uv run python /tmp/compat_scripts/phase1_seed.py
 
       # ── Alembic migrations ─────────────────────────────────────────────────
