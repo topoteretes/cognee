@@ -1432,6 +1432,7 @@ jobs:
         run: uv sync --extra api --extra docs --extra dev
 
       - name: Run Alembic migrations (current branch schema → legacy version databases)
+        working-directory: cognee
         run: uv run alembic upgrade head
 
       # ── Phase 2: current branch ────────────────────────────────────────────
@@ -1523,6 +1524,7 @@ jobs:
         run: uv sync --extra api --extra docs --extra dev --extra postgres
 
       - name: Run Alembic migrations (current branch schema → legacy version databases)
+        working-directory: cognee
         run: uv run alembic upgrade head
 
       # ── Phase 2: current branch ────────────────────────────────────────────
