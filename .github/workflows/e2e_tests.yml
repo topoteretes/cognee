@@ -1410,11 +1410,11 @@ jobs:
         with:
           enable-cache: true
 
-      # Save test scripts — they won't exist on the v0.5.7 tag
+      # Save test scripts — they won't exist on the legacy version tag
       - name: Save compatibility test scripts
         run: cp -r cognee/tests/backwards_compatibility /tmp/compat_scripts
 
-      # ── Phase 1: v0.5.7 ────────────────────────────────────────────────────
+      # ── Phase 1: legacy version ────────────────────────────────────────────
       - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
         run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
@@ -1431,12 +1431,12 @@ jobs:
       - name: Install current branch dependencies
         run: uv sync --extra api --extra docs --extra dev
 
-      - name: Run Alembic migrations (current branch schema → v0.5.7 databases)
+      - name: Run Alembic migrations (current branch schema → legacy version databases)
         run: |
           alembic upgrade head
 
       # ── Phase 2: current branch ────────────────────────────────────────────
-      - name: "Phase 2 — search v0.5.7 data (compat), then add, cognify, search (current branch)"
+      - name: "Phase 2 — search legacy version data, then add, cognify, search (current branch)"
         run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py
 
   backwards-compatibility-postgres:
@@ -1502,11 +1502,11 @@ jobs:
         with:
           enable-cache: true
 
-      # Save test scripts — they won't exist on the v0.5.7 tag
+      # Save test scripts — they won't exist on the legacy version tag
       - name: Save compatibility test scripts
         run: cp -r cognee/tests/backwards_compatibility /tmp/compat_scripts
 
-      # ── Phase 1: v0.5.7 ────────────────────────────────────────────────────
+      # ── Phase 1: legacy version ────────────────────────────────────────────
       - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
         run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
@@ -1523,10 +1523,10 @@ jobs:
       - name: Install current branch dependencies (with postgres extra)
         run: uv sync --extra api --extra docs --extra dev --extra postgres
 
-      - name: Run Alembic migrations (current branch schema → v0.5.7 databases)
+      - name: Run Alembic migrations (current branch schema → legacy version databases)
         run: |
           alembic upgrade head
 
       # ── Phase 2: current branch ────────────────────────────────────────────
-      - name: "Phase 2 — search v0.5.7 data (compat), then add, cognify, search (current branch)"
+      - name: "Phase 2 — search legacy version data, then add, cognify, search (current branch)"
         run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py
