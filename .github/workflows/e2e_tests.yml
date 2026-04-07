@@ -1380,7 +1380,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.7
+      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.6
 
       ENV: dev
       LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
@@ -1459,7 +1459,7 @@ jobs:
           - 5432:5432
 
     env:
-      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.7
+      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.6
 
       # Relational DB — PostgreSQL
       DB_PROVIDER: postgres
