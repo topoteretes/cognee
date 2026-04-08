@@ -185,8 +185,12 @@ class SessionManager:
             user_id=str(user_id), session_id=resolved_session_id
         )
         if graph_context:
-            if max_context_chars is not None:
-                graph_context = graph_context[:max_context_chars]
+            # Apply context char limit: explicit param > config > unlimited
+            char_limit = max_context_chars
+            if char_limit is None:
+                char_limit = CacheConfig().max_session_context_chars
+            if char_limit is not None:
+                graph_context = graph_context[:char_limit]
             conversation_history = (
                 "Background knowledge from the knowledge graph:\n"
                 + graph_context
