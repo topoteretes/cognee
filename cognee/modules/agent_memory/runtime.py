@@ -33,6 +33,7 @@ class AgentMemoryConfig:
     memory_query_from_method: Optional[str]
     memory_system_prompt: Optional[str]
     memory_top_k: int
+    memory_only_context: bool
     user: Optional[User]
     dataset_name: Optional[str]
 
@@ -90,6 +91,7 @@ def validate_agent_memory_config(
     memory_query_from_method: Optional[str],
     memory_system_prompt: Optional[str],
     memory_top_k: int,
+    memory_only_context: bool = False,
     user: Optional[User],
     dataset_name: Optional[str],
 ) -> AgentMemoryConfig:
@@ -151,6 +153,7 @@ def validate_agent_memory_config(
             memory_system_prompt.strip() if isinstance(memory_system_prompt, str) else None
         ),
         memory_top_k=memory_top_k,
+        memory_only_context=memory_only_context,
         user=user,
         dataset_name=dataset_name.strip() if isinstance(dataset_name, str) else None,
     )
@@ -286,6 +289,7 @@ async def retrieve_memory_context(context: AgentMemoryContext) -> str:
                 dataset_ids=[context.scope.dataset_id],
                 system_prompt=context.config.memory_system_prompt,
                 top_k=context.config.memory_top_k,
+                only_context=context.config.memory_only_context,
             )
         except Exception as error:
             logger.warning(
