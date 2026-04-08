@@ -54,7 +54,7 @@ def redis_adapter():
     from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
     try:
-        yield RedisAdapter(host="localhost", port=6379, log_key="test_usage_logs")
+        yield RedisAdapter(host="redis", port=6379, log_key="test_usage_logs")
     except Exception as e:
         pytest.skip(f"Redis not available: {e}")
 
