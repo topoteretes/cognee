@@ -202,7 +202,9 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
 
         subquery_results = await asyncio.gather(
             *[
-                self._resolve_subquery_context_and_answer(subquery_state.query, subquery_state.edges)
+                self._resolve_subquery_context_and_answer(
+                    subquery_state.query, subquery_state.edges
+                )
                 for subquery_state in state.subqueries
             ]
         )
