@@ -5,6 +5,7 @@ from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 from cognee.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
 from cognee.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
 from cognee.eval_framework.evaluation.metrics.context_coverage import ContextCoverageMetric
+from cognee.eval_framework.evaluation.metrics.rubric import RubricMetric
 from typing import Any, Dict, List
 from deepeval.metrics import ContextualRelevancyMetric
 import time
@@ -22,6 +23,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
             "f1": F1ScoreMetric(),
             "contextual_relevancy": ContextualRelevancyMetric(),
             "context_coverage": ContextCoverageMetric(),
+            "rubric": RubricMetric(),
         }
 
     def _calculate_metric(self, metric: str, test_case: LLMTestCase) -> Dict[str, Any]:
@@ -61,6 +63,13 @@ class DeepEvalAdapter(BaseEvalAdapter):
 
         results = []
         for answer in answers:
+            # Build additional_metadata for metrics that need extra data (e.g., RubricMetric)
+            additional_metadata = {}
+            if "rubric" in answer:
+                additional_metadata["rubric"] = answer["rubric"]
+            if "question_type" in answer:
+                additional_metadata["question_type"] = answer["question_type"]
+
             test_case = LLMTestCase(
                 input=answer["question"],
                 actual_output=answer["answer"],
@@ -69,6 +78,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
                 if "golden_context" in answer
                 else None,
                 context=[answer["golden_context"]] if "golden_context" in answer else None,
+                additional_metadata=additional_metadata if additional_metadata else None,
             )
             metric_results = {}
             for metric in evaluator_metrics:

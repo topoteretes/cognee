@@ -1,0 +1,50 @@
+# Fly.io deployment configuration for Cognee
+#
+# Deploy:
+#   fly apps create cognee
+#   fly secrets set LLM_API_KEY=sk-xxx LLM_MODEL=openai/gpt-4o-mini
+#   fly volumes create cognee_data --size 10 --region iad
+#   fly deploy
+
+app = "cognee"
+primary_region = "iad"
+
+[build]
+dockerfile = "Dockerfile"
+
+[env]
+HOST = "0.0.0.0"
+ENVIRONMENT = "prod"
+DATA_ROOT_DIRECTORY = "/data/cognee_data"
+SYSTEM_ROOT_DIRECTORY = "/data/cognee_system"
+
+[http_service]
+internal_port = 8000
+force_https = true
+auto_stop_machines = "stop"
+auto_start_machines = true
+min_machines_running = 0
+
+[http_service.concurrency]
+type = "requests"
+hard_limit = 50
+soft_limit = 25
+
+[checks]
+  [checks.health]
+  port = 8000
+  type = "http"
+  interval = 30000
+  timeout = 5000
+  grace_period = "30s"
+  method = "GET"
+  path = "/health"
+
+[mounts]
+source = "cognee_data"
+destination = "/data"
+
+[[vm]]
+memory = "2gb"
+cpu_kind = "shared"
+cpus = 2

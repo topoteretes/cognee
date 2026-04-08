@@ -1,0 +1,13 @@
+# Railway deployment configuration for Cognee
+# Deploy: railway init && railway up
+# Or use the "Deploy on Railway" button in the README
+
+[build]
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+numReplicas = 1

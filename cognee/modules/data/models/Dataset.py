@@ -21,6 +21,12 @@ class Dataset(Base):
     tenant_id = Column(UUID, index=True, nullable=True)
 
     acls = relationship("ACL", back_populates="dataset", cascade="all, delete-orphan")
+    configuration = relationship(
+        "DatasetConfiguration",
+        back_populates="dataset",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     data: Mapped[List["Data"]] = relationship(
         "Data",

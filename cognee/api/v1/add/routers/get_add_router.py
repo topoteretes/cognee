@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, UploadFile as UF, Depends
+from fastapi import Form, File, UploadFile as UF, Depends, status
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import WithJsonSchema
 
@@ -13,6 +13,7 @@ from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse
 
 logger = get_logger()
 
@@ -24,7 +25,16 @@ UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"}
 def get_add_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post(
+        "",
+        response_model=dict,
+        responses={
+            400: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
         data: List[UploadFile] = File(default=None),
@@ -81,7 +91,12 @@ def get_add_router() -> APIRouter:
         from cognee.api.v1.add import add as cognee_add
 
         if not datasetId and not datasetName:
-            raise ValueError("Either datasetId or datasetName must be provided.")
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponse(
+                    error="Either datasetId or datasetName must be provided.",
+                ).model_dump(),
+            )
 
         try:
             add_run = await cognee_add(
@@ -95,9 +110,22 @@ def get_add_router() -> APIRouter:
             )
 
             if isinstance(add_run, PipelineRunErrored):
-                return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content=ErrorResponse(
+                        error="Pipeline run errored",
+                        detail=getattr(add_run, "error", None) or str(add_run),
+                    ).model_dump(),
+                )
             return add_run.model_dump()
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.exception("Add failed")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    detail=str(error),
+                ).model_dump(),
+            )
 
     return router
