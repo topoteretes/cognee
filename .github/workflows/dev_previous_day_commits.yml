@@ -1,0 +1,69 @@
+name: automation | Previous Day Dev Commits
+
+on:
+  schedule:
+    - cron: "23 59 * * *"
+  push:
+    branches:
+      - feature/cog-4577-continuous-docs-drafting-from-dev
+
+permissions:
+  contents: read
+
+jobs:
+  list-dev-commits:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch latest dev branch
+        run: git fetch origin dev --no-tags
+
+      - name: Collect previous day commits from dev
+        env:
+          TARGET_BRANCH: origin/dev
+        run: |
+          read -r START_DATE END_DATE <<EOF
+          $(python3 - <<'PY'
+          from datetime import datetime, time, timedelta, timezone
+
+          today = datetime.now(timezone.utc).date()
+          start = datetime.combine(today - timedelta(days=1), time.min, tzinfo=timezone.utc)
+          end = datetime.combine(today, time.min, tzinfo=timezone.utc)
+
+          print(start.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ"))
+          PY
+          )
+          EOF
+
+          echo "Collecting commit subjects from ${TARGET_BRANCH}"
+          echo "Time window (UTC): ${START_DATE} <= committed_at < ${END_DATE}"
+
+          COMMITS="$(git log "${TARGET_BRANCH}" \
+            --since="${START_DATE}" \
+            --until="${END_DATE}" \
+            --pretty=format:'- %s (%h)')"
+
+          {
+            echo "## Previous day commits on dev"
+            echo
+            echo "- Source branch: \`${TARGET_BRANCH}\`"
+            echo "- Time window (UTC): \`${START_DATE}\` to \`${END_DATE}\`"
+            echo
+            if [ -n "${COMMITS}" ]; then
+              echo "${COMMITS}"
+            else
+              echo "No commits were found on \`${TARGET_BRANCH}\` during the previous UTC day."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ -n "${COMMITS}" ]; then
+            echo "${COMMITS}"
+          else
+            echo "No commits were found on ${TARGET_BRANCH} during the previous UTC day."
+          fi
