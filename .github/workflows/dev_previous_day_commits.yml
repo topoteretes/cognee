@@ -44,10 +44,13 @@ jobs:
           echo "Collecting commit subjects from ${TARGET_BRANCH}"
           echo "Time window (UTC): ${START_DATE} <= committed_at < ${END_DATE}"
 
-          COMMITS="$(git log "${TARGET_BRANCH}" \
+          COMMITS_FILE="$(mktemp)"
+          DETAILS_FILE="$(mktemp)"
+
+          git log "${TARGET_BRANCH}" \
             --since="${START_DATE}" \
             --until="${END_DATE}" \
-            --pretty=format:'- %s (%h)')"
+            --pretty=format:'%H%x09%s' > "${COMMITS_FILE}"
 
           {
             echo "## Previous day commits on dev"
@@ -55,15 +58,49 @@ jobs:
             echo "- Source branch: \`${TARGET_BRANCH}\`"
             echo "- Time window (UTC): \`${START_DATE}\` to \`${END_DATE}\`"
             echo
-            if [ -n "${COMMITS}" ]; then
-              echo "${COMMITS}"
+            if [ -s "${COMMITS_FILE}" ]; then
+              echo "### Commit titles"
+              echo
+              while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
+                echo "- ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
+              done < "${COMMITS_FILE}"
+              echo
+              echo "### Change content"
+              echo
+              while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
+                {
+                  echo "#### ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
+                  echo
+                  echo '```diff'
+                  git show "${COMMIT_SHA}" \
+                    --format='commit %H%nAuthor: %an <%ae>%nDate: %cI%nTitle: %s%n' \
+                    --stat \
+                    --patch
+                  echo '```'
+                  echo
+                } >> "${DETAILS_FILE}"
+              done < "${COMMITS_FILE}"
+              cat "${DETAILS_FILE}"
             else
               echo "No commits were found on \`${TARGET_BRANCH}\` during the previous UTC day."
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          if [ -n "${COMMITS}" ]; then
-            echo "${COMMITS}"
+          if [ -s "${COMMITS_FILE}" ]; then
+            echo "Commit titles:"
+            while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
+              echo "- ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
+            done < "${COMMITS_FILE}"
+            echo
+            echo "Detailed changes:"
+            while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
+              echo "::group::${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
+              git show "${COMMIT_SHA}" \
+                --format='commit %H%nAuthor: %an <%ae>%nDate: %cI%nTitle: %s%n' \
+                --stat \
+                --patch
+              echo "::endgroup::"
+            done < "${COMMITS_FILE}"
           else
             echo "No commits were found on ${TARGET_BRANCH} during the previous UTC day."
           fi
