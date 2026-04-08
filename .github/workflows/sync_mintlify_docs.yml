@@ -76,11 +76,17 @@ jobs:
           echo "::error::DOCS_REPO_TOKEN secret is required to sync the docs repository on release runs."
           exit 1
 
-      - name: Prepare temporary docs workspace for push tests
-        if: ${{ github.event_name == 'push' && env.DOCS_REPO_TOKEN == '' }}
+      - name: Resolve docs workspace
+        id: docs_workspace
         run: |
-          mkdir -p "${GITHUB_WORKSPACE}/docs-repo"
-          echo "DOCS_REPO_TOKEN is not available; using a temporary docs workspace for push validation."
+          if [ -n "${DOCS_REPO_TOKEN}" ]; then
+            DOCS_REPO_PATH="${GITHUB_WORKSPACE}/docs-repo"
+            echo "Using checked-out docs repository path: ${DOCS_REPO_PATH}"
+          else
+            DOCS_REPO_PATH="$(mktemp -d)"
+            echo "DOCS_REPO_TOKEN is not available; using a temporary docs workspace: ${DOCS_REPO_PATH}"
+          fi
+          echo "path=${DOCS_REPO_PATH}" >> "$GITHUB_OUTPUT"
 
       - name: Check out docs repository
         if: ${{ env.DOCS_REPO_TOKEN != '' }}
@@ -89,12 +95,12 @@ jobs:
           repository: topoteretes/cognee-docs
           token: ${{ secrets.DOCS_REPO_TOKEN }}
           ref: main
-          path: docs-repo
+          path: ${{ steps.docs_workspace.outputs.path }}
 
       - name: Sync OpenAPI and changelog
         run: |
           uv run python tools/sync_release_docs.py \
-            --docs-repo "${GITHUB_WORKSPACE}/docs-repo" \
+            --docs-repo "${{ steps.docs_workspace.outputs.path }}" \
             --tag "${{ steps.release_meta.outputs.tag }}" \
             --release-url "${{ steps.release_meta.outputs.release_url }}" \
             --published-at "${{ steps.release_meta.outputs.published_at }}" \
@@ -102,7 +108,7 @@ jobs:
 
       - name: Preview docs changes
         if: ${{ github.event_name == 'push' }}
-        working-directory: docs-repo
+        working-directory: ${{ steps.docs_workspace.outputs.path }}
         run: |
           if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             git status --short
@@ -110,11 +116,14 @@ jobs:
           else
             echo "Temporary docs workspace contents:"
             ls -la
+            echo
+            echo "Generated changelog preview:"
+            sed -n '1,80p' changelog.mdx
           fi
 
       - name: Commit and push docs changes
         if: ${{ github.event_name == 'release' }}
-        working-directory: docs-repo
+        working-directory: ${{ steps.docs_workspace.outputs.path }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
