@@ -4,9 +4,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-  push:
-    branches:
-      - feature/cog-4568-make-changelog-generation-automation-testable-and-reliable
 
 permissions:
   contents: read
@@ -16,8 +13,6 @@ jobs:
     if: ${{ github.event_name != 'release' || github.event.release.prerelease == false }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-    env:
-      DOCS_REPO_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
 
     steps:
       - name: Check out core repository
@@ -25,6 +20,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Normalize release metadata so the sync script can run unchanged for
+      # published releases, manual dispatches, and branch-push preview runs.
+      # This step always produces a body file plus synthetic tag/url/date
+      # values when the event is not an actual GitHub release.
       - name: Prepare release body file
         id: release_meta
         env:
