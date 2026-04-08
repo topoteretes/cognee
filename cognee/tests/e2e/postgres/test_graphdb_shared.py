@@ -22,7 +22,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-TEST_DATA_DIR = pathlib.Path(__file__).parent / "test_data"
+TEST_DATA_DIR = pathlib.Path(__file__).parents[2] / "test_data"
 
 
 async def run_graph_db_test(provider: str):

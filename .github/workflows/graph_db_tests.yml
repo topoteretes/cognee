@@ -108,7 +108,7 @@ jobs:
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
           DB_NAME: cognee_db
-        run: uv run pytest cognee/tests/unit/infrastructure/databases/graph/test_postgres_adapter.py -v
+        run: uv run pytest cognee/tests/e2e/postgres/test_postgres_adapter.py -v
 
       - name: Run Postgres Graph E2E Test
         env:
@@ -131,7 +131,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_graphdb_postgres.py
+        run: uv run python ./cognee/tests/e2e/postgres/test_graphdb_postgres.py
 
   run-neo4j-tests:
     name: Neo4j Tests
