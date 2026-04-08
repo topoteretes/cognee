@@ -171,7 +171,7 @@ def get_llm_router() -> APIRouter:
                                 "error": f"No valid loader found for file {file.filename}. File type is not supported."
                             },
                         )
-                    data_content = await loader.load(file_path, no_persist=True)
+                    data_content = await loader.load(file_path, persist=False)
                     file_contents.append(data_content)
 
             if text:

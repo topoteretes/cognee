@@ -71,7 +71,7 @@ class DoclingLoader(LoaderInterface):
             conv_result = converter.convert(file_path)
             text = conv_result.document.export_to_text()
 
-            if "no_persist" in kwargs:
+            if "persist" in kwargs and not kwargs["persist"]:
                 return text
 
             storage_config = get_storage_config()

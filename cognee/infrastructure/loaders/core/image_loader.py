@@ -105,7 +105,7 @@ class ImageLoader(LoaderInterface):
 
         result = await LLMGateway.transcribe_image(file_path)
 
-        if "no_persist" in kwargs:
+        if "persist" in kwargs and not kwargs["persist"]:
             return result.choices[0].message.content
 
         storage_config = get_storage_config()

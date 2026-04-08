@@ -90,7 +90,7 @@ class AudioLoader(LoaderInterface):
 
         result = await LLMGateway.create_transcript(file_path)
 
-        if "no_persist" in kwargs:
+        if "persist" in kwargs and not kwargs["persist"]:
             return result.text
 
         storage_config = get_storage_config()

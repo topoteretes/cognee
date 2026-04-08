@@ -113,7 +113,7 @@ class UnstructuredLoader(LoaderInterface):
             # Combine all text content
             full_content = "\n\n".join(text_parts)
 
-            if "no_persist" in kwargs:
+            if "persist" in kwargs and not kwargs["persist"]:
                 return full_content
 
             storage_config = get_storage_config()
