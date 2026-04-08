@@ -15,6 +15,8 @@ jobs:
     if: ${{ github.event_name == 'push' || github.event.release.prerelease == false }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    env:
+      DOCS_REPO_TOKEN: ${{ secrets.DOCS_REPO_TOKEN }}
 
     steps:
       - name: Check out core repository
@@ -69,19 +71,19 @@ jobs:
         run: uv sync --locked --all-extras
 
       - name: Verify docs repo token for release syncs
-        if: ${{ github.event_name == 'release' && secrets.DOCS_REPO_TOKEN == '' }}
+        if: ${{ github.event_name == 'release' && env.DOCS_REPO_TOKEN == '' }}
         run: |
           echo "::error::DOCS_REPO_TOKEN secret is required to sync the docs repository on release runs."
           exit 1
 
       - name: Prepare temporary docs workspace for push tests
-        if: ${{ github.event_name == 'push' && secrets.DOCS_REPO_TOKEN == '' }}
+        if: ${{ github.event_name == 'push' && env.DOCS_REPO_TOKEN == '' }}
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/docs-repo"
           echo "DOCS_REPO_TOKEN is not available; using a temporary docs workspace for push validation."
 
       - name: Check out docs repository
-        if: ${{ secrets.DOCS_REPO_TOKEN != '' }}
+        if: ${{ env.DOCS_REPO_TOKEN != '' }}
         uses: actions/checkout@v6
         with:
           repository: topoteretes/cognee-docs
@@ -102,8 +104,13 @@ jobs:
         if: ${{ github.event_name == 'push' }}
         working-directory: docs-repo
         run: |
-          git status --short
-          git diff -- cognee_openapi_spec.json changelog.mdx
+          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            git status --short
+            git diff -- cognee_openapi_spec.json changelog.mdx
+          else
+            echo "Temporary docs workspace contents:"
+            ls -la
+          fi
 
       - name: Commit and push docs changes
         if: ${{ github.event_name == 'release' }}
