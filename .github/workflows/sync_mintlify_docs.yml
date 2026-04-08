@@ -8,11 +8,11 @@ on:
       - feature/cog-4568-make-changelog-generation-automation-testable-and-reliable
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   sync-mintlify-docs:
-    if: ${{ github.event_name == 'push' || github.event.release.prerelease == false }}
+    if: ${{ (github.event_name == 'push' && github.actor != 'github-actions[bot]') || github.event.release.prerelease == false }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
@@ -101,25 +101,38 @@ jobs:
         run: |
           uv run python tools/sync_release_docs.py \
             --docs-repo "${{ steps.docs_workspace.outputs.path }}" \
+            --openapi-output "${RUNNER_TEMP}/cognee_openapi_spec.json" \
             --tag "${{ steps.release_meta.outputs.tag }}" \
             --release-url "${{ steps.release_meta.outputs.release_url }}" \
             --published-at "${{ steps.release_meta.outputs.published_at }}" \
             --release-body-file "${{ steps.release_meta.outputs.body_file }}"
 
+      - name: Copy preview artifacts into current branch
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          PREVIEW_DIR="${GITHUB_WORKSPACE}/.github/mintlify-sync-preview"
+          mkdir -p "${PREVIEW_DIR}"
+          cp "${{ steps.docs_workspace.outputs.path }}/cognee_openapi_spec.json" "${PREVIEW_DIR}/cognee_openapi_spec.json"
+          cp "${{ steps.docs_workspace.outputs.path }}/changelog.mdx" "${PREVIEW_DIR}/changelog.mdx"
+
       - name: Preview docs changes
         if: ${{ github.event_name == 'push' }}
-        working-directory: ${{ steps.docs_workspace.outputs.path }}
         run: |
-          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            git status --short
-            git diff -- cognee_openapi_spec.json changelog.mdx
-          else
-            echo "Temporary docs workspace contents:"
-            ls -la
-            echo
-            echo "Generated changelog preview:"
-            sed -n '1,80p' changelog.mdx
-          fi
+          git status --short -- .github/mintlify-sync-preview
+          git diff -- .github/mintlify-sync-preview/cognee_openapi_spec.json .github/mintlify-sync-preview/changelog.mdx || true
+          echo
+          echo "Generated changelog preview:"
+          sed -n '1,80p' .github/mintlify-sync-preview/changelog.mdx
+
+      - name: Commit preview artifacts to current branch
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/mintlify-sync-preview/cognee_openapi_spec.json .github/mintlify-sync-preview/changelog.mdx
+          git diff --cached --quiet && exit 0
+          git commit -m "test(docs): capture Mintlify sync preview [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}
 
       - name: Commit and push docs changes
         if: ${{ github.event_name == 'release' }}
