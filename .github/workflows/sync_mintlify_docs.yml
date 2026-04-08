@@ -68,7 +68,20 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras
 
+      - name: Verify docs repo token for release syncs
+        if: ${{ github.event_name == 'release' && secrets.DOCS_REPO_TOKEN == '' }}
+        run: |
+          echo "::error::DOCS_REPO_TOKEN secret is required to sync the docs repository on release runs."
+          exit 1
+
+      - name: Prepare temporary docs workspace for push tests
+        if: ${{ github.event_name == 'push' && secrets.DOCS_REPO_TOKEN == '' }}
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/docs-repo"
+          echo "DOCS_REPO_TOKEN is not available; using a temporary docs workspace for push validation."
+
       - name: Check out docs repository
+        if: ${{ secrets.DOCS_REPO_TOKEN != '' }}
         uses: actions/checkout@v6
         with:
           repository: topoteretes/cognee-docs
