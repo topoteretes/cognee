@@ -83,7 +83,7 @@ class PyPdfLoader(LoaderInterface):
                 # Combine all content
                 full_content = "\n".join(content_parts)
 
-                if "persist" in kwargs and not kwargs["persist"]:
+                if not kwargs.get("persist", True):
                     return full_content
 
                 storage_config = get_storage_config()

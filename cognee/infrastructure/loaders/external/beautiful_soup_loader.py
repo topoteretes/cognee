@@ -218,7 +218,7 @@ class BeautifulSoupLoader(LoaderInterface):
         if not full_content:
             logger.warning(f"No content extracted from HTML file: {file_path}")
 
-        if "persist" in kwargs and not kwargs["persist"]:
+        if not kwargs.get("persist", True):
             return full_content
 
         # Store the extracted content

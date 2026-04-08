@@ -84,7 +84,7 @@ class CsvLoader(LoaderInterface):
 
         content = "\n".join(row_texts)
 
-        if "persist" in kwargs and not kwargs["persist"]:
+        if not kwargs.get("persist", True):
             return content
 
         storage_config = get_storage_config()

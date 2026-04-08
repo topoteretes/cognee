@@ -97,7 +97,7 @@ class AdvancedPdfLoader(LoaderInterface):
             # Combine all page outputs
             full_content = "\n".join(page_contents)
 
-            if "persist" in kwargs and not kwargs["persist"]:
+            if not kwargs.get("persist", True):
                 return full_content
 
             # Store the content
