@@ -80,6 +80,9 @@ class TextLoader(LoaderInterface):
         with open(file_path, "r", encoding=encoding) as f:
             content = f.read()
 
+        if "no_persist" in kwargs:
+            return content
+
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)

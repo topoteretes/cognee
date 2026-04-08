@@ -97,6 +97,9 @@ class AdvancedPdfLoader(LoaderInterface):
             # Combine all page outputs
             full_content = "\n".join(page_contents)
 
+            if "no_persist" in kwargs:
+                return full_content
+
             # Store the content
             storage_config = get_storage_config()
             data_root_directory = storage_config["data_root_directory"]
