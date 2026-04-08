@@ -91,7 +91,7 @@ class MetricsCollector:
         # Round-1 feature accuracy: did the agent pick the right feature on first pitch?
         if conv_result.features_pitched:
             lead_profile = next(
-                (l for l in LEADS if l.lead_id == conv_result.lead_id), None
+                (lead for lead in LEADS if lead.lead_id == conv_result.lead_id), None
             )
             if lead_profile:
                 self._current.r1_feature_correct = (
@@ -133,11 +133,7 @@ def print_comparison(
     nomem_by_id = {r.lead_id: r for r in nomem.results}
     ctx_by_id = {r.lead_id: r for r in ctx.results}
     mem_by_id = {r.lead_id: r for r in mem.results}
-    all_ids = list(
-        dict.fromkeys(
-            r.lead_id for r in nomem.results + ctx.results + mem.results
-        )
-    )
+    all_ids = list(dict.fromkeys(r.lead_id for r in nomem.results + ctx.results + mem.results))
 
     for lead_id in all_ids:
         for mode, lookup in [
@@ -204,9 +200,7 @@ def print_comparison(
     print()
     print("AGGREGATE COMPARISON")
     print(sep)
-    print(
-        f"{'Metric':<20} {'No-Memory':>12} {'Context':>12} {'Graph':>12}"
-    )
+    print(f"{'Metric':<20} {'No-Memory':>12} {'Context':>12} {'Graph':>12}")
     print(sep)
     print(
         f"{'Win rate':<20} {nm['win_rate']:>11.0f}% {cx['win_rate']:>11.0f}% "
@@ -223,9 +217,7 @@ def print_comparison(
     nm_rw = f"{nm['avg_rounds_to_win']:.1f}" if nm["avg_rounds_to_win"] else "n/a"
     cx_rw = f"{cx['avg_rounds_to_win']:.1f}" if cx["avg_rounds_to_win"] else "n/a"
     mm_rw = f"{mm['avg_rounds_to_win']:.1f}" if mm["avg_rounds_to_win"] else "n/a"
-    print(
-        f"{'Avg rounds to win':<20} {nm_rw:>12} {cx_rw:>12} {mm_rw:>12}"
-    )
+    print(f"{'Avg rounds to win':<20} {nm_rw:>12} {cx_rw:>12} {mm_rw:>12}")
     print(
         f"{'Total LLM calls':<20} {nm['total_calls']:>12,} {cx['total_calls']:>12,} "
         f"{mm['total_calls']:>12,}"
@@ -249,9 +241,7 @@ def print_comparison(
     print()
     print("DELTAS vs NO-MEMORY BASELINE")
     print(sep)
-    print(
-        f"{'Metric':<20} {'Context Δ':>12} {'Graph Δ':>12}"
-    )
+    print(f"{'Metric':<20} {'Context Δ':>12} {'Graph Δ':>12}")
     print(sep)
     print(
         f"{'Win rate':<20} {_delta(nm['win_rate'], cx['win_rate']):>12} "

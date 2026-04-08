@@ -43,8 +43,7 @@ async def sales_agent_turn(
     memory_block = ""
     if memory_context:
         memory_block = (
-            f"PAST SALES LEARNINGS (use these to guide your strategy):\n"
-            f"{memory_context}\n\n"
+            f"PAST SALES LEARNINGS (use these to guide your strategy):\n{memory_context}\n\n"
         )
 
     text_input = (
@@ -98,8 +97,7 @@ async def customer_hint_turn(
         )
 
     text_input = (
-        f"Conversation so far:\n{json.dumps(conversation_history, indent=2)}\n\n"
-        f"{instruction}"
+        f"Conversation so far:\n{json.dumps(conversation_history, indent=2)}\n\n{instruction}"
     )
     system_prompt = (
         f"You are a customer at: {profile.company_context}.\n"
@@ -107,9 +105,7 @@ async def customer_hint_turn(
         "Respond naturally in 1-3 sentences. Do NOT mention specific Cognee feature names. "
         "Describe your needs in terms of business problems, not technical solutions."
     )
-    result = await LLMGateway.acreate_structured_output(
-        text_input, system_prompt, CustomerHint
-    )
+    result = await LLMGateway.acreate_structured_output(text_input, system_prompt, CustomerHint)
     return result.message
 
 
@@ -151,15 +147,15 @@ async def run_conversation(
 
     for round_num in range(1, MAX_ROUNDS + 1):
         # Sales turn
-        sales_resp = await sales_fn(
-            conversation_history, profile.initial_message, round_num
-        )
+        sales_resp = await sales_fn(conversation_history, profile.initial_message, round_num)
         features_pitched.append(sales_resp.lead_feature)
-        conversation_history.append({
-            "role": "sales",
-            "message": sales_resp.message_to_customer,
-            "feature": sales_resp.lead_feature,
-        })
+        conversation_history.append(
+            {
+                "role": "sales",
+                "message": sales_resp.message_to_customer,
+                "feature": sales_resp.lead_feature,
+            }
+        )
 
         # Track right feature count
         pitched_right = sales_resp.lead_feature == profile.must_have_feature
@@ -172,9 +168,7 @@ async def run_conversation(
         )
 
         # Customer hint (LLM generates natural response text)
-        customer_message = await customer_hint_turn(
-            conversation_history, profile, pitched_right
-        )
+        customer_message = await customer_hint_turn(conversation_history, profile, pitched_right)
         conversation_history.append({"role": "customer", "message": customer_message})
 
         print(
@@ -213,7 +207,7 @@ def format_trace_summary(profile: BuyingProfile, result: ConversationResult) -> 
     """Create a concise, searchable text summary of a completed conversation."""
     features_tried = ", ".join(result.features_pitched)
     lines = [
-        f"Sales conversation with a customer.",
+        "Sales conversation with a customer.",
         f"Customer said: {profile.initial_message}",
         f"Features pitched: {features_tried}.",
         f"Outcome: {result.outcome} after {result.rounds} rounds.",

@@ -60,7 +60,8 @@ async def run_all_leads(collector: MetricsCollector) -> list:
             completion_tokens=round(collector._bulk_completion_tokens * share),
             r1_feature_correct=(
                 result.features_pitched[0] == lead.must_have_feature
-                if result.features_pitched else False
+                if result.features_pitched
+                else False
             ),
         )
         collector.results.append(m)

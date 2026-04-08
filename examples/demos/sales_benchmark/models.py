@@ -14,7 +14,9 @@ from cognee.modules.engine.models import NodeSet
 class SalesResponse(BaseModel):
     """Sales agent turn output."""
 
-    thought: str = Field(min_length=1, description="Internal reasoning about strategy for this lead")
+    thought: str = Field(
+        min_length=1, description="Internal reasoning about strategy for this lead"
+    )
     lead_feature: str = Field(
         min_length=1,
         description=(

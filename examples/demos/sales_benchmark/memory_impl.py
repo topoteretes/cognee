@@ -46,6 +46,7 @@ from .models import (
     _deterministic_id,
 )
 
+
 @cognee.agent_memory(
     with_memory=True,
     save_traces=False,
@@ -53,9 +54,7 @@ from .models import (
     memory_only_context=True,
     dataset_name="sales_benchmark_traces",
 )
-async def sales_agent(
-    conversation_history: list, lead_intro: str, round_num: int
-) -> SalesResponse:
+async def sales_agent(conversation_history: list, lead_intro: str, round_num: int) -> SalesResponse:
     """Reader: decorator queries graph via GRAPH_SUMMARY_COMPLETION, LLMGateway auto-injects memory."""
     return await sales_agent_turn(conversation_history, lead_intro, round_num)
 
@@ -107,9 +106,7 @@ def _build_trace_node(
     winning_feature = (
         [SalesFeatureNode(name=result.winning_feature)] if result.winning_feature else []
     )
-    winning_angle = (
-        [PitchAngleNode(name=result.winning_angle)] if result.winning_angle else []
-    )
+    winning_angle = [PitchAngleNode(name=result.winning_angle)] if result.winning_angle else []
 
     return SalesTraceNode(
         text=summary,

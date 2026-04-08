@@ -43,10 +43,12 @@ def _format_full_transcript(lead: BuyingProfile, result: ConversationResult) -> 
 
 def _make_context_turn(memory_context: str):
     """Create a sales turn function with captured memory context."""
+
     async def sales_turn_context(
         conversation_history: list, lead_intro: str, round_num: int
     ) -> SalesResponse:
         return await sales_agent_turn(conversation_history, lead_intro, round_num, memory_context)
+
     return sales_turn_context
 
 
@@ -87,7 +89,9 @@ async def run_all_leads(collector: MetricsCollector) -> list:
 
         if parts:
             memory_context = "\n\n".join(parts)
-            print(f"  [context] {len(memory_context)} chars (summary={'yes' if _summary else 'no'}, transcripts={len(_all_transcripts)})")
+            print(
+                f"  [context] {len(memory_context)} chars (summary={'yes' if _summary else 'no'}, transcripts={len(_all_transcripts)})"
+            )
         else:
             memory_context = ""
 
