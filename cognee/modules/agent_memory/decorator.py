@@ -27,6 +27,7 @@ def agent_memory(
     memory_query_from_method: Optional[str] = None,
     memory_system_prompt: Optional[str] = None,
     memory_top_k: int = 5,
+    memory_only_context: bool = False,
     user: Optional[User] = None,
     dataset_name: Optional[str] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -38,6 +39,7 @@ def agent_memory(
         memory_query_from_method=memory_query_from_method,
         memory_system_prompt=memory_system_prompt,
         memory_top_k=memory_top_k,
+        memory_only_context=memory_only_context,
         user=user,
         dataset_name=dataset_name,
     )
