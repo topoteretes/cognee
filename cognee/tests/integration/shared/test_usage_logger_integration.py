@@ -22,7 +22,7 @@ def usage_logging_config():
     original_env = os.environ.copy()
     os.environ["USAGE_LOGGING"] = "true"
     os.environ["CACHE_BACKEND"] = "redis"
-    os.environ["CACHE_HOST"] = "localhost"
+    os.environ["CACHE_HOST"] = "redis"
     os.environ["CACHE_PORT"] = "6379"
     get_cache_config.cache_clear()
     create_cache_engine.cache_clear()
