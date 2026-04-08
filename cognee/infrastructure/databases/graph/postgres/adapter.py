@@ -541,7 +541,7 @@ class PostgresAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
         """Retrieve a subgraph containing matching nodes, their neighbors, and interconnecting edges.
 
@@ -684,6 +684,85 @@ class PostgresAdapter(GraphDBInterface):
                 metrics["avg_clustering"] = -1
 
             return metrics
+
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        """Get the k-hop neighborhood subgraph around seed nodes.
+
+        Uses a single recursive CTE query to collect all node IDs within
+        `depth` hops, then returns nodes and edges for that subgraph.
+        """
+        if not node_ids:
+            return [], []
+
+        # Optional edge type filter for the CTE traversal
+        edge_filter = ""
+        if edge_types:
+            placeholders = ", ".join(f":et_{i}" for i in range(len(edge_types)))
+            edge_filter = f"AND e.relationship_name IN ({placeholders})"
+
+        # Single query: recursive CTE finds reachable IDs, then joins
+        # nodes and edges in two unioned result sets distinguished by 'kind'
+        query_str = f"""
+            WITH RECURSIVE neighborhood(id, hops) AS (
+                SELECT unnest(:seeds), 0
+              UNION
+                SELECT CASE WHEN e.source_id = n.id THEN e.target_id
+                            ELSE e.source_id END,
+                       n.hops + 1
+                FROM neighborhood n
+                JOIN graph_edge e ON (e.source_id = n.id OR e.target_id = n.id)
+                    {edge_filter}
+                WHERE n.hops < :depth
+            ),
+            ids AS (SELECT DISTINCT id FROM neighborhood)
+
+            SELECT 'node' AS kind,
+                   gn.id, gn.name, gn.type, gn.properties,
+                   NULL AS source_id, NULL AS target_id,
+                   NULL AS relationship_name, NULL AS edge_properties
+            FROM graph_node gn
+            JOIN ids ON gn.id = ids.id
+
+            UNION ALL
+
+            SELECT 'edge' AS kind,
+                   NULL, NULL, NULL, NULL,
+                   ge.source_id, ge.target_id,
+                   ge.relationship_name, ge.properties
+            FROM graph_edge ge
+            WHERE ge.source_id IN (SELECT id FROM ids)
+              AND ge.target_id IN (SELECT id FROM ids)
+        """
+
+        params: Dict[str, Any] = {"seeds": list(node_ids), "depth": depth}
+        if edge_types:
+            for i, et in enumerate(edge_types):
+                params[f"et_{i}"] = et
+
+        async with self._session() as session:
+            result = await session.execute(text(query_str), params)
+
+            nodes = []
+            edges = []
+            for row in result.fetchall():
+                if row.kind == "node":
+                    nodes.append((row.id, self._parse_node_row(row)))
+                else:
+                    props = {}
+                    if row.edge_properties is not None:
+                        props = (
+                            row.edge_properties
+                            if isinstance(row.edge_properties, dict)
+                            else json.loads(row.edge_properties)
+                        )
+                    edges.append((row.source_id, row.target_id, row.relationship_name, props))
+
+            return nodes, edges
 
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
