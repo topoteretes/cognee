@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
-from cognee.context_global_variables import set_database_global_context_variables
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.observability import new_span
 from cognee.modules.users.methods import get_default_user
@@ -17,6 +16,7 @@ from cognee.modules.users.permissions.methods import get_all_user_permission_dat
 from cognee.shared.logging_utils import get_logger
 
 from .models import AgentTrace
+from cognee.context_global_variables import set_database_global_context_variables
 
 logger = get_logger("agent_memory")
 
