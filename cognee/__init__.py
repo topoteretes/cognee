@@ -16,66 +16,45 @@ from cognee.shared.logging_utils import setup_logging
 logger = setup_logging()
 
 # ---------------------------------------------------------------------------
-# Lazy imports — heavy modules are loaded on first access, not at import time.
-# This keeps `import cognee` fast for scripts that only use a subset of the API.
+# V1 API
 # ---------------------------------------------------------------------------
+from .api.v1.add import add
+from .api.v1.delete import delete
+from .api.v1.cognify import cognify
+from .modules.memify import memify
+from .modules.run_custom_pipeline import run_custom_pipeline
+from .api.v1.update import update
+from .api.v1.config.config import config
+from .api.v1.datasets.datasets import datasets
+from .api.v1.prune import prune
+from .api.v1.search import SearchType, search
+from .api.v1.visualize import visualize_graph, start_visualization_server
+from cognee.modules.visualization.cognee_network_visualization import (
+    cognee_network_visualization,
+)
+from .api.v1.ui import start_ui
+from .api.v1.session import session
 
-_LAZY_IMPORTS = {
-    # V1 API
-    "add": ".api.v1.add",
-    "delete": ".api.v1.delete",
-    "cognify": ".api.v1.cognify",
-    "memify": ".modules.memify",
-    "run_custom_pipeline": ".modules.run_custom_pipeline",
-    "update": ".api.v1.update",
-    "config": ".api.v1.config.config",
-    "datasets": ".api.v1.datasets.datasets",
-    "prune": ".api.v1.prune",
-    "SearchType": ".api.v1.search",
-    "search": ".api.v1.search",
-    "visualize_graph": ".api.v1.visualize",
-    "start_visualization_server": ".api.v1.visualize",
-    "cognee_network_visualization": "cognee.modules.visualization.cognee_network_visualization",
-    "start_ui": ".api.v1.ui",
-    "session": ".api.v1.session",
-    # V2 memory-oriented API
-    "remember": ".api.v2",
-    "RememberResult": ".api.v2",
-    "recall": ".api.v2",
-    "improve": ".api.v2",
-    "forget": ".api.v2",
-    # Pipelines
-    "pipelines": ".modules",
-    "Drop": ".pipelines",
-    # Migrations
-    "run_migrations": "cognee.run_migrations",
-    # Tracing / Observability
-    "enable_tracing": "cognee.modules.observability.trace_context",
-    "disable_tracing": "cognee.modules.observability.trace_context",
-    "get_last_trace": "cognee.modules.observability.trace_context",
-    "get_all_traces": "cognee.modules.observability.trace_context",
-    "clear_traces": "cognee.modules.observability.trace_context",
-    "agent_memory": "cognee.modules.agent_memory",
-}
+# Pipelines
+from .modules import pipelines
+from .pipelines import Drop
 
+# Migrations
+from cognee.run_migrations import run_migrations
 
-def __getattr__(name: str):
-    if name in _LAZY_IMPORTS:
-        module_path = _LAZY_IMPORTS[name]
-        if module_path.startswith("."):
-            import importlib
+# ---------------------------------------------------------------------------
+# V2 memory-oriented API
+# ---------------------------------------------------------------------------
+from .api.v2 import remember, RememberResult, recall, improve, forget
 
-            mod = importlib.import_module(module_path, package="cognee")
-        else:
-            import importlib
+# Tracing / Observability
+from cognee.modules.observability.trace_context import (
+    enable_tracing,
+    disable_tracing,
+    get_last_trace,
+    get_all_traces,
+    clear_traces,
+)
 
-            mod = importlib.import_module(module_path)
-        attr = getattr(mod, name)
-        # Cache on the module so __getattr__ is only called once per name
-        globals()[name] = attr
-        return attr
-    raise AttributeError(f"module 'cognee' has no attribute {name!r}")
-
-
-# Explicit list for `from cognee import *` and IDE autocompletion
-__all__ = list(_LAZY_IMPORTS.keys()) + ["__version__", "logger"]
+# Agent memory
+from cognee.modules.agent_memory import agent_memory

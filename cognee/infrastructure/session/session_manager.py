@@ -140,6 +140,7 @@ class SessionManager:
         response_model: Type = str,
         summarize_context: bool = False,
         used_graph_element_ids: Optional[dict] = None,
+        max_context_chars: Optional[int] = None,
     ) -> Any:
         """
         Run single-query completion with session: read history, generate, save QA.
@@ -184,6 +185,8 @@ class SessionManager:
             user_id=str(user_id), session_id=resolved_session_id
         )
         if graph_context:
+            if max_context_chars is not None:
+                graph_context = graph_context[:max_context_chars]
             conversation_history = (
                 "Background knowledge from the knowledge graph:\n"
                 + graph_context

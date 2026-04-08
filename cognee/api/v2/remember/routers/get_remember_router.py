@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi import Form, File, UploadFile, Depends
 from typing import List, Optional, Union, Literal
@@ -62,14 +62,17 @@ def get_remember_router() -> APIRouter:
         )
 
         if not datasetId and not datasetName:
-            raise ValueError("Either datasetId or datasetName must be provided.")
+            raise HTTPException(
+                status_code=400,
+                detail="Either datasetId or datasetName must be provided.",
+            )
 
         from cognee.api.v2.remember import remember as cognee_remember
 
         try:
             result = await cognee_remember(
                 data,
-                dataset_name=datasetName or "main_dataset",
+                dataset_name=datasetName,
                 user=user,
                 dataset_id=datasetId if datasetId else None,
                 node_set=node_set if node_set != [""] else None,

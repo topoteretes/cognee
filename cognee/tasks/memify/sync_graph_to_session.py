@@ -26,7 +26,7 @@ logger = get_logger("sync_graph_to_session")
 _CHECKPOINT_KEY_PREFIX = "graph_sync_checkpoint"
 
 BATCH_SIZE = 500
-DEFAULT_MAX_LINES = 200
+DEFAULT_MAX_LINES = 500
 
 
 def _checkpoint_key(user_id: str, dataset_id: str, session_id: str) -> str:
@@ -101,16 +101,36 @@ async def _fetch_new_edges(
 
 
 def _edge_to_text(edge: Edge, node_map: dict) -> Optional[str]:
-    """Render an edge as a human-readable triplet string."""
+    """Render an edge as a structured JSON-line with node metadata.
+
+    Preserves node type and description alongside the triplet relationship,
+    giving LLMs richer context than plain ``src —[rel]→ dst`` strings.
+    """
+    import json
+
     src = node_map.get(edge.source_node_id)
     dst = node_map.get(edge.destination_node_id)
     if not src or not dst:
         return None
 
-    src_label = src.label or src.type or str(src.id)
-    dst_label = dst.label or dst.type or str(dst.id)
-    rel = edge.relationship_name or "related_to"
-    return f"{src_label} —[{rel}]→ {dst_label}"
+    src_entry = {"label": src.label or src.type or str(src.id)}
+    dst_entry = {"label": dst.label or dst.type or str(dst.id)}
+
+    if getattr(src, "type", None):
+        src_entry["type"] = src.type
+    if getattr(dst, "type", None):
+        dst_entry["type"] = dst.type
+    if getattr(src, "description", None):
+        src_entry["description"] = src.description
+    if getattr(dst, "description", None):
+        dst_entry["description"] = dst.description
+
+    entry = {
+        "source": src_entry,
+        "relationship": edge.relationship_name or "related_to",
+        "target": dst_entry,
+    }
+    return json.dumps(entry, ensure_ascii=False)
 
 
 async def sync_graph_to_session(
@@ -177,6 +197,12 @@ async def sync_graph_to_session(
     existing_lines = [line for line in existing.split("\n") if line] if existing else []
     merged = existing_lines + new_lines
     if len(merged) > max_lines:
+        logger.info(
+            "sync_graph_to_session: capping at %d lines (had %d), dropping %d oldest",
+            max_lines,
+            len(merged),
+            len(merged) - max_lines,
+        )
         merged = merged[-max_lines:]
 
     await sm.set_graph_context(

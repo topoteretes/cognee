@@ -111,7 +111,8 @@ async def improve(
     )
 
     # Stage 4: sync enriched graph back to session cache (incremental)
-    if session_ids:
+    # Skip when running in background — stage 3 hasn't completed yet
+    if session_ids and not run_in_background:
         await _sync_graph_to_sessions(
             dataset=dataset,
             session_ids=session_ids,
@@ -121,6 +122,16 @@ async def improve(
     return result
 
 
+async def _resolve_dataset_name(dataset: Union[str, UUID], user) -> str:
+    """Resolve a dataset reference to its name string."""
+    if isinstance(dataset, str):
+        return dataset
+    from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+
+    ds = await get_authorized_dataset(user, dataset, "write")
+    return ds.name if ds else "main_dataset"
+
+
 async def _bridge_sessions(
     dataset: Union[str, UUID],
     session_ids: List[str],
@@ -128,12 +139,23 @@ async def _bridge_sessions(
     feedback_alpha: float,
     run_in_background: bool,
 ):
-    """Run feedback weights and session persistence pipelines."""
+    """Run feedback weights and session persistence pipelines.
 
-    # Stage 1: apply feedback weights from session scores
+    Stage 1 (feedback weights): Updates ``feedback_weight`` on graph nodes
+    and edges that were *used during retrieval* in session Q&A entries.
+    Only elements referenced in ``used_graph_element_ids`` are affected.
+    If no retrieval has occurred in these sessions, no weights are updated.
+
+    Stage 2 (persist Q&A): Cognifies the actual question/answer text from
+    sessions into the permanent graph, tagged with
+    ``node_set="user_sessions_from_cache"``. This persists the Q&A content
+    itself, not serialized graph edges.
+    """
+
+    # Stage 1: apply feedback weights from session retrieval traces
     from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 
-    dataset_name = dataset if isinstance(dataset, str) else "main_dataset"
+    dataset_name = await _resolve_dataset_name(dataset, user)
 
     try:
         await apply_feedback_weights_pipeline(
@@ -141,7 +163,7 @@ async def _bridge_sessions(
             session_ids=session_ids,
             dataset=dataset_name,
             alpha=feedback_alpha,
-            run_in_background=False,
+            run_in_background=run_in_background,
         )
         logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
     except Exception as e:
@@ -157,7 +179,7 @@ async def _bridge_sessions(
             user=user,
             session_ids=session_ids,
             dataset=dataset_name,
-            run_in_background=False,
+            run_in_background=run_in_background,
         )
         logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
     except Exception as e:
@@ -169,25 +191,36 @@ async def _sync_graph_to_sessions(
     session_ids: List[str],
     user,
 ):
-    """Incrementally sync recent graph knowledge into each session cache."""
+    """Incrementally sync recent graph knowledge into each session cache.
+
+    Reads new edges from the relational DB (since last checkpoint) and
+    stores them as structured JSON-lines in the session's graph knowledge
+    context. Each session is synced independently — one failure does not
+    prevent others from completing.
+    """
     from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
         resolve_authorized_user_datasets,
     )
     from cognee.tasks.memify.sync_graph_to_session import sync_graph_to_session
 
-    dataset_name = dataset if isinstance(dataset, str) else "main_dataset"
+    dataset_name = await _resolve_dataset_name(dataset, user)
 
     try:
         _, authorized_datasets = await resolve_authorized_user_datasets(dataset, user)
-        if not authorized_datasets:
-            logger.warning("improve: no authorized datasets for graph sync")
-            return
-        dataset_obj = authorized_datasets[0]
-        user_id = str(user.id) if hasattr(user, "id") else None
-        if not user_id:
-            return
+    except Exception as e:
+        logger.warning("improve: graph-to-session sync setup failed (non-fatal): %s", e)
+        return
 
-        for session_id in session_ids:
+    if not authorized_datasets:
+        logger.warning("improve: no authorized datasets for graph sync")
+        return
+    dataset_obj = authorized_datasets[0]
+    user_id = str(user.id) if hasattr(user, "id") else None
+    if not user_id:
+        return
+
+    for session_id in session_ids:
+        try:
             result = await sync_graph_to_session(
                 user_id=user_id,
                 session_id=session_id,
@@ -199,5 +232,9 @@ async def _sync_graph_to_sessions(
                 result.get("synced", 0),
                 session_id,
             )
-    except Exception as e:
-        logger.warning("improve: graph-to-session sync failed (non-fatal): %s", e)
+        except Exception as e:
+            logger.warning(
+                "improve: graph-to-session sync failed for session '%s' (non-fatal): %s",
+                session_id,
+                e,
+            )

@@ -60,6 +60,7 @@ async def run_tasks(
     pipeline_name: str = "unknown_pipeline",
     incremental_loading: bool = False,
     data_per_batch: int = 20,
+    extras: Optional[dict] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -105,6 +106,7 @@ async def run_tasks(
                         data_item=data_item,
                         dataset=dataset,
                         pipeline_name=pipeline_name,
+                        extras=extras if isinstance(extras, dict) else {},
                     ),
                     user,
                     incremental_loading,

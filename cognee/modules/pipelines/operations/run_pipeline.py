@@ -83,10 +83,11 @@ async def run_pipeline(
             inner = inner.with_config(**bound.kwargs)
         tasks.append(inner)
 
-    # Build typed context
+    # Build typed context — pass caller-supplied context dict as extras
     ctx = PipelineContext(
         user=user,
         pipeline_name=pipeline_name,
+        extras=context if isinstance(context, dict) else {},
     )
 
     # Delegate to existing run_tasks_base — gets us observability,

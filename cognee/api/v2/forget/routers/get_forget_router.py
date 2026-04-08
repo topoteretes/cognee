@@ -52,10 +52,12 @@ def get_forget_router() -> APIRouter:
                 user=user,
             )
             return result
-        except ValueError as error:
+        except ValueError:
             return JSONResponse(
                 status_code=422,
-                content={"error": str(error)},
+                content={
+                    "error": "Invalid request parameters. Specify dataset, data_id+dataset, or everything=True."
+                },
             )
         except Exception as error:
             logger = get_logger()

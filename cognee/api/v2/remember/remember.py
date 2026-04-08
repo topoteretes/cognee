@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import time
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
@@ -32,26 +31,20 @@ class RememberKwargs(TypedDict, total=False):
     graph_db_config: dict
 
 
-def _build_param_sets():
-    """Pre-compute which kwargs belong to add() vs cognify() vs both."""
-    from cognee.api.v1.add import add
-    from cognee.api.v1.cognify import cognify
-
-    add_params = frozenset(inspect.signature(add).parameters) - {"data", "dataset_name"}
-    cognify_params = frozenset(inspect.signature(cognify).parameters) - {"datasets"}
-    shared = add_params & cognify_params
-    return add_params, cognify_params, shared
-
-
-_ADD_PARAMS: Optional[frozenset] = None
-_COGNIFY_PARAMS: Optional[frozenset] = None
-_SHARED_PARAMS: Optional[frozenset] = None
-
-
-def _ensure_param_sets():
-    global _ADD_PARAMS, _COGNIFY_PARAMS, _SHARED_PARAMS
-    if _ADD_PARAMS is None:
-        _ADD_PARAMS, _COGNIFY_PARAMS, _SHARED_PARAMS = _build_param_sets()
+# Kwarg routing: which RememberKwargs go to add(), cognify(), or both.
+# Kept in sync with RememberKwargs above and the add()/cognify() signatures.
+_ADD_ONLY = frozenset({"dataset_id", "node_set", "preferred_loaders", "importance_weight"})
+_COGNIFY_ONLY = frozenset({"graph_model", "chunks_per_batch", "config", "temporal_cognify"})
+_SHARED = frozenset(
+    {
+        "user",
+        "vector_db_config",
+        "graph_db_config",
+        "incremental_loading",
+        "data_per_batch",
+        "run_in_background",
+    }
+)
 
 
 def _data_to_text(data) -> str:
@@ -344,8 +337,6 @@ async def remember(
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
-    _ensure_param_sets()
-
     if chunker is None:
         from cognee.modules.chunking.TextChunker import TextChunker
 
@@ -358,11 +349,11 @@ async def remember(
     shared_kwargs = {}
 
     for key in list(remaining):
-        if key in _SHARED_PARAMS:
+        if key in _SHARED:
             shared_kwargs[key] = remaining.pop(key)
-        elif key in _ADD_PARAMS:
+        elif key in _ADD_ONLY:
             add_kwargs[key] = remaining.pop(key)
-        elif key in _COGNIFY_PARAMS:
+        elif key in _COGNIFY_ONLY:
             cognify_kwargs[key] = remaining.pop(key)
 
     if remaining:

@@ -25,13 +25,15 @@ MAX_TEXT = 4000
 def _build_tool_text(payload: dict) -> str:
     tool_name = payload.get("tool_name", "unknown")
     tool_input = json.dumps(payload.get("tool_input", {}))[:MAX_TEXT]
-    tool_response = str(payload.get("tool_response", ""))[:MAX_TEXT]
+    tool_response = str(payload.get("tool_output") or payload.get("tool_response", ""))[:MAX_TEXT]
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return f"[{ts}] Tool: {tool_name}\nInput: {tool_input}\nOutput: {tool_response}"
 
 
 def _build_stop_text(payload: dict) -> str:
-    msg = str(payload.get("last_assistant_message", ""))[:MAX_TEXT]
+    msg = str(payload.get("assistant_message") or payload.get("last_assistant_message", ""))[
+        :MAX_TEXT
+    ]
     if not msg or msg == "null":
         return ""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -49,8 +51,9 @@ async def _store(text: str):
     )
 
     if not result:
+        status = getattr(result, "status", "unknown")
         print(
-            f"cognee-session: store failed (status={result.status})",
+            f"cognee-session: store failed (status={status})",
             file=sys.stderr,
         )
 

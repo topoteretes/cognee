@@ -63,7 +63,14 @@ async def forget(
 
 
 async def _forget_everything(user) -> dict:
-    """Delete all datasets and data owned by the user."""
+    """Delete all datasets, data, and session cache owned by the user.
+
+    Cleanup scope:
+    - Relational DB (datasets, data records): yes
+    - Graph DB (nodes, edges): yes
+    - Vector DB (embeddings): yes
+    - Session cache (Redis/FS): yes (full prune)
+    """
     from cognee.api.v1.datasets.datasets import datasets
 
     user_datasets = await datasets.list_datasets(user=user)
@@ -71,12 +78,34 @@ async def _forget_everything(user) -> dict:
 
     await datasets.delete_all(user=user)
 
+    # Clean up session cache (Redis or filesystem)
+    try:
+        from cognee.infrastructure.databases.cache import get_cache_config
+        from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
+
+        cache_config = get_cache_config()
+        if cache_config.caching or cache_config.usage_logging:
+            cache_engine = get_cache_engine()
+            if cache_engine is not None:
+                await cache_engine.prune()
+    except Exception as e:
+        logger.warning("forget: session cache cleanup failed (non-fatal): %s", e)
+
     logger.info("forget: deleted all data for user=%s (%d datasets)", user.id, count)
     return {"datasets_removed": count, "status": "success"}
 
 
 async def _forget_dataset(dataset_ref: Union[str, UUID], user) -> dict:
-    """Delete an entire dataset by name or UUID."""
+    """Delete an entire dataset by name or UUID.
+
+    Cleanup scope:
+    - Relational DB (datasets, data records): yes
+    - Graph DB (nodes, edges): yes
+    - Vector DB (embeddings): yes
+    - Session cache: no (sessions are keyed by user_id+session_id,
+      not by dataset — targeted cleanup requires tagging sessions
+      with dataset_id, which is a future enhancement)
+    """
     from cognee.api.v1.datasets.datasets import datasets
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
@@ -110,9 +139,14 @@ async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user) 
 
 
 async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user) -> UUID:
-    """Resolve a dataset name or UUID to a UUID."""
+    """Resolve a dataset name or UUID to a UUID, with permission check."""
     if isinstance(dataset_ref, UUID):
-        return dataset_ref
+        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+
+        dataset = await get_authorized_dataset(user, dataset_ref, "delete")
+        if not dataset:
+            raise ValueError(f"Dataset {dataset_ref} not found or not accessible.")
+        return dataset.id
 
     from cognee.modules.data.methods import get_authorized_dataset_by_name
 

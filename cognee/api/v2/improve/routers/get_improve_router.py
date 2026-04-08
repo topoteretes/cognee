@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi import Depends
 from pydantic import Field
@@ -65,7 +65,10 @@ def get_improve_router() -> APIRouter:
         )
 
         if not payload.dataset_id and not payload.dataset_name:
-            raise ValueError("Either datasetId or datasetName must be provided.")
+            raise HTTPException(
+                status_code=400,
+                detail="Either datasetId or datasetName must be provided.",
+            )
 
         try:
             from cognee.api.v2.improve import improve as cognee_improve
