@@ -114,6 +114,7 @@ jobs:
         env:
           ENV: 'dev'
           GRAPH_DATABASE_PROVIDER: "postgres"
+          GRAPH_DATABASE_URL: "postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db"
           DB_PROVIDER: postgres
           DB_HOST: localhost
           DB_PORT: 5432

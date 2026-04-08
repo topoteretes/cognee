@@ -122,13 +122,12 @@ def _create_graph_engine(
         )
 
     elif graph_database_provider == "postgres":
-        from .postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.relational.get_relational_engine import (
-            get_relational_engine,
-        )
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Postgres GRAPH_DATABASE_URL.")
 
-        relational_engine = get_relational_engine()
-        return PostgresAdapter(relational_engine=relational_engine)
+        from .postgres.adapter import PostgresAdapter
+
+        return PostgresAdapter(connection_string=graph_database_url)
 
     elif graph_database_provider == "kuzu":
         if not graph_file_path:

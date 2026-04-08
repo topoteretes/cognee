@@ -12,14 +12,23 @@ import json
 import pytest
 import pytest_asyncio
 
-from sqlalchemy import URL
-from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
-    SQLAlchemyAdapter,
-)
 from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
 
 
-# -- Fixture: real Postgres via SQLAlchemyAdapter --
+# -- Session-scoped event loop so the async engine's connection pool
+#    stays on a single loop across all tests.
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
+# -- Fixture: real Postgres --
 
 
 @pytest_asyncio.fixture
@@ -29,16 +38,15 @@ async def adapter():
     Initializes schema, yields the adapter, then cleans up all graph
     tables so tests are isolated.
     """
-    connection_string = URL.create(
-        "postgresql+asyncpg",
-        username=os.environ.get("DB_USERNAME", "cognee"),
-        password=os.environ.get("DB_PASSWORD", "cognee"),
-        host=os.environ.get("DB_HOST", "localhost"),
-        port=int(os.environ.get("DB_PORT", "5432")),
-        database=os.environ.get("DB_NAME", "cognee_db"),
+    username = os.environ.get("DB_USERNAME", "cognee")
+    password = os.environ.get("DB_PASSWORD", "cognee")
+    host = os.environ.get("DB_HOST", "localhost")
+    port = os.environ.get("DB_PORT", "5432")
+    database = os.environ.get("DB_NAME", "cognee_db")
+    connection_string = (
+        f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}"
     )
-    engine = SQLAlchemyAdapter(connection_string)
-    a = PostgresAdapter(relational_engine=engine)
+    a = PostgresAdapter(connection_string=connection_string)
 
     # Create tables and indexes
     await a.initialize()

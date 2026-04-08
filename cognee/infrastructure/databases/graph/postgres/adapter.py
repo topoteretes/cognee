@@ -6,65 +6,19 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
 
-from sqlalchemy import (
-    text, Table, Column, MetaData, String, DateTime, Index, ForeignKey,
-    values, select, exists, func,
-)
+from sqlalchemy import text, values, select, exists, func, String
 from sqlalchemy import column as sa_column
-from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.storage.utils import JSONEncoder
 
+from .tables import _meta, _node_table, _edge_table
+
 logger = get_logger()
-
-_meta = MetaData()
-
-_node_table = Table(
-    "graph_node",
-    _meta,
-    Column("id", String, primary_key=True),
-    Column("name", String),
-    Column("type", String),
-    Column("properties", JSONB),
-    Column("created_at", DateTime(timezone=True), server_default=func.now()),
-    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
-)
-
-_edge_table = Table(
-    "graph_edge",
-    _meta,
-    Column(
-        "source_id", String,
-        ForeignKey("graph_node.id", ondelete="CASCADE"),
-        primary_key=True, nullable=False,
-    ),
-    Column(
-        "target_id", String,
-        ForeignKey("graph_node.id", ondelete="CASCADE"),
-        primary_key=True, nullable=False,
-    ),
-    Column("relationship_name", String, primary_key=True, nullable=False),
-    Column("properties", JSONB),
-    Column("created_at", DateTime(timezone=True), server_default=func.now()),
-    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
-)
-
-Index("idx_edge_source", _edge_table.c.source_id)
-Index("idx_edge_target", _edge_table.c.target_id)
-Index("idx_node_type", _node_table.c.type)
-
-# Covering indexes: neighbor lookups without heap reads
-Index(
-    "idx_edge_source_cover", _edge_table.c.source_id,
-    postgresql_include=["target_id", "relationship_name"],
-)
-Index(
-    "idx_edge_target_cover", _edge_table.c.target_id,
-    postgresql_include=["source_id", "relationship_name"],
-)
 
 
 class PostgresAdapter(GraphDBInterface):
@@ -72,26 +26,23 @@ class PostgresAdapter(GraphDBInterface):
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
-    def __init__(self, relational_engine: Any) -> None:
-        """Accept an existing SQLAlchemyAdapter (shared with the relational layer)."""
-        self.engine = relational_engine
+    def __init__(self, connection_string: str) -> None:
+        """Create engine and sessionmaker from a Postgres connection string."""
+        self.db_uri = connection_string
+        self.engine = create_async_engine(self.db_uri)
+        self.sessionmaker = async_sessionmaker(
+            bind=self.engine, expire_on_commit=False
+        )
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
-        async with self.engine.engine.begin() as conn:
+        async with self.engine.begin() as conn:
             await conn.run_sync(_meta.create_all, checkfirst=True)
-
-    async def _ensure_initialized(self) -> None:
-        """Re-run initialize() if tables were dropped (e.g. by prune_system).
-
-        Uses CREATE IF NOT EXISTS, so this is cheap and idempotent.
-        """
-        await self.initialize()
 
     @asynccontextmanager
     async def _session(self) -> AsyncIterator[Any]:
         """Yield an async session from the underlying engine."""
-        async with self.engine.get_async_session() as session:
+        async with self.sessionmaker() as session:
             yield session
 
     def _serialize_properties(self, props: Dict[str, Any]) -> str:
@@ -101,7 +52,7 @@ class PostgresAdapter(GraphDBInterface):
     def _parse_node_row(self, row) -> Dict[str, Any]:
         """Convert a (id, name, type, properties) row to a merged dict."""
         data = {"id": row.id, "name": row.name, "type": row.type}
-        if row.properties:
+        if row.properties is not None:
             props = (
                 row.properties if isinstance(row.properties, dict) else json.loads(row.properties)
             )
@@ -128,7 +79,7 @@ class PostgresAdapter(GraphDBInterface):
         --------
             bool: True if the graph has no nodes.
         """
-        await self._ensure_initialized()
+        await self.initialize()
         async with self._session() as session:
             result = await session.execute(text("SELECT EXISTS(SELECT 1 FROM graph_node LIMIT 1)"))
             return not result.scalar()
@@ -736,7 +687,7 @@ class PostgresAdapter(GraphDBInterface):
 
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
-        await self._ensure_initialized()
+        await self.initialize()
         async with self._session() as session:
             await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
