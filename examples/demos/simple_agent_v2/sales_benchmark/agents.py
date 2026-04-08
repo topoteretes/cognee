@@ -22,8 +22,8 @@ from .models import ConversationResult, CustomerHint, SalesResponse
 
 MAX_ROUNDS = 2
 
-# Sales function signature: (history, lead_intro, round_num, memory_context) -> SalesResponse
-SalesFn = Callable[[list, str, int, str], Awaitable[SalesResponse]]
+# Sales function signature: (history, lead_intro, round_num) -> SalesResponse
+SalesFn = Callable[[list, str, int], Awaitable[SalesResponse]]
 
 
 def _feature_catalog_text() -> str:
@@ -64,8 +64,8 @@ async def sales_agent_turn(
         "IMPORTANT: You do NOT know who this customer is or what persona they fit. "
         "You must figure out what they need from their messages and any past learnings.\n\n"
         "Guidelines:\n"
-        "- If PAST SALES LEARNINGS are provided, follow them closely — they reflect what "
-        "actually worked and failed with similar customers.\n"
+        "- If PAST SALES LEARNINGS or Additional Cognee Memory Context is provided, "
+        "follow it closely — it reflects what actually worked and failed with similar customers.\n"
         "- Listen carefully to what the customer is actually asking for.\n"
         "- Pay close attention to customer hints and objections — they reveal what the "
         "customer actually needs.\n"
@@ -141,7 +141,6 @@ def _evaluate_round(
 async def run_conversation(
     sales_fn: SalesFn,
     profile: BuyingProfile,
-    memory_context: str = "",
 ) -> ConversationResult:
     """Run one full lead conversation with deterministic evaluation."""
     conversation_history: list[dict] = []
@@ -153,7 +152,7 @@ async def run_conversation(
     for round_num in range(1, MAX_ROUNDS + 1):
         # Sales turn
         sales_resp = await sales_fn(
-            conversation_history, profile.initial_message, round_num, memory_context
+            conversation_history, profile.initial_message, round_num
         )
         features_pitched.append(sales_resp.lead_feature)
         conversation_history.append({

@@ -825,7 +825,7 @@ _ARCHETYPES = [
     [lead for lead in _ALL_LEADS if lead.persona_tag == "ai_reliability"],
 ]
 
-TARGET_LEADS = 204  # 34 rounds of 6 archetypes
+TARGET_LEADS = 300  # 50 per archetype for robust demo stats
 _LEADS_PER_ARCHETYPE = TARGET_LEADS // len(_ARCHETYPES)  # 34 each
 
 

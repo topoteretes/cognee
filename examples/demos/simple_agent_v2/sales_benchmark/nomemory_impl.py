@@ -9,9 +9,8 @@ from .models import SalesResponse
 
 
 async def sales_turn_no_memory(
-    conversation_history: list, lead_intro: str, round_num: int, memory_context: str
+    conversation_history: list, lead_intro: str, round_num: int
 ) -> SalesResponse:
-    # Ignores memory_context — always empty for no-memory mode
     return await sales_agent_turn(conversation_history, lead_intro, round_num)
 
 
