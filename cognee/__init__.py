@@ -55,6 +55,7 @@ _LAZY_IMPORTS = {
     "get_last_trace": "cognee.modules.observability.trace_context",
     "get_all_traces": "cognee.modules.observability.trace_context",
     "clear_traces": "cognee.modules.observability.trace_context",
+    "agent_memory": "cognee.modules.agent_memory",
 }
 
 
