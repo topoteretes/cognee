@@ -2,7 +2,7 @@ name: automation | Previous Day Dev Commits
 
 on:
   schedule:
-    - cron: "23 59 * * *"
+    - cron: "59 23 * * *"
   push:
     branches:
       - feature/cog-4577-continuous-docs-drafting-from-dev
