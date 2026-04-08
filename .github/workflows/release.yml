@@ -75,7 +75,7 @@ jobs:
           body: ${{ steps.generate_notes.outputs.RELEASE_NOTES }}
           prerelease: ${{ github.ref_name == 'dev' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
 
   release-pypi-package:
     needs: release-github
