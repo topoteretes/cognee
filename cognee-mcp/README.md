@@ -433,6 +433,8 @@ Some features are only available in direct mode:
 - `prune` (data reset)
 - `get_developer_rules` (developer rules retrieval)
 - `list_data` with specific dataset_id (detailed data listing)
+- `get_document` (full document retrieval)
+- `get_chunk_neighbors` (neighboring chunk retrieval)
 
 Basic operations like `cognify`, `search`, `delete`, and `list_data` (all datasets) work in both modes.
 
@@ -461,6 +463,10 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 - **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, SUMMARIES, CYPHER, and FEELING_LUCKY
 
+- **get_document**: Retrieve complete documents with all chunks by document ID
+
+- **get_chunk_neighbors**: Retrieve surrounding chunks by chunk_index for narrative context
+
 - **cognify_status / codify_status**: Track pipeline progress
 
 **Data Management Examples:**
@@ -476,6 +482,18 @@ delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="soft")
 
 # Delete specific data (hard deletion - removes orphaned entities)
 delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="hard")
+```
+
+**Document Retrieval Examples:**
+```bash
+# Retrieve a complete document with all chunks
+get_document(document_id="doc-uuid-here", include_metadata=True)
+
+# Retrieve surrounding chunks for context (2 chunks before and after)
+get_chunk_neighbors(chunk_id="chunk-uuid-here", neighbor_count=2, include_target=True)
+
+# Get only surrounding chunks without the target chunk
+get_chunk_neighbors(chunk_id="chunk-uuid-here", neighbor_count=3, include_target=False)
 ```
 
 

@@ -1,6 +1,8 @@
 from typing import Any, Optional, List, Union
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.graph.utils import normalize_graph_result
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
@@ -23,8 +25,10 @@ class ChunksRetriever(BaseRetriever):
     def __init__(
         self,
         top_k: Optional[int] = 5,
+        strict_enrichment: bool = False,
     ):
         self.top_k = top_k
+        self.strict_enrichment = strict_enrichment
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -99,9 +103,163 @@ class ChunksRetriever(BaseRetriever):
                 "DocumentChunk_text", query, limit=self.top_k, include_payload=True
             )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
-
-            return found_chunks
-
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
+
+        if not found_chunks:
+            return found_chunks
+
+        try:
+            await update_node_access_timestamps(found_chunks)
+        except Exception as error:
+            logger.warning(f"Failed to update timestamps: {error}")
+            if self.strict_enrichment:
+                raise NoDataError(f"Failed to update timestamps: {error}") from error
+
+        try:
+            graph_engine = unified.graph
+        except Exception as error:
+            error_msg = f"Graph engine unavailable: {error}"
+            if self.strict_enrichment:
+                logger.error(error_msg)
+                raise NoDataError(error_msg) from error
+            else:
+                logger.warning(f"{error_msg}, skipping enrichment")
+                return found_chunks
+
+        chunk_ids, chunk_id_map = self._extract_chunk_ids(found_chunks)
+
+        if not chunk_ids:
+            logger.warning("No valid chunk IDs found, skipping enrichment")
+            return found_chunks
+
+        parent_map = await self._fetch_parent_documents(graph_engine, chunk_ids)
+        self._enrich_chunk_payloads(found_chunks, chunk_id_map, parent_map)
+
+        return found_chunks
+
+    def _extract_chunk_ids(self, found_chunks: list) -> tuple[list, dict]:
+        """Extract chunk IDs from search results into a list and lookup map."""
+        chunk_ids = []
+        chunk_id_map = {}
+
+        for chunk in found_chunks:
+            chunk_id = None
+            try:
+                if hasattr(chunk, "id"):
+                    chunk_id = str(chunk.id)
+                elif hasattr(chunk, "payload") and "id" in chunk.payload:
+                    chunk_id = str(chunk.payload["id"])
+                elif isinstance(chunk, dict):
+                    if "id" in chunk:
+                        chunk_id = str(chunk["id"])
+                    elif isinstance(chunk.get("payload"), dict) and "id" in chunk["payload"]:
+                        chunk_id = str(chunk["payload"]["id"])
+
+                if chunk_id:
+                    chunk_ids.append(chunk_id)
+                    chunk_id_map[chunk_id] = chunk
+                elif self.strict_enrichment:
+                    raise ValueError(f"Chunk missing ID: {chunk}")
+            except Exception as error:
+                if self.strict_enrichment:
+                    raise NoDataError(f"Failed to extract chunk ID: {error}") from error
+                logger.debug(f"Failed to extract chunk ID: {error}")
+
+        return chunk_ids, chunk_id_map
+
+    async def _fetch_parent_documents(self, graph_engine: Any, chunk_ids: list) -> dict:
+        """Fetch parent document info for chunks via batched query with individual fallback."""
+        parent_map = {}
+
+        try:
+            logger.debug(f"Attempting batched parent lookup for {len(chunk_ids)} chunks")
+
+            cypher_query = """
+            MATCH (chunk:DocumentChunk)-[:is_part_of]->(doc:Document)
+            WHERE chunk.id IN $chunk_ids
+            RETURN chunk.id as chunk_id, doc.id as doc_id, doc.name as doc_name, doc.type as doc_type
+            """
+
+            result = await graph_engine.query(cypher_query, params={"chunk_ids": chunk_ids})
+            result = normalize_graph_result(result, ["chunk_id", "doc_id", "doc_name", "doc_type"])
+
+            for row in result:
+                try:
+                    parent_map[str(row["chunk_id"])] = self._build_parent_info(row)
+                except Exception as error:
+                    logger.warning(f"Failed to parse batch result row: {error}")
+
+            logger.info(
+                f"Batched query found parents for {len(parent_map)}/{len(chunk_ids)} chunks"
+            )
+
+        except Exception as error:
+            logger.warning(f"Batched lookup failed, falling back to individual queries: {error}")
+
+        # Retry missing chunk IDs individually (handles both batch failure and partial results)
+        missing_chunk_ids = [cid for cid in chunk_ids if cid not in parent_map]
+        for chunk_id in missing_chunk_ids:
+            try:
+                cypher_query = """
+                MATCH (chunk:DocumentChunk {id: $chunk_id})-[:is_part_of]->(doc:Document)
+                RETURN doc.id as doc_id, doc.name as doc_name, doc.type as doc_type
+                LIMIT 1
+                """
+
+                result = await graph_engine.query(cypher_query, params={"chunk_id": chunk_id})
+                result = normalize_graph_result(result, ["doc_id", "doc_name", "doc_type"])
+
+                if result and len(result) > 0:
+                    parent_map[chunk_id] = self._build_parent_info(result[0])
+
+            except Exception as individual_error:
+                if self.strict_enrichment:
+                    raise NoDataError(
+                        f"Failed to fetch parent for {chunk_id}: {individual_error}"
+                    ) from individual_error
+                logger.debug(f"Individual query failed for {chunk_id}: {individual_error}")
+
+        return parent_map
+
+    def _build_parent_info(self, row: dict) -> dict:
+        """Build parent document info dict from a graph query result row."""
+        parent_info = {
+            "id": str(row.get("doc_id", "")),
+            "name": row.get("doc_name", "Unknown"),
+        }
+        if "doc_type" in row and row["doc_type"]:
+            parent_info["type"] = row["doc_type"]
+        return parent_info
+
+    def _enrich_chunk_payloads(
+        self, found_chunks: list, chunk_id_map: dict, parent_map: dict
+    ) -> None:
+        """Attach parent document info to chunk payloads and log enrichment rate."""
+        enriched_count = 0
+        for chunk_id, chunk in chunk_id_map.items():
+            if chunk_id in parent_map:
+                try:
+                    parent_info = parent_map[chunk_id]
+
+                    if hasattr(chunk, "payload") and isinstance(chunk.payload, dict):
+                        chunk.payload["parent_document"] = parent_info
+                    elif isinstance(chunk, dict):
+                        chunk["parent_document"] = parent_info
+                    enriched_count += 1
+                except Exception as error:
+                    if self.strict_enrichment:
+                        raise NoDataError(f"Failed to add parent info: {error}") from error
+                    logger.warning(f"Failed to add parent info to chunk: {error}")
+            elif self.strict_enrichment:
+                raise NoDataError(f"No parent found for chunk {chunk_id}")
+
+        success_rate = (enriched_count / len(found_chunks) * 100) if found_chunks else 0
+        logger.info(f"Enriched {enriched_count}/{len(found_chunks)} chunks ({success_rate:.1f}%)")
+
+        if success_rate < 50 and len(found_chunks) > 0 and not self.strict_enrichment:
+            logger.warning(
+                f"Low enrichment rate ({success_rate:.1f}%) suggests vector/graph DB inconsistency. "
+                "Consider running cognee.prune() and re-cognifying."
+            )
