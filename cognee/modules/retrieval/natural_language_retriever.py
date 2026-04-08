@@ -109,6 +109,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
         # Postgres backend does not support Cypher generation/execution
         from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+
         if isinstance(graph_engine, PostgresAdapter):
             raise SearchTypeNotSupported(
                 "Natural language search is not supported with the Postgres graph backend. "

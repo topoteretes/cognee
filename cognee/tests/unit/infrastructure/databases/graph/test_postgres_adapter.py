@@ -43,9 +43,7 @@ async def adapter():
     host = os.environ.get("DB_HOST", "localhost")
     port = os.environ.get("DB_PORT", "5432")
     database = os.environ.get("DB_NAME", "cognee_db")
-    connection_string = (
-        f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}"
-    )
+    connection_string = f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}"
     a = PostgresAdapter(connection_string=connection_string)
 
     # Create tables and indexes

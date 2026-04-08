@@ -20,14 +20,18 @@ _edge_table = Table(
     "graph_edge",
     _meta,
     Column(
-        "source_id", String,
+        "source_id",
+        String,
         ForeignKey("graph_node.id", ondelete="CASCADE"),
-        primary_key=True, nullable=False,
+        primary_key=True,
+        nullable=False,
     ),
     Column(
-        "target_id", String,
+        "target_id",
+        String,
         ForeignKey("graph_node.id", ondelete="CASCADE"),
-        primary_key=True, nullable=False,
+        primary_key=True,
+        nullable=False,
     ),
     Column("relationship_name", String, primary_key=True, nullable=False),
     Column("properties", JSONB),
@@ -41,10 +45,12 @@ Index("idx_node_type", _node_table.c.type)
 
 # Covering indexes: neighbor lookups without heap reads
 Index(
-    "idx_edge_source_cover", _edge_table.c.source_id,
+    "idx_edge_source_cover",
+    _edge_table.c.source_id,
     postgresql_include=["target_id", "relationship_name"],
 )
 Index(
-    "idx_edge_target_cover", _edge_table.c.target_id,
+    "idx_edge_target_cover",
+    _edge_table.c.target_id,
     postgresql_include=["source_id", "relationship_name"],
 )

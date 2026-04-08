@@ -30,9 +30,7 @@ class PostgresAdapter(GraphDBInterface):
         """Create engine and sessionmaker from a Postgres connection string."""
         self.db_uri = connection_string
         self.engine = create_async_engine(self.db_uri)
-        self.sessionmaker = async_sessionmaker(
-            bind=self.engine, expire_on_commit=False
-        )
+        self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
@@ -124,14 +122,16 @@ class PostgresAdapter(GraphDBInterface):
                 props = vars(node)
 
             extra = {k: v for k, v in props.items() if k not in core_keys}
-            rows.append({
-                "id": str(props.get("id", "")),
-                "name": str(props.get("name", "")),
-                "type": str(props.get("type", "")),
-                "properties": json.loads(json.dumps(extra, cls=JSONEncoder)),
-                "created_at": now,
-                "updated_at": now,
-            })
+            rows.append(
+                {
+                    "id": str(props.get("id", "")),
+                    "name": str(props.get("name", "")),
+                    "type": str(props.get("type", "")),
+                    "properties": json.loads(json.dumps(extra, cls=JSONEncoder)),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
 
         stmt = pg_insert(_node_table).values(rows)
         stmt = stmt.on_conflict_do_update(
@@ -243,14 +243,16 @@ class PostgresAdapter(GraphDBInterface):
         rows = []
         for edge in edges:
             raw_props = edge[3] if len(edge) > 3 and edge[3] else {}
-            rows.append({
-                "source_id": str(edge[0]),
-                "target_id": str(edge[1]),
-                "relationship_name": edge[2],
-                "properties": json.loads(self._serialize_properties(raw_props)),
-                "created_at": now,
-                "updated_at": now,
-            })
+            rows.append(
+                {
+                    "source_id": str(edge[0]),
+                    "target_id": str(edge[1]),
+                    "relationship_name": edge[2],
+                    "properties": json.loads(self._serialize_properties(raw_props)),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
 
         stmt = pg_insert(_edge_table).values(rows)
         stmt = stmt.on_conflict_do_update(
@@ -302,16 +304,13 @@ class PostgresAdapter(GraphDBInterface):
             name="q",
         ).data([(str(s), str(t), str(r)) for s, t, r in edges])
 
-        stmt = (
-            select(candidates.c.src, candidates.c.tgt, candidates.c.rel)
-            .where(
-                exists(
-                    select(text("1"))
-                    .select_from(_edge_table)
-                    .where(_edge_table.c.source_id == candidates.c.src)
-                    .where(_edge_table.c.target_id == candidates.c.tgt)
-                    .where(_edge_table.c.relationship_name == candidates.c.rel)
-                )
+        stmt = select(candidates.c.src, candidates.c.tgt, candidates.c.rel).where(
+            exists(
+                select(text("1"))
+                .select_from(_edge_table)
+                .where(_edge_table.c.source_id == candidates.c.src)
+                .where(_edge_table.c.target_id == candidates.c.tgt)
+                .where(_edge_table.c.relationship_name == candidates.c.rel)
             )
         )
 
@@ -820,9 +819,11 @@ class PostgresAdapter(GraphDBInterface):
                 if row[9]:
                     end_node.update(row[9] if isinstance(row[9], dict) else json.loads(row[9]))
 
-                triplets.append({
-                    "start_node": start_node,
-                    "relationship_properties": rel,
-                    "end_node": end_node,
-                })
+                triplets.append(
+                    {
+                        "start_node": start_node,
+                        "relationship_properties": rel,
+                        "end_node": end_node,
+                    }
+                )
             return triplets
