@@ -167,14 +167,27 @@ jobs:
           mkdir -p docs-repo
           echo "review_dir=${REVIEW_DIR}" >> "${GITHUB_OUTPUT}"
 
-      - name: Assess and update docs for merged branch
-        id: claude
+      - name: Prepare merge context files
+        id: context
+        run: |
+          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
+          FILES_FILE="${REVIEW_DIR}/changed-files.txt"
+          DIFF_FILE="${REVIEW_DIR}/branch.diff"
+
+          git diff --name-only "${{ matrix.first_parent }}" "${{ matrix.second_parent }}" > "${FILES_FILE}"
+          git diff "${{ matrix.first_parent }}" "${{ matrix.second_parent }}" > "${DIFF_FILE}"
+
+          echo "files_file=${FILES_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "diff_file=${DIFF_FILE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Assess docs impact for merged branch
+        id: assess
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are a documentation update agent for the Cognee project.
+            You are a documentation impact assessor for the Cognee project.
 
             The core source repository is checked out at the workspace root.
             The docs repository is checked out at `./docs-repo/`.
@@ -189,27 +202,68 @@ jobs:
             - Time window end: `${{ needs.prepare-merged-branches.outputs.end_date }}`
 
             Treat the repository history as the source of truth. Use git commands yourself to inspect what this merged branch changed.
-            Prefer comparing `${{ matrix.first_parent }}` and `${{ matrix.second_parent }}` or inspecting `${{ matrix.merge_sha }}` directly.
+            Start with these prepared files:
+            - Changed files list: `${{ steps.context.outputs.files_file }}`
+            - Full branch diff: `${{ steps.context.outputs.diff_file }}`
+            Prefer those first, then inspect specific files with git or normal file reads only when needed.
 
             Your task:
             1. Determine whether this merged branch requires a documentation update.
-            2. Write your decision to `${{ steps.workspace.outputs.review_dir }}/report.md`.
-            3. If documentation updates are needed, edit the docs repo in `./docs-repo/` directly.
-            4. If no update is needed, explain clearly why in the report and leave the docs repo unchanged.
+            2. Write your decision to `${{ steps.workspace.outputs.review_dir }}/assessment.json`.
+            3. Also write a short human-readable review to `${{ steps.workspace.outputs.review_dir }}/report.md`.
+            4. Do not edit the docs repo in this step.
 
-            The report must include these sections:
+            `assessment.json` must be valid JSON with exactly these keys:
+            - `needs_documentation_update`: boolean
+            - `summary`: string
+            - `why`: string
+            - `source_files_reviewed`: array of strings
+            - `suggested_docs_files`: array of strings
+            - `changelog_draft`: string
+            - `open_questions`: array of strings
+
+            `report.md` must include these sections:
             - Branch
             - Merge commit
             - Needs documentation update
             - Why
             - Source files reviewed
-            - Docs files changed
+            - Suggested docs files
             - Changelog draft
             - Open questions
 
             Keep edits grounded in the code changes from this merged branch only.
             In your final response, only list the files you created or changed.
-          claude_args: "--allowed-tools Read,Write,Glob,Grep,Bash --max-turns 20"
+          claude_args: "--allowed-tools Read,Write,Glob,Grep,Bash --max-turns 12"
+
+      - name: Update docs for merged branch
+        id: update_docs
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are a documentation update agent for the Cognee project.
+
+            The core source repository is checked out at the workspace root.
+            The docs repository is checked out at `./docs-repo/`.
+            Your assigned merged branch is `${{ matrix.branch_name }}`.
+
+            First read `${{ steps.workspace.outputs.review_dir }}/assessment.json` and `${{ steps.workspace.outputs.review_dir }}/report.md`.
+
+            Rules:
+            1. If `needs_documentation_update` is false, do not edit `./docs-repo/`.
+            2. If `needs_documentation_update` is true, update the docs repo in `./docs-repo/` based only on the assessed code changes from this merged branch.
+            3. After you finish, append a section named `Docs files changed` to `${{ steps.workspace.outputs.review_dir }}/report.md`.
+            4. Also write `${{ steps.workspace.outputs.review_dir }}/result.json` with exactly these keys:
+               - `needs_documentation_update`: boolean
+               - `docs_updated`: boolean
+               - `docs_files_changed`: array of strings
+               - `summary`: string
+
+            Keep changes focused and minimal. Do not review the branch from scratch unless needed to complete the docs edits.
+            In your final response, only list the files you created or changed.
+          claude_args: "--allowed-tools Read,Write,Glob,Grep,Bash --max-turns 12"
 
       - name: Capture docs diff
         id: diff
@@ -235,9 +289,19 @@ jobs:
           echo "Merged branch: ${{ matrix.branch_name }} (${{ matrix.short_sha }})"
           echo "Review directory: ${REVIEW_DIR}"
           echo
+          if [ -f "${REVIEW_DIR}/assessment.json" ]; then
+            echo "::group::assessment.json"
+            cat "${REVIEW_DIR}/assessment.json"
+            echo "::endgroup::"
+          fi
           echo "::group::report.md"
           cat "${REVIEW_DIR}/report.md"
           echo "::endgroup::"
+          if [ -f "${REVIEW_DIR}/result.json" ]; then
+            echo "::group::result.json"
+            cat "${REVIEW_DIR}/result.json"
+            echo "::endgroup::"
+          fi
 
           if [ -s "${REVIEW_DIR}/docs.diff" ]; then
             echo "::group::docs.diff"
@@ -253,12 +317,28 @@ jobs:
             echo "- Merge commit: \`${{ matrix.merge_sha }}\`"
             echo "- Docs changed: \`${{ steps.diff.outputs.docs_changed }}\`"
             echo
+            if [ -f "${REVIEW_DIR}/assessment.json" ]; then
+              echo "### Assessment"
+              echo
+              echo '```json'
+              cat "${REVIEW_DIR}/assessment.json"
+              echo '```'
+              echo
+            fi
             echo "### Report"
             echo
             echo '```md'
             cat "${REVIEW_DIR}/report.md"
             echo '```'
             echo
+            if [ -f "${REVIEW_DIR}/result.json" ]; then
+              echo "### Result"
+              echo
+              echo '```json'
+              cat "${REVIEW_DIR}/result.json"
+              echo '```'
+              echo
+            fi
             if [ -s "${REVIEW_DIR}/docs.diff" ]; then
               echo "### Docs diff"
               echo
