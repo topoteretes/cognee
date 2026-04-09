@@ -20,6 +20,7 @@ jobs:
       end_date: ${{ steps.prepare.outputs.end_date }}
       has_merges: ${{ steps.prepare.outputs.has_merges }}
       merge_summary: ${{ steps.prepare.outputs.merge_summary }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
 
     steps:
       - name: Check out repository
@@ -115,6 +116,7 @@ jobs:
               fh.write(f"start_date={start.strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
               fh.write(f"end_date={end.strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
               fh.write(f"has_merges={'true' if merges else 'false'}\n")
+              fh.write(f"matrix={json.dumps(merges)}\n")
               fh.write("merge_summary<<EOF\n")
               if merge_lines:
                   fh.write("\n".join(merge_lines))
@@ -138,11 +140,16 @@ jobs:
                   fh.write("No branches were merged into `origin/dev` during the current UTC day.\n")
           PY
 
-  generate-and-assess-dev-notes:
-    needs: prepare-merged-branches
+  create-docs-prs:
+    needs:
+      - prepare-merged-branches
     if: ${{ needs.prepare-merged-branches.outputs.has_merges == 'true' }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare-merged-branches.outputs.matrix) }}
 
     steps:
       - name: Check out core repository
@@ -153,77 +160,198 @@ jobs:
       - name: Fetch latest dev branch
         run: git fetch origin dev --no-tags
 
-      - name: Prepare output paths
-        id: output_paths
+      - name: Prepare branch note paths
+        id: branch_paths
         run: |
-          OUTPUT_DIR="daily-dev-notes"
+          OUTPUT_DIR="branch-dev-notes/${{ matrix.safe_branch }}-${{ matrix.short_sha }}"
           mkdir -p "${OUTPUT_DIR}"
           echo "output_dir=${OUTPUT_DIR}" >> "${GITHUB_OUTPUT}"
-          echo "notes_json=${OUTPUT_DIR}/dev_notes.json" >> "${GITHUB_OUTPUT}"
-          echo "notes_markdown=${OUTPUT_DIR}/dev_notes.md" >> "${GITHUB_OUTPUT}"
+          echo "notes_json=${OUTPUT_DIR}/branch_notes.json" >> "${GITHUB_OUTPUT}"
+          echo "notes_markdown=${OUTPUT_DIR}/branch_notes.md" >> "${GITHUB_OUTPUT}"
           echo "assessment_json=${OUTPUT_DIR}/docs_assessment.json" >> "${GITHUB_OUTPUT}"
           echo "assessment_markdown=${OUTPUT_DIR}/docs_assessment.md" >> "${GITHUB_OUTPUT}"
 
-      - name: Generate current day dev notes
+      - name: Generate branch notes
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY || secrets.ANTHROPIC_API_KEY }}
           LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
-          START_DATE: ${{ needs.prepare-merged-branches.outputs.start_date }}
-          END_DATE: ${{ needs.prepare-merged-branches.outputs.end_date }}
-          NOTES_JSON: ${{ steps.output_paths.outputs.notes_json }}
-          NOTES_MARKDOWN: ${{ steps.output_paths.outputs.notes_markdown }}
+          NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
+          NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
         run: |
-          python3 tools/generate_dev_notes.py \
-            --target-branch origin/dev \
-            --start-date "${START_DATE}" \
-            --end-date "${END_DATE}" \
+          python3 tools/generate_branch_notes.py \
+            --branch-name "${{ matrix.branch_name }}" \
+            --merge-sha "${{ matrix.merge_sha }}" \
+            --first-parent "${{ matrix.first_parent }}" \
+            --second-parent "${{ matrix.second_parent }}" \
             --json-output "${NOTES_JSON}" \
             --markdown-output "${NOTES_MARKDOWN}"
 
-      - name: Assess documentation impact from dev notes
+      - name: Assess documentation impact for branch
+        id: assessment
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY || secrets.ANTHROPIC_API_KEY }}
           LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
-          NOTES_JSON: ${{ steps.output_paths.outputs.notes_json }}
-          NOTES_MARKDOWN: ${{ steps.output_paths.outputs.notes_markdown }}
-          ASSESSMENT_JSON: ${{ steps.output_paths.outputs.assessment_json }}
-          ASSESSMENT_MARKDOWN: ${{ steps.output_paths.outputs.assessment_markdown }}
+          NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
+          NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
+          ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
+          ASSESSMENT_MARKDOWN: ${{ steps.branch_paths.outputs.assessment_markdown }}
+          BRANCH_NAME: ${{ matrix.branch_name }}
+          BRANCH_SLUG: ${{ matrix.safe_branch }}
+          SHORT_SHA: ${{ matrix.short_sha }}
+          MERGE_SHA: ${{ matrix.merge_sha }}
         run: |
-          python3 tools/assess_dev_notes.py \
+          python3 tools/assess_branch_notes.py \
             --notes-json "${NOTES_JSON}" \
             --notes-markdown "${NOTES_MARKDOWN}" \
             --json-output "${ASSESSMENT_JSON}" \
             --markdown-output "${ASSESSMENT_MARKDOWN}"
 
-      - name: Echo generated notes and assessment
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          assessment = json.loads(Path(os.environ["ASSESSMENT_JSON"]).read_text())
+          notes_markdown = Path(os.environ["NOTES_MARKDOWN"]).read_text()
+          assessment_markdown = Path(os.environ["ASSESSMENT_MARKDOWN"]).read_text()
+
+          needs_update = bool(assessment.get("needs_documentation_update"))
+          branch_name = os.environ["BRANCH_NAME"]
+          branch_slug = os.environ["BRANCH_SLUG"]
+          short_sha = os.environ["SHORT_SHA"]
+          merge_sha = os.environ["MERGE_SHA"]
+          docs_branch = f"automation/docs-{branch_slug}-{short_sha}"
+          draft_path = f"review-notes/{branch_slug}-{short_sha}.md"
+          pr_title = f"docs: draft updates for {branch_name}"
+
+          recommended = assessment.get("recommended_next_steps", [])
+          candidate_areas = assessment.get("candidate_areas", [])
+          reason = assessment.get("reason", "")
+
+          pr_body_lines = [
+              f"Automated documentation draft for merged branch `{branch_name}` (`{short_sha}`).",
+              "",
+              f"Needs documentation update: `{str(needs_update).lower()}`",
+              "",
+              f"Reason: {reason}",
+          ]
+          if candidate_areas:
+              pr_body_lines.extend(["", "Candidate areas:"])
+              pr_body_lines.extend([f"- {item}" for item in candidate_areas])
+          if recommended:
+              pr_body_lines.extend(["", "Recommended next steps:"])
+              pr_body_lines.extend([f"- {item}" for item in recommended])
+
+          draft_lines = [
+              f"# Documentation draft for {branch_name}",
+              "",
+              f"- Merge SHA: `{merge_sha}`",
+              f"- Short SHA: `{short_sha}`",
+              "",
+              "## Branch Notes",
+              "",
+              notes_markdown,
+              "",
+              "## Documentation Assessment",
+              "",
+              assessment_markdown,
+              "",
+          ]
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as fh:
+              fh.write(f"needs_update={'true' if needs_update else 'false'}\n")
+              fh.write(f"docs_branch={docs_branch}\n")
+              fh.write(f"draft_path={draft_path}\n")
+              fh.write(f"pr_title={pr_title}\n")
+              fh.write("pr_body<<EOF\n")
+              fh.write("\n".join(pr_body_lines) + "\n")
+              fh.write("EOF\n")
+              fh.write("draft_content<<EOF\n")
+              fh.write("\n".join(draft_lines) + "\n")
+              fh.write("EOF\n")
+          PY
+
+      - name: Skip docs PR creation when docs are not needed
+        if: ${{ steps.assessment.outputs.needs_update != 'true' }}
+        run: echo "Assessment says no documentation update is needed for ${{ matrix.branch_name }}; skipping docs PR."
+
+      - name: Check out docs repository
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        uses: actions/checkout@v6
+        with:
+          repository: topoteretes/cognee-docs
+          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          ref: main
+          path: docs-repo
+
+      - name: Create docs draft commit
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: commit_docs
+        working-directory: docs-repo
         run: |
-          {
-            echo "## Dev notes"
-            echo
-            echo '```md'
-            cat "${{ steps.output_paths.outputs.notes_markdown }}"
-            echo '```'
-            echo
-            echo "## Documentation assessment"
-            echo
-            echo '```md'
-            cat "${{ steps.output_paths.outputs.assessment_markdown }}"
-            echo '```'
-            echo
-          } >> "${GITHUB_STEP_SUMMARY}"
+          mkdir -p "$(dirname "${{ steps.assessment.outputs.draft_path }}")"
+          cat <<'EOF' > "${{ steps.assessment.outputs.draft_path }}"
+          ${{ steps.assessment.outputs.draft_content }}
+          EOF
 
-          echo "::group::dev_notes.md"
-          cat "${{ steps.output_paths.outputs.notes_markdown }}"
-          echo "::endgroup::"
-          echo "::group::docs_assessment.md"
-          cat "${{ steps.output_paths.outputs.assessment_markdown }}"
-          echo "::endgroup::"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${{ steps.assessment.outputs.docs_branch }}"
+          git add "${{ steps.assessment.outputs.draft_path }}"
 
-      - name: Upload notes artifact
+          if git diff --cached --quiet; then
+            echo "changes_made=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "${{ steps.assessment.outputs.pr_title }}"
+          echo "changes_made=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push docs draft branch
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
+        working-directory: docs-repo
+        run: git push --force-with-lease origin "${{ steps.assessment.outputs.docs_branch }}"
+
+      - name: Create or update docs pull request
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          TARGET_REPO: topoteretes/cognee-docs
+          HEAD_BRANCH: ${{ steps.assessment.outputs.docs_branch }}
+          PR_TITLE: ${{ steps.assessment.outputs.pr_title }}
+          PR_BODY: ${{ steps.assessment.outputs.pr_body }}
+          CHANGES_MADE: ${{ steps.commit_docs.outputs.changes_made }}
+        run: |
+          EXISTING_PR_NUMBER="$(gh pr list \
+            --repo "${TARGET_REPO}" \
+            --head "topoteretes:${HEAD_BRANCH}" \
+            --base main \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          if [ -n "${EXISTING_PR_NUMBER}" ]; then
+            gh pr edit "${EXISTING_PR_NUMBER}" \
+              --repo "${TARGET_REPO}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}"
+          elif [ "${CHANGES_MADE}" = "true" ]; then
+            gh pr create \
+              --repo "${TARGET_REPO}" \
+              --base main \
+              --head "topoteretes:${HEAD_BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}"
+          else
+            echo "No docs changes were committed and no open PR exists; skipping PR creation."
+          fi
+
+      - name: Upload branch notes artifact
         uses: actions/upload-artifact@v6
         with:
-          name: current-day-dev-notes
-          path: ${{ steps.output_paths.outputs.output_dir }}
+          name: branch-notes-${{ matrix.safe_branch }}-${{ matrix.short_sha }}
+          path: ${{ steps.branch_paths.outputs.output_dir }}
           if-no-files-found: error
 
   skip-when-no-merges:
