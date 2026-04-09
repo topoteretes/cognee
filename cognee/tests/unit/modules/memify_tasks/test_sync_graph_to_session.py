@@ -100,18 +100,28 @@ def _mock_db_engine_empty():
 
 class TestEdgeToText:
     def test_renders_labeled_nodes(self):
+        import json
+
         n1 = _make_node("a", label="Alice")
         n2 = _make_node("b", label="Bob")
         edge = _make_edge("a", "b", "knows")
         result = _edge_to_text(edge, {"a": n1, "b": n2})
-        assert result == "Alice —[knows]→ Bob"
+        parsed = json.loads(result)
+        assert parsed["source"]["label"] == "Alice"
+        assert parsed["target"]["label"] == "Bob"
+        assert parsed["relationship"] == "knows"
 
     def test_falls_back_to_type_when_no_label(self):
+        import json
+
         n1 = _make_node("a", label=None, type_="Person")
         n2 = _make_node("b", label=None, type_="City")
         edge = _make_edge("a", "b", "lives_in")
         result = _edge_to_text(edge, {"a": n1, "b": n2})
-        assert result == "Person —[lives_in]→ City"
+        parsed = json.loads(result)
+        assert parsed["source"]["label"] == "Person"
+        assert parsed["target"]["label"] == "City"
+        assert parsed["relationship"] == "lives_in"
 
     def test_returns_none_when_node_missing(self):
         n1 = _make_node("a", label="Alice")
@@ -119,12 +129,15 @@ class TestEdgeToText:
         assert _edge_to_text(edge, {"a": n1}) is None
 
     def test_default_relationship_name(self):
+        import json
+
         n1 = _make_node("a", label="X")
         n2 = _make_node("b", label="Y")
         edge = _make_edge("a", "b")
         edge.relationship_name = None
         result = _edge_to_text(edge, {"a": n1, "b": n2})
-        assert "related_to" in result
+        parsed = json.loads(result)
+        assert parsed["relationship"] == "related_to"
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +204,9 @@ async def test_sync_merges_with_existing():
     n2 = _make_node("b", label="Bob")
     edge = _make_edge("a", "b", "knows", created_at=ts)
 
-    sm = _make_session_manager(graph_context="Carol —[likes]→ Dave")
+    sm = _make_session_manager(
+        graph_context='{"source":{"label":"Carol"},"relationship":"likes","target":{"label":"Dave"}}'
+    )
     cache_engine = _make_cache_engine()
     db_engine = _mock_db_engine_returning([edge], [n1, n2])
 
@@ -210,8 +225,8 @@ async def test_sync_merges_with_existing():
     assert result["total"] == 2
 
     context = sm.set_graph_context.call_args.kwargs["context"]
-    assert "Carol —[likes]→ Dave" in context
-    assert "Alice —[knows]→ Bob" in context
+    assert "Carol" in context
+    assert "Alice" in context
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +247,7 @@ async def test_sync_caps_at_max_lines():
     ]
 
     # Existing has 2 lines, new adds 3, cap at 3 → oldest 2 dropped
-    existing = "OldA —[x]→ OldB\nOldC —[y]→ OldD"
+    existing = '{"source":{"label":"OldA"},"relationship":"x","target":{"label":"OldB"}}\n{"source":{"label":"OldC"},"relationship":"y","target":{"label":"OldD"}}'
     sm = _make_session_manager(graph_context=existing)
     cache_engine = _make_cache_engine()
     db_engine = _mock_db_engine_returning(edges, list(nodes.values()))
@@ -255,8 +270,8 @@ async def test_sync_caps_at_max_lines():
     lines = context.split("\n")
     assert len(lines) == 3
     # Old lines should be dropped (they were at the front)
-    assert "OldA —[x]→ OldB" not in lines
-    assert "OldC —[y]→ OldD" not in lines
+    assert not any("OldA" in line for line in lines)
+    assert not any("OldC" in line for line in lines)
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +358,7 @@ async def test_graph_context_prepended_to_completion():
     mock_cache.get_all_qa_entries = AsyncMock(return_value=[])
     mock_cache.create_qa_entry = AsyncMock()
 
-    graph_ctx = "Alice —[knows]→ Bob"
+    graph_ctx = '{"source":{"label":"Alice"},"relationship":"knows","target":{"label":"Bob"}}'
 
     async def mock_get(key):
         if "graph_knowledge:" in key:
@@ -386,7 +401,8 @@ async def test_graph_context_prepended_to_completion():
         )
 
     assert "Background knowledge from the knowledge graph:" in captured_history["value"]
-    assert "Alice —[knows]→ Bob" in captured_history["value"]
+    assert "Alice" in captured_history["value"]
+    assert "knows" in captured_history["value"]
 
 
 # ---------------------------------------------------------------------------

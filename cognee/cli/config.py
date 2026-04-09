@@ -21,6 +21,7 @@ COMMAND_DESCRIPTIONS = {
     "recall": "Search the knowledge graph for relevant information",
     "improve": "Enrich an existing knowledge graph with additional context and rules",
     "forget": "Remove data from the knowledge graph",
+    "serve": "Connect to a Cognee instance (cloud or local)",
 }
 
 # Search type choices

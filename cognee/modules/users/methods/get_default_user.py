@@ -13,7 +13,7 @@ from cognee.modules.users.methods.create_default_user import create_default_user
 async def get_default_user() -> User:
     db_engine = get_relational_engine()
     base_config = get_base_config()
-    default_email = base_config.default_user_email or "local-ui@cognee.local"
+    default_email = base_config.default_user_email or "default_user@example.com"
 
     try:
         async with db_engine.get_async_session() as session:
