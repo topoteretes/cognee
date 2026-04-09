@@ -684,7 +684,8 @@ class TestRememberResult:
                 AsyncMock(return_value=mock_user),
             ),
             patch.object(
-                _mod_sm, "get_session_manager",
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -787,7 +788,8 @@ class TestSearchSession:
 
         with (
             patch.object(
-                _mod_sm, "get_session_manager",
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -819,7 +821,8 @@ class TestSearchSession:
 
         with (
             patch.object(
-                _mod_sm, "get_session_manager",
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -847,7 +850,8 @@ class TestSearchSession:
 
         with (
             patch.object(
-                _mod_sm, "get_session_manager",
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -869,7 +873,8 @@ class TestSearchSession:
 
         with (
             patch.object(
-                _mod_sm, "get_session_manager",
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -895,7 +900,8 @@ class TestSearchSession:
 
         with (
             patch.object(
-                _mod_sm, "get_session_manager",
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -959,7 +965,8 @@ class TestRecallSessionMode:
                 AsyncMock(return_value=mock_graph_results),
             ),
             patch.object(
-                _mod_query_router, "route_query",
+                _mod_query_router,
+                "route_query",
                 return_value=MagicMock(search_type=MagicMock()),
             ),
         ):
