@@ -1,5 +1,5 @@
 from cognee.modules.users.models import DatasetDatabase
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm.attributes import flag_modified
 
 from cognee.modules.data.models import Dataset, DatasetData, Data
@@ -16,6 +16,11 @@ async def delete_dataset(dataset: Dataset):
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
+        if db_engine.engine.dialect.name == "sqlite":
+            # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
+            # so must be enabled for each database connection/session separately.
+            await session.execute(text("PRAGMA foreign_keys = ON;"))
+
         stmt = select(DatasetDatabase).where(
             DatasetDatabase.dataset_id == dataset.id,
         )
@@ -62,6 +67,11 @@ async def delete_dataset(dataset: Dataset):
     # resolves the table through SQLAlchemy metadata and triggers ORM cascades
     # (e.g. deleting related ACL rows via cascade="all, delete-orphan").
     async with db_engine.get_async_session() as session:
+        if db_engine.engine.dialect.name == "sqlite":
+            # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
+            # so must be enabled for each database connection/session separately.
+            await session.execute(text("PRAGMA foreign_keys = ON;"))
+
         dataset = await session.get(Dataset, dataset.id)
         if dataset:
             await session.delete(dataset)
