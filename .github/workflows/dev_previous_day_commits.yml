@@ -181,12 +181,15 @@ jobs:
           REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
           FILES_FILE="${REVIEW_DIR}/changed-files.txt"
           DIFF_FILE="${REVIEW_DIR}/branch.diff"
+          DOCS_INDEX_FILE="${REVIEW_DIR}/docs-files.txt"
 
           git diff --name-only "${{ matrix.first_parent }}" "${{ matrix.second_parent }}" > "${FILES_FILE}"
           git diff "${{ matrix.first_parent }}" "${{ matrix.second_parent }}" > "${DIFF_FILE}"
+          find docs-repo -type f \( -name '*.mdx' -o -name '*.md' \) | sort > "${DOCS_INDEX_FILE}"
 
           echo "files_file=${FILES_FILE}" >> "${GITHUB_OUTPUT}"
           echo "diff_file=${DIFF_FILE}" >> "${GITHUB_OUTPUT}"
+          echo "docs_index_file=${DOCS_INDEX_FILE}" >> "${GITHUB_OUTPUT}"
 
       - name: Assess docs impact for merged branch
         id: assess
@@ -213,7 +216,8 @@ jobs:
             Start with these prepared files:
             - Changed files list: `${{ steps.context.outputs.files_file }}`
             - Full branch diff: `${{ steps.context.outputs.diff_file }}`
-            Prefer those first, then inspect specific files with git or normal file reads only when needed.
+            - Existing docs file index: `${{ steps.context.outputs.docs_index_file }}`
+            Use only these prepared files and normal file reads. Do not run shell commands.
 
             Your task:
             1. Determine whether this merged branch requires a documentation update.
@@ -242,9 +246,45 @@ jobs:
 
             Keep edits grounded in the code changes from this merged branch only.
             In your final response, only list the files you created or changed.
-          claude_args: "--allowed-tools Read,Write,Glob,Grep,Bash --max-turns 12"
+          claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 8"
+
+      - name: Parse assessment decision
+        id: assessment_decision
+        run: |
+          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          review_dir = Path(os.environ["REVIEW_DIR"])
+          assessment_path = review_dir / "assessment.json"
+          result_path = review_dir / "result.json"
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+
+          if not assessment_path.exists():
+              raise SystemExit("assessment.json was not created")
+
+          data = json.loads(assessment_path.read_text())
+          needs_update = bool(data.get("needs_documentation_update"))
+
+          with output_path.open("a", encoding="utf-8") as fh:
+              fh.write(f"needs_update={'true' if needs_update else 'false'}\n")
+
+          if not needs_update:
+              result = {
+                  "needs_documentation_update": False,
+                  "docs_updated": False,
+                  "docs_files_changed": [],
+                  "summary": "Assessment concluded that no documentation update is required for this merged branch.",
+              }
+              result_path.write_text(json.dumps(result, indent=2) + "\n")
+          PY
+        env:
+          REVIEW_DIR: ${{ steps.workspace.outputs.review_dir }}
 
       - name: Update docs for merged branch
+        if: ${{ steps.assessment_decision.outputs.needs_update == 'true' }}
         id: update_docs
         uses: anthropics/claude-code-action@v1
         with:
@@ -258,6 +298,7 @@ jobs:
             Your assigned merged branch is `${{ matrix.branch_name }}`.
 
             First read `${{ steps.workspace.outputs.review_dir }}/assessment.json` and `${{ steps.workspace.outputs.review_dir }}/report.md`.
+            Also use `${{ steps.context.outputs.docs_index_file }}` to see what documentation files already exist.
 
             Rules:
             1. If `needs_documentation_update` is false, do not edit `./docs-repo/`.
@@ -269,9 +310,9 @@ jobs:
                - `docs_files_changed`: array of strings
                - `summary`: string
 
-            Keep changes focused and minimal. Do not review the branch from scratch unless needed to complete the docs edits.
+            Keep changes focused and minimal. Use only normal file reads and writes. Do not run shell commands.
             In your final response, only list the files you created or changed.
-          claude_args: "--allowed-tools Read,Write,Glob,Grep,Bash --max-turns 12"
+          claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 8"
 
       - name: Capture docs diff
         id: diff
