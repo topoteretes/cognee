@@ -86,6 +86,7 @@ async def run_corpus_builder(
             chunks_per_batch=params.get("chunks_per_batch"),
             custom_prompt=params.get("custom_prompt"),
             skip_prune=params.get("_skip_prune", False),
+            dataset_name=params.get("dataset_name", "main_dataset"),
         )
         with open(params["questions_path"], "w", encoding="utf-8") as f:
             json.dump(questions, f, ensure_ascii=False, indent=4)

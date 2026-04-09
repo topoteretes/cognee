@@ -50,6 +50,7 @@ class CorpusBuilderExecutor:
         chunks_per_batch: Optional[int] = None,
         custom_prompt: Optional[str] = None,
         skip_prune: bool = False,
+        dataset_name: str = "main_dataset",
     ) -> List[str]:
         self.load_corpus(
             limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
@@ -60,6 +61,7 @@ class CorpusBuilderExecutor:
             chunks_per_batch=chunks_per_batch,
             custom_prompt=custom_prompt,
             skip_prune=skip_prune,
+            dataset_name=dataset_name,
         )
         return self.questions
 
@@ -70,12 +72,13 @@ class CorpusBuilderExecutor:
         chunks_per_batch: Optional[int] = None,
         custom_prompt: Optional[str] = None,
         skip_prune: bool = False,
+        dataset_name: str = "main_dataset",
     ) -> None:
         if not skip_prune:
             await cognee.prune.prune_data()
             await cognee.prune.prune_system(metadata=True)
 
-        await cognee.add(self.raw_corpus)
+        await cognee.add(self.raw_corpus, dataset_name=dataset_name)
 
         task_kwargs = {"chunk_size": chunk_size, "chunker": chunker}
         if chunks_per_batch is not None:

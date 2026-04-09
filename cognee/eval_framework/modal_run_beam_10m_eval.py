@@ -61,7 +61,7 @@ _10M_TOP_K = {
 _10M_CONTEXT_EXTENSION_ROUNDS = 8
 _10M_WIDE_SEARCH_TOP_K = 300  # default is 100; larger graph needs wider candidate pool
 _10M_TRIPLET_DISTANCE_PENALTY = 4.0  # default is 6.5; softer penalty for large sparse graphs
-_10M_CHUNKS_PER_BATCH = 30  # default is 100; reduced to lower peak memory during cognify
+_10M_CHUNKS_PER_BATCH = 40  # default is 100; reduced to lower peak memory during cognify
 
 # BEAM-10M has 10 plans per conversation
 ALL_PLANS = [f"plan-{i}" for i in range(1, 11)]
@@ -70,13 +70,14 @@ ALL_PLANS = [f"plan-{i}" for i in range(1, 11)]
 @app.function(
     image=image,
     timeout=86400,
-    memory=65536,  # 64 GB — 10M needs headroom for accumulated graph across 10 plans
+    memory=65536,  # 64 GB — graph accumulates across 10 plans; LanceDB indexing needs headroom
     volumes={"/results": vol},
     secrets=[
         modal.Secret.from_name("eval_secrets"),
         modal.Secret.from_dict({
             "COGNEE_SKIP_CONNECTION_TEST": "true",
             "LITELLM_LOG": "ERROR",
+            "LLM_MAX_CONCURRENT": "40",
         }),
     ],
 )
@@ -116,11 +117,33 @@ async def run_beam_10m_conversation(
         vol.commit()
         logger.info(f"[conv {conversation_index}] Checkpoint saved: {stage}")
 
+    # Resume from checkpoint if this is a retry — skip already-completed plans
+    completed_plans = set()
+    checkpoint_path = f"/results/conv_{conversation_index}_checkpoint.json"
+    vol.reload()
+    try:
+        with open(checkpoint_path, "r") as f:
+            checkpoint = json.load(f)
+        completed_plans = set(checkpoint.get("plans_completed", []))
+        if completed_plans:
+            logger.info(
+                f"[conv {conversation_index}] Resuming — "
+                f"skipping already-completed plans: {sorted(completed_plans)}"
+            )
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
     # Step 1: Build corpus plan-by-plan to avoid OOM.
     # Each plan is ~1M tokens. We cognify them sequentially so the graph
     # accumulates across plans but memory stays bounded.
     for plan_idx, plan_name in enumerate(selected_plans):
-        is_first = plan_idx == 0
+        if plan_name in completed_plans:
+            logger.info(
+                f"[conv {conversation_index}] Skipping {plan_name} (already done)"
+            )
+            continue
+
+        is_first = plan_idx == 0 and not completed_plans
         logger.info(
             f"[conv {conversation_index}] Cognifying {plan_name} "
             f"({plan_idx + 1}/{len(selected_plans)})..."
@@ -149,6 +172,7 @@ async def run_beam_10m_conversation(
         params["_beam_max_batches"] = max_batches_per_plan
         params["_beam_conversation_index"] = conversation_index
         params["_beam_plans"] = [plan_name]  # Single plan at a time
+        params["dataset_name"] = f"beam10m_conv{conversation_index}_{plan_name}"
         params["chunker"] = ConversationChunker
         params["chunks_per_batch"] = _10M_CHUNKS_PER_BATCH
         # Only prune on first plan; subsequent plans accumulate into the graph
@@ -157,9 +181,12 @@ async def run_beam_10m_conversation(
         await run_corpus_builder(params)
 
         # Checkpoint after each plan so we know how far we got
+        completed_plans.add(plan_name)
+        all_done = [p for p in selected_plans if p in completed_plans]
+        remaining = [p for p in selected_plans if p not in completed_plans]
         _save_checkpoint(f"cognified_{plan_name}", {
-            "plans_completed": selected_plans[: plan_idx + 1],
-            "plans_remaining": selected_plans[plan_idx + 1 :],
+            "plans_completed": all_done,
+            "plans_remaining": remaining,
         })
 
     # Step 2: Load and optionally filter questions
@@ -250,82 +277,67 @@ async def run_beam_10m_conversation(
     return result
 
 
-@app.local_entrypoint()
-async def main(
+@app.function(
+    image=image,
+    timeout=86400,  # 24h — with max_parallel=5, all batches fit within this
+    volumes={"/results": vol},
+    secrets=[modal.Secret.from_name("eval_secrets")],
+)
+async def orchestrate_beam_10m(
     num_conversations: int = 10,
-    question_types: str = "",
-    max_batches_per_plan: int = 0,
-    plans: str = "",
-    max_parallel: int = 3,
+    question_types: Optional[List[str]] = None,
+    max_batches_per_plan: Optional[int] = None,
+    plans: Optional[List[str]] = None,
+    max_parallel: int = 5,
 ):
-    """Run BEAM-10M eval across multiple conversations on Modal.
+    """Orchestrator that runs entirely on Modal — survives laptop sleep.
 
-    Args:
-        num_conversations: Number of conversations to evaluate (max 10)
-        question_types: Comma-separated question types to filter (empty = all)
-        max_batches_per_plan: Max session batches per plan (0 = all)
-        plans: Comma-separated plan names to include (empty = all 10 plans)
-        max_parallel: Max conversations to run in parallel (default 3)
+    Spawns conversation workers in batches, collects results, and saves
+    the combined report to the volume.
     """
     from collections import defaultdict
+    from cognee.shared.logging_utils import get_logger
 
-    types_list = [t.strip() for t in question_types.split(",") if t.strip()] or None
-    batches = max_batches_per_plan if max_batches_per_plan > 0 else None
-    plans_list = [p.strip() for p in plans.split(",") if p.strip()] or None
+    logger = get_logger()
 
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    print(f"BEAM-10M eval started at {timestamp}")
-    print(f"  conversations={num_conversations}")
-    print(f"  max_parallel={max_parallel}")
-    print(f"  plans={plans_list or 'ALL (10 plans, ingested per-plan)'}")
-    print(f"  question_types={types_list or 'ALL'}")
-    print(f"  max_batches_per_plan={batches or 'ALL'}")
-    print(f"  top_k overrides: {_10M_TOP_K}")
-    print(f"  context_extension_rounds: {_10M_CONTEXT_EXTENSION_ROUNDS}")
-    print(f"  wide_search_top_k: {_10M_WIDE_SEARCH_TOP_K}")
-    print(f"  triplet_distance_penalty: {_10M_TRIPLET_DISTANCE_PENALTY}")
-    print(f"  chunks_per_batch: {_10M_CHUNKS_PER_BATCH}")
-    print(f"  memory per container: 64 GB")
+    logger.info(
+        f"BEAM-10M orchestrator started at {timestamp}: "
+        f"conversations={num_conversations}, max_parallel={max_parallel}, "
+        f"plans={plans or 'ALL'}, question_types={question_types or 'ALL'}, "
+        f"max_batches_per_plan={max_batches_per_plan or 'ALL'}"
+    )
 
-    # Process conversations in batches to stay within Modal workspace memory limits.
-    # Each container needs 64GB, so max_parallel=3 uses ~192GB peak.
     results = []
     failed = []
 
     for batch_start in range(0, num_conversations, max_parallel):
         batch_end = min(batch_start + max_parallel, num_conversations)
         batch_indices = list(range(batch_start, batch_end))
-        print(f"\n--- Batch: conversations {batch_indices} ---")
+        logger.info(f"--- Batch: conversations {batch_indices} ---")
 
         function_calls = []
         for i in batch_indices:
             fc = await run_beam_10m_conversation.spawn.aio(
                 conversation_index=i,
-                question_types=types_list,
-                max_batches_per_plan=batches,
-                plans=plans_list,
+                question_types=question_types,
+                max_batches_per_plan=max_batches_per_plan,
+                plans=plans,
             )
             function_calls.append((i, fc))
-            print(f"  Spawned conv {i}: {fc.object_id}")
-
-        print(f"  Waiting for batch to complete (safe to Ctrl+C — tasks keep running)...")
-        print(f"  Monitor: modal volume ls beam_10m_eval_results\n")
+            logger.info(f"  Spawned conv {i}: {fc.object_id}")
 
         for i, fc in function_calls:
             try:
                 result = await fc.get.aio()
                 results.append(result)
-                print(f"  [DONE] conv {i}")
+                logger.info(f"  [DONE] conv {i}")
             except Exception as e:
-                print(f"  [FAILED] conv {i}: {type(e).__name__}: {e}")
+                logger.error(f"  [FAILED] conv {i}: {type(e).__name__}: {e}")
                 failed.append(i)
                 results.append(None)
 
-    if failed:
-        print(f"\n  {len(failed)} conversation(s) failed: {failed}")
-        print("  Check volume for partial results: modal volume ls beam_10m_eval_results")
-
-    # Aggregate results, skipping failed conversations
+    # Aggregate results
     all_aggregate = []
     type_scores = defaultdict(lambda: defaultdict(list))
 
@@ -340,7 +352,6 @@ async def main(
                 if score is not None:
                     type_scores[qtype][metric_name].append(score)
 
-    # Per-type averages
     avg_per_type = {}
     for qtype, metrics in sorted(type_scores.items()):
         avg_per_type[qtype] = {
@@ -350,8 +361,10 @@ async def main(
     combined = {
         "dataset": "BEAM-10M",
         "num_conversations": len(all_aggregate),
-        "plans": plans_list,
-        "question_types": types_list,
+        "num_failed": len(failed),
+        "failed_conversations": failed,
+        "plans": plans,
+        "question_types": question_types,
         "timestamp": timestamp,
         "retrieval_config": {
             "top_k_overrides": _10M_TOP_K,
@@ -364,13 +377,13 @@ async def main(
         "per_conversation": all_aggregate,
     }
 
-    # Save locally
-    local_path = f"beam10m_combined_{timestamp}.json"
-    with open(local_path, "w") as f:
+    # Save combined results to volume
+    result_path = f"/results/beam10m_combined_{timestamp}.json"
+    with open(result_path, "w") as f:
         json.dump(combined, f, indent=2)
+    vol.commit()
 
-    # Print summary
-    print(f"\n=== BEAM-10M Results ({len(all_aggregate)} conversations) ===")
+    logger.info(f"\n=== BEAM-10M Results ({len(all_aggregate)} conversations, {len(failed)} failed) ===")
     for qtype, metrics in avg_per_type.items():
         beam_rubric = metrics.get("beam_rubric")
         kendall = metrics.get("kendall_tau")
@@ -380,12 +393,69 @@ async def main(
         if kendall is not None:
             parts.append(f"kendall_tau={kendall:.3f}")
         if parts:
-            print(f"  {qtype}: {', '.join(parts)}")
+            logger.info(f"  {qtype}: {', '.join(parts)}")
 
     all_rubric = [
         m.get("beam_rubric") for m in avg_per_type.values() if m.get("beam_rubric") is not None
     ]
     if all_rubric:
-        print(f"\n  OVERALL beam_rubric avg: {sum(all_rubric) / len(all_rubric):.3f}")
+        logger.info(f"  OVERALL beam_rubric avg: {sum(all_rubric) / len(all_rubric):.3f}")
 
-    print(f"\nResults saved to: {local_path}")
+    logger.info(f"Results saved to volume: {result_path}")
+    return combined
+
+
+@app.local_entrypoint()
+async def main(
+    num_conversations: int = 10,
+    question_types: str = "",
+    max_batches_per_plan: int = 0,
+    plans: str = "",
+    max_parallel: int = 5,
+):
+    """Trigger the DEPLOYED orchestrator on Modal and exit immediately.
+
+    The orchestrator runs entirely on Modal — safe to close your laptop.
+
+    Usage:
+        # Deploy first (one-time):
+        modal deploy cognee/eval_framework/modal_run_beam_10m_eval.py
+
+        # Then trigger:
+        modal run cognee/eval_framework/modal_run_beam_10m_eval.py
+
+    Monitor progress:
+        modal volume ls beam_10m_eval_results
+    """
+    types_list = [t.strip() for t in question_types.split(",") if t.strip()] or None
+    batches = max_batches_per_plan if max_batches_per_plan > 0 else None
+    plans_list = [p.strip() for p in plans.split(",") if p.strip()] or None
+
+    print(f"Looking up deployed orchestrator...")
+
+    # Look up the DEPLOYED function so it runs under the persistent app,
+    # not this ephemeral `modal run` app.
+    deployed_orchestrator = modal.Function.from_name(
+        "beam-10m-benchmark-eval", "orchestrate_beam_10m"
+    )
+
+    print(f"Spawning orchestrator on deployed app...")
+    print(f"  conversations={num_conversations}, max_parallel={max_parallel}")
+    print(f"  plans={plans_list or 'ALL'}")
+    print(f"  question_types={types_list or 'ALL'}")
+    print(f"  max_batches_per_plan={batches or 'ALL'}")
+
+    fc = await deployed_orchestrator.spawn.aio(
+        num_conversations=num_conversations,
+        question_types=types_list,
+        max_batches_per_plan=batches,
+        plans=plans_list,
+        max_parallel=max_parallel,
+    )
+    print(f"\nOrchestrator spawned: {fc.object_id}")
+    print("All work runs on the DEPLOYED app — safe to close your laptop.")
+    print("\nMonitor progress:")
+    print("  modal volume ls beam_10m_eval_results")
+    print("  modal container list")
+    print("\nWhen done, download results:")
+    print("  modal volume get beam_10m_eval_results beam10m_combined_*.json .")
