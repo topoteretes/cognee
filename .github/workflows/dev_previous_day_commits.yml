@@ -156,7 +156,7 @@ jobs:
       - name: Prepare output paths
         id: output_paths
         run: |
-          OUTPUT_DIR=".daily-dev-notes"
+          OUTPUT_DIR="daily-dev-notes"
           mkdir -p "${OUTPUT_DIR}"
           echo "output_dir=${OUTPUT_DIR}" >> "${GITHUB_OUTPUT}"
           echo "notes_json=${OUTPUT_DIR}/dev_notes.json" >> "${GITHUB_OUTPUT}"
