@@ -30,6 +30,6 @@ async def save_data_to_file(
 
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(file_name, data)
+        full_file_path = await storage.store(file_name, data, overwrite=True)
 
         return full_file_path

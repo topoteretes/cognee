@@ -1,0 +1,9 @@
+{
+  "name": "cognee-memory",
+  "description": "Stores agent reasoning and tool calls into Cognee's knowledge graph, and retrieves relevant context via Cognee search",
+  "version": "0.1.0",
+  "author": {
+    "name": "Cognee"
+  },
+  "keywords": ["memory", "knowledge-graph", "cognee", "reasoning"]
+}

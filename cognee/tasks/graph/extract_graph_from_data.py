@@ -1,6 +1,6 @@
 import asyncio
 import inspect
-from typing import Dict, Type, List, Optional
+from typing import Type, List, Optional
 from pydantic import BaseModel
 
 from cognee.modules.pipelines.tasks.task import task_summary
@@ -128,15 +128,16 @@ async def integrate_chunk_graphs(
 @task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
-    context: Dict,
     graph_model: Type[BaseModel],
     config: Optional[Config] = None,
     custom_prompt: Optional[str] = None,
+    ctx=None,
     **kwargs,
 ) -> List[DocumentChunk]:
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
+    pipeline_name = ctx.pipeline_name if ctx else None
 
     if not isinstance(data_chunks, list) or not data_chunks:
         raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
@@ -206,7 +207,6 @@ async def extract_graph_from_data(
 
     ontology_resolver = config["ontology_config"]["ontology_resolver"]
 
-    pipeline_name = context.get("pipeline_name") if isinstance(context, dict) else None
     task_name = "extract_graph_from_data"
 
     integrated = await integrate_chunk_graphs(
