@@ -220,7 +220,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Upload notes artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: current-day-dev-notes
           path: ${{ steps.output_paths.outputs.output_dir }}
