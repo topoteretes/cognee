@@ -290,6 +290,8 @@ jobs:
         id: commit_docs
         working-directory: docs-repo
         run: |
+          git fetch origin "${{ steps.assessment.outputs.docs_branch }}" || true
+
           mkdir -p "$(dirname "${{ steps.assessment.outputs.draft_path }}")"
           cat <<'EOF' > "${{ steps.assessment.outputs.draft_path }}"
           ${{ steps.assessment.outputs.draft_content }}
@@ -297,7 +299,11 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "${{ steps.assessment.outputs.docs_branch }}"
+          if git show-ref --verify --quiet "refs/remotes/origin/${{ steps.assessment.outputs.docs_branch }}"; then
+            git checkout -B "${{ steps.assessment.outputs.docs_branch }}" "origin/${{ steps.assessment.outputs.docs_branch }}"
+          else
+            git checkout -B "${{ steps.assessment.outputs.docs_branch }}"
+          fi
           git add "${{ steps.assessment.outputs.draft_path }}"
 
           if git diff --cached --quiet; then
