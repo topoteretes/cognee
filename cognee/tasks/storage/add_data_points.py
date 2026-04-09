@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
@@ -10,7 +10,6 @@ from cognee.modules.graph.utils import (
     ensure_default_edge_properties,
     get_graph_from_model,
 )
-from cognee.modules.users.models import User
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
@@ -20,52 +19,32 @@ from cognee.tasks.storage.exceptions import (
 )
 from ...modules.engine.utils import generate_node_id
 
+if TYPE_CHECKING:
+    from cognee.modules.pipelines.models import PipelineContext
+
 logger = get_logger("add_data_points")
 
 
 @task_summary("Stored {n} data point(s)")
 async def add_data_points(
     data_points: List[DataPoint],
-    context: Optional[Dict[str, Any]] = None,
     custom_edges: Optional[List] = None,
     embed_triplets: bool = False,
+    ctx: Optional["PipelineContext"] = None,
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
     deduplicating them, and indexing them for retrieval.
 
-    This function parallelizes the graph extraction for each data point,
-    merges the resulting nodes and edges, and ensures uniqueness before
-    committing them to the underlying graph engine. It also updates the
-    associated retrieval indices for nodes and (optionally) edges.
-
     Args:
-        data_points (List[DataPoint]):
-            A list of data points to process and insert into the graph.
-        custom_edges (List[tuple]): Custom edges between datapoints.
-        embed_triplets (bool):
-            If True, creates and indexes triplet embeddings from the graph structure.
-            Defaults to False.
-
-    Returns:
-        List[DataPoint]:
-            The original list of data points after processing and insertion.
-
-    Side Effects:
-        - Calls `get_graph_from_model` concurrently for each data point.
-        - Deduplicates nodes and edges across all results.
-        - Updates the node index via `index_data_points`.
-        - Inserts nodes and edges into the graph engine.
-        - Optionally updates the edge index via `index_graph_edges`.
+        data_points: Data points to process and insert into the graph.
+        custom_edges: Custom edges between datapoints.
+        embed_triplets: If True, creates and indexes triplet embeddings.
+        ctx: Pipeline runtime context (user, dataset, data_item).
     """
-    user: Optional[User] = None
-    data = None
-    dataset = None
-
-    if context:
-        data = context["data"]
-        dataset = context["dataset"]
-        user = context["user"]
+    user = ctx.user if ctx else None
+    data_item = ctx.data_item if ctx else None
+    dataset = ctx.dataset if ctx else None
 
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
@@ -106,12 +85,20 @@ async def add_data_points(
     await graph_engine.add_nodes(nodes)
     await index_data_points(nodes, vector_engine=vector_engine)
 
-    if user and dataset and data:
+    if user and dataset and data_item:
         await upsert_nodes(
-            nodes, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+            nodes,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            dataset_id=dataset.id,
+            data_id=data_item.id,
         )
         await upsert_edges(
-            edges, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+            edges,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            dataset_id=dataset.id,
+            data_id=data_item.id,
         )
 
     await graph_engine.add_edges(edges)
@@ -123,13 +110,13 @@ async def add_data_points(
         await graph_engine.add_edges(custom_edges)
         await index_graph_edges(custom_edges, vector_engine=vector_engine)
 
-        if user and dataset and data:
+        if user and dataset and data_item:
             await upsert_edges(
                 custom_edges,
                 tenant_id=user.tenant_id,
                 user_id=user.id,
                 dataset_id=dataset.id,
-                data_id=data.id,
+                data_id=data_item.id,
             )
 
         edges.extend(custom_edges)
