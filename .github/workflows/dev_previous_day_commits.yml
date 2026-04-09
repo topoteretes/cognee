@@ -322,6 +322,7 @@ jobs:
       - name: Create or update docs pull request
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: manage_pr
+        working-directory: docs-repo
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
           TARGET_REPO: topoteretes/cognee-docs
@@ -348,12 +349,12 @@ jobs:
             gh pr create \
               --repo "${TARGET_REPO}" \
               --base main \
-              --head "topoteretes:${HEAD_BRANCH}" \
+              --head "${HEAD_BRANCH}" \
               --title "${PR_TITLE}" \
               --body "${PR_BODY}"
             PR_NUMBER="$(gh pr list \
               --repo "${TARGET_REPO}" \
-              --head "topoteretes:${HEAD_BRANCH}" \
+              --head "${HEAD_BRANCH}" \
               --base main \
               --state open \
               --json number \
