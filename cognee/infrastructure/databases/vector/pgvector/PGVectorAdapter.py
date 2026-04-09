@@ -66,7 +66,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         db_name2 = make_url(self.db_uri).database
         if backend_access_control_enabled() and (db_name1 != db_name2):
             # If backend access control create new instances of engine and sessionmaker
-            self.engine = create_async_engine(self.db_uri)
+            self.engine = create_async_engine(self.db_uri, pool_pre_ping=True)
             self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
         elif relational_db.engine.dialect.name == "postgresql":
             # If postgreSQL is used and not backend access control we must use the same engine and sessionmaker
@@ -74,7 +74,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             self.sessionmaker = relational_db.sessionmaker
         else:
             # If not postgreSQL and not backend access control create new instances of engine and sessionmaker
-            self.engine = create_async_engine(self.db_uri)
+            self.engine = create_async_engine(self.db_uri, pool_pre_ping=True)
             self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
         # Has to be imported at class level
