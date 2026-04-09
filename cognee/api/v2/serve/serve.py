@@ -1,4 +1,4 @@
-"""Top-level serve() orchestrator — connects the SDK to Cognee Cloud."""
+"""Top-level serve() orchestrator — connects the SDK to Cognee Cloud or a local instance."""
 
 from __future__ import annotations
 
@@ -15,44 +15,99 @@ logger = get_logger("serve")
 
 
 async def serve(
+    url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    *,
     management_url: Optional[str] = None,
     auth0_domain: Optional[str] = None,
     auth0_client_id: Optional[str] = None,
     auth0_audience: Optional[str] = None,
-) -> "CloudClient":
-    """Connect the local Cognee SDK to a remote Cognee Cloud instance.
+) -> CloudClient:
+    """Connect the local Cognee SDK to a remote or local Cognee instance.
 
-    Authenticates via the Auth0 Device Code Flow (opens a browser URL),
-    discovers or creates a tenant, obtains an API key, and sets all V2
-    operations (remember, recall, improve, forget) to route to the cloud.
+    Two modes:
 
-    Credentials are cached at ``~/.cognee/cloud_credentials.json`` so
-    subsequent calls skip the device flow when the token is still valid.
+    **Local / direct mode** — when ``url`` is provided (with optional
+    ``api_key``), connects directly to that instance. No Auth0, no
+    Management API. Use this to connect to a local Cognee backend or
+    any instance where you already have the URL and credentials::
+
+        await cognee.serve(url="http://localhost:8000")
+        await cognee.serve(url="https://my-instance.cognee.ai", api_key="ck_...")
+
+    **Cloud mode** — when ``url`` is not provided, runs the full Auth0
+    Device Code Flow, discovers the tenant via the Management API, and
+    connects to the cloud instance automatically::
+
+        await cognee.serve()
+
+    In both modes, all V2 operations (remember, recall, improve, forget,
+    visualize) route to the connected instance instead of running locally.
 
     Args:
-        management_url: Override the Management API URL. Defaults to
-            ``COGNEE_CLOUD_URL`` env var or ``https://api.dev.cloud.topoteretes.com``.
-        auth0_domain: Override the Auth0 domain.
+        url: Direct URL of a Cognee instance. Skips Auth0 and tenant
+            discovery. Can also be set via ``COGNEE_SERVICE_URL`` env var.
+        api_key: API key for authentication. Used with ``url`` for direct
+            connections, or via ``COGNEE_API_KEY`` env var.
+        management_url: Override the Management API URL (cloud mode only).
+        auth0_domain: Override the Auth0 domain (cloud mode only).
         auth0_client_id: Override the Auth0 Device Code client ID.
         auth0_audience: Override the Auth0 API audience.
 
     Returns:
-        CloudClient connected to the remote instance.
-
-    Example::
-
-        import cognee
-
-        # Authenticate and connect
-        await cognee.serve()
-
-        # All V2 ops now route to the cloud
-        await cognee.remember("Einstein was born in Ulm.")
-        results = await cognee.recall("Where was Einstein born?")
-
-        # Disconnect to go back to local mode
-        await cognee.disconnect()
+        CloudClient connected to the instance.
     """
+    # Resolve URL from arg or env
+    service_url = url or os.getenv("COGNEE_SERVICE_URL")
+    resolved_api_key = api_key or os.getenv("COGNEE_API_KEY", "")
+
+    if service_url:
+        return await _serve_direct(service_url, resolved_api_key)
+
+    return await _serve_cloud(
+        management_url=management_url,
+        auth0_domain=auth0_domain,
+        auth0_client_id=auth0_client_id,
+        auth0_audience=auth0_audience,
+    )
+
+
+async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
+    """Connect directly to a Cognee instance — no Auth0, no Management API."""
+    from cognee.api.v2.serve.cloud_client import CloudClient
+    from cognee.api.v2.serve.credentials import CloudCredentials, save_credentials
+    from cognee.api.v2.serve.state import set_remote_client
+
+    service_url = service_url.rstrip("/")
+    client = CloudClient(service_url, api_key)
+
+    health_ok = await client._health_check()
+    if not health_ok:
+        logger.warning("Instance at %s did not respond to health check", service_url)
+
+    # Save so subsequent serve() calls reconnect without args
+    save_credentials(
+        CloudCredentials(
+            access_token="",
+            service_url=service_url,
+            api_key=api_key,
+            email="local",
+        )
+    )
+
+    set_remote_client(client)
+    mode = "local" if "localhost" in service_url or "127.0.0.1" in service_url else "remote"
+    print(f"  Connected to Cognee ({mode}) at {service_url}")
+    return client
+
+
+async def _serve_cloud(
+    management_url: Optional[str] = None,
+    auth0_domain: Optional[str] = None,
+    auth0_client_id: Optional[str] = None,
+    auth0_audience: Optional[str] = None,
+) -> CloudClient:
+    """Full cloud flow: Auth0 Device Code → tenant discovery → API key → connect."""
     from cognee.api.v2.serve.cloud_client import CloudClient
     from cognee.api.v2.serve.credentials import (
         CloudCredentials,
@@ -83,7 +138,6 @@ async def serve(
 
     if creds and creds.service_url and creds.api_key:
         if not is_token_expired(creds):
-            # Credentials still valid — connect directly
             logger.info("Using saved credentials for %s", creds.email)
             client = CloudClient(creds.service_url, creds.api_key)
             if await client._health_check():
@@ -95,7 +149,6 @@ async def serve(
                 await client.close()
 
         elif creds.refresh_token:
-            # Token expired but we have a refresh token
             try:
                 logger.info("Refreshing expired token for %s", creds.email)
                 token = await refresh_access_token(
@@ -165,7 +218,8 @@ async def serve(
     health_ok = await client._health_check()
     if not health_ok:
         logger.warning(
-            "Service URL %s not responding to health check — may still be starting", service_url
+            "Service URL %s not responding to health check — may still be starting",
+            service_url,
         )
 
     set_remote_client(client)
