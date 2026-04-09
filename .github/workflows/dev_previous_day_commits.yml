@@ -1,4 +1,4 @@
-name: automation | Draft Docs For Current Day Dev Merges
+name: automation | Generate Current Day Dev Notes
 
 on:
   pull_request:
@@ -20,7 +20,6 @@ jobs:
       end_date: ${{ steps.prepare.outputs.end_date }}
       has_merges: ${{ steps.prepare.outputs.has_merges }}
       merge_summary: ${{ steps.prepare.outputs.merge_summary }}
-      matrix: ${{ steps.prepare.outputs.matrix }}
 
     steps:
       - name: Check out repository
@@ -116,7 +115,6 @@ jobs:
               fh.write(f"start_date={start.strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
               fh.write(f"end_date={end.strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
               fh.write(f"has_merges={'true' if merges else 'false'}\n")
-              fh.write(f"matrix={json.dumps(merges)}\n")
               fh.write("merge_summary<<EOF\n")
               if merge_lines:
                   fh.write("\n".join(merge_lines))
@@ -140,15 +138,11 @@ jobs:
                   fh.write("No branches were merged into `origin/dev` during the current UTC day.\n")
           PY
 
-  review-and-update-docs:
+  generate-and-assess-dev-notes:
     needs: prepare-merged-branches
     if: ${{ needs.prepare-merged-branches.outputs.has_merges == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.prepare-merged-branches.outputs.matrix) }}
 
     steps:
       - name: Check out core repository
@@ -159,331 +153,77 @@ jobs:
       - name: Fetch latest dev branch
         run: git fetch origin dev --no-tags
 
-      - name: Check out docs repository
-        uses: actions/checkout@v6
-        with:
-          repository: topoteretes/cognee-docs
-          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
-          ref: main
-          path: docs-repo
-
-      - name: Prepare workspace paths
-        id: workspace
+      - name: Prepare output paths
+        id: output_paths
         run: |
-          REVIEW_DIR=".claude-reviews/${{ matrix.safe_branch }}-${{ matrix.short_sha }}"
-          mkdir -p "${REVIEW_DIR}"
-          mkdir -p docs-repo
-          echo "review_dir=${REVIEW_DIR}" >> "${GITHUB_OUTPUT}"
+          OUTPUT_DIR=".daily-dev-notes"
+          mkdir -p "${OUTPUT_DIR}"
+          echo "output_dir=${OUTPUT_DIR}" >> "${GITHUB_OUTPUT}"
+          echo "notes_json=${OUTPUT_DIR}/dev_notes.json" >> "${GITHUB_OUTPUT}"
+          echo "notes_markdown=${OUTPUT_DIR}/dev_notes.md" >> "${GITHUB_OUTPUT}"
+          echo "assessment_json=${OUTPUT_DIR}/docs_assessment.json" >> "${GITHUB_OUTPUT}"
+          echo "assessment_markdown=${OUTPUT_DIR}/docs_assessment.md" >> "${GITHUB_OUTPUT}"
 
-      - name: Prepare merge context files
-        id: context
-        run: |
-          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
-          FILES_FILE="${REVIEW_DIR}/changed-files.txt"
-          DIFF_FILE="${REVIEW_DIR}/branch.diff"
-          DOCS_INDEX_FILE="${REVIEW_DIR}/docs-files.txt"
-
-          git diff --name-only "${{ matrix.first_parent }}" "${{ matrix.second_parent }}" > "${FILES_FILE}"
-          git diff "${{ matrix.first_parent }}" "${{ matrix.second_parent }}" > "${DIFF_FILE}"
-          find docs-repo -type f \( -name '*.mdx' -o -name '*.md' \) | sort > "${DOCS_INDEX_FILE}"
-
-          echo "files_file=${FILES_FILE}" >> "${GITHUB_OUTPUT}"
-          echo "diff_file=${DIFF_FILE}" >> "${GITHUB_OUTPUT}"
-          echo "docs_index_file=${DOCS_INDEX_FILE}" >> "${GITHUB_OUTPUT}"
-
-      - name: Assess docs impact for merged branch
-        id: assess
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
-            You are a documentation impact classifier for the Cognee project.
-
-            Your only goal is to decide whether this merged branch needs documentation changes.
-
-            Branch context:
-            - Branch: `${{ matrix.branch_name }}`
-            - Merge commit: `${{ matrix.merge_sha }}`
-
-            Read only these prepared files:
-            - Changed files list: `${{ steps.context.outputs.files_file }}`
-            - Full branch diff: `${{ steps.context.outputs.diff_file }}`
-            Use only normal file reads and writes. Do not run shell commands.
-
-            Your task:
-            1. Decide whether this branch requires documentation updates.
-            2. Write only `${{ steps.workspace.outputs.review_dir }}/assessment.json`.
-            3. Do not create any other files.
-
-            `assessment.json` must be valid JSON with exactly these keys:
-            - `needs_documentation_update`: boolean
-            - `reason`: string
-            - `source_files_reviewed`: array of strings
-            - `likely_user_visible`: boolean
-
-            In your final response, only list the file you created.
-          claude_args: "--allowed-tools Read,Write --max-turns 4"
-
-      - name: Parse assessment decision
-        id: assessment_decision
-        run: |
-          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          review_dir = Path(os.environ["REVIEW_DIR"])
-          assessment_path = review_dir / "assessment.json"
-          result_path = review_dir / "result.json"
-          output_path = Path(os.environ["GITHUB_OUTPUT"])
-
-          if not assessment_path.exists():
-              raise SystemExit("assessment.json was not created")
-
-          data = json.loads(assessment_path.read_text())
-          needs_update = bool(data.get("needs_documentation_update"))
-          reason = str(data.get("reason", "")).strip()
-
-          with output_path.open("a", encoding="utf-8") as fh:
-              fh.write(f"needs_update={'true' if needs_update else 'false'}\n")
-
-          if not needs_update:
-              result = {
-                  "needs_documentation_update": False,
-                  "docs_updated": False,
-                  "docs_files_changed": [],
-                  "summary": reason or "Assessment concluded that no documentation update is required for this merged branch.",
-              }
-              result_path.write_text(json.dumps(result, indent=2) + "\n")
-          PY
+      - name: Generate current day dev notes
         env:
-          REVIEW_DIR: ${{ steps.workspace.outputs.review_dir }}
-
-      - name: Create docs update plan
-        if: ${{ steps.assessment_decision.outputs.needs_update == 'true' }}
-        id: plan
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
-            You are a documentation planning agent for the Cognee project.
-
-            Your only goal is to choose which docs files should be updated for this merged branch.
-            Do not edit docs in this step.
-
-            Read these files:
-            - Assessment: `${{ steps.workspace.outputs.review_dir }}/assessment.json`
-            - Changed files list: `${{ steps.context.outputs.files_file }}`
-            - Existing docs file index: `${{ steps.context.outputs.docs_index_file }}`
-
-            Write only `${{ steps.workspace.outputs.review_dir }}/update-plan.json`.
-
-            `update-plan.json` must be valid JSON with exactly these keys:
-            - `docs_goal`: string
-            - `docs_files_to_edit`: array of strings
-            - `changelog_draft`: string
-            - `notes_for_editor`: array of strings
-
-            Keep it short and concrete.
-            In your final response, only list the file you created.
-          claude_args: "--allowed-tools Read,Write --max-turns 4"
-
-      - name: Update docs for merged branch
-        if: ${{ steps.assessment_decision.outputs.needs_update == 'true' }}
-        id: update_docs
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
-            You are a documentation update agent for the Cognee project.
-
-            The docs repository is checked out at `./docs-repo/`.
-            Your assigned merged branch is `${{ matrix.branch_name }}`.
-
-            First read:
-            - `${{ steps.workspace.outputs.review_dir }}/assessment.json`
-            - `${{ steps.workspace.outputs.review_dir }}/update-plan.json`
-
-            Rules:
-            1. Update only the docs files required by the plan.
-            2. Keep changes focused and minimal.
-            3. After editing docs, write only `${{ steps.workspace.outputs.review_dir }}/result.json`.
-
-            `result.json` must be valid JSON with exactly these keys:
-               - `needs_documentation_update`: boolean
-               - `docs_updated`: boolean
-               - `docs_files_changed`: array of strings
-               - `summary`: string
-
-            Do not create any other files outside `docs-repo/` and `result.json`.
-            Use only normal file reads and writes.
-            In your final response, only list the files you changed.
-          claude_args: "--allowed-tools Read,Write --max-turns 6"
-
-      - name: Build human-readable report
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          START_DATE: ${{ needs.prepare-merged-branches.outputs.start_date }}
+          END_DATE: ${{ needs.prepare-merged-branches.outputs.end_date }}
+          NOTES_JSON: ${{ steps.output_paths.outputs.notes_json }}
+          NOTES_MARKDOWN: ${{ steps.output_paths.outputs.notes_markdown }}
         run: |
-          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
-          REPORT_FILE="${REVIEW_DIR}/report.md"
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
+          python3 tools/generate_dev_notes.py \
+            --target-branch origin/dev \
+            --start-date "${START_DATE}" \
+            --end-date "${END_DATE}" \
+            --json-output "${NOTES_JSON}" \
+            --markdown-output "${NOTES_MARKDOWN}"
 
-          review_dir = Path(os.environ["REVIEW_DIR"])
-          report_path = Path(os.environ["REPORT_FILE"])
-
-          assessment = json.loads((review_dir / "assessment.json").read_text())
-          result = json.loads((review_dir / "result.json").read_text()) if (review_dir / "result.json").exists() else {
-              "docs_updated": False,
-              "docs_files_changed": [],
-              "summary": "",
-          }
-          plan = json.loads((review_dir / "update-plan.json").read_text()) if (review_dir / "update-plan.json").exists() else {
-              "docs_goal": "",
-              "docs_files_to_edit": [],
-              "changelog_draft": "",
-              "notes_for_editor": [],
-          }
-
-          lines = [
-              "# Branch review",
-              "",
-              "## Needs documentation update",
-              str(bool(assessment.get("needs_documentation_update"))).lower(),
-              "",
-              "## Reason",
-              assessment.get("reason", ""),
-              "",
-              "## Source files reviewed",
-          ]
-          lines.extend(assessment.get("source_files_reviewed", []) or ["None recorded"])
-          lines.extend([
-              "",
-              "## Docs goal",
-              plan.get("docs_goal", ""),
-              "",
-              "## Suggested docs files",
-          ])
-          lines.extend(plan.get("docs_files_to_edit", []) or ["No docs files suggested"])
-          lines.extend([
-              "",
-              "## Changelog draft",
-              plan.get("changelog_draft", ""),
-              "",
-              "## Notes for editor",
-          ])
-          lines.extend(plan.get("notes_for_editor", []) or ["No extra notes"])
-          lines.extend([
-              "",
-              "## Docs files changed",
-          ])
-          lines.extend(result.get("docs_files_changed", []) or ["No docs files changed"])
-          lines.extend([
-              "",
-              "## Result summary",
-              result.get("summary", ""),
-              "",
-          ])
-
-          report_path.write_text("\n".join(lines) + "\n")
-          PY
+      - name: Assess documentation impact from dev notes
         env:
-          REVIEW_DIR: ${{ steps.workspace.outputs.review_dir }}
-          REPORT_FILE: ${{ steps.workspace.outputs.review_dir }}/report.md
-
-      - name: Capture docs diff
-        id: diff
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          NOTES_JSON: ${{ steps.output_paths.outputs.notes_json }}
+          NOTES_MARKDOWN: ${{ steps.output_paths.outputs.notes_markdown }}
+          ASSESSMENT_JSON: ${{ steps.output_paths.outputs.assessment_json }}
+          ASSESSMENT_MARKDOWN: ${{ steps.output_paths.outputs.assessment_markdown }}
         run: |
-          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
-          STATUS_FILE="${REVIEW_DIR}/docs-status.txt"
-          DIFF_FILE="${REVIEW_DIR}/docs.diff"
+          python3 tools/assess_dev_notes.py \
+            --notes-json "${NOTES_JSON}" \
+            --notes-markdown "${NOTES_MARKDOWN}" \
+            --json-output "${ASSESSMENT_JSON}" \
+            --markdown-output "${ASSESSMENT_MARKDOWN}"
 
-          git -C docs-repo add -N . >/dev/null 2>&1 || true
-          git -C docs-repo status --short > "${STATUS_FILE}"
-          git -C docs-repo diff -- . > "${DIFF_FILE}"
-
-          if [ -s "${STATUS_FILE}" ]; then
-            echo "docs_changed=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "docs_changed=false" >> "${GITHUB_OUTPUT}"
-          fi
-
-      - name: Echo branch review
+      - name: Echo generated notes and assessment
         run: |
-          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
-
-          echo "Merged branch: ${{ matrix.branch_name }} (${{ matrix.short_sha }})"
-          echo "Review directory: ${REVIEW_DIR}"
-          echo
-          if [ -f "${REVIEW_DIR}/assessment.json" ]; then
-            echo "::group::assessment.json"
-            cat "${REVIEW_DIR}/assessment.json"
-            echo "::endgroup::"
-          fi
-          echo "::group::report.md"
-          cat "${REVIEW_DIR}/report.md"
-          echo "::endgroup::"
-          if [ -f "${REVIEW_DIR}/result.json" ]; then
-            echo "::group::result.json"
-            cat "${REVIEW_DIR}/result.json"
-            echo "::endgroup::"
-          fi
-
-          if [ -s "${REVIEW_DIR}/docs.diff" ]; then
-            echo "::group::docs.diff"
-            cat "${REVIEW_DIR}/docs.diff"
-            echo "::endgroup::"
-          else
-            echo "No docs diff generated for ${{ matrix.branch_name }}."
-          fi
-
           {
-            echo "## Branch `${{ matrix.branch_name }}`"
-            echo
-            echo "- Merge commit: \`${{ matrix.merge_sha }}\`"
-            echo "- Docs changed: \`${{ steps.diff.outputs.docs_changed }}\`"
-            echo
-            if [ -f "${REVIEW_DIR}/assessment.json" ]; then
-              echo "### Assessment"
-              echo
-              echo '```json'
-              cat "${REVIEW_DIR}/assessment.json"
-              echo '```'
-              echo
-            fi
-            echo "### Report"
+            echo "## Dev notes"
             echo
             echo '```md'
-            cat "${REVIEW_DIR}/report.md"
+            cat "${{ steps.output_paths.outputs.notes_markdown }}"
             echo '```'
             echo
-            if [ -f "${REVIEW_DIR}/result.json" ]; then
-              echo "### Result"
-              echo
-              echo '```json'
-              cat "${REVIEW_DIR}/result.json"
-              echo '```'
-              echo
-            fi
-            if [ -s "${REVIEW_DIR}/docs.diff" ]; then
-              echo "### Docs diff"
-              echo
-              echo '```diff'
-              cat "${REVIEW_DIR}/docs.diff"
-              echo '```'
-              echo
-            fi
+            echo "## Documentation assessment"
+            echo
+            echo '```md'
+            cat "${{ steps.output_paths.outputs.assessment_markdown }}"
+            echo '```'
+            echo
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Upload review artifact
+          echo "::group::dev_notes.md"
+          cat "${{ steps.output_paths.outputs.notes_markdown }}"
+          echo "::endgroup::"
+          echo "::group::docs_assessment.md"
+          cat "${{ steps.output_paths.outputs.assessment_markdown }}"
+          echo "::endgroup::"
+
+      - name: Upload notes artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docs-review-${{ matrix.safe_branch }}-${{ matrix.short_sha }}
-          path: ${{ steps.workspace.outputs.review_dir }}
+          name: current-day-dev-notes
+          path: ${{ steps.output_paths.outputs.output_dir }}
           if-no-files-found: error
 
   skip-when-no-merges:
