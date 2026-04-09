@@ -278,6 +278,15 @@ app.include_router(
     tags=["health"],
 )
 
+# Activity / observability
+from cognee.api.v1.activity.routers import get_activity_router
+
+app.include_router(
+    get_activity_router(),
+    prefix="/api/v1/activity",
+    tags=["activity"],
+)
+
 # V2 memory-oriented API
 app.include_router(get_remember_router(), prefix="/api/v2/remember", tags=["remember"])
 app.include_router(get_recall_router(), prefix="/api/v2/recall", tags=["recall"])

@@ -101,38 +101,6 @@ class DataPoint(BaseModel):
             return identity
         return None
 
-    @staticmethod
-    def _generate_identity_id(
-        identity_fields: list[str], data: dict, class_name: str
-    ) -> Optional[UUID]:
-        """Generate a deterministic UUID5 from identity field values.
-
-        Returns None if any identity field is missing from data,
-        causing fallback to the default UUID4.
-        """
-        parts = []
-        for field_name in identity_fields:
-            if field_name not in data:
-                logger.warning(
-                    "identity_fields references missing field '%s' on %s; falling back to UUID4",
-                    field_name,
-                    class_name,
-                )
-                return None
-            value = data[field_name]
-            parts.append(str(value) if not isinstance(value, str) else value)
-        joined = "|".join(parts)
-        identity_string = f"{class_name}:{joined}"
-        return generate_node_id(identity_string)
-
-    @classmethod
-    def _get_identity_fields(cls) -> Optional[list[str]]:
-        """Get identity_fields from the class's metadata field default, if defined."""
-        metadata_field = cls.model_fields.get("metadata")
-        if metadata_field is not None and metadata_field.default is not None:
-            return metadata_field.default.get("identity_fields")
-        return None
-
     @classmethod
     def _generate_identity_id(
         cls, identity_fields: list[str], data: dict, class_name: str

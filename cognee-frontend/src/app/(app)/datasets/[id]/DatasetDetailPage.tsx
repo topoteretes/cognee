@@ -5,6 +5,7 @@ import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import getDatasetData from "@/modules/datasets/getDatasetData";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import addData from "@/modules/ingestion/addData";
+import cognifyDataset from "@/modules/datasets/cognifyDataset";
 
 interface FileEntry {
   id: string;
@@ -80,6 +81,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [cognifying, setCognifying] = useState(false);
   const [search, setSearch] = useState("");
   const [showShareModal, setShowShareModal] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -122,10 +124,14 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     try {
       await addData({ name: datasetName }, Array.from(newFiles), cogniInstance);
       await loadFiles();
+      setUploading(false);
+      setCognifying(true);
+      await cognifyDataset({ id: datasetId, name: datasetName }, cogniInstance);
     } catch (err) {
-      console.error("Upload failed:", err);
+      console.error("Upload or cognify failed:", err);
     } finally {
       setUploading(false);
+      setCognifying(false);
     }
   }
 
@@ -198,6 +204,31 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         className="hidden"
         onChange={(e) => { if (e.target.files) handleUpload(e.target.files); e.target.value = ""; }}
       />
+
+      {/* Status banner */}
+      {(uploading || cognifying) && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10, padding: "12px 16px",
+          background: cognifying ? "#EDE9FE" : "#EFF6FF",
+          border: `1px solid ${cognifying ? "#DDD6FE" : "#BFDBFE"}`,
+          borderRadius: 10,
+        }}>
+          <div style={{
+            width: 16, height: 16, border: "2px solid", borderRadius: "50%",
+            borderColor: cognifying ? "#7C3AED transparent #7C3AED transparent" : "#3B82F6 transparent #3B82F6 transparent",
+            animation: "spin 0.8s linear infinite",
+          }} />
+          <span style={{ fontSize: 14, color: cognifying ? "#5B21B6" : "#1E40AF", fontWeight: 500 }}>
+            {uploading ? "Uploading files..." : "Building knowledge graph..."}
+          </span>
+          {cognifying && (
+            <span style={{ fontSize: 12, color: "#7C3AED" }}>
+              Extracting entities and relationships — this may take a minute
+            </span>
+          )}
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>

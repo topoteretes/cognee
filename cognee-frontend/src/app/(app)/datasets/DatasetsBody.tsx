@@ -17,6 +17,7 @@ import CloseIcon from "@/ui/icons/CloseIcon";
 import { trackEvent } from "@/modules/analytics";
 import PlusIcon from "@/ui/icons/PlusIcon";
 import addData from "@/modules/ingestion/addData";
+import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import { notifications } from "@mantine/notifications";
 
 interface DatasetFile {
@@ -91,11 +92,28 @@ function DatasetRow({
           },
         });
         notifications.show({
-          title: "Files added",
-          message: `${selected.length} file(s) added to "${dataset.name}"`,
-          color: "green",
+          title: "Files added — building knowledge graph...",
+          message: `${selected.length} file(s) added to "${dataset.name}". Cognify is running.`,
+          color: "blue",
+          autoClose: 5000,
         });
         onFilesAdded?.(dataset.id);
+        // Auto-cognify after upload
+        try {
+          await cognifyDataset({ id: dataset.id, name: dataset.name }, instance);
+          notifications.show({
+            title: "Knowledge graph built",
+            message: `"${dataset.name}" is now searchable.`,
+            color: "green",
+          });
+        } catch (cognifyErr) {
+          console.error("Cognify failed:", cognifyErr);
+          notifications.show({
+            title: "Cognify failed",
+            message: "Files uploaded but knowledge graph build failed. Try again from the dataset.",
+            color: "orange",
+          });
+        }
         // Refresh file list if expanded
         if (isExpanded) {
           const data = await getDatasetData(dataset.id);
