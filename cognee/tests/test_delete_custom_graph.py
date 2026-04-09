@@ -71,22 +71,24 @@ async def main():
 
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
+    from cognee.modules.pipelines.models import PipelineContext
+
     await add_data_points(
         [person1],
-        context={
-            "user": user,
-            "dataset": dataset,
-            "data": data1,
-        },
+        ctx=PipelineContext(
+            user=user,
+            dataset=dataset,
+            data_item=data1,
+        ),
     )
 
     await add_data_points(
         [person2],
-        context={
-            "user": user,
-            "dataset": dataset,
-            "data": data2,
-        },
+        ctx=PipelineContext(
+            user=user,
+            dataset=dataset,
+            data_item=data2,
+        ),
     )
 
     from cognee.infrastructure.databases.graph import get_graph_engine
