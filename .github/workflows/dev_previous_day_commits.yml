@@ -1,6 +1,7 @@
 name: automation | Previous Day Dev Commits
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "59 23 * * *"
   push:
@@ -14,6 +15,8 @@ jobs:
   list-dev-commits:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
+    env:
+      CLAUDE_PROMPTS_DIR: claude-prompts
 
     steps:
       - name: Check out repository
@@ -46,6 +49,7 @@ jobs:
 
           COMMITS_FILE="$(mktemp)"
           DETAILS_FILE="$(mktemp)"
+          mkdir -p "${CLAUDE_PROMPTS_DIR}"
 
           git log "${TARGET_BRANCH}" \
             --since="${START_DATE}" \
@@ -65,17 +69,66 @@ jobs:
                 echo "- ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
               done < "${COMMITS_FILE}"
               echo
-              echo "### Change content"
+              echo "### Claude prompt files"
               echo
+              echo "Generated in \`${CLAUDE_PROMPTS_DIR}\` as one prompt per commit."
+              echo
+              echo "### Generated prompts"
+              echo
+              COMMIT_INDEX=0
               while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
+                COMMIT_INDEX=$((COMMIT_INDEX + 1))
+                SAFE_TITLE="$(printf '%s' "${COMMIT_TITLE}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//')"
+                if [ -z "${SAFE_TITLE}" ]; then
+                  SAFE_TITLE="commit"
+                fi
+                PROMPT_FILE="${CLAUDE_PROMPTS_DIR}/$(printf '%02d' "${COMMIT_INDEX}")-${SAFE_TITLE}-${COMMIT_SHA:0:7}.txt"
+                COMMIT_PATCH_FILE="$(mktemp)"
+                git show "${COMMIT_SHA}" \
+                  --format='commit %H%nAuthor: %an <%ae>%nDate: %cI%nTitle: %s%n' \
+                  --stat \
+                  --patch > "${COMMIT_PATCH_FILE}"
+                {
+                  printf '%s\n' \
+                    '<instructions>' \
+                    'Draft documentation updates for this single commit only.' \
+                    'Focus on user-facing behavior, API changes, configuration changes, setup steps, breaking changes, and anything that should appear in changelog or product docs.' \
+                    'If the commit does not require docs updates, say so clearly and explain why.' \
+                    '</instructions>' \
+                    '' \
+                    '<context>' \
+                    'This commit is from the dev branch.' \
+                    'Treat the patch below as the only source of truth for this prompt.' \
+                    '</context>' \
+                    '' \
+                    '<commit>'
+                  printf '<title>%s</title>\n' "${COMMIT_TITLE}"
+                  printf '%s\n' \
+                    '<branch>dev</branch>' \
+                    '<diff>' \
+                    '```diff'
+                  cat "${COMMIT_PATCH_FILE}"
+                  printf '%s\n' \
+                    '```' \
+                    '</diff>' \
+                    '</commit>' \
+                    '' \
+                    '<output_format>' \
+                    'Return the following sections:' \
+                    '1. Summary' \
+                    '2. Documentation impact' \
+                    '3. Changelog draft' \
+                    '4. Pages to update' \
+                    '5. Open questions' \
+                    '</output_format>'
+                } > "${PROMPT_FILE}"
                 {
                   echo "#### ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
                   echo
-                  echo '```diff'
-                  git show "${COMMIT_SHA}" \
-                    --format='commit %H%nAuthor: %an <%ae>%nDate: %cI%nTitle: %s%n' \
-                    --stat \
-                    --patch
+                  echo "- Claude prompt file: \`${PROMPT_FILE}\`"
+                  echo
+                  echo '```text'
+                  cat "${PROMPT_FILE}"
                   echo '```'
                   echo
                 } >> "${DETAILS_FILE}"
@@ -92,15 +145,23 @@ jobs:
               echo "- ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
             done < "${COMMITS_FILE}"
             echo
-            echo "Detailed changes:"
+            echo "Claude prompt files:"
+            find "${CLAUDE_PROMPTS_DIR}" -maxdepth 1 -type f | sort
+            echo
+            echo "Generated prompts:"
             while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
               echo "::group::${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
-              git show "${COMMIT_SHA}" \
-                --format='commit %H%nAuthor: %an <%ae>%nDate: %cI%nTitle: %s%n' \
-                --stat \
-                --patch
+              cat "${CLAUDE_PROMPTS_DIR}/"*"${COMMIT_SHA:0:7}.txt"
               echo "::endgroup::"
             done < "${COMMITS_FILE}"
           else
             echo "No commits were found on ${TARGET_BRANCH} during the previous UTC day."
           fi
+
+      - name: Upload Claude prompts artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: previous-day-dev-claude-prompts
+          path: ${{ env.CLAUDE_PROMPTS_DIR }}
+          if-no-files-found: warn
