@@ -1,4 +1,4 @@
-name: automation | Generate Current Day Dev Notes
+name: automation | Draft Docs PRs For Current Day Dev Merges
 
 on:
   pull_request:
@@ -315,6 +315,7 @@ jobs:
 
       - name: Create or update docs pull request
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: manage_pr
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
           TARGET_REPO: topoteretes/cognee-docs
@@ -336,6 +337,7 @@ jobs:
               --repo "${TARGET_REPO}" \
               --title "${PR_TITLE}" \
               --body "${PR_BODY}"
+            PR_NUMBER="${EXISTING_PR_NUMBER}"
           elif [ "${CHANGES_MADE}" = "true" ]; then
             gh pr create \
               --repo "${TARGET_REPO}" \
@@ -343,9 +345,45 @@ jobs:
               --head "topoteretes:${HEAD_BRANCH}" \
               --title "${PR_TITLE}" \
               --body "${PR_BODY}"
+            PR_NUMBER="$(gh pr list \
+              --repo "${TARGET_REPO}" \
+              --head "topoteretes:${HEAD_BRANCH}" \
+              --base main \
+              --state open \
+              --json number \
+              --jq '.[0].number')"
           else
             echo "No docs changes were committed and no open PR exists; skipping PR creation."
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            echo "pr_url=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          PR_URL="$(gh pr view "${PR_NUMBER}" --repo "${TARGET_REPO}" --json url --jq '.url')"
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize docs PR result
+        run: |
+          {
+            echo "## Branch docs review: ${{ matrix.branch_name }}"
+            echo
+            echo "- Merge commit: \`${{ matrix.merge_sha }}\`"
+            echo "- Needs documentation update: \`${{ steps.assessment.outputs.needs_update }}\`"
+            if [ "${{ steps.assessment.outputs.needs_update }}" = "true" ]; then
+              echo "- Docs branch: \`${{ steps.assessment.outputs.docs_branch }}\`"
+              echo "- Draft file: \`${{ steps.assessment.outputs.draft_path }}\`"
+              if [ -n "${{ steps.manage_pr.outputs.pr_url }}" ]; then
+                echo "- Pull request: ${{ steps.manage_pr.outputs.pr_url }}"
+              else
+                echo "- Pull request: not created"
+              fi
+            fi
+            echo
+            echo "### Documentation assessment"
+            echo
+            cat "${{ steps.branch_paths.outputs.assessment_markdown }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload branch notes artifact
         uses: actions/upload-artifact@v6
