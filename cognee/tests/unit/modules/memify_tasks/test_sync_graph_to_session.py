@@ -906,7 +906,7 @@ class TestRecallSessionMode:
     @pytest.mark.asyncio
     async def test_session_only_when_no_datasets_no_type(self):
         """recall(session_id=X) without datasets/type searches session."""
-        from cognee.api.v2.recall.recall import _search_session
+        import cognee.api.v2.recall.recall as recall_mod
 
         session_entries = [
             {
@@ -916,13 +916,12 @@ class TestRecallSessionMode:
             }
         ]
 
-        with patch(
-            "cognee.api.v2.recall.recall._search_session",
+        with patch.object(
+            recall_mod,
+            "_search_session",
             AsyncMock(return_value=session_entries),
         ):
-            from cognee.api.v2.recall.recall import recall
-
-            results = await recall("test", session_id="s1")
+            results = await recall_mod.recall("test", session_id="s1")
 
         assert len(results) == 1
         assert results[0]["_source"] == "session"
@@ -930,11 +929,14 @@ class TestRecallSessionMode:
     @pytest.mark.asyncio
     async def test_fallthrough_to_graph_when_session_empty(self):
         """When session search returns nothing, falls through to graph."""
+        import cognee.api.v2.recall.recall as recall_mod
+
         mock_graph_results = ["graph result"]
 
         with (
-            patch(
-                "cognee.api.v2.recall.recall._search_session",
+            patch.object(
+                recall_mod,
+                "_search_session",
                 AsyncMock(return_value=[]),
             ),
             patch(
@@ -946,9 +948,7 @@ class TestRecallSessionMode:
                 return_value=MagicMock(search_type=MagicMock()),
             ),
         ):
-            from cognee.api.v2.recall.recall import recall
-
-            results = await recall("test", session_id="s1")
+            results = await recall_mod.recall("test", session_id="s1")
 
         # Should get graph results since session was empty
         assert results == mock_graph_results
@@ -960,15 +960,15 @@ class TestRecallSessionMode:
 
         mock_graph_results = ["graph result"]
 
+        import cognee.api.v2.recall.recall as recall_mod
+
         with (
             patch(
                 "cognee.api.v1.search.search",
                 AsyncMock(return_value=mock_graph_results),
             ),
         ):
-            from cognee.api.v2.recall.recall import recall
-
-            results = await recall(
+            results = await recall_mod.recall(
                 "test",
                 query_type=SearchType.GRAPH_COMPLETION,
                 session_id="s1",
