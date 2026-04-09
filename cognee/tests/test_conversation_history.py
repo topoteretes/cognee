@@ -202,9 +202,9 @@ async def main():
         retriever_specific_config={"decomposition_mode": "combined_triplets_context"},
     )
 
-    assert isinstance(result_decomposition_combined, list) and len(
-        result_decomposition_combined
-    ) > 0, (
+    assert (
+        isinstance(result_decomposition_combined, list) and len(result_decomposition_combined) > 0
+    ), (
         "GRAPH_COMPLETION_DECOMPOSITION combined mode should return non-empty list, "
         f"got: {result_decomposition_combined!r}"
     )
