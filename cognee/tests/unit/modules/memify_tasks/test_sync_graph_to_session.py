@@ -902,11 +902,18 @@ class TestSearchSession:
 # ---------------------------------------------------------------------------
 
 
+def _get_recall_module():
+    """Import the recall module by full path to avoid __init__.py name collision."""
+    import importlib
+
+    return importlib.import_module("cognee.api.v2.recall.recall")
+
+
 class TestRecallSessionMode:
     @pytest.mark.asyncio
     async def test_session_only_when_no_datasets_no_type(self):
         """recall(session_id=X) without datasets/type searches session."""
-        import cognee.api.v2.recall.recall as recall_mod
+        recall_mod = _get_recall_module()
 
         session_entries = [
             {
@@ -929,7 +936,7 @@ class TestRecallSessionMode:
     @pytest.mark.asyncio
     async def test_fallthrough_to_graph_when_session_empty(self):
         """When session search returns nothing, falls through to graph."""
-        import cognee.api.v2.recall.recall as recall_mod
+        recall_mod = _get_recall_module()
 
         mock_graph_results = ["graph result"]
 
@@ -960,7 +967,7 @@ class TestRecallSessionMode:
 
         mock_graph_results = ["graph result"]
 
-        import cognee.api.v2.recall.recall as recall_mod
+        recall_mod = _get_recall_module()
 
         with (
             patch(
