@@ -45,7 +45,7 @@ from cognee.run_migrations import run_migrations
 # ---------------------------------------------------------------------------
 # V2 memory-oriented API
 # ---------------------------------------------------------------------------
-from .api.v2 import remember, RememberResult, recall, improve, forget
+from .api.v2 import remember, RememberResult, recall, improve, forget, serve, disconnect
 
 # Tracing / Observability
 from cognee.modules.observability.trace_context import (

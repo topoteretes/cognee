@@ -76,6 +76,12 @@ async def improve(
         # Enrich graph only (no session bridging)
         await cognee.improve(dataset="docs")
     """
+    from cognee.api.v2.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.improve(dataset, node_name=node_name, **kwargs)
+
     from cognee.modules.users.methods import get_default_user
 
     user = kwargs.pop("user", None)

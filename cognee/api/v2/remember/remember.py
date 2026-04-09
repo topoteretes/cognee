@@ -334,6 +334,12 @@ async def remember(
         # Access raw pipeline result:
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
+    from cognee.api.v2.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.remember(data, dataset_name, **kwargs)
+
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 

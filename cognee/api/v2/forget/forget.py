@@ -42,6 +42,12 @@ async def forget(
     Returns:
         Dict with deletion summary: items removed, datasets removed.
     """
+    from cognee.api.v2.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.forget(data_id=data_id, dataset=dataset, everything=everything)
+
     from cognee.modules.users.methods import get_default_user
 
     if user is None:

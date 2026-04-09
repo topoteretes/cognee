@@ -146,6 +146,12 @@ async def recall(
         Search results. When searching session-only, returns a list of
         matching QA entry dicts with ``_source="session"``.
     """
+    from cognee.api.v2.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.recall(query_text, query_type, datasets=datasets, top_k=top_k, **kwargs)
+
     session_id = kwargs.get("session_id")
 
     # Session-only search: when session_id is provided but no datasets
