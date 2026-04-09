@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "59 23 * * *"
-  push:
-    branches:
-      - feature/cog-4577-continuous-docs-drafting-from-dev
 
 permissions:
   contents: read
