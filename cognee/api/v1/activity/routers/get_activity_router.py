@@ -29,10 +29,16 @@ def get_activity_router() -> APIRouter:
         async with db_engine.get_async_session() as session:
             # Join pipeline runs → dataset → owner user for agent attribution
             stmt = (
-                select(PipelineRun, Dataset.name.label("ds_name"), Dataset.owner_id, User.email.label("owner_email"))
+                select(
+                    PipelineRun,
+                    Dataset.name.label("ds_name"),
+                    Dataset.owner_id,
+                    User.email.label("owner_email"),
+                )
                 .select_from(
-                    outerjoin(PipelineRun, Dataset, PipelineRun.dataset_id == Dataset.id)
-                    .outerjoin(User, Dataset.owner_id == User.id)
+                    outerjoin(PipelineRun, Dataset, PipelineRun.dataset_id == Dataset.id).outerjoin(
+                        User, Dataset.owner_id == User.id
+                    )
                 )
                 .order_by(PipelineRun.created_at.desc())
                 .limit(50)
@@ -78,14 +84,16 @@ def get_activity_router() -> APIRouter:
             for trace_id, spans in all_traces.items():
                 root = spans[0] if spans else None
                 duration = max((s.get("duration_ms", 0) for s in spans), default=0)
-                result.append({
-                    "trace_id": trace_id,
-                    "root_name": root.get("name") if root else None,
-                    "duration_ms": duration,
-                    "span_count": len(spans),
-                    "status": root.get("status") if root else None,
-                    "spans": spans,
-                })
+                result.append(
+                    {
+                        "trace_id": trace_id,
+                        "root_name": root.get("name") if root else None,
+                        "duration_ms": duration,
+                        "span_count": len(spans),
+                        "status": root.get("status") if root else None,
+                        "spans": spans,
+                    }
+                )
 
             return result
         except Exception as e:
@@ -108,7 +116,9 @@ def get_activity_router() -> APIRouter:
                     "id": str(u.id),
                     "email": u.email,
                     "is_superuser": u.is_superuser,
-                    "created_at": u.created_at.isoformat() if hasattr(u, "created_at") and u.created_at else None,
+                    "created_at": u.created_at.isoformat()
+                    if hasattr(u, "created_at") and u.created_at
+                    else None,
                 }
                 for u in users
             ]
@@ -128,12 +138,14 @@ def get_activity_router() -> APIRouter:
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             # Get all users (agents have @cognee.agent, but show all non-default)
-            users_q = select(User).filter(User.is_active == True)
+            users_q = select(User).filter(User.is_active.is_(True))  # noqa: E712
             users_result = await session.execute(users_q)
             all_users = users_result.scalars().all()
 
             # Count API keys per user
-            keys_q = select(UserApiKey.user_id, func.count().label("key_count")).group_by(UserApiKey.user_id)
+            keys_q = select(UserApiKey.user_id, func.count().label("key_count")).group_by(
+                UserApiKey.user_id
+            )
             keys_result = await session.execute(keys_q)
             key_counts = {str(row.user_id): row.key_count for row in keys_result}
 
@@ -144,8 +156,7 @@ def get_activity_router() -> APIRouter:
                 .filter(PipelineRun.created_at > cutoff)
                 .group_by(PipelineRun.dataset_id)
             )
-            recent_result = await session.execute(recent_q)
-            recent_runs = {str(row.dataset_id): row.run_count for row in recent_result}
+            await session.execute(recent_q)
 
         agents = []
         for u in all_users:
@@ -166,17 +177,21 @@ def get_activity_router() -> APIRouter:
             api_key_count = key_counts.get(str(u.id), 0)
             has_recent = api_key_count > 0  # Simplified: has key = potentially active
 
-            agents.append({
-                "id": str(u.id),
-                "email": email,
-                "agent_type": agent_type,
-                "agent_short_id": agent_short_id,
-                "is_agent": is_agent,
-                "is_default": is_default,
-                "status": "LIVE" if has_recent else "INACTIVE",
-                "api_key_count": api_key_count,
-                "created_at": u.created_at.isoformat() if hasattr(u, "created_at") and u.created_at else None,
-            })
+            agents.append(
+                {
+                    "id": str(u.id),
+                    "email": email,
+                    "agent_type": agent_type,
+                    "agent_short_id": agent_short_id,
+                    "is_agent": is_agent,
+                    "is_default": is_default,
+                    "status": "LIVE" if has_recent else "INACTIVE",
+                    "api_key_count": api_key_count,
+                    "created_at": u.created_at.isoformat()
+                    if hasattr(u, "created_at") and u.created_at
+                    else None,
+                }
+            )
 
         return agents
 
@@ -203,7 +218,9 @@ def get_activity_router() -> APIRouter:
 
             # Get documents (join DatasetData → Data)
             docs_result = await session.execute(
-                select(Data).join(DatasetData, Data.id == DatasetData.data_id).filter(DatasetData.dataset_id == dataset_id)
+                select(Data)
+                .join(DatasetData, Data.id == DatasetData.data_id)
+                .filter(DatasetData.dataset_id == dataset_id)
             )
             docs = docs_result.scalars().all()
 
@@ -222,30 +239,36 @@ def get_activity_router() -> APIRouter:
         # Categorize nodes
         entities = [n for n in nodes if n.get("type") == "Entity"]
         summaries = [n for n in nodes if n.get("type") == "TextSummary"]
-        other_nodes = [n for n in nodes if n.get("type") not in ("Entity", "TextSummary", "DocumentChunk", "TextDocument")]
+        other_nodes = [
+            n
+            for n in nodes
+            if n.get("type") not in ("Entity", "TextSummary", "DocumentChunk", "TextDocument")
+        ]
 
         lines = []
         lines.append(f"# Dataset: {ds_name}")
-        lines.append(f"")
-        lines.append(f"Exported: {now} | {len(docs)} documents | {len(entities)} entities | {len(edges)} relationships")
-        lines.append(f"")
+        lines.append("")
+        lines.append(
+            f"Exported: {now} | {len(docs)} documents | {len(entities)} entities | {len(edges)} relationships"
+        )
+        lines.append("")
 
         # Summaries
         if summaries:
-            lines.append(f"## Summaries")
-            lines.append(f"")
+            lines.append("## Summaries")
+            lines.append("")
             for s in summaries:
                 text = s.get("properties", {}).get("text", "")
                 if text:
                     lines.append(f"> {text}")
-                    lines.append(f"")
+                    lines.append("")
 
         # Entities
         if entities:
-            lines.append(f"## Entities")
-            lines.append(f"")
-            lines.append(f"| Entity | Description |")
-            lines.append(f"|--------|-------------|")
+            lines.append("## Entities")
+            lines.append("")
+            lines.append("| Entity | Description |")
+            lines.append("|--------|-------------|")
             for e in entities:
                 label = e.get("label", "?")
                 desc = e.get("properties", {}).get("description", "")
@@ -253,16 +276,16 @@ def get_activity_router() -> APIRouter:
                 label = label.replace("|", "\\|")
                 desc = desc.replace("|", "\\|").replace("\n", " ")
                 lines.append(f"| {label} | {desc} |")
-            lines.append(f"")
+            lines.append("")
 
         # Relationships
         if edges:
             # Build label lookup
             node_labels = {n.get("id"): n.get("label", n.get("id", "?")[:12]) for n in nodes}
-            lines.append(f"## Relationships")
-            lines.append(f"")
-            lines.append(f"| Source | Relationship | Target |")
-            lines.append(f"|--------|-------------|--------|")
+            lines.append("## Relationships")
+            lines.append("")
+            lines.append("| Source | Relationship | Target |")
+            lines.append("|--------|-------------|--------|")
             for e in edges:
                 src = node_labels.get(e.get("source"), e.get("source", "?")[:12])
                 tgt = node_labels.get(e.get("target"), e.get("target", "?")[:12])
@@ -271,28 +294,28 @@ def get_activity_router() -> APIRouter:
                 tgt = tgt.replace("|", "\\|")
                 rel = rel.replace("|", "\\|")
                 lines.append(f"| {src} | {rel} | {tgt} |")
-            lines.append(f"")
+            lines.append("")
 
         # Documents
         if docs:
-            lines.append(f"## Documents")
-            lines.append(f"")
+            lines.append("## Documents")
+            lines.append("")
             for d in docs:
                 name = d.name or "unnamed"
                 ext = (d.extension or "").upper()
                 created = d.created_at.strftime("%b %d, %Y") if d.created_at else "?"
                 lines.append(f"- **{name}** ({ext}, {created})")
-            lines.append(f"")
+            lines.append("")
 
         # Other node types
         if other_nodes:
-            lines.append(f"## Other Nodes")
-            lines.append(f"")
+            lines.append("## Other Nodes")
+            lines.append("")
             for n in other_nodes:
                 ntype = n.get("type", "?")
                 label = n.get("label", "?")
                 lines.append(f"- [{ntype}] {label}")
-            lines.append(f"")
+            lines.append("")
 
         markdown = "\n".join(lines)
         filename = f"{ds_name}-memory-export.md"

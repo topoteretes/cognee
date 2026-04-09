@@ -46,6 +46,7 @@ from cognee.api.v1.users.routers import (
     get_user_id_by_email_router,
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
+from cognee.api.v1.activity.routers import get_activity_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
@@ -279,8 +280,6 @@ app.include_router(
 )
 
 # Activity / observability
-from cognee.api.v1.activity.routers import get_activity_router
-
 app.include_router(
     get_activity_router(),
     prefix="/api/v1/activity",
