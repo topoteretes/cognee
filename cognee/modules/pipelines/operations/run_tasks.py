@@ -2,7 +2,7 @@ import os
 
 import asyncio
 from functools import wraps
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -14,6 +14,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
+from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
@@ -57,9 +58,9 @@ async def run_tasks(
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
     pipeline_name: str = "unknown_pipeline",
-    context: Optional[Dict] = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
+    extras: Optional[dict] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -87,37 +88,52 @@ async def run_tasks(
         if incremental_loading:
             data = await resolve_data_directories(data)
 
-        # Create and gather batches of async tasks of data items that will run the pipeline for the data item
-        results = []
-        for start in range(0, len(data), data_per_batch):
-            data_batch = data[start : start + data_per_batch]
+        # Semaphore-based concurrency: all items are scheduled at once,
+        # but at most data_per_batch run concurrently at any time.
+        semaphore = asyncio.Semaphore(data_per_batch)
 
-            data_item_tasks = [
-                asyncio.create_task(
-                    run_tasks_data_item(
-                        data_item,
-                        dataset,
-                        tasks,
-                        pipeline_name,
-                        pipeline_id,
-                        pipeline_run_id,
-                        {
-                            **(context or {}),
-                            "user": user,  # Used by tasks via context["user"]
-                            "data": data_item,
-                            "dataset": dataset,
-                        },
-                        user,  # Used by pipeline framework for telemetry
-                        incremental_loading,
-                    )
+        async def _run_item(data_item):
+            async with semaphore:
+                return await run_tasks_data_item(
+                    data_item,
+                    dataset,
+                    tasks,
+                    pipeline_name,
+                    pipeline_id,
+                    pipeline_run_id,
+                    PipelineContext(
+                        user=user,
+                        data_item=data_item,
+                        dataset=dataset,
+                        pipeline_name=pipeline_name,
+                        extras=extras if isinstance(extras, dict) else {},
+                    ),
+                    user,
+                    incremental_loading,
                 )
-                for data_item in data_batch
-            ]
 
-            results.extend(await asyncio.gather(*data_item_tasks))
+        gathered = await asyncio.gather(
+            *[asyncio.create_task(_run_item(item)) for item in data],
+            return_exceptions=True,
+        )
 
-        # Remove skipped data items from results
-        results = [result for result in results if result]
+        # Separate successes from unhandled exceptions
+        results = []
+        for i, result in enumerate(gathered):
+            if isinstance(result, BaseException):
+                logger.error(f"Item {i} failed: {result}", exc_info=result)
+                results.append(
+                    {
+                        "run_info": PipelineRunErrored(
+                            pipeline_run_id=pipeline_run_id,
+                            payload=repr(result),
+                            dataset_id=dataset.id,
+                            dataset_name=dataset.name,
+                        ),
+                    }
+                )
+            elif result:
+                results.append(result)
 
         # If any data item could not be processed propagate error
         errored_results = [

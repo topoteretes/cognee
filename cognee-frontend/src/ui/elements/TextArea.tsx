@@ -91,7 +91,14 @@ export default function TextArea({
       style={style}
       value={value}
       placeholder={placeholder}
-      className={classNames("block w-full rounded-md bg-white px-4 py-4 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600", className)}
+      className={classNames(
+        "block w-full rounded-lg bg-white px-3.5 py-3 text-sm text-cognee-body",
+        "border border-cognee-border",
+        "placeholder:text-cognee-placeholder",
+        "hover:bg-cognee-hover",
+        "focus:border-cognee-purple focus:border-2 focus:shadow-[0_0_0_3px_rgba(101,16,244,0.1)] focus:outline-none",
+        className,
+      )}
       onChange={handleChange}
       onKeyUp={onKeyUp}
       {...props}

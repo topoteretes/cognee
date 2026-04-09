@@ -1,31 +1,60 @@
+@layer tailwind, mantine;
+@layer tailwind {
+  @import "tailwindcss";
+}
+
+@theme {
+  /* ── Brand ── */
+  --color-cognee-purple: #6510F4;
+  --color-cognee-purple-hover: #5A0ED6;
+  --color-cognee-purple-pressed: #4A0BAF;
+  --color-cognee-green: #0DFF00;
+
+  /* ── Surfaces ── */
+  --color-cognee-bg: #F4F4F4;
+  --color-cognee-hover: #F4F4F5;
+  --color-cognee-pressed: #E4E4E7;
+  --color-cognee-selected: #F0EDFF;
+  --color-cognee-selected-hover: #E8E2FD;
+  --color-cognee-disabled: #FAFAFA;
+
+  /* ── Borders ── */
+  --color-cognee-border: #E4E4E7;
+  --color-cognee-border-light: #E5E7EB;
+
+  /* ── Text (Zinc scale) ── */
+  --color-cognee-dark: #18181B;
+  --color-cognee-body: #3F3F46;
+  --color-cognee-secondary: #52525B;
+  --color-cognee-muted: #71717A;
+  --color-cognee-placeholder: #A1A1AA;
+  --color-cognee-text-disabled: #D4D4D8;
+}
+
 :root {
-  --max-width: 1100px;
-  --border-radius: 2px;
-  --font-mono: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono",
-    "Roboto Mono", "Oxygen Mono", "Ubuntu Monospace", "Source Code Pro",
-    "Fira Mono", "Droid Sans Mono", "Courier New", monospace;
-
-  --button-padding: 14px 20px !important;
-  --button-border-radius: 100px !important;
-  --global-color-primary: #6510F4 !important;
-  --global-color-primary-active: #500cc5 !important;
-  --global-color-primary-text: white !important;
-  --global-color-secondary: #0DFF00 !important;
-  --global-background-default: #F4F4F4;
-  --textarea-default-color: #0D051C !important;
+  --cognee-purple: #6510F4;
+  --cognee-green: #0DFF00;
+  --cognee-terminal-dot: #351A4B;
 }
 
-html,
 body {
-  height: 100%;
-  max-width: 100vw;
-  overflow-x: hidden;
-  background-color: var(--global-background-default);
+  background-color: var(--color-cognee-bg);
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
+@font-face {
+  font-family: "TWK Lausanne";
+  src:
+    url("/fonts/TWKLausanne-300.woff2") format("woff2"),
+    url("/fonts/TWKLausanne-300.woff") format("woff");
+  font-weight: 300;
+  font-style: normal;
 }
 
-@import "tailwindcss";
+@font-face {
+  font-family: "TWK Lausanne";
+  src:
+    url("/fonts/TWKLausanne-700.woff2") format("woff2"),
+    url("/fonts/TWKLausanne-700.woff") format("woff");
+  font-weight: 700;
+  font-style: normal;
+}
