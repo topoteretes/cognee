@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 
 @dataclass
@@ -15,7 +15,7 @@ class PipelineContext:
                 custom_val = ctx.extras.get("my_key")
 
     The pipeline machinery passes ``ctx`` to any task whose signature
-    includes a parameter named ``ctx`` with type ``PipelineContext``.
+    includes a parameter named ``ctx`` (matched by name, not by type annotation).
 
     Custom pipelines can store additional state in ``extras``.
     """
@@ -25,3 +25,7 @@ class PipelineContext:
     dataset: Any = None
     pipeline_name: Optional[str] = None
     extras: Dict[str, Any] = field(default_factory=dict)
+
+    # Internal: persisted across tasks so _stamp_provenance skips
+    # DataPoints that were already walked in earlier pipeline stages.
+    _provenance_visited: Set[int] = field(default_factory=set, repr=False)
