@@ -5,7 +5,8 @@ import { v4 as uuid4 } from "uuid";
 import { NodeObject, LinkObject } from "react-force-graph-2d";
 import { ChangeEvent, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-import { DeleteIcon } from "@/ui/Icons";
+import { DeleteIcon } from "@/ui/icons";
+// import { FeedbackForm } from "@/ui/Partials";
 import { CTAButton, Input, NeutralButton, Select } from "@/ui/elements";
 
 interface GraphControlsProps {
@@ -111,7 +112,7 @@ export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeCha
 
   const [isAuthShapeChangeEnabled, setIsAuthShapeChangeEnabled] = useState(true);
   const shapeChangeTimeout = useRef<number | null>(null);
-
+  
   useEffect(() => {
     onGraphShapeChange(DEFAULT_GRAPH_SHAPE);
 
@@ -229,6 +230,12 @@ export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeCha
           )}
         </>
         {/* )} */}
+
+        {/* {selectedTab === "feedback" && (
+          <div className="flex flex-col gap-2">
+            <FeedbackForm onSuccess={() => {}} />
+          </div>
+        )} */}
       </div>
     </>
   );
