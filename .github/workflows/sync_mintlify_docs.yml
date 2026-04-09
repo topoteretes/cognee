@@ -152,7 +152,7 @@ jobs:
             --base main \
             --state open \
             --json number \
-            --jq '.[0].number')"
+            --jq '.[0].number // empty')"
 
           if [ -n "${EXISTING_PR_NUMBER}" ]; then
             gh pr edit "${EXISTING_PR_NUMBER}" \
