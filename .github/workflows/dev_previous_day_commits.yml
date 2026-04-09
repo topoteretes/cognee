@@ -170,7 +170,7 @@ jobs:
       - name: Prepare workspace paths
         id: workspace
         run: |
-          REVIEW_DIR="${RUNNER_TEMP}/review-${{ matrix.safe_branch }}-${{ matrix.short_sha }}"
+          REVIEW_DIR=".claude-reviews/${{ matrix.safe_branch }}-${{ matrix.short_sha }}"
           mkdir -p "${REVIEW_DIR}"
           mkdir -p docs-repo
           echo "review_dir=${REVIEW_DIR}" >> "${GITHUB_OUTPUT}"
@@ -198,55 +198,32 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are a documentation impact assessor for the Cognee project.
+            You are a documentation impact classifier for the Cognee project.
 
-            The core source repository is checked out at the workspace root.
-            The docs repository is checked out at `./docs-repo/`.
-            Your assigned merged branch is `${{ matrix.branch_name }}`.
+            Your only goal is to decide whether this merged branch needs documentation changes.
 
-            Merge context:
+            Branch context:
+            - Branch: `${{ matrix.branch_name }}`
             - Merge commit: `${{ matrix.merge_sha }}`
-            - Dev before merge: `${{ matrix.first_parent }}`
-            - Merged branch tip: `${{ matrix.second_parent }}`
-            - Target branch: `origin/dev`
-            - Time window start: `${{ needs.prepare-merged-branches.outputs.start_date }}`
-            - Time window end: `${{ needs.prepare-merged-branches.outputs.end_date }}`
 
-            Treat the repository history as the source of truth. Use git commands yourself to inspect what this merged branch changed.
-            Start with these prepared files:
+            Read only these prepared files:
             - Changed files list: `${{ steps.context.outputs.files_file }}`
             - Full branch diff: `${{ steps.context.outputs.diff_file }}`
-            - Existing docs file index: `${{ steps.context.outputs.docs_index_file }}`
-            Use only these prepared files and normal file reads. Do not run shell commands.
+            Use only normal file reads and writes. Do not run shell commands.
 
             Your task:
-            1. Determine whether this merged branch requires a documentation update.
-            2. Write your decision to `${{ steps.workspace.outputs.review_dir }}/assessment.json`.
-            3. Also write a short human-readable review to `${{ steps.workspace.outputs.review_dir }}/report.md`.
-            4. Do not edit the docs repo in this step.
+            1. Decide whether this branch requires documentation updates.
+            2. Write only `${{ steps.workspace.outputs.review_dir }}/assessment.json`.
+            3. Do not create any other files.
 
             `assessment.json` must be valid JSON with exactly these keys:
             - `needs_documentation_update`: boolean
-            - `summary`: string
-            - `why`: string
+            - `reason`: string
             - `source_files_reviewed`: array of strings
-            - `suggested_docs_files`: array of strings
-            - `changelog_draft`: string
-            - `open_questions`: array of strings
+            - `likely_user_visible`: boolean
 
-            `report.md` must include these sections:
-            - Branch
-            - Merge commit
-            - Needs documentation update
-            - Why
-            - Source files reviewed
-            - Suggested docs files
-            - Changelog draft
-            - Open questions
-
-            Keep edits grounded in the code changes from this merged branch only.
-            In your final response, only list the files you created or changed.
-          claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 8"
+            In your final response, only list the file you created.
+          claude_args: "--allowed-tools Read,Write --max-turns 4"
 
       - name: Parse assessment decision
         id: assessment_decision
@@ -267,6 +244,7 @@ jobs:
 
           data = json.loads(assessment_path.read_text())
           needs_update = bool(data.get("needs_documentation_update"))
+          reason = str(data.get("reason", "")).strip()
 
           with output_path.open("a", encoding="utf-8") as fh:
               fh.write(f"needs_update={'true' if needs_update else 'false'}\n")
@@ -276,12 +254,42 @@ jobs:
                   "needs_documentation_update": False,
                   "docs_updated": False,
                   "docs_files_changed": [],
-                  "summary": "Assessment concluded that no documentation update is required for this merged branch.",
+                  "summary": reason or "Assessment concluded that no documentation update is required for this merged branch.",
               }
               result_path.write_text(json.dumps(result, indent=2) + "\n")
           PY
         env:
           REVIEW_DIR: ${{ steps.workspace.outputs.review_dir }}
+
+      - name: Create docs update plan
+        if: ${{ steps.assessment_decision.outputs.needs_update == 'true' }}
+        id: plan
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are a documentation planning agent for the Cognee project.
+
+            Your only goal is to choose which docs files should be updated for this merged branch.
+            Do not edit docs in this step.
+
+            Read these files:
+            - Assessment: `${{ steps.workspace.outputs.review_dir }}/assessment.json`
+            - Changed files list: `${{ steps.context.outputs.files_file }}`
+            - Existing docs file index: `${{ steps.context.outputs.docs_index_file }}`
+
+            Write only `${{ steps.workspace.outputs.review_dir }}/update-plan.json`.
+
+            `update-plan.json` must be valid JSON with exactly these keys:
+            - `docs_goal`: string
+            - `docs_files_to_edit`: array of strings
+            - `changelog_draft`: string
+            - `notes_for_editor`: array of strings
+
+            Keep it short and concrete.
+            In your final response, only list the file you created.
+          claude_args: "--allowed-tools Read,Write --max-turns 4"
 
       - name: Update docs for merged branch
         if: ${{ steps.assessment_decision.outputs.needs_update == 'true' }}
@@ -293,26 +301,99 @@ jobs:
           prompt: |
             You are a documentation update agent for the Cognee project.
 
-            The core source repository is checked out at the workspace root.
             The docs repository is checked out at `./docs-repo/`.
             Your assigned merged branch is `${{ matrix.branch_name }}`.
 
-            First read `${{ steps.workspace.outputs.review_dir }}/assessment.json` and `${{ steps.workspace.outputs.review_dir }}/report.md`.
-            Also use `${{ steps.context.outputs.docs_index_file }}` to see what documentation files already exist.
+            First read:
+            - `${{ steps.workspace.outputs.review_dir }}/assessment.json`
+            - `${{ steps.workspace.outputs.review_dir }}/update-plan.json`
 
             Rules:
-            1. If `needs_documentation_update` is false, do not edit `./docs-repo/`.
-            2. If `needs_documentation_update` is true, update the docs repo in `./docs-repo/` based only on the assessed code changes from this merged branch.
-            3. After you finish, append a section named `Docs files changed` to `${{ steps.workspace.outputs.review_dir }}/report.md`.
-            4. Also write `${{ steps.workspace.outputs.review_dir }}/result.json` with exactly these keys:
+            1. Update only the docs files required by the plan.
+            2. Keep changes focused and minimal.
+            3. After editing docs, write only `${{ steps.workspace.outputs.review_dir }}/result.json`.
+
+            `result.json` must be valid JSON with exactly these keys:
                - `needs_documentation_update`: boolean
                - `docs_updated`: boolean
                - `docs_files_changed`: array of strings
                - `summary`: string
 
-            Keep changes focused and minimal. Use only normal file reads and writes. Do not run shell commands.
-            In your final response, only list the files you created or changed.
-          claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 8"
+            Do not create any other files outside `docs-repo/` and `result.json`.
+            Use only normal file reads and writes.
+            In your final response, only list the files you changed.
+          claude_args: "--allowed-tools Read,Write --max-turns 6"
+
+      - name: Build human-readable report
+        run: |
+          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
+          REPORT_FILE="${REVIEW_DIR}/report.md"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          review_dir = Path(os.environ["REVIEW_DIR"])
+          report_path = Path(os.environ["REPORT_FILE"])
+
+          assessment = json.loads((review_dir / "assessment.json").read_text())
+          result = json.loads((review_dir / "result.json").read_text()) if (review_dir / "result.json").exists() else {
+              "docs_updated": False,
+              "docs_files_changed": [],
+              "summary": "",
+          }
+          plan = json.loads((review_dir / "update-plan.json").read_text()) if (review_dir / "update-plan.json").exists() else {
+              "docs_goal": "",
+              "docs_files_to_edit": [],
+              "changelog_draft": "",
+              "notes_for_editor": [],
+          }
+
+          lines = [
+              "# Branch review",
+              "",
+              "## Needs documentation update",
+              str(bool(assessment.get("needs_documentation_update"))).lower(),
+              "",
+              "## Reason",
+              assessment.get("reason", ""),
+              "",
+              "## Source files reviewed",
+          ]
+          lines.extend(assessment.get("source_files_reviewed", []) or ["None recorded"])
+          lines.extend([
+              "",
+              "## Docs goal",
+              plan.get("docs_goal", ""),
+              "",
+              "## Suggested docs files",
+          ])
+          lines.extend(plan.get("docs_files_to_edit", []) or ["No docs files suggested"])
+          lines.extend([
+              "",
+              "## Changelog draft",
+              plan.get("changelog_draft", ""),
+              "",
+              "## Notes for editor",
+          ])
+          lines.extend(plan.get("notes_for_editor", []) or ["No extra notes"])
+          lines.extend([
+              "",
+              "## Docs files changed",
+          ])
+          lines.extend(result.get("docs_files_changed", []) or ["No docs files changed"])
+          lines.extend([
+              "",
+              "## Result summary",
+              result.get("summary", ""),
+              "",
+          ])
+
+          report_path.write_text("\n".join(lines) + "\n")
+          PY
+        env:
+          REVIEW_DIR: ${{ steps.workspace.outputs.review_dir }}
+          REPORT_FILE: ${{ steps.workspace.outputs.review_dir }}/report.md
 
       - name: Capture docs diff
         id: diff
