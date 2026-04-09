@@ -43,7 +43,7 @@ function StepDots({ current, total = 4 }: { current: number; total?: number }) {
 function SkipLink() {
   const router = useRouter();
   return (
-    <button onClick={() => router.push("/dashboard")} className="cursor-pointer" style={{ background: "none", border: "none", color: "#71717A", fontSize: 13 }}>
+    <button onClick={() => { localStorage.setItem("cognee-onboarding-dismissed", "1"); router.push("/dashboard"); }} className="cursor-pointer" style={{ background: "none", border: "none", color: "#71717A", fontSize: 13 }}>
       Skip onboarding and go to dashboard
     </button>
   );

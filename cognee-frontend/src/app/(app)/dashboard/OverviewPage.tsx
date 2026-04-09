@@ -63,7 +63,7 @@ export default function OverviewPage() {
     ]).then(([runData, spanData]) => {
       setRuns(Array.isArray(runData) ? runData : []);
       setTraceCount(Array.isArray(spanData) ? spanData.length : 0);
-      if (datasets.length === 0 && !filterLoading) {
+      if (datasets.length === 0 && !filterLoading && !localStorage.getItem("cognee-onboarding-dismissed")) {
         router.replace("/onboarding");
       }
     }).finally(() => setLoading(false));
@@ -288,13 +288,45 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function CopyableCodeBlock({ text, children }: { text: string; children: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div
+      onClick={handleCopy}
+      className="cursor-pointer"
+      style={{
+        background: "#18181B",
+        borderRadius: 8,
+        padding: "10px 16px",
+        position: "relative",
+      }}
+    >
+      {children}
+      <span style={{ position: "absolute", top: 10, right: 12, display: "flex", alignItems: "center" }}>
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="#71717A" strokeWidth="1.5" /><path d="M11 3H4.5A1.5 1.5 0 003 4.5V11" stroke="#71717A" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        )}
+      </span>
+    </div>
+  );
+}
+
 function SdkCard() {
   const [expanded, setExpanded] = useState(false);
 
+  const step3Code = `import cognee\n\ncognee.config.set_llm_api_key("your-key")\n\nawait cognee.add("Your text data")\nawait cognee.cognify()\n\nresults = await cognee.search("query")\nprint(results)`;
+
   return (
     <div
-      onClick={() => setExpanded(!expanded)}
-      className="cursor-pointer hover:bg-cognee-hover transition-colors"
+      onClick={!expanded ? () => setExpanded(true) : undefined}
+      className={!expanded ? "cursor-pointer hover:bg-cognee-hover transition-colors" : ""}
       style={{
         flex: expanded ? 2 : 1,
         background: "#fff",
@@ -321,9 +353,9 @@ function SdkCard() {
       )}
 
       {expanded && (
-        <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
           {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 20px", borderBottom: "1px solid #E4E4E7" }}>
+          <div onClick={() => setExpanded(false)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 20px", borderBottom: "1px solid #E4E4E7" }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path d="M7 8l5 4 5-4M7 16l5-4 5 4" stroke="#6510F4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -340,10 +372,9 @@ function SdkCard() {
               </div>
               <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Install the SDK</span>
             </div>
-            <div className="flex items-center justify-between" style={{ background: "#18181B", borderRadius: 8, padding: "10px 16px" }}>
-              <span style={{ fontSize: 13, color: "#A1A1AA", fontFamily: '"Fira Code", monospace' }}>pip install cognee</span>
-              <CopyButton text="pip install cognee" />
-            </div>
+            <CopyableCodeBlock text="pip install cognee">
+              <code style={{ margin: 0, fontSize: 13, lineHeight: "20px", fontFamily: '"Fira Code", monospace', color: "#A1A1AA" }}>pip install cognee</code>
+            </CopyableCodeBlock>
 
             <div style={{ height: 1, background: "#E4E4E7" }} />
 
@@ -354,10 +385,9 @@ function SdkCard() {
               </div>
               <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Set your API key</span>
             </div>
-            <div className="flex items-center justify-between" style={{ background: "#18181B", borderRadius: 8, padding: "10px 16px" }}>
-              <span style={{ fontSize: 13, color: "#A1A1AA", fontFamily: '"Fira Code", monospace' }}>export COGNEE_API_KEY=your-key</span>
-              <CopyButton text="export COGNEE_API_KEY=your-key" />
-            </div>
+            <CopyableCodeBlock text="export COGNEE_API_KEY=your-key">
+              <code style={{ margin: 0, fontSize: 13, lineHeight: "20px", fontFamily: '"Fira Code", monospace', color: "#A1A1AA" }}>export COGNEE_API_KEY=your-key</code>
+            </CopyableCodeBlock>
 
             <div style={{ height: 1, background: "#E4E4E7" }} />
 
@@ -368,8 +398,8 @@ function SdkCard() {
               </div>
               <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>Connect to your instance</span>
             </div>
-            <div style={{ background: "#18181B", borderRadius: 8, padding: "12px 16px", position: "relative" }}>
-              <pre style={{ margin: 0, fontSize: 12, lineHeight: "20px", fontFamily: '"Fira Code", monospace', color: "#A1A1AA" }}>
+            <CopyableCodeBlock text={step3Code}>
+              <pre style={{ margin: 0, fontSize: 13, lineHeight: "20px", fontFamily: '"Fira Code", monospace', color: "#A1A1AA" }}>
 {`import cognee
 
 cognee.config.set_llm_api_key("your-key")
@@ -380,10 +410,7 @@ await cognee.cognify()
 results = await cognee.search("query")
 print(results)`}
               </pre>
-              <span style={{ position: "absolute", top: 12, right: 16 }}>
-                <CopyButton text={`import cognee\n\ncognee.config.set_llm_api_key("your-key")\n\nawait cognee.add("Your text data")\nawait cognee.cognify()\n\nresults = await cognee.search("query")\nprint(results)`} />
-              </span>
-            </div>
+            </CopyableCodeBlock>
           </div>
         </div>
       )}

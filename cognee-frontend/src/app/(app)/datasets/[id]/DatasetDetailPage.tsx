@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
+import getDatasets from "@/modules/datasets/getDatasets";
 import getDatasetData from "@/modules/datasets/getDatasetData";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import addData from "@/modules/ingestion/addData";
@@ -87,12 +88,15 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sharedWith, setSharedWith] = useState<Set<string>>(new Set());
   const [sharing, setSharing] = useState<string | null>(null);
+  const [datasetName, setDatasetName] = useState(decodeURIComponent(datasetId));
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const datasetName = decodeURIComponent(datasetId);
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
+    getDatasets(cogniInstance).then((datasets: { id: string; name: string }[]) => {
+      const match = Array.isArray(datasets) ? datasets.find((d) => d.id === datasetId) : undefined;
+      if (match) setDatasetName(match.name);
+    }).catch(() => {});
     loadFiles();
     // Load agents for sharing (graceful — endpoint may not exist on cloud)
     cogniInstance.fetch("/v1/activity/agents").then((r) => r.ok ? r.json() : []).then((data) => {

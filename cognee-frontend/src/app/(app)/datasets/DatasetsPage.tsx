@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import getDatasets from "@/modules/datasets/getDatasets";
 import getDatasetData from "@/modules/datasets/getDatasetData";
@@ -41,7 +42,8 @@ export default function DatasetsPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const searchParams = useSearchParams();
+  const [showCreateModal, setShowCreateModal] = useState(searchParams.get("create") === "true");
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");

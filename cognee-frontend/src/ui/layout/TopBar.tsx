@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import getUser from "@/modules/users/getUser";
 import getLocalUser from "@/modules/users/getLocalUser";
 import CogneeUser from "@/modules/users/CogneeUser";
@@ -50,7 +50,7 @@ function Dropdown({ trigger, children, width = 280 }: { trigger: React.ReactNode
     <div ref={ref} style={{ position: "relative" }}>
       <div onClick={toggle} className="cursor-pointer flex items-center">{trigger}</div>
       {isOpen && (
-        <div onClick={close} style={{ position: "absolute", top: 32, left: 0, width, background: "#fff", borderRadius: 10, boxShadow: "0px 8px 30px #0000001F, 0px 0px 0px 1px #0000000F", padding: 6, zIndex: 50 }}>
+        <div onClick={close} style={{ position: "absolute", top: 32, left: 0, width, background: "#fff", borderRadius: 10, boxShadow: "0px 8px 30px #0000001F, 0px 0px 0px 1px #0000000F", padding: 6, zIndex: 50, display: "flex", flexDirection: "column", gap: 2 }}>
           {children}
         </div>
       )}
@@ -75,6 +75,7 @@ export default function TopBar() {
   const [user, setUser] = useState<CogneeUser>();
   const cloud = isCloudEnvironment();
   const pathname = usePathname();
+  const router = useRouter();
   const { workspace, workspaces, setWorkspace, selectedAgent, selectedDataset, setSelectedAgent, setSelectedDataset, agents, datasets } = useFilter();
 
   useEffect(() => {
@@ -94,7 +95,7 @@ export default function TopBar() {
 
   return (
     <header className="flex items-center justify-between border-b border-cognee-border bg-white flex-shrink-0" style={{ height: 53, paddingInline: 24, fontFamily: '"Inter", system-ui, sans-serif' }}>
-      {/* Left: breadcrumbs */}
+      {/* Left: breadcrumbs — Workspace / [Agent /] Dataset / PageName */}
       <div className="flex items-center" style={{ gap: 8 }}>
 
         {/* 1. Workspace switcher */}
@@ -112,7 +113,7 @@ export default function TopBar() {
           width={220}
         >
           {workspaces.map((ws) => (
-            <div key={ws.id} onClick={() => setWorkspace(ws)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6, background: workspace.id === ws.id ? "#F0EDFF" : "transparent" }}>
+            <div key={ws.id} onClick={() => setWorkspace(ws)} className={`cursor-pointer transition-colors ${workspace.id === ws.id ? "bg-[#F0EDFF]" : "hover:bg-[#F4F4F5]"}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6 }}>
               <div style={{ width: 16, height: 16, borderRadius: 3, background: ws.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <span style={{ color: "#fff", fontSize: 8, fontWeight: 700 }}>{ws.initial}</span>
               </div>
@@ -122,7 +123,7 @@ export default function TopBar() {
             </div>
           ))}
           <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-          <div className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6 }}>
+          <div className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6 }}>
             <PlusIcon />
             <span style={{ fontSize: 13, color: "#A1A1AA" }}>Create workspace</span>
           </div>
@@ -130,9 +131,10 @@ export default function TopBar() {
 
         <Slash />
 
-        {/* 2. Agent context (if selected) */}
+        {/* 2. Context selector: datasets + agents in one dropdown, or agent breadcrumb if selected */}
         {selectedAgent ? (
           <>
+            {/* Agent is selected — show agent breadcrumb segment */}
             <Dropdown
               trigger={
                 <div className="flex items-center" style={{ gap: 6 }}>
@@ -143,13 +145,22 @@ export default function TopBar() {
                 </div>
               }
             >
-              {/* All agents option */}
-              <div onClick={() => setSelectedAgent(null)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
-                <span style={{ fontSize: 13, color: "#3F3F46" }}>All (Overview)</span>
+              {/* Datasets section */}
+              <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Datasets</div>
+              <div onClick={() => { setSelectedAgent(null); setSelectedDataset(null); }} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+                <span style={{ fontSize: 13, color: "#3F3F46" }}>All datasets</span>
               </div>
+              {datasets.map((d) => (
+                <div key={d.id} onClick={() => { setSelectedAgent(null); setSelectedDataset(d); }} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+                  <DatasetIcon color="#3F3F46" />
+                  <span style={{ fontSize: 13, color: "#3F3F46" }}>{d.name}</span>
+                </div>
+              ))}
               <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
+              {/* Agents section */}
+              <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Agents</div>
               {agentList.map((a) => (
-                <div key={a.id} onClick={() => setSelectedAgent(a)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6, background: selectedAgent.id === a.id ? "#F0EDFF" : "transparent" }}>
+                <div key={a.id} onClick={() => setSelectedAgent(a)} className={`cursor-pointer transition-colors ${selectedAgent.id === a.id ? "bg-[#F0EDFF]" : "hover:bg-[#F4F4F5]"}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
                   <AgentIcon color={selectedAgent.id === a.id ? "#6510F4" : "#3F3F46"} />
                   <span style={{ fontSize: 13, fontWeight: selectedAgent.id === a.id ? 500 : 400, color: selectedAgent.id === a.id ? "#6510F4" : "#3F3F46" }}>{a.agent_type}</span>
                   <span style={{ marginLeft: "auto" }}><StatusDot status={a.status} /></span>
@@ -157,7 +168,7 @@ export default function TopBar() {
                 </div>
               ))}
               <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-              <div className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+              <div className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
                 <PlusIcon />
                 <span style={{ fontSize: 13, color: "#A1A1AA" }}>Connect agent</span>
               </div>
@@ -165,118 +176,91 @@ export default function TopBar() {
 
             <Slash />
 
-            {/* 3. Dataset selector (within agent context) */}
-            {selectedDataset ? (
-              <>
-                <Dropdown
-                  trigger={
-                    <div className="flex items-center" style={{ gap: 6 }}>
-                      <DatasetIcon color="#52525B" />
-                      <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{selectedDataset.name}</span>
-                      <Chevron />
-                    </div>
-                  }
-                  width={240}
-                >
-                  {datasets.map((d) => (
-                    <div key={d.id} onClick={() => setSelectedDataset(d)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6, background: selectedDataset.id === d.id ? "#F0EDFF" : "transparent" }}>
-                      <DatasetIcon color={selectedDataset.id === d.id ? "#6510F4" : "#3F3F46"} />
-                      <span style={{ fontSize: 13, color: selectedDataset.id === d.id ? "#6510F4" : "#3F3F46" }}>{d.name}</span>
-                      {selectedDataset.id === d.id && <Check />}
-                    </div>
-                  ))}
-                  <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-                  <div onClick={() => setSelectedDataset(null)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
-                    <span style={{ fontSize: 13, color: "#A1A1AA" }}>All datasets</span>
-                  </div>
-                </Dropdown>
-
-                {/* 4. Sub-page */}
-                {isDatasetDetail ? (
-                  <><Slash /><span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>Documents</span></>
-                ) : basePath !== "/datasets" && basePath !== "/" && basePath !== "/dashboard" ? (
-                  <><Slash /><span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{pageName}</span></>
-                ) : null}
-              </>
-            ) : (
-              /* No dataset selected yet — show page name + dataset dropdown */
-              <>
-                <Dropdown
-                  trigger={
-                    <div className="flex items-center" style={{ gap: 6 }}>
-                      <DatasetIcon color="#52525B" />
-                      <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>All datasets</span>
-                      <Chevron />
-                    </div>
-                  }
-                  width={240}
-                >
-                  <div onClick={() => setSelectedDataset(null)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6, background: "#F0EDFF" }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: "#6510F4" }}>All datasets</span>
-                    <Check />
-                  </div>
-                  {datasets.map((d) => (
-                    <div key={d.id} onClick={() => setSelectedDataset(d)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
-                      <DatasetIcon color="#3F3F46" />
-                      <span style={{ fontSize: 13, color: "#3F3F46" }}>{d.name}</span>
-                    </div>
-                  ))}
-                </Dropdown>
-                {basePath !== "/" && basePath !== "/dashboard" && (
-                  <><Slash /><span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{pageName}</span></>
-                )}
-              </>
-            )}
+            {/* Agent's dataset selector */}
+            <Dropdown
+              trigger={
+                <div className="flex items-center" style={{ gap: 6 }}>
+                  <DatasetIcon color="#52525B" />
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{selectedDataset ? selectedDataset.name : "All datasets"}</span>
+                  <Chevron />
+                </div>
+              }
+              width={240}
+            >
+              <div onClick={() => setSelectedDataset(null)} className={`cursor-pointer transition-colors ${!selectedDataset ? "bg-[#F0EDFF]" : "hover:bg-[#F4F4F5]"}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: !selectedDataset ? 500 : 400, color: !selectedDataset ? "#6510F4" : "#3F3F46" }}>All datasets</span>
+                {!selectedDataset && <Check />}
+              </div>
+              {datasets.map((d) => (
+                <div key={d.id} onClick={() => setSelectedDataset(d)} className={`cursor-pointer transition-colors ${selectedDataset?.id === d.id ? "bg-[#F0EDFF]" : "hover:bg-[#F4F4F5]"}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+                  <DatasetIcon color={selectedDataset?.id === d.id ? "#6510F4" : "#3F3F46"} />
+                  <span style={{ fontSize: 13, fontWeight: selectedDataset?.id === d.id ? 500 : 400, color: selectedDataset?.id === d.id ? "#6510F4" : "#3F3F46" }}>{d.name}</span>
+                  {selectedDataset?.id === d.id && <Check />}
+                </div>
+              ))}
+            </Dropdown>
           </>
         ) : (
-          /* No agent selected — show page name with agent+dataset dropdown */
+          /* No agent selected — combined dropdown with datasets + agents */
           <Dropdown
             trigger={
               <div className="flex items-center" style={{ gap: 6 }}>
-                <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{pageName}</span>
-                {agentList.length > 0 && <Chevron />}
+                {selectedDataset ? (
+                  <>
+                    <DatasetIcon color="#52525B" />
+                    <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{selectedDataset.name}</span>
+                  </>
+                ) : (
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>All datasets</span>
+                )}
+                <Chevron />
               </div>
             }
+            width={260}
           >
-            {/* Overview = all */}
-            <div onClick={() => { setSelectedAgent(null); setSelectedDataset(null); }} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6, background: !selectedAgent ? "#F0EDFF" : "transparent" }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: !selectedAgent ? "#6510F4" : "#3F3F46" }}>Overview (All)</span>
-              {!selectedAgent && <Check />}
+            {/* Datasets section */}
+            <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Datasets</div>
+            <div onClick={() => setSelectedDataset(null)} className={`cursor-pointer transition-colors ${!selectedDataset ? "bg-[#F0EDFF]" : "hover:bg-[#F4F4F5]"}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: !selectedDataset ? 500 : 400, color: !selectedDataset ? "#6510F4" : "#3F3F46" }}>All datasets</span>
+              {!selectedDataset && <Check />}
             </div>
-
-            {agentList.length > 0 && (
-              <>
-                <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-                <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Agents</div>
-                {agentList.map((a) => (
-                  <div key={a.id} onClick={() => setSelectedAgent(a)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
-                    <AgentIcon color="#3F3F46" />
-                    <span style={{ fontSize: 13, color: "#3F3F46" }}>{a.agent_type}</span>
-                    <span style={{ marginLeft: "auto" }}><StatusDot status={a.status} /></span>
-                  </div>
-                ))}
-              </>
-            )}
-
-            {datasets.length > 0 && (
-              <>
-                <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-                <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Datasets</div>
-                {datasets.slice(0, 5).map((d) => (
-                  <div key={d.id} onClick={() => setSelectedDataset(d)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
-                    <DatasetIcon color="#3F3F46" />
-                    <span style={{ fontSize: 13, color: "#3F3F46" }}>{d.name}</span>
-                  </div>
-                ))}
-              </>
-            )}
-
+            {datasets.map((d) => (
+              <div key={d.id} onClick={() => setSelectedDataset(d)} className={`cursor-pointer transition-colors ${selectedDataset?.id === d.id ? "bg-[#F0EDFF]" : "hover:bg-[#F4F4F5]"}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+                <DatasetIcon color={selectedDataset?.id === d.id ? "#6510F4" : "#3F3F46"} />
+                <span style={{ fontSize: 13, fontWeight: selectedDataset?.id === d.id ? 500 : 400, color: selectedDataset?.id === d.id ? "#6510F4" : "#3F3F46" }}>{d.name}</span>
+                {selectedDataset?.id === d.id && <Check />}
+              </div>
+            ))}
             <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-            <div className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+            {/* Agents section */}
+            <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Agents</div>
+            {agentList.length > 0 ? (
+              agentList.map((a) => (
+                <div key={a.id} onClick={() => setSelectedAgent(a)} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+                  <AgentIcon color="#3F3F46" />
+                  <span style={{ fontSize: 13, color: "#3F3F46" }}>{a.agent_type}</span>
+                  <span style={{ marginLeft: "auto" }}><StatusDot status={a.status} /></span>
+                </div>
+              ))
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px" }}>
+                <span style={{ fontSize: 13, color: "#A1A1AA" }}>No agents connected</span>
+              </div>
+            )}
+            <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
+            <div onClick={() => router.push("/datasets?create=true")} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
               <PlusIcon />
-              <span style={{ fontSize: 13, color: "#A1A1AA" }}>Connect agent</span>
+              <span style={{ fontSize: 13, color: "#A1A1AA" }}>New dataset</span>
             </div>
           </Dropdown>
+        )}
+
+        {/* 4. Page name (leaf) — shown on non-overview pages */}
+        {basePath !== "/" && basePath !== "/dashboard" && (
+          <>
+            <Slash />
+            <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{pageName}</span>
+          </>
         )}
       </div>
 

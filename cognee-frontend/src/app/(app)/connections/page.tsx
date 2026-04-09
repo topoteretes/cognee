@@ -194,9 +194,7 @@ export default function ConnectionsPage() {
         <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0 }}>
           {/* Agent sidebar */}
           <div style={{ width: 260, display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
-            {agentUsers.length === 0 ? (
-              <span style={{ fontSize: 13, color: "#A1A1AA", padding: 12 }}>No agents connected yet.</span>
-            ) : (
+            {agentUsers.length > 0 && (
               agentUsers.map((a) => (
                 <div
                   key={a.id}
@@ -268,8 +266,20 @@ export default function ConnectionsPage() {
                   )}
                 </div>
               </>
-            ) : (
+            ) : agentUsers.length > 0 ? (
               <span style={{ fontSize: 14, color: "#A1A1AA", padding: 20 }}>Select an agent to view details.</span>
+            ) : (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 48 }}>
+                <a
+                  href="https://docs.cognee.ai/guides/agent-memory-quickstart"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="cursor-pointer hover:bg-cognee-purple-hover"
+                  style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, textDecoration: "none" }}
+                >
+                  + Connect your first agent
+                </a>
+              </div>
             )}
           </div>
         </div>
