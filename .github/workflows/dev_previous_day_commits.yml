@@ -1,4 +1,4 @@
-name: automation | Previous Day Dev Commits
+name: automation | Draft Docs For Current Day Dev Merges
 
 on:
   workflow_dispatch:
@@ -12,11 +12,15 @@ permissions:
   contents: read
 
 jobs:
-  list-dev-commits:
+  prepare-merged-branches:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-    env:
-      CLAUDE_PROMPTS_DIR: claude-prompts
+    outputs:
+      start_date: ${{ steps.prepare.outputs.start_date }}
+      end_date: ${{ steps.prepare.outputs.end_date }}
+      has_merges: ${{ steps.prepare.outputs.has_merges }}
+      merge_summary: ${{ steps.prepare.outputs.merge_summary }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
 
     steps:
       - name: Check out repository
@@ -27,141 +31,255 @@ jobs:
       - name: Fetch latest dev branch
         run: git fetch origin dev --no-tags
 
-      - name: Collect previous day commits from dev
-        env:
-          TARGET_BRANCH: origin/dev
+      - name: Prepare current day merged branches
+        id: prepare
         run: |
-          read -r START_DATE END_DATE <<EOF
-          $(python3 - <<'PY'
-          from datetime import datetime, time, timedelta, timezone
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from datetime import datetime, time, timezone
+          from pathlib import Path
 
-          today = datetime.now(timezone.utc).date()
-          start = datetime.combine(today - timedelta(days=1), time.min, tzinfo=timezone.utc)
-          end = datetime.combine(today, time.min, tzinfo=timezone.utc)
+          now = datetime.now(timezone.utc)
+          start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+          end = now
 
-          print(start.strftime("%Y-%m-%dT%H:%M:%SZ"), end.strftime("%Y-%m-%dT%H:%M:%SZ"))
-          PY
+          def git(*args: str) -> str:
+              return subprocess.check_output(["git", *args], text=True).strip()
+
+          raw_log = git(
+              "log",
+              "origin/dev",
+              "--merges",
+              "--first-parent",
+              f"--since={start.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+              f"--until={end.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+              "--pretty=format:%H%x1f%P%x1f%s%x1f%b%x1e",
           )
-          EOF
 
-          echo "Collecting commit subjects from ${TARGET_BRANCH}"
-          echo "Time window (UTC): ${START_DATE} <= committed_at < ${END_DATE}"
+          merges = []
+          for record in raw_log.split("\x1e"):
+              if not record.strip():
+                  continue
+              merge_sha, parents, subject, body = record.strip().split("\x1f", 3)
+              parent_parts = parents.split()
+              if len(parent_parts) < 2:
+                  continue
+              first_parent, second_parent = parent_parts[0], parent_parts[1]
 
-          COMMITS_FILE="$(mktemp)"
-          DETAILS_FILE="$(mktemp)"
-          mkdir -p "${CLAUDE_PROMPTS_DIR}"
+              branch_name = None
+              pr_match = re.search(r"Merge pull request #\d+ from [^/]+/(.+)", subject)
+              if pr_match:
+                  branch_name = pr_match.group(1).strip()
+              if not branch_name:
+                  branch_match = re.search(r"Merge branch '([^']+)'", subject)
+                  if branch_match:
+                      branch_name = branch_match.group(1).strip()
+              if not branch_name:
+                  body_match = re.search(r"from [^/]+/(.+)", body)
+                  if body_match:
+                      branch_name = body_match.group(1).strip()
+              if not branch_name:
+                  branch_name = f"merge-{merge_sha[:7]}"
 
-          git log "${TARGET_BRANCH}" \
-            --since="${START_DATE}" \
-            --until="${END_DATE}" \
-            --pretty=format:'%H%x09%s' > "${COMMITS_FILE}"
+              safe_branch = re.sub(r"[^a-z0-9]+", "-", branch_name.lower()).strip("-") or f"merge-{merge_sha[:7]}"
+
+              merges.append(
+                  {
+                      "merge_sha": merge_sha,
+                      "short_sha": merge_sha[:7],
+                      "first_parent": first_parent,
+                      "second_parent": second_parent,
+                      "branch_name": branch_name,
+                      "safe_branch": safe_branch,
+                      "subject": subject,
+                  }
+              )
+
+          merge_lines = [
+              f"- {item['branch_name']} ({item['short_sha']}): {item['subject']}"
+              for item in merges
+          ]
+
+          github_output = Path(os.environ["GITHUB_OUTPUT"])
+          with github_output.open("a", encoding="utf-8") as fh:
+              fh.write(f"start_date={start.strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+              fh.write(f"end_date={end.strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+              fh.write(f"has_merges={'true' if merges else 'false'}\n")
+              fh.write(f"matrix={json.dumps(merges)}\n")
+              fh.write("merge_summary<<EOF\n")
+              if merge_lines:
+                  fh.write("\n".join(merge_lines))
+                  fh.write("\n")
+              else:
+                  fh.write("No branches were merged into origin/dev during the current UTC day.\n")
+              fh.write("EOF\n")
+
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a", encoding="utf-8") as fh:
+              fh.write("## Current day merged branches on dev\n\n")
+              fh.write("- Source branch: `origin/dev`\n")
+              fh.write(
+                  f"- Time window (UTC): `{start.strftime('%Y-%m-%dT%H:%M:%SZ')}` to `{end.strftime('%Y-%m-%dT%H:%M:%SZ')}`\n\n"
+              )
+              if merge_lines:
+                  fh.write("### Merged branches\n\n")
+                  fh.write("\n".join(merge_lines))
+                  fh.write("\n")
+              else:
+                  fh.write("No branches were merged into `origin/dev` during the current UTC day.\n")
+          PY
+
+  review-and-update-docs:
+    needs: prepare-merged-branches
+    if: ${{ needs.prepare-merged-branches.outputs.has_merges == 'true' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare-merged-branches.outputs.matrix) }}
+
+    steps:
+      - name: Check out core repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch latest dev branch
+        run: git fetch origin dev --no-tags
+
+      - name: Check out docs repository
+        uses: actions/checkout@v6
+        with:
+          repository: topoteretes/cognee-docs
+          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          ref: main
+          path: docs-repo
+
+      - name: Prepare workspace paths
+        id: workspace
+        run: |
+          REVIEW_DIR="${RUNNER_TEMP}/review-${{ matrix.safe_branch }}-${{ matrix.short_sha }}"
+          mkdir -p "${REVIEW_DIR}"
+          mkdir -p docs-repo
+          echo "review_dir=${REVIEW_DIR}" >> "${GITHUB_OUTPUT}"
+
+      - name: Assess and update docs for merged branch
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are a documentation update agent for the Cognee project.
+
+            The core source repository is checked out at the workspace root.
+            The docs repository is checked out at `./docs-repo/`.
+            Your assigned merged branch is `${{ matrix.branch_name }}`.
+
+            Merge context:
+            - Merge commit: `${{ matrix.merge_sha }}`
+            - Dev before merge: `${{ matrix.first_parent }}`
+            - Merged branch tip: `${{ matrix.second_parent }}`
+            - Target branch: `origin/dev`
+            - Time window start: `${{ needs.prepare-merged-branches.outputs.start_date }}`
+            - Time window end: `${{ needs.prepare-merged-branches.outputs.end_date }}`
+
+            Treat the repository history as the source of truth. Use git commands yourself to inspect what this merged branch changed.
+            Prefer comparing `${{ matrix.first_parent }}` and `${{ matrix.second_parent }}` or inspecting `${{ matrix.merge_sha }}` directly.
+
+            Your task:
+            1. Determine whether this merged branch requires a documentation update.
+            2. Write your decision to `${{ steps.workspace.outputs.review_dir }}/report.md`.
+            3. If documentation updates are needed, edit the docs repo in `./docs-repo/` directly.
+            4. If no update is needed, explain clearly why in the report and leave the docs repo unchanged.
+
+            The report must include these sections:
+            - Branch
+            - Merge commit
+            - Needs documentation update
+            - Why
+            - Source files reviewed
+            - Docs files changed
+            - Changelog draft
+            - Open questions
+
+            Keep edits grounded in the code changes from this merged branch only.
+            In your final response, only list the files you created or changed.
+          claude_args: "--allowed-tools Read,Write,Glob,Grep,Bash --max-turns 20"
+
+      - name: Capture docs diff
+        id: diff
+        run: |
+          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
+          STATUS_FILE="${REVIEW_DIR}/docs-status.txt"
+          DIFF_FILE="${REVIEW_DIR}/docs.diff"
+
+          git -C docs-repo add -N . >/dev/null 2>&1 || true
+          git -C docs-repo status --short > "${STATUS_FILE}"
+          git -C docs-repo diff -- . > "${DIFF_FILE}"
+
+          if [ -s "${STATUS_FILE}" ]; then
+            echo "docs_changed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "docs_changed=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Echo branch review
+        run: |
+          REVIEW_DIR="${{ steps.workspace.outputs.review_dir }}"
+
+          echo "Merged branch: ${{ matrix.branch_name }} (${{ matrix.short_sha }})"
+          echo "Review directory: ${REVIEW_DIR}"
+          echo
+          echo "::group::report.md"
+          cat "${REVIEW_DIR}/report.md"
+          echo "::endgroup::"
+
+          if [ -s "${REVIEW_DIR}/docs.diff" ]; then
+            echo "::group::docs.diff"
+            cat "${REVIEW_DIR}/docs.diff"
+            echo "::endgroup::"
+          else
+            echo "No docs diff generated for ${{ matrix.branch_name }}."
+          fi
 
           {
-            echo "## Previous day commits on dev"
+            echo "## Branch `${{ matrix.branch_name }}`"
             echo
-            echo "- Source branch: \`${TARGET_BRANCH}\`"
-            echo "- Time window (UTC): \`${START_DATE}\` to \`${END_DATE}\`"
+            echo "- Merge commit: \`${{ matrix.merge_sha }}\`"
+            echo "- Docs changed: \`${{ steps.diff.outputs.docs_changed }}\`"
             echo
-            if [ -s "${COMMITS_FILE}" ]; then
-              echo "### Commit titles"
+            echo "### Report"
+            echo
+            echo '```md'
+            cat "${REVIEW_DIR}/report.md"
+            echo '```'
+            echo
+            if [ -s "${REVIEW_DIR}/docs.diff" ]; then
+              echo "### Docs diff"
               echo
-              while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
-                echo "- ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
-              done < "${COMMITS_FILE}"
+              echo '```diff'
+              cat "${REVIEW_DIR}/docs.diff"
+              echo '```'
               echo
-              echo "### Claude prompt files"
-              echo
-              echo "Generated in \`${CLAUDE_PROMPTS_DIR}\` as one prompt per commit."
-              echo
-              echo "### Generated prompts"
-              echo
-              COMMIT_INDEX=0
-              while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
-                COMMIT_INDEX=$((COMMIT_INDEX + 1))
-                SAFE_TITLE="$(printf '%s' "${COMMIT_TITLE}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//')"
-                if [ -z "${SAFE_TITLE}" ]; then
-                  SAFE_TITLE="commit"
-                fi
-                PROMPT_FILE="${CLAUDE_PROMPTS_DIR}/$(printf '%02d' "${COMMIT_INDEX}")-${SAFE_TITLE}-${COMMIT_SHA:0:7}.txt"
-                COMMIT_PATCH_FILE="$(mktemp)"
-                git show "${COMMIT_SHA}" \
-                  --format='commit %H%nAuthor: %an <%ae>%nDate: %cI%nTitle: %s%n' \
-                  --stat \
-                  --patch > "${COMMIT_PATCH_FILE}"
-                {
-                  printf '%s\n' \
-                    '<instructions>' \
-                    'Draft documentation updates for this single commit only.' \
-                    'Focus on user-facing behavior, API changes, configuration changes, setup steps, breaking changes, and anything that should appear in changelog or product docs.' \
-                    'If the commit does not require docs updates, say so clearly and explain why.' \
-                    '</instructions>' \
-                    '' \
-                    '<context>' \
-                    'This commit is from the dev branch.' \
-                    'Treat the patch below as the only source of truth for this prompt.' \
-                    '</context>' \
-                    '' \
-                    '<commit>'
-                  printf '<title>%s</title>\n' "${COMMIT_TITLE}"
-                  printf '%s\n' \
-                    '<branch>dev</branch>' \
-                    '<diff>' \
-                    '```diff'
-                  cat "${COMMIT_PATCH_FILE}"
-                  printf '%s\n' \
-                    '```' \
-                    '</diff>' \
-                    '</commit>' \
-                    '' \
-                    '<output_format>' \
-                    'Return the following sections:' \
-                    '1. Summary' \
-                    '2. Documentation impact' \
-                    '3. Changelog draft' \
-                    '4. Pages to update' \
-                    '5. Open questions' \
-                    '</output_format>'
-                } > "${PROMPT_FILE}"
-                {
-                  echo "#### ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
-                  echo
-                  echo "- Claude prompt file: \`${PROMPT_FILE}\`"
-                  echo
-                  echo '```text'
-                  cat "${PROMPT_FILE}"
-                  echo '```'
-                  echo
-                } >> "${DETAILS_FILE}"
-              done < "${COMMITS_FILE}"
-              cat "${DETAILS_FILE}"
-            else
-              echo "No commits were found on \`${TARGET_BRANCH}\` during the previous UTC day."
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          if [ -s "${COMMITS_FILE}" ]; then
-            echo "Commit titles:"
-            while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
-              echo "- ${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
-            done < "${COMMITS_FILE}"
-            echo
-            echo "Claude prompt files:"
-            find "${CLAUDE_PROMPTS_DIR}" -maxdepth 1 -type f | sort
-            echo
-            echo "Generated prompts:"
-            while IFS=$'\t' read -r COMMIT_SHA COMMIT_TITLE; do
-              echo "::group::${COMMIT_TITLE} (${COMMIT_SHA:0:7})"
-              cat "${CLAUDE_PROMPTS_DIR}/"*"${COMMIT_SHA:0:7}.txt"
-              echo "::endgroup::"
-            done < "${COMMITS_FILE}"
-          else
-            echo "No commits were found on ${TARGET_BRANCH} during the previous UTC day."
-          fi
-
-      - name: Upload Claude prompts artifact
-        if: ${{ always() }}
+      - name: Upload review artifact
         uses: actions/upload-artifact@v4
         with:
-          name: previous-day-dev-claude-prompts
-          path: ${{ env.CLAUDE_PROMPTS_DIR }}
-          if-no-files-found: warn
+          name: docs-review-${{ matrix.safe_branch }}-${{ matrix.short_sha }}
+          path: ${{ steps.workspace.outputs.review_dir }}
+          if-no-files-found: error
+
+  skip-when-no-merges:
+    needs: prepare-merged-branches
+    if: ${{ needs.prepare-merged-branches.outputs.has_merges != 'true' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: No merged branches to review
+        run: echo "No current-day merge commits found on origin/dev; skipping docs review."
