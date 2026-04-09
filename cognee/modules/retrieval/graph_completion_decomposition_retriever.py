@@ -71,6 +71,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         query: Optional[str],
         query_batch: Optional[List[str]],
     ) -> None:
+        """Validate the retriever's single-query public contract."""
+
         if query_batch is not None:
             raise QueryValidationError(
                 message=(
@@ -81,6 +83,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         validate_retriever_input(query, None, self._use_session_cache())
 
     async def _decompose_query(self, query: str) -> List[str]:
+        """Decompose the original query into focused subqueries."""
+
         system_prompt = read_query_prompt("graph_completion_decomposition_system_prompt.txt")
         if not system_prompt:
             logger.warning("Decomposition prompt not found, falling back to original query.")
@@ -103,6 +107,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         return normalize_subqueries(query, getattr(decomposition, "subqueries", None))
 
     async def _ensure_state(self, query: Optional[str]) -> DecompositionRunState:
+        """Return cached run state or initialize it from the query."""
+
         if (
             self._decomposition_state is not None
             and query == self._decomposition_state.original_query
@@ -122,6 +128,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         subquery: str,
         edge_batch: List[Edge],
     ) -> tuple[str, str]:
+        """Resolve context and answer for one subquery."""
+
         subquery_context = await super().get_context_from_objects(
             query=subquery,
             retrieved_objects=edge_batch,
@@ -142,6 +150,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
     async def get_retrieved_objects(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
     ) -> List[Edge]:
+        """Retrieve and merge edges for the decomposed subqueries."""
+
         self._validate_single_query_input(query, query_batch)
 
         self._decomposition_state = None
@@ -182,6 +192,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         query_batch: Optional[List[str]] = None,
         retrieved_objects=None,
     ) -> str:
+        """Build the final context for the original query."""
+
         self._validate_single_query_input(query, query_batch)
 
         state = await self._ensure_state(query)
@@ -222,6 +234,8 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         retrieved_objects: Optional[List[Edge]] = None,
         context: str = None,
     ) -> List[Any]:
+        """Generate the final completion for the original query."""
+
         self._validate_single_query_input(query, query_batch)
 
         state = await self._ensure_state(query)

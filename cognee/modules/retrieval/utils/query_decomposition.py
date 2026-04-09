@@ -8,16 +8,22 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 
 
 class DecompositionMode(str, Enum):
+    """Supported decomposition execution modes."""
+
     ANSWER_PER_SUBQUERY = "answer_per_subquery"
     COMBINED_TRIPLETS_CONTEXT = "combined_triplets_context"
 
 
 class QueryDecomposition(BaseModel):
+    """Structured decomposition output."""
+
     subqueries: List[str]
 
 
 @dataclass
 class SubqueryRunState:
+    """State collected for one decomposed subquery."""
+
     query: str
     edges: List[Edge] = field(default_factory=list)
     context: str = ""
@@ -26,6 +32,8 @@ class SubqueryRunState:
 
 @dataclass
 class DecompositionRunState:
+    """State collected for one decomposed retrieval run."""
+
     original_query: str
     subqueries: List[SubqueryRunState] = field(default_factory=list)
     merged_edges: List[Edge] = field(default_factory=list)
@@ -33,6 +41,8 @@ class DecompositionRunState:
 
 
 def normalize_subqueries(original_query: str, subqueries: Optional[List[str]]) -> List[str]:
+    """Clean and bound decomposed subqueries."""
+
     normalized_queries: List[str] = []
     for subquery in subqueries or []:
         cleaned_query = subquery.strip()
@@ -50,6 +60,8 @@ def normalize_subqueries(original_query: str, subqueries: Optional[List[str]]) -
 
 
 def merge_deduplicated_edges(edge_batches: List[List[Edge]]) -> List[Edge]:
+    """Merge edge batches using identity-based deduplication."""
+
     merged_edges: List[Edge] = []
     seen_ids: set[int] = set()
     for edge_batch in edge_batches:
@@ -63,6 +75,8 @@ def merge_deduplicated_edges(edge_batches: List[List[Edge]]) -> List[Edge]:
 
 
 def build_subquery_answer_context(state: DecompositionRunState) -> str:
+    """Build the final context from ordered subquery answers."""
+
     sections: List[str] = []
     for index, subquery_state in enumerate(state.subqueries, start=1):
         sections.append(
