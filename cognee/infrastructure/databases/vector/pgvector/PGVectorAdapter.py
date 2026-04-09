@@ -14,7 +14,7 @@ from sqlalchemy.engine import make_url
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
-from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
 
 from distributed.utils import override_distributed
 from distributed.tasks.queued_add_data_points import queued_add_data_points
@@ -60,22 +60,29 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.VECTOR_DB_LOCK = asyncio.Lock()
 
         relational_db = get_relational_engine()
+        relational_config = get_relational_config()
 
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
         db_name2 = make_url(self.db_uri).database
         if backend_access_control_enabled() and (db_name1 != db_name2):
             # If backend access control create new instances of engine and sessionmaker
-            self.engine = create_async_engine(self.db_uri, pool_pre_ping=True)
-            self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+            # To make sure we use the same pool_args as for the relational database, we create the engine via the SQLAlchemy constructor
+            super().__init__(
+                connection_string=self.db_uri,
+                pool_args=dict(relational_config.pool_args) if relational_config.pool_args else {},
+            )
         elif relational_db.engine.dialect.name == "postgresql":
             # If postgreSQL is used and not backend access control we must use the same engine and sessionmaker
             self.engine = relational_db.engine
             self.sessionmaker = relational_db.sessionmaker
         else:
             # If not postgreSQL and not backend access control create new instances of engine and sessionmaker
-            self.engine = create_async_engine(self.db_uri, pool_pre_ping=True)
-            self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+            # To make sure we use the same pool_args as for the relational database, we create the engine via the SQLAlchemy constructor
+            super().__init__(
+                connection_string=self.db_uri,
+                pool_args=dict(relational_config.pool_args) if relational_config.pool_args else {},
+            )
 
         # Has to be imported at class level
         # Functions reading tables from database need to know what a Vector column type is
