@@ -103,6 +103,14 @@ jobs:
               for item in merges
           ]
 
+          print("Current day merged branches on origin/dev")
+          print(f"Time window (UTC): {start.strftime('%Y-%m-%dT%H:%M:%SZ')} to {end.strftime('%Y-%m-%dT%H:%M:%SZ')}")
+          if merge_lines:
+              for line in merge_lines:
+                  print(line)
+          else:
+              print("No branches were merged into origin/dev during the current UTC day.")
+
           github_output = Path(os.environ["GITHUB_OUTPUT"])
           with github_output.open("a", encoding="utf-8") as fh:
               fh.write(f"start_date={start.strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
