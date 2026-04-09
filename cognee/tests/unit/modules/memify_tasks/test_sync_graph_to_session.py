@@ -25,11 +25,12 @@ _PATCH_GET_REL = "cognee.tasks.memify.sync_graph_to_session.get_relational_engin
 # ---------------------------------------------------------------------------
 
 
-def _make_node(id_, label=None, type_="Entity"):
-    node = MagicMock()
+def _make_node(id_, label=None, type_="Entity", description=None):
+    node = MagicMock(spec=["id", "label", "type", "description"])
     node.id = id_
     node.label = label
     node.type = type_
+    node.description = description
     return node
 
 
@@ -391,6 +392,7 @@ async def test_graph_context_prepended_to_completion():
         mock_session_user.get.return_value = mock_user
         MockCacheConfig.return_value.caching = True
         MockCacheConfig.return_value.auto_feedback = False
+        MockCacheConfig.return_value.max_session_context_chars = None
 
         await sm.generate_completion_with_session(
             session_id="s1",
