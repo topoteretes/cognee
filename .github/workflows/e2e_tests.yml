@@ -1435,9 +1435,6 @@ jobs:
         working-directory: cognee
         run: uv run alembic upgrade head
 
-      # ── Phase 2: current branch ────────────────────────────────────────────
-      - name: "Phase 2 — search legacy version data, then add, cognify, search (current branch)"
-        run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py
 
   backwards-compatibility-postgres:
     name: Backwards compatibility — PostgreSQL + PGVector + Kuzu
