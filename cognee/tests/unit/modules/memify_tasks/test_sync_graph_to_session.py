@@ -691,7 +691,9 @@ class TestRememberResult:
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
             ),
-            patch.object(_get_session_manager_module(), "get_session_manager", return_value=mock_sm),
+            patch.object(
+                _get_session_manager_module(), "get_session_manager", return_value=mock_sm
+            ),
         ):
             from cognee.api.v2.remember.remember import remember, RememberResult
 
@@ -791,7 +793,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=entries)
 
         with (
-            patch.object(_get_session_manager_module(), "get_session_manager", return_value=mock_sm),
+            patch.object(
+                _get_session_manager_module(), "get_session_manager", return_value=mock_sm
+            ),
         ):
             results = await _search_session("graph", "s1", user=mock_user)
 
@@ -820,7 +824,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=entries)
 
         with (
-            patch.object(_get_session_manager_module(), "get_session_manager", return_value=mock_sm),
+            patch.object(
+                _get_session_manager_module(), "get_session_manager", return_value=mock_sm
+            ),
         ):
             results = await _search_session("cats dogs", "s1", user=mock_user)
 
@@ -845,7 +851,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=entries)
 
         with (
-            patch.object(_get_session_manager_module(), "get_session_manager", return_value=mock_sm),
+            patch.object(
+                _get_session_manager_module(), "get_session_manager", return_value=mock_sm
+            ),
         ):
             results = await _search_session("Einstein", "s1", user=mock_user)
 
@@ -864,7 +872,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=[])
 
         with (
-            patch.object(_get_session_manager_module(), "get_session_manager", return_value=mock_sm),
+            patch.object(
+                _get_session_manager_module(), "get_session_manager", return_value=mock_sm
+            ),
         ):
             results = await _search_session("anything", "s1", user=mock_user)
 
@@ -887,7 +897,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=entries)
 
         with (
-            patch.object(_get_session_manager_module(), "get_session_manager", return_value=mock_sm),
+            patch.object(
+                _get_session_manager_module(), "get_session_manager", return_value=mock_sm
+            ),
         ):
             # Query with only short words → no matches
             results = await _search_session("a I", "s1", user=mock_user)
