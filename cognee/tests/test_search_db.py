@@ -166,9 +166,7 @@ async def e2e_state():
             GraphCompletionDecompositionRetriever(), query=query
         ),
         "graph_completion_decomposition_combined_triplets": await _get_retriever_context(
-            GraphCompletionDecompositionRetriever(
-                decomposition_mode="combined_triplets_context"
-            ),
+            GraphCompletionDecompositionRetriever(decomposition_mode="combined_triplets_context"),
             query=query,
         ),
         "graph_completion_cot": await _get_retriever_context(
