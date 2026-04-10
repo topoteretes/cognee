@@ -410,7 +410,7 @@ jobs:
           claude_outcome = os.environ.get("CLAUDE_OUTCOME", "")
 
           changed_files = [
-              line.strip()
+              line.rstrip()
               for line in subprocess.check_output(
                   ["git", "-C", "docs-repo", "status", "--short"],
                   text=True,
