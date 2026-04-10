@@ -102,6 +102,26 @@ def _mock_db_engine_empty():
     return _mock_db_engine_returning([], [])
 
 
+def _get_cache_module():
+    return importlib.import_module("cognee.infrastructure.databases.cache.get_cache_engine")
+
+
+def _get_session_manager_module():
+    return importlib.import_module("cognee.infrastructure.session.get_session_manager")
+
+
+def _get_remember_module():
+    return importlib.import_module("cognee.api.v2.remember.remember")
+
+
+def _get_improve_module():
+    return importlib.import_module("cognee.api.v2.improve")
+
+
+def _get_query_router_module():
+    return importlib.import_module("cognee.api.v2.recall.query_router")
+
+
 # ---------------------------------------------------------------------------
 # _edge_to_text
 # ---------------------------------------------------------------------------
