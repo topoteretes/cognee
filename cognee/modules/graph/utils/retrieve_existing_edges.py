@@ -1,12 +1,8 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils import generate_edge_name, generate_node_id
+from cognee.modules.graph.utils.expand_with_nodes_and_edges import _create_edge_key
 from cognee.shared.data_models import KnowledgeGraph
-
-
-def _create_existing_edge_key(source_id: str, target_id: str, relationship_name: str) -> str:
-    """Build a lookup key matching the format used by expand_with_nodes_and_edges."""
-    return f"{source_id}_{target_id}_{relationship_name}"
 
 
 async def retrieve_existing_edges(
@@ -88,6 +84,6 @@ async def retrieve_existing_edges(
     existing_edges_map = {}
 
     for edge in existing_edges:
-        existing_edges_map[_create_existing_edge_key(edge[0], edge[1], edge[2])] = True
+        existing_edges_map[_create_edge_key(edge[0], edge[1], edge[2])] = True
 
     return existing_edges_map
