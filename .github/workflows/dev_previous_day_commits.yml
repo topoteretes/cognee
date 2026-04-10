@@ -157,6 +157,82 @@ jobs:
             git checkout -B "${{ steps.assessment.outputs.docs_branch }}"
           fi
 
+      - name: Prepare docs edit scope
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: docs_scope
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          first_parent = "${{ matrix.first_parent }}"
+          second_parent = "${{ matrix.second_parent }}"
+          docs_root = Path("docs-repo")
+
+          changed_files = [
+              line.strip()
+              for line in subprocess.check_output(
+                  ["git", "diff", "--name-only", first_parent, second_parent],
+                  text=True,
+              ).splitlines()
+              if line.strip()
+          ]
+
+          doc_files = sorted(
+              path.relative_to(docs_root).as_posix()
+              for path in docs_root.rglob("*")
+              if path.is_file() and path.suffix.lower() == ".mdx"
+          )
+
+          ignored_parts = {
+              "cognee",
+              "__init__.py",
+              "models",
+              "operations",
+              "modules",
+              "tasks",
+              "routers",
+              "shared",
+              "infrastructure",
+          }
+
+          keywords: list[str] = []
+          for changed_file in changed_files:
+              path = Path(changed_file)
+              stem = path.stem.lower()
+              if len(stem) >= 3 and stem not in ignored_parts:
+                  keywords.append(stem)
+              for part in path.parts:
+                  token = part.lower()
+                  if len(token) >= 4 and token not in ignored_parts:
+                      keywords.append(token)
+
+          unique_keywords: list[str] = []
+          for keyword in keywords:
+              if keyword not in unique_keywords:
+                  unique_keywords.append(keyword)
+
+          scored: list[tuple[int, str]] = []
+          for doc_file in doc_files:
+              haystack = doc_file.lower()
+              score = sum(1 for keyword in unique_keywords if keyword in haystack)
+              if score > 0:
+                  scored.append((score, doc_file))
+
+          scored.sort(key=lambda item: (-item[0], item[1]))
+          candidate_doc_files = [doc_file for _, doc_file in scored[:5]]
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as fh:
+              fh.write("changed_source_files<<EOF\n")
+              fh.write("\n".join(changed_files) + "\n")
+              fh.write("EOF\n")
+              fh.write("candidate_doc_files<<EOF\n")
+              fh.write("\n".join(candidate_doc_files) + "\n")
+              fh.write("EOF\n")
+          PY
+
       - name: Generate docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: claude
@@ -183,9 +259,18 @@ jobs:
             - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`): Summary of the merged branch.
             - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`): Candidate docs areas and rationale for the update.
 
+            ## Precomputed scope
+
+            Changed source files:
+            ${{ steps.docs_scope.outputs.changed_source_files }}
+
+            Likely documentation targets:
+            ${{ steps.docs_scope.outputs.candidate_doc_files }}
+
             ## Required approach
 
             Start by reading the branch notes, then inspect the actual code diff for this branch. Use the branch parents above to identify what really changed. Prefer `git diff ${{ matrix.first_parent }} ${{ matrix.second_parent }}` and read the touched source files before editing docs.
+            Focus on the precomputed source files and likely documentation targets first. Only search outside those targets if they are clearly not sufficient.
 
             Before making any docs edits:
 
@@ -210,10 +295,11 @@ jobs:
             6. Prefer the smallest possible set of docs edits that fully covers the code changes.
             7. Review the relevant existing documentation pages in `./docs-repo`.
             8. Search the Cognee source code in the current workspace to verify technical details before editing docs.
-            9. Prefer updating existing pages over creating new ones.
-            10. If you create a new page, update `./docs-repo/docs.json` navigation.
-            11. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
-            12. Do NOT create git commits.
+            9. Edit at most 3 documentation files unless the source diff clearly requires more.
+            10. Prefer updating existing pages over creating new ones.
+            11. If you create a new page, update `./docs-repo/docs.json` navigation.
+            12. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
+            13. Do NOT create git commits.
 
             ## What to prioritize
 
