@@ -27,10 +27,14 @@ def run_git_command(command: list[str]) -> str:
         raise SystemExit(1) from exc
 
 
-def collect_branch_payload(first_parent: str, second_parent: str, branch_name: str, merge_sha: str) -> dict[str, Any]:
+def collect_branch_payload(
+    first_parent: str, second_parent: str, branch_name: str, merge_sha: str
+) -> dict[str, Any]:
     changed_files = [
         line
-        for line in run_git_command(["git", "diff", "--name-only", first_parent, second_parent]).splitlines()
+        for line in run_git_command(
+            ["git", "diff", "--name-only", first_parent, second_parent]
+        ).splitlines()
         if line.strip()
     ]
     commit_subjects = [
@@ -79,7 +83,9 @@ async def generate_notes_with_llm(payload: dict[str, Any]) -> Any:
         highlights: list[str] = Field(description="Top highlights from this branch")
         user_impact: str = Field(description="Likely user-facing impact")
         notable_files: list[str] = Field(description="Most relevant changed files")
-        documentation_signals: list[str] = Field(description="What documentation areas may be affected")
+        documentation_signals: list[str] = Field(
+            description="What documentation areas may be affected"
+        )
 
     system_prompt = """You are a technical writer creating notes for a single merged branch in Cognee.
 
@@ -88,8 +94,7 @@ Keep the output concise and concrete.
 """
 
     user_prompt = (
-        "Generate notes for this merged branch.\n\n"
-        f"Branch data:\n{json.dumps(payload, indent=2)}\n"
+        f"Generate notes for this merged branch.\n\nBranch data:\n{json.dumps(payload, indent=2)}\n"
     )
 
     try:
@@ -112,7 +117,7 @@ Keep the output concise and concrete.
 def fallback_notes(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "title": f"Branch notes for {payload['branch_name']}",
-        "summary": payload["merge_sha"],
+        "summary": f"Merged branch `{payload['branch_name']}` at commit `{payload['merge_sha']}`.",
         "highlights": payload["commit_subjects"][:5],
         "user_impact": "Needs review based on merged branch changes.",
         "notable_files": payload["changed_files"][:10],
@@ -122,11 +127,20 @@ def fallback_notes(payload: dict[str, Any]) -> dict[str, Any]:
 
 def format_markdown(notes: Any, payload: dict[str, Any]) -> str:
     def get(name: str, default=""):
-        return getattr(notes, name, notes.get(name, default) if isinstance(notes, dict) else default)
+        return getattr(
+            notes, name, notes.get(name, default) if isinstance(notes, dict) else default
+        )
 
     highlights = get("highlights", [])
     notable_files = get("notable_files", [])
     documentation_signals = get("documentation_signals", [])
+    summary = str(get("summary", "")).strip()
+    branch_summary_prefix = f"Merged branch `{payload['branch_name']}`:"
+    if summary:
+        if payload["branch_name"].lower() not in summary.lower():
+            summary = f"{branch_summary_prefix} {summary}"
+    else:
+        summary = branch_summary_prefix
 
     lines = [
         f"# {get('title', 'Branch notes')}",
@@ -136,7 +150,7 @@ def format_markdown(notes: Any, payload: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        get("summary", ""),
+        summary,
         "",
         "## User Impact",
         "",

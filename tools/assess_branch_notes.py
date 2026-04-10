@@ -78,7 +78,9 @@ async def assess_with_llm(notes_json: str, notes_markdown: str) -> Any:
         return None
 
     class DocsAssessment(BaseModel):
-        needs_documentation_update: bool = Field(description="Whether docs should likely be updated")
+        needs_documentation_update: bool = Field(
+            description="Whether docs should likely be updated"
+        )
         reason: str = Field(description="Why a docs update is or is not needed")
         candidate_areas: list[str] = Field(description="Likely docs areas/pages affected")
         recommended_next_steps: list[str] = Field(description="Practical next steps for docs work")
