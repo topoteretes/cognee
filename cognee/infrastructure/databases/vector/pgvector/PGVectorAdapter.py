@@ -120,9 +120,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         try:
             async with self.engine.begin() as connection:
-                await connection.run_sync(
-                    self._metadata.reflect, only=[collection_name]
-                )
+                await connection.run_sync(self._metadata.reflect, only=[collection_name])
         except exc.InvalidRequestError:
             return False
 
@@ -290,9 +288,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         try:
             async with self.engine.begin() as connection:
-                await connection.run_sync(
-                    self._metadata.reflect, only=[collection_name]
-                )
+                await connection.run_sync(self._metadata.reflect, only=[collection_name])
         except exc.InvalidRequestError:
             raise CollectionNotFoundError(
                 f"Collection '{collection_name}' not found!",
