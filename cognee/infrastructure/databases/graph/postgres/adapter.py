@@ -140,7 +140,7 @@ class PostgresAdapter(GraphDBInterface):
                 "name": stmt.excluded.name,
                 "type": stmt.excluded.type,
                 "properties": stmt.excluded.properties,
-                "updated_at": stmt.excluded.updated_at,
+                "updated_at": func.now(),
             },
         )
 
@@ -259,7 +259,7 @@ class PostgresAdapter(GraphDBInterface):
             index_elements=["source_id", "target_id", "relationship_name"],
             set_={
                 "properties": stmt.excluded.properties,
-                "updated_at": stmt.excluded.updated_at,
+                "updated_at": func.now(),
             },
         )
 
