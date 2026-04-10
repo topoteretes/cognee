@@ -40,6 +40,18 @@ def create_graph_engine(
     Wrapper function to call create graph engine with caching.
     For a detailed description, see _create_graph_engine.
     """
+    # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
+    import os
+
+    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified_provider == "pghybrid":
+        from .postgres.adapter import PostgresAdapter
+        from cognee.infrastructure.databases.relational.get_relational_engine import (
+            get_relational_engine,
+        )
+
+        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+
     return _create_graph_engine(
         graph_database_provider,
         graph_file_path,
@@ -94,18 +106,6 @@ def _create_graph_engine(
         Returns an instance of the appropriate graph adapter depending on the provider type
         specified.
     """
-
-    # USE_UNIFIED_PROVIDER overrides graph provider to postgres
-    import os
-
-    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
-    if unified_provider == "pghybrid":
-        from .postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.relational.get_relational_engine import (
-            get_relational_engine,
-        )
-
-        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
 
     if graph_database_provider in supported_databases:
         adapter = supported_databases[graph_database_provider]
