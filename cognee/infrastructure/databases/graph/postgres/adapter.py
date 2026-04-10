@@ -555,14 +555,10 @@ class PostgresAdapter(GraphDBInterface):
         """
         label = node_type.__name__
 
-        async with self._session() as session:
-            result = await session.execute(
-                text("""
-                    WITH primary_nodes AS (
-                        SELECT DISTINCT id
-                        FROM graph_node
-                        WHERE type = :label AND name = ANY(:names)
-                    ),
+        # OR: neighbor of any primary node qualifies
+        # AND: neighbor must be connected to every primary node
+        if node_name_filter_operator == "OR":
+            neighbor_cte = """
                     neighbor_ids AS (
                         SELECT DISTINCT CASE
                             WHEN e.source_id IN (SELECT id FROM primary_nodes)
@@ -571,7 +567,34 @@ class PostgresAdapter(GraphDBInterface):
                         FROM graph_edge e
                         WHERE e.source_id IN (SELECT id FROM primary_nodes)
                            OR e.target_id IN (SELECT id FROM primary_nodes)
+                    )"""
+        else:
+            neighbor_cte = """
+                    neighbor_ids AS (
+                        SELECT nbr_id AS id FROM (
+                            SELECT CASE
+                                WHEN e.source_id IN (SELECT id FROM primary_nodes)
+                                THEN e.target_id ELSE e.source_id
+                            END AS nbr_id,
+                            CASE
+                                WHEN e.source_id IN (SELECT id FROM primary_nodes)
+                                THEN e.source_id ELSE e.target_id
+                            END AS primary_id
+                            FROM graph_edge e
+                            WHERE e.source_id IN (SELECT id FROM primary_nodes)
+                               OR e.target_id IN (SELECT id FROM primary_nodes)
+                        ) sub
+                        GROUP BY nbr_id
+                        HAVING COUNT(DISTINCT primary_id) = :primary_count
+                    )"""
+
+        query_str = f"""
+                    WITH primary_nodes AS (
+                        SELECT DISTINCT id
+                        FROM graph_node
+                        WHERE type = :label AND name = ANY(:names)
                     ),
+                    {neighbor_cte},
                     all_ids AS (
                         SELECT id FROM primary_nodes
                         UNION
@@ -590,9 +613,14 @@ class PostgresAdapter(GraphDBInterface):
                     FROM graph_edge e
                     WHERE e.source_id IN (SELECT id FROM all_ids)
                       AND e.target_id IN (SELECT id FROM all_ids)
-                """),
-                {"label": label, "names": node_name},
-            )
+                """
+
+        params = {"label": label, "names": node_name}
+        if node_name_filter_operator != "OR":
+            params["primary_count"] = len(node_name)
+
+        async with self._session() as session:
+            result = await session.execute(text(query_str), params)
 
             nodes = []
             edges = []
