@@ -1108,10 +1108,12 @@ async def forget_memory(
     with redirect_stdout(sys.stderr):
         try:
             if not dataset and not everything:
-                return [types.TextContent(
-                    type="text",
-                    text="Error: Specify 'dataset' name or set 'everything' to true.",
-                )]
+                return [
+                    types.TextContent(
+                        type="text",
+                        text="Error: Specify 'dataset' name or set 'everything' to true.",
+                    )
+                ]
             result = await cognee_client.forget(dataset=dataset, everything=everything)
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:

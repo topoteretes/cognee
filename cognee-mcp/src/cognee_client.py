@@ -356,7 +356,9 @@ class CogneeClient:
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             headers = {"Authorization": f"Bearer {self.api_token}"} if self.api_token else {}
-            response = await self.client.post(endpoint, files=files, data=form_data, headers=headers)
+            response = await self.client.post(
+                endpoint, files=files, data=form_data, headers=headers
+            )
             response.raise_for_status()
             return response.json()
         else:
@@ -400,6 +402,7 @@ class CogneeClient:
                 kwargs = {"top_k": top_k, "auto_route": True}
                 if search_type:
                     from cognee.modules.search.types import SearchType
+
                     kwargs["query_type"] = SearchType[search_type.upper()]
                 if datasets:
                     kwargs["datasets"] = datasets
