@@ -121,6 +121,14 @@ def _create_graph_engine(
             graph_database_allow_anonymous=graph_database_allow_anonymous,
         )
 
+    elif graph_database_provider == "postgres":
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Postgres GRAPH_DATABASE_URL.")
+
+        from .postgres.adapter import PostgresAdapter
+
+        return PostgresAdapter(connection_string=graph_database_url)
+
     elif graph_database_provider == "kuzu":
         if not graph_file_path:
             raise EnvironmentError("Missing required Kuzu database path.")
@@ -199,5 +207,5 @@ def _create_graph_engine(
 
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'postgres', 'neptune', 'neptune_analytics'])}"
     )

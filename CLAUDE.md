@@ -132,7 +132,7 @@ All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
-- **Graph**: Kuzu (default), Neo4j, Neptune via `GraphDBInterface`
+- **Graph**: Kuzu (default), Neo4j, Neptune, Postgres via `GraphDBInterface`
 - **Vector**: LanceDB (default), ChromaDB, PGVector via `VectorDBInterface`
 - **Relational**: SQLite (default), PostgreSQL
 
@@ -268,7 +268,7 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: kuzu (default), neo4j, neptune, kuzu-remote
+Supported: kuzu (default), neo4j, neptune, kuzu-remote, postgres
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -282,6 +282,11 @@ GRAPH_DATABASE_PROVIDER=kuzu-remote
 GRAPH_DATABASE_URL=http://localhost:8000
 GRAPH_DATABASE_USERNAME=your_username
 GRAPH_DATABASE_PASSWORD=your_password
+
+# Postgres (requires postgres extra: pip install cognee[postgres])
+# Does not support raw Cypher queries, natural language search, or Graphiti.
+GRAPH_DATABASE_PROVIDER=postgres
+GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
 ### LLM Provider Configuration
