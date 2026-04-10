@@ -14,6 +14,9 @@ from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
+    GraphCompletionDecompositionRetriever,
+)
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
 from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
@@ -107,6 +110,27 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
+            },
+        ),
+        SearchType.GRAPH_COMPLETION_DECOMPOSITION: (
+            GraphCompletionDecompositionRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "top_k": top_k,
+                "node_type": node_type,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+                "system_prompt": system_prompt,
+                "wide_search_top_k": wide_search_top_k,
+                "triplet_distance_penalty": triplet_distance_penalty,
+                "feedback_influence": feedback_influence,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "neighborhood_depth": neighborhood_depth,
+                "neighborhood_seed_top_k": neighborhood_seed_top_k,
+                "decomposition_mode": retriever_specific_config.get(
+                    "decomposition_mode", "answer_per_subquery"
+                ),
             },
         ),
         SearchType.GRAPH_COMPLETION_COT: (

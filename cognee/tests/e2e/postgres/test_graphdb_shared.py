@@ -13,6 +13,8 @@ import pathlib
 
 import cognee
 from cognee.infrastructure.files.storage import get_storage_config
+from cognee.modules.engine.models import NodeSet
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
@@ -110,12 +112,31 @@ async def run_graph_db_test(provider: str):
         history = await get_history(user.id)
         assert len(history) == 6, f"{provider}: expected 6 history entries, got {len(history)}"
 
-        # TODO: Nodeset filtering test is disabled because extracted entities
-        # do not inherit belongs_to_set from their source documents/chunks.
-        # The cognify pipeline sets belongs_to_set on Document and DocumentChunk
-        # (via classify_documents / extract_chunks_from_documents) but Entity
-        # datapoints created by extract_graph_from_data do not propagate it.
-        # This affects all backends, not just postgres.
+        # Test nodeset filtering via GraphCompletionRetriever
+        nodeset_text = "Neo4j is a graph database that supports cypher."
+        await cognee.add([nodeset_text], dataset_name, node_set=["first"])
+        await cognee.cognify([dataset_name])
+
+        # Existing nodeset should return results
+        graph_retriever = GraphCompletionRetriever(node_type=NodeSet, node_name=["first"])
+        objects = await graph_retriever.get_retrieved_objects("What is in the context?")
+        context_nonempty = await graph_retriever.get_context_from_objects(
+            query="What is in the context?", retrieved_objects=objects
+        )
+
+        # Nonexistent nodeset should return empty
+        graph_retriever = GraphCompletionRetriever(node_type=NodeSet, node_name=["nonexistent"])
+        objects = await graph_retriever.get_retrieved_objects("What is in the context?")
+        context_empty = await graph_retriever.get_context_from_objects(
+            query="What is in the context?", retrieved_objects=objects
+        )
+
+        assert isinstance(context_nonempty, str) and context_nonempty != "", (
+            f"{provider}: expected non-empty context for existing nodeset, got: {context_nonempty!r}"
+        )
+        assert context_empty == "", (
+            f"{provider}: expected empty context for nonexistent nodeset, got: {context_empty!r}"
+        )
 
         # Clean up and verify
         await cognee.prune.prune_data()
