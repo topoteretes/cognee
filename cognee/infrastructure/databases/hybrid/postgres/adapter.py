@@ -71,7 +71,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Initialize both underlying adapters."""
+        """Initialize the graph adapter (vector adapter initializes lazily)."""
         await self._graph.initialize()
 
     # ------------------------------------------------------------------

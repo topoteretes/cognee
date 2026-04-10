@@ -466,5 +466,5 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return results
 
     async def prune(self):
-        # Clean up the database if it was set up as temporary
+        self._metadata.clear()
         await self.delete_database()
