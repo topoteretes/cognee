@@ -39,9 +39,7 @@ async def get_no_summary_tasks(
     }
     if ontology_file_path is not None:
         ontology_resolver = RDFLibOntologyResolver(ontology_file=ontology_file_path)
-        graph_task_kwargs["config"] = {
-            "ontology_config": {"ontology_resolver": ontology_resolver}
-        }
+        graph_task_kwargs["config"] = {"ontology_config": {"ontology_resolver": ontology_resolver}}
 
     graph_task = Task(extract_graph_from_data, **graph_task_kwargs)
 
