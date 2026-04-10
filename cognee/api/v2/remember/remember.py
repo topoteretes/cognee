@@ -292,9 +292,10 @@ async def remember(
     ``cognify()`` to ingest data and build the knowledge graph.
 
     **With session_id (session memory):** Stores the data in the
-    session cache only. The data is NOT ingested into the permanent
-    graph. Use ``improve(session_ids=[...])`` later to sync session
-    content into the permanent graph.
+    session cache for fast retrieval. When ``self_improvement`` is
+    True (default), also bridges the session data into the permanent
+    graph in the background via ``improve()``. The call returns
+    immediately — await the result to wait for the background sync.
 
     Args:
         data: The data to store (text, file paths, binary streams, etc.).
@@ -375,7 +376,7 @@ async def remember(
         user = await get_default_user()
         shared_kwargs["user"] = user
 
-    # Session memory: store in session cache only, skip permanent graph
+    # Session memory: store in session cache, then optionally bridge to graph
     if session_id:
         await _add_to_session(session_id, data, user)
         result = RememberResult(
@@ -384,6 +385,24 @@ async def remember(
             session_ids=[session_id],
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
+
+        # Bridge session data to permanent graph in the background
+        if self_improvement:
+            from cognee.api.v2.improve import improve
+
+            async def _session_improve():
+                try:
+                    await improve(
+                        dataset=dataset_name,
+                        session_ids=[session_id],
+                        user=user,
+                    )
+                    logger.info("remember: session '%s' bridged to permanent graph", session_id)
+                except Exception as exc:
+                    logger.warning("remember: session improve failed (non-fatal): %s", exc)
+
+            result._task = asyncio.create_task(_session_improve())
+
         return result
 
     # Build the result object — starts as "running"
