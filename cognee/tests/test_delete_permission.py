@@ -98,7 +98,8 @@ async def main():
     graph_engine = await get_graph_engine()
 
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) == 4 and len(edges) == 3, (
+    # 4 data nodes (Person x2, ForProfit, NonProfit) + 1 EdgeType("works_for") = 5
+    assert len(nodes) == 5 and len(edges) == 3, (
         "Nodes and edges are not correctly added to the graph."
     )
 
@@ -111,7 +112,7 @@ async def main():
     assert is_permission_error_raised, "PermissionDeniedError was not raised as expected."
 
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) == 4 and len(edges) == 3, "Graph is changed without permissions."
+    assert len(nodes) == 5 and len(edges) == 3, "Graph is changed without permissions."
 
     await authorized_give_permission_on_datasets(user2.id, [dataset.id], "delete", user1.id)
 
