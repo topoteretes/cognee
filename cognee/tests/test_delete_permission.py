@@ -119,7 +119,8 @@ async def main():
     await datasets.delete_data(dataset.id, data1.id, user2)
 
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) == 2 and len(edges) == 1, "Nodes and edges are not deleted properly."
+    # 2 data nodes (CompanyB, Person2) + 1 EdgeType("works_for") still has edges = 3
+    assert len(nodes) == 3 and len(edges) == 1, "Nodes and edges are not deleted properly."
 
     await datasets.delete_data(dataset.id, data2.id, user2)
 
