@@ -188,19 +188,33 @@ jobs:
 
             Start by reading the branch notes, then inspect the actual code diff for this branch. Use the branch parents above to identify what really changed. Prefer `git diff ${{ matrix.first_parent }} ${{ matrix.second_parent }}` and read the touched source files before editing docs.
 
+            Before making any docs edits:
+
+            1. List the source files changed by this branch.
+            2. For each changed source file, identify whether it changes:
+               - public behavior
+               - public API / imports / entrypoints
+               - documented configuration or defaults
+               - developer-facing extension semantics
+               - examples or usage patterns
+               - or only internal implementation details
+            3. Only edit docs for items that fall into the documented/public categories above.
+            4. If a proposed docs edit cannot be traced back to a concrete source diff in this branch, do not make that edit.
+
             ## Instructions
 
             1. Read the branch notes and documentation assessment first.
             2. Inspect the source diff for `${{ matrix.first_parent }}..${{ matrix.second_parent }}` and identify which changes are documentation-worthy.
-            3. Only document user-facing behavior, public API changes, examples, or developer-facing pipeline semantics that actually changed in this branch.
-            4. Do not make unrelated cleanup edits or generic improvements to nearby docs sections unless they are required to explain the branch changes.
-            5. Review the relevant existing documentation pages in `./docs-repo`.
-            6. Search the Cognee source code in the current workspace to verify technical details before editing docs.
-            7. Make focused, minimal documentation updates that match the merged branch.
-            8. Prefer updating existing pages over creating new ones.
-            9. If you create a new page, update `./docs-repo/docs.json` navigation.
-            10. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
-            11. Do NOT create git commits.
+            3. Review the touched source files themselves, not just the merge summary.
+            4. Only document user-facing behavior, public API changes, examples, or developer-facing semantics that actually changed in this branch.
+            5. Do not make unrelated cleanup edits, style edits, or generic improvements to nearby docs sections unless they are strictly required to explain the branch changes.
+            6. Prefer the smallest possible set of docs edits that fully covers the code changes.
+            7. Review the relevant existing documentation pages in `./docs-repo`.
+            8. Search the Cognee source code in the current workspace to verify technical details before editing docs.
+            9. Prefer updating existing pages over creating new ones.
+            10. If you create a new page, update `./docs-repo/docs.json` navigation.
+            11. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
+            12. Do NOT create git commits.
 
             ## What to prioritize
 
@@ -219,6 +233,15 @@ jobs:
             - private implementation details that users do not interact with directly
 
             If a change is purely internal and not represented in public docs, leave it undocumented rather than inventing a public-facing explanation.
+
+            ## Output discipline
+
+            The resulting docs PR should be easy to justify from the code diff.
+
+            - Keep the PR narrowly scoped to this merge.
+            - Avoid adding documentation for features, integrations, or guides that were not touched by this branch.
+            - Do not add new conceptual pages unless the source diff introduces a new public concept that cannot fit into an existing page.
+            - If the branch only warrants one or two doc edits, make only one or two doc edits.
 
             When done, print a short summary of what you changed and which existing documentation pages you updated.
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 20"
