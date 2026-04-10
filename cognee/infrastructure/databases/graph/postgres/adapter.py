@@ -133,6 +133,9 @@ class PostgresAdapter(GraphDBInterface):
                 }
             )
 
+        # Deduplicate by id (last wins) to avoid ON CONFLICT errors within one batch
+        rows = list({r["id"]: r for r in rows}.values())
+
         stmt = pg_insert(_node_table).values(rows)
         stmt = stmt.on_conflict_do_update(
             index_elements=["id"],
@@ -253,6 +256,11 @@ class PostgresAdapter(GraphDBInterface):
                     "updated_at": now,
                 }
             )
+
+        # Deduplicate by composite key (last wins) to avoid ON CONFLICT errors within one batch
+        rows = list(
+            {(r["source_id"], r["target_id"], r["relationship_name"]): r for r in rows}.values()
+        )
 
         stmt = pg_insert(_edge_table).values(rows)
         stmt = stmt.on_conflict_do_update(
@@ -626,7 +634,7 @@ class PostgresAdapter(GraphDBInterface):
             edges = []
             for row in result.fetchall():
                 if row[0] == "node":
-                    data = {"id": row[1], "name": row[2], "type": row[3]}
+                    data = {"name": row[2], "type": row[3]}
                     if row[4]:
                         data.update(row[4] if isinstance(row[4], dict) else json.loads(row[4]))
                     nodes.append((row[1], data))
@@ -778,7 +786,9 @@ class PostgresAdapter(GraphDBInterface):
             edges = []
             for row in result.fetchall():
                 if row.kind == "node":
-                    nodes.append((row.id, self._parse_node_row(row)))
+                    data = self._parse_node_row(row)
+                    data.pop("id", None)
+                    nodes.append((row.id, data))
                 else:
                     props = {}
                     if row.edge_properties is not None:
@@ -826,7 +836,7 @@ class PostgresAdapter(GraphDBInterface):
                     FROM graph_edge e
                     JOIN graph_node s ON s.id = e.source_id
                     JOIN graph_node t ON t.id = e.target_id
-                    ORDER BY e.source_id, e.target_id
+                    ORDER BY e.source_id, e.target_id, e.relationship_name
                     OFFSET :off LIMIT :lim
                 """),
                 {"off": offset, "lim": limit},
