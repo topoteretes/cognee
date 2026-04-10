@@ -278,7 +278,8 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         # Embed all texts grouped by collection
         embeddings_by_collection: Dict[str, List[Tuple[DataPoint, List[float], str]]] = {}
         for collection, items in vector_groups.items():
-            valid_items = [(dp, DataPoint.get_embeddable_data(dp)) for dp, _ in items]
+            valid_items = [(dp, getattr(dp, field_name, None)) for dp, field_name in items]
+            valid_items = [(dp, t.strip() if isinstance(t, str) else t) for dp, t in valid_items]
             valid_items = [(dp, t) for dp, t in valid_items if t is not None]
             if not valid_items:
                 continue
