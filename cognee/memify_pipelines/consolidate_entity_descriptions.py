@@ -66,6 +66,8 @@ def format_edges(edges: List[Any]) -> Dict[str, str]:
     """
     result = {}
     for edge in edges:
+        if not isinstance(edge, (tuple, list)) or len(edge) < 3:
+            continue
         if isinstance(edge[2], dict) and "relationship_name" in edge[2]:
             # Neo4j / Neptune format
             target_id = edge[1]

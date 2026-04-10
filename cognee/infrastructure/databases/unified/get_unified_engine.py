@@ -7,13 +7,15 @@ from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
 
 HYBRID_PROVIDERS = {"neptune_analytics"}
+UNIFIED_PROVIDERS = {"pghybrid"}
 
 
 def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
     import os
 
     # USE_UNIFIED_PROVIDER flag overrides both graph and vector providers
-    if os.environ.get("USE_UNIFIED_PROVIDER", ""):
+    unified = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified and unified in UNIFIED_PROVIDERS:
         return True
 
     # Original logic for neptune and future paired providers
