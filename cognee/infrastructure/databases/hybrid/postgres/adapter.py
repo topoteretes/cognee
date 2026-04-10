@@ -155,6 +155,14 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             node_type, node_name, node_name_filter_operator
         )
 
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        return await self._graph.get_neighborhood(node_ids, depth, edge_types)
+
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         return await self._graph.get_graph_metrics(include_optional)
 

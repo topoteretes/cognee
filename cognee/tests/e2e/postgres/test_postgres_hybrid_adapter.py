@@ -15,6 +15,18 @@ from cognee.infrastructure.databases.vector.embeddings import get_embedding_engi
 from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
 
 
+# -- Session-scoped event loop so async engines stay on a single loop.
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
 # -- Fixture --
 
 
@@ -31,28 +43,12 @@ async def adapter():
         f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
     )
 
-    # Build a fresh SQLAlchemyAdapter per test to avoid stale event loop
-    # issues from lru_cached global engines across pytest-asyncio boundaries
-    from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
-        SQLAlchemyAdapter,
+    graph_adapter = PostgresAdapter(connection_string=connection_string)
+    vector_adapter = PGVectorAdapter(
+        connection_string=connection_string,
+        api_key=None,
+        embedding_engine=get_embedding_engine(),
     )
-
-    relational_engine = SQLAlchemyAdapter(connection_string)
-    graph_adapter = PostgresAdapter(relational_engine=relational_engine)
-
-    # Give PGVectorAdapter the same engine/sessionmaker directly to
-    # avoid it calling get_relational_engine() which returns a cached
-    # instance tied to a previous event loop
-    vector_adapter = PGVectorAdapter.__new__(PGVectorAdapter)
-    vector_adapter.api_key = None
-    vector_adapter.embedding_engine = get_embedding_engine()
-    vector_adapter.db_uri = connection_string
-    vector_adapter.VECTOR_DB_LOCK = __import__("asyncio").Lock()
-    vector_adapter.engine = relational_engine.engine
-    vector_adapter.sessionmaker = relational_engine.sessionmaker
-    from pgvector.sqlalchemy import Vector
-
-    vector_adapter.Vector = Vector
 
     a = PostgresHybridAdapter(
         graph_adapter=graph_adapter,
@@ -69,10 +65,9 @@ async def adapter():
     except Exception:
         pass
 
-    # Drop any vector collection tables created during the test to
-    # avoid polluting the shared connection pool for the next fixture
+    # Drop any vector collection tables created during the test
     try:
-        async with relational_engine.get_async_session() as session:
+        async with graph_adapter.sessionmaker() as session:
             from sqlalchemy import text as sa_text
 
             for table_name in [
@@ -344,10 +339,7 @@ async def test_hybrid_payload_matches_separate_path(adapter):
 
     # Build two parallel graphs with the same structure but different IDs
     def make_ids(prefix):
-        return {
-            k: str(uuid5(NAMESPACE_OID, f"{prefix}_{k}"))
-            for k in ("physics", "math", "cs")
-        }
+        return {k: str(uuid5(NAMESPACE_OID, f"{prefix}_{k}")) for k in ("physics", "math", "cs")}
 
     h = make_ids("hybrid")
     s = make_ids("separate")
@@ -377,15 +369,12 @@ async def test_hybrid_payload_matches_separate_path(adapter):
     sep_edges = make_edges(s)
     await adapter._graph.add_edges(sep_edges)
     from cognee.tasks.storage.index_graph_edges import index_graph_edges
+
     await index_graph_edges(sep_edges, vector_engine=adapter._vector)
 
     # -- Compare node payloads --
-    hybrid_node_results = await adapter.retrieve(
-        "TestEntity_name", list(h.values())
-    )
-    separate_node_results = await adapter.retrieve(
-        "TestEntity_name", list(s.values())
-    )
+    hybrid_node_results = await adapter.retrieve("TestEntity_name", list(h.values()))
+    separate_node_results = await adapter.retrieve("TestEntity_name", list(s.values()))
     assert len(hybrid_node_results) == 3
     assert len(separate_node_results) == 3
 
@@ -424,12 +413,7 @@ async def test_hybrid_payload_matches_separate_path(adapter):
 
 @pytest.mark.asyncio
 async def test_add_edges_with_vectors(adapter):
-    """Edges should be inserted into graph and edge types into vector table.
-
-    Note: this test passes in isolation but may fail when run in suite
-    due to PGVectorAdapter connection pool state from prior tests.
-    This is a pre-existing PGVectorAdapter issue, not a hybrid adapter bug.
-    """
+    """Edges should be inserted into graph and edge types into vector table."""
     await adapter.add_nodes(
         [
             _FakeDataPoint(id="ev1", name="A", type="T"),
