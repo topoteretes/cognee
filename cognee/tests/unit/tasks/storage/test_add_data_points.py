@@ -27,6 +27,7 @@ def _make_unified_mock():
     unified = AsyncMock()
     unified.graph = graph_engine
     unified.vector = vector_engine
+    unified.has_capability = MagicMock(return_value=False)
     return unified, graph_engine, vector_engine
 
 
