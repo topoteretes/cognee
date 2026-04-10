@@ -254,7 +254,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         if not data_points:
             return
 
-        await self._graph._ensure_initialized()
+        await self._graph.initialize()
         now = datetime.now(timezone.utc)
 
         # Group data points by (type_name, field_name) for vector indexing
@@ -270,10 +270,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         # Embed all texts grouped by collection
         embeddings_by_collection: Dict[str, List[Tuple[DataPoint, List[float], str]]] = {}
         for collection, items in vector_groups.items():
-            valid_items = [
-                (dp, DataPoint.get_embeddable_data(dp))
-                for dp, _ in items
-            ]
+            valid_items = [(dp, DataPoint.get_embeddable_data(dp)) for dp, _ in items]
             valid_items = [(dp, t) for dp, t in valid_items if t is not None]
             if not valid_items:
                 continue
@@ -295,13 +292,15 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         for dp in data_points:
             props = dp.model_dump() if hasattr(dp, "model_dump") else vars(dp)
             extra = {k: v for k, v in props.items() if k not in core_keys}
-            node_rows.append({
-                "id": str(props.get("id", "")),
-                "name": str(props.get("name", "")),
-                "type": str(props.get("type", "")),
-                "properties": json.dumps(extra, cls=JSONEncoder),
-                "now": now,
-            })
+            node_rows.append(
+                {
+                    "id": str(props.get("id", "")),
+                    "name": str(props.get("name", "")),
+                    "type": str(props.get("type", "")),
+                    "properties": json.dumps(extra, cls=JSONEncoder),
+                    "now": now,
+                }
+            )
 
         vector_rows_by_table: Dict[str, List[Dict]] = {}
         for collection, items in embeddings_by_collection.items():
@@ -314,11 +313,13 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                     belongs_to_set=(dp.belongs_to_set or []),
                 )
                 payload = serialize_data(index_point.model_dump())
-                rows.append({
-                    "id": str(dp.id),
-                    "payload": json.dumps(payload),
-                    "vector": str(vector),
-                })
+                rows.append(
+                    {
+                        "id": str(dp.id),
+                        "payload": json.dumps(payload),
+                        "vector": str(vector),
+                    }
+                )
             vector_rows_by_table[table] = rows
 
         # Single transaction: one batched INSERT per table
@@ -365,7 +366,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         if not edges:
             return
 
-        await self._graph._ensure_initialized()
+        await self._graph.initialize()
         now = datetime.now(timezone.utc)
 
         # Collect edge type counts for EdgeType vector indexing
@@ -395,13 +396,15 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             source_id, target_id, rel_name = str(edge[0]), str(edge[1]), edge[2]
             props = edge[3] if len(edge) > 3 and edge[3] else {}
             props_json = json.dumps(props, cls=JSONEncoder)
-            edge_rows.append({
-                "src": source_id,
-                "tgt": target_id,
-                "rel": rel_name,
-                "props": props_json,
-                "now": now,
-            })
+            edge_rows.append(
+                {
+                    "src": source_id,
+                    "tgt": target_id,
+                    "rel": rel_name,
+                    "props": props_json,
+                    "now": now,
+                }
+            )
 
         vector_rows = []
         table = _validate_table_name(collection)
@@ -421,11 +424,13 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 belongs_to_set=(edge_type_dp.belongs_to_set or []),
             )
             payload = json.dumps(serialize_data(index_point.model_dump()))
-            vector_rows.append({
-                "id": str(edge_id),
-                "payload": payload,
-                "vector": str(vector),
-            })
+            vector_rows.append(
+                {
+                    "id": str(edge_id),
+                    "payload": payload,
+                    "vector": str(vector),
+                }
+            )
 
         # Single transaction: one batched INSERT per table
         async with self._graph._session() as session:
@@ -474,7 +479,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         if not node_ids:
             return
 
-        await self._graph._ensure_initialized()
+        await self._graph.initialize()
 
         async with self._graph._session() as session:
             # Delete from graph (CASCADE removes edges)

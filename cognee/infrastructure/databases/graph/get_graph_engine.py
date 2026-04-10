@@ -105,8 +105,7 @@ def _create_graph_engine(
             get_relational_engine,
         )
 
-        relational_engine = get_relational_engine()
-        return PostgresAdapter(relational_engine=relational_engine)
+        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
 
     if graph_database_provider in supported_databases:
         adapter = supported_databases[graph_database_provider]

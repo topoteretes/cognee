@@ -68,9 +68,8 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
             get_relational_engine,
         )
 
-        # Graph adapter reuses the relational engine
-        relational_engine = get_relational_engine()
-        graph_adapter = PostgresAdapter(relational_engine=relational_engine)
+        # Graph adapter gets its own engine from the relational connection string
+        graph_adapter = PostgresAdapter(connection_string=get_relational_engine().db_uri)
 
         # Vector adapter: reuse the cached PGVectorAdapter from the
         # vector engine factory. This requires VECTOR_DB_PROVIDER=pgvector.
