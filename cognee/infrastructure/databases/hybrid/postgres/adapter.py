@@ -593,21 +593,31 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 "limit": limit,
             }
         else:
-            # All nodes ranked by vector distance, with edge context
+            # Top-k distinct nodes by vector distance, then join edge context
             sql = text(f"""
+                WITH top_nodes AS (
+                    SELECT
+                        gn.id AS node_id,
+                        gn.name AS node_name,
+                        gn.type AS node_type,
+                        vc.vector <=> CAST(:query_vector AS vector) AS distance
+                    FROM graph_node gn
+                    JOIN {table} vc ON CAST(vc.id AS text) = gn.id
+                    ORDER BY distance
+                    LIMIT :limit
+                )
                 SELECT
-                    gn.id AS node_id,
-                    gn.name AS node_name,
-                    gn.type AS node_type,
+                    tn.node_id,
+                    tn.node_name,
+                    tn.node_type,
                     ge.relationship_name,
                     ge.source_id,
                     ge.target_id,
-                    vc.vector <=> CAST(:query_vector AS vector) AS distance
-                FROM graph_node gn
-                JOIN {table} vc ON CAST(vc.id AS text) = gn.id
-                LEFT JOIN graph_edge ge ON ge.source_id = gn.id OR ge.target_id = gn.id
-                ORDER BY distance
-                LIMIT :limit
+                    tn.distance
+                FROM top_nodes tn
+                LEFT JOIN graph_edge ge ON ge.source_id = tn.node_id
+                    OR ge.target_id = tn.node_id
+                ORDER BY tn.distance
             """)
             params = {
                 "query_vector": str(query_vector),
