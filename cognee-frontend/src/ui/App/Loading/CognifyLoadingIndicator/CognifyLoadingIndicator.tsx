@@ -1,5 +1,5 @@
-import classNames from 'classnames';
-import styles from './CognifyLoadingIndicator.module.css';
+import classNames from "classnames";
+import styles from "./CognifyLoadingIndicator.module.css";
 
 function CognifyLoadingIndicator({ isLoading = true }) {
   return (

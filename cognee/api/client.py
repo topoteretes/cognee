@@ -26,6 +26,10 @@ from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_ro
 from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
+from cognee.api.v2.remember.routers import get_remember_router
+from cognee.api.v2.recall.routers import get_recall_router
+from cognee.api.v2.improve.routers import get_improve_router
+from cognee.api.v2.forget.routers import get_forget_router
 from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.llm.routers import get_llm_router
 from cognee.api.v1.sync.routers import get_sync_router
@@ -42,6 +46,7 @@ from cognee.api.v1.users.routers import (
     get_user_id_by_email_router,
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
+from cognee.api.v1.activity.routers import get_activity_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
@@ -273,6 +278,19 @@ app.include_router(
     prefix="/health",
     tags=["health"],
 )
+
+# Activity / observability
+app.include_router(
+    get_activity_router(),
+    prefix="/api/v1/activity",
+    tags=["activity"],
+)
+
+# V2 memory-oriented API
+app.include_router(get_remember_router(), prefix="/api/v2/remember", tags=["remember"])
+app.include_router(get_recall_router(), prefix="/api/v2/recall", tags=["recall"])
+app.include_router(get_improve_router(), prefix="/api/v2/improve", tags=["improve"])
+app.include_router(get_forget_router(), prefix="/api/v2/forget", tags=["forget"])
 
 
 @app.get("/")
