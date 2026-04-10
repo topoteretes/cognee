@@ -1339,8 +1339,7 @@ async def main():
     parser.add_argument(
         "--serve-api-key",
         default=None,
-        help="API key for the Cognee Cloud instance. "
-        "Can also be set via COGNEE_API_KEY env var.",
+        help="API key for the Cognee Cloud instance. Can also be set via COGNEE_API_KEY env var.",
     )
 
     args = parser.parse_args()
