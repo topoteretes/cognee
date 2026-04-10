@@ -2,6 +2,12 @@ from uuid import UUID
 from typing import Optional, Union
 
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_DATASET_NAME,
+    COGNEE_FORGET_TARGET,
+    COGNEE_RESULT_COUNT,
+)
 
 logger = get_logger("forget")
 
@@ -42,30 +48,41 @@ async def forget(
     Returns:
         Dict with deletion summary: items removed, datasets removed.
     """
-    from cognee.api.v2.serve.state import get_remote_client
+    target = "everything" if everything else ("data_item" if data_id else ("dataset" if dataset else "unknown"))
 
-    client = get_remote_client()
-    if client is not None:
-        return await client.forget(data_id=data_id, dataset=dataset, everything=everything)
+    with new_span("cognee.api.forget") as span:
+        span.set_attribute(COGNEE_FORGET_TARGET, target)
+        if dataset:
+            span.set_attribute(COGNEE_DATASET_NAME, str(dataset))
 
-    from cognee.modules.users.methods import get_default_user
+        from cognee.api.v2.serve.state import get_remote_client
 
-    if user is None:
-        user = await get_default_user()
+        client = get_remote_client()
+        if client is not None:
+            result = await client.forget(data_id=data_id, dataset=dataset, everything=everything)
+            span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0) if isinstance(result, dict) else 0)
+            return result
 
-    if everything:
-        return await _forget_everything(user)
+        from cognee.modules.users.methods import get_default_user
 
-    if dataset is not None and data_id is not None:
-        return await _forget_data_item(data_id, dataset, user)
+        if user is None:
+            user = await get_default_user()
 
-    if dataset is not None:
-        return await _forget_dataset(dataset, user)
+        if everything:
+            result = await _forget_everything(user)
+            span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
+            return result
 
-    if data_id is not None:
-        raise ValueError("data_id requires dataset to be specified.")
+        if dataset is not None and data_id is not None:
+            return await _forget_data_item(data_id, dataset, user)
 
-    raise ValueError("Specify dataset, data_id+dataset, or everything=True.")
+        if dataset is not None:
+            return await _forget_dataset(dataset, user)
+
+        if data_id is not None:
+            raise ValueError("data_id requires dataset to be specified.")
+
+        raise ValueError("Specify dataset, data_id+dataset, or everything=True.")
 
 
 async def _forget_everything(user) -> dict:

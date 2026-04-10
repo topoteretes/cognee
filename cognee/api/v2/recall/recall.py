@@ -11,6 +11,16 @@ from typing_extensions import TypedDict
 
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_SEARCH_QUERY,
+    COGNEE_SEARCH_TYPE,
+    COGNEE_SESSION_ID,
+    COGNEE_RESULT_COUNT,
+    COGNEE_RECALL_SCOPE,
+    COGNEE_RECALL_SOURCE,
+    COGNEE_SESSION_ENTRY_COUNT,
+)
 
 logger = get_logger("recall")
 
@@ -46,6 +56,7 @@ async def _search_session(
     session_id: str,
     top_k: int = 10,
     user=None,
+    _parent_span=None,
 ) -> list:
     """Search session cache entries by word-boundary keyword matching.
 
@@ -146,64 +157,87 @@ async def recall(
         Search results. When searching session-only, returns a list of
         matching QA entry dicts with ``_source="session"``.
     """
-    from cognee.api.v2.serve.state import get_remote_client
-
-    client = get_remote_client()
-    if client is not None:
-        return await client.recall(query_text, query_type, datasets=datasets, top_k=top_k, **kwargs)
-
     session_id = kwargs.get("session_id")
+    scope = "session" if (session_id and not datasets and query_type is None) else "graph"
+    if session_id and datasets:
+        scope = "auto"
 
-    # Session-only search: when session_id is provided but no datasets
-    # or explicit query_type, search the session cache directly.
-    if session_id and not datasets and query_type is None:
-        user = kwargs.get("user")
-        session_results = await _search_session(
-            query_text=query_text,
-            session_id=session_id,
-            top_k=top_k,
-            user=user,
-        )
-        if session_results:
-            logger.info(
-                "recall: found %d session entries for session '%s'",
-                len(session_results),
-                session_id,
+    with new_span("cognee.api.recall") as span:
+        span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
+        span.set_attribute(COGNEE_RECALL_SCOPE, scope)
+        if session_id:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+        span.set_attribute("cognee.recall.top_k", top_k)
+
+        from cognee.api.v2.serve.state import get_remote_client
+
+        client = get_remote_client()
+        if client is not None:
+            results = await client.recall(
+                query_text, query_type, datasets=datasets, top_k=top_k, **kwargs
             )
-            return session_results
-        logger.info("recall: no session entries matched, falling through to graph search")
+            span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
+            span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
+            return results
 
-    from cognee.api.v1.search import search
+        # Session-only search: when session_id is provided but no datasets
+        # or explicit query_type, search the session cache directly.
+        if session_id and not datasets and query_type is None:
+            user = kwargs.get("user")
+            session_results = await _search_session(
+                query_text=query_text,
+                session_id=session_id,
+                top_k=top_k,
+                user=user,
+            )
+            if session_results:
+                logger.info(
+                    "recall: found %d session entries for session '%s'",
+                    len(session_results),
+                    session_id,
+                )
+                span.set_attribute(COGNEE_RECALL_SOURCE, "session")
+                span.set_attribute(COGNEE_RESULT_COUNT, len(session_results))
+                span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, len(session_results))
+                return session_results
+            logger.info("recall: no session entries matched, falling through to graph search")
 
-    if query_type is not None:
-        if auto_route:
-            from cognee.api.v2.recall.query_router import route_query, record_override
+        from cognee.api.v1.search import search
+
+        if query_type is not None:
+            if auto_route:
+                from cognee.api.v2.recall.query_router import route_query, record_override
+
+                result = route_query(query_text)
+                routed_type = result.search_type
+                record_override(routed_type, query_type)
+        elif auto_route:
+            from cognee.api.v2.recall.query_router import route_query
 
             result = route_query(query_text)
-            routed_type = result.search_type
-            record_override(routed_type, query_type)
-    elif auto_route:
-        from cognee.api.v2.recall.query_router import route_query
-
-        result = route_query(query_text)
-        query_type = result.search_type
-    else:
-        query_type = SearchType.GRAPH_COMPLETION
-
-    graph_results = await search(
-        query_text=query_text,
-        query_type=query_type,
-        datasets=datasets,
-        top_k=top_k,
-        **kwargs,
-    )
-
-    # Tag graph results with source
-    tagged = []
-    for r in graph_results:
-        if isinstance(r, dict):
-            r["_source"] = "graph"
-            tagged.append(r)
+            query_type = result.search_type
         else:
-            tagged.append(r)
-    return tagged
+            query_type = SearchType.GRAPH_COMPLETION
+
+        span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value) if query_type else "unknown")
+
+        graph_results = await search(
+            query_text=query_text,
+            query_type=query_type,
+            datasets=datasets,
+            top_k=top_k,
+            **kwargs,
+        )
+
+        # Tag graph results with source
+        tagged = []
+        for r in graph_results:
+            if isinstance(r, dict):
+                r["_source"] = "graph"
+                tagged.append(r)
+            else:
+                tagged.append(r)
+
+        span.set_attribute(COGNEE_RECALL_SOURCE, "graph")
+        span.set_attribute(COGNEE_RESULT_COUNT, len(tagged))
+        return tagged

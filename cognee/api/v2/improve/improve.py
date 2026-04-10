@@ -9,6 +9,13 @@ except ImportError:
 from typing_extensions import TypedDict
 
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_DATASET_NAME,
+    COGNEE_SESSION_ID,
+    COGNEE_IMPROVE_STAGES,
+    COGNEE_GRAPH_EDGES_SYNCED,
+)
 
 logger = get_logger("improve")
 
@@ -76,56 +83,67 @@ async def improve(
         # Enrich graph only (no session bridging)
         await cognee.improve(dataset="docs")
     """
-    from cognee.api.v2.serve.state import get_remote_client
+    stages_run = []
 
-    client = get_remote_client()
-    if client is not None:
-        return await client.improve(dataset, node_name=node_name, **kwargs)
+    with new_span("cognee.api.improve") as span:
+        span.set_attribute(COGNEE_DATASET_NAME, str(dataset))
+        if session_ids:
+            span.set_attribute(COGNEE_SESSION_ID, ",".join(session_ids))
 
-    from cognee.modules.users.methods import get_default_user
+        from cognee.api.v2.serve.state import get_remote_client
 
-    user = kwargs.pop("user", None)
-    if user is None:
-        user = await get_default_user()
+        client = get_remote_client()
+        if client is not None:
+            return await client.improve(dataset, node_name=node_name, **kwargs)
 
-    feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
+        from cognee.modules.users.methods import get_default_user
 
-    # Stage 1 & 2: bridge sessions into the permanent graph
-    if session_ids:
-        await _bridge_sessions(
+        user = kwargs.pop("user", None)
+        if user is None:
+            user = await get_default_user()
+
+        feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
+
+        # Stage 1 & 2: bridge sessions into the permanent graph
+        if session_ids:
+            await _bridge_sessions(
+                dataset=dataset,
+                session_ids=session_ids,
+                user=user,
+                feedback_alpha=feedback_alpha,
+                run_in_background=run_in_background,
+            )
+            stages_run.extend(["feedback_weights", "persist_sessions"])
+
+        # Stage 3: default enrichment (triplet embeddings)
+        from cognee.modules.memify import memify
+
+        if "node_type" not in kwargs or kwargs.get("node_type") is None:
+            from cognee.modules.engine.models.node_set import NodeSet
+
+            kwargs["node_type"] = NodeSet
+
+        result = await memify(
             dataset=dataset,
-            session_ids=session_ids,
+            node_name=node_name,
             user=user,
-            feedback_alpha=feedback_alpha,
             run_in_background=run_in_background,
+            **kwargs,
         )
+        stages_run.append("memify_enrichment")
 
-    # Stage 3: default enrichment (triplet embeddings)
-    from cognee.modules.memify import memify
+        # Stage 4: sync enriched graph back to session cache (incremental)
+        # Skip when running in background — stage 3 hasn't completed yet
+        if session_ids and not run_in_background:
+            await _sync_graph_to_sessions(
+                dataset=dataset,
+                session_ids=session_ids,
+                user=user,
+            )
+            stages_run.append("sync_graph_to_sessions")
 
-    if "node_type" not in kwargs or kwargs.get("node_type") is None:
-        from cognee.modules.engine.models.node_set import NodeSet
-
-        kwargs["node_type"] = NodeSet
-
-    result = await memify(
-        dataset=dataset,
-        node_name=node_name,
-        user=user,
-        run_in_background=run_in_background,
-        **kwargs,
-    )
-
-    # Stage 4: sync enriched graph back to session cache (incremental)
-    # Skip when running in background — stage 3 hasn't completed yet
-    if session_ids and not run_in_background:
-        await _sync_graph_to_sessions(
-            dataset=dataset,
-            session_ids=session_ids,
-            user=user,
-        )
-
-    return result
+        span.set_attribute(COGNEE_IMPROVE_STAGES, ",".join(stages_run))
+        return result
 
 
 async def _resolve_dataset_name(dataset: Union[str, UUID], user) -> str:

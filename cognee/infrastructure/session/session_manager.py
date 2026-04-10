@@ -9,6 +9,12 @@ from cognee.modules.retrieval.utils.completion import (
     generate_session_completion_with_optional_summary,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_SESSION_ID,
+    COGNEE_SESSION_ENTRY_COUNT,
+    COGNEE_DATA_SIZE_BYTES,
+)
 
 logger = get_logger("SessionManager")
 
@@ -96,19 +102,27 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
 
-        qa_id = str(uuid.uuid4())
-        await self._cache.create_qa_entry(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=qa_id,
-            question=question,
-            context=context,
-            answer=answer,
-            feedback_text=feedback_text,
-            feedback_score=feedback_score,
-            used_graph_element_ids=used_graph_element_ids,
-        )
-        return qa_id
+        data_size = len(answer.encode("utf-8", errors="replace")) if answer else 0
+        data_size += len(question.encode("utf-8", errors="replace")) if question else 0
+        data_size += len(context.encode("utf-8", errors="replace")) if context else 0
+
+        with new_span("cognee.session.add_qa") as span:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+            span.set_attribute(COGNEE_DATA_SIZE_BYTES, data_size)
+
+            qa_id = str(uuid.uuid4())
+            await self._cache.create_qa_entry(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=qa_id,
+                question=question,
+                context=context,
+                answer=answer,
+                feedback_text=feedback_text,
+                feedback_score=feedback_score,
+                used_graph_element_ids=used_graph_element_ids,
+            )
+            return qa_id
 
     def is_session_available_for_completion(self, user_id: Optional[str]) -> bool:
         """Return True if session (history + save) is available for completion."""
@@ -326,10 +340,18 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []
 
-        if last_n is not None:
-            entries = await self._cache.get_latest_qa_entries(user_id, session_id, last_n=last_n)
-        else:
-            entries = await self._cache.get_all_qa_entries(user_id, session_id)
+        with new_span("cognee.session.get_session") as span:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+
+            if last_n is not None:
+                entries = await self._cache.get_latest_qa_entries(
+                    user_id, session_id, last_n=last_n
+                )
+            else:
+                entries = await self._cache.get_all_qa_entries(user_id, session_id)
+
+            entry_count = len(entries) if entries else 0
+            span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, entry_count)
 
         if entries is None:
             return "" if formatted else []

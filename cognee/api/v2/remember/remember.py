@@ -12,6 +12,15 @@ from typing_extensions import TypedDict
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_DATASET_NAME,
+    COGNEE_SESSION_ID,
+    COGNEE_DATA_SIZE_BYTES,
+    COGNEE_OPERATION_MODE,
+    COGNEE_DATA_ITEM_COUNT,
+    OtelStatusCode,
+)
 
 logger = get_logger("remember")
 
@@ -45,6 +54,23 @@ _SHARED = frozenset(
         "run_in_background",
     }
 )
+
+
+def _estimate_data_size(data) -> int:
+    """Estimate the byte size of input data."""
+    if isinstance(data, str):
+        return len(data.encode("utf-8", errors="replace"))
+    if isinstance(data, bytes):
+        return len(data)
+    if isinstance(data, list):
+        return sum(_estimate_data_size(item) for item in data)
+    if hasattr(data, "seek") and hasattr(data, "tell"):
+        pos = data.tell()
+        data.seek(0, 2)
+        size = data.tell()
+        data.seek(pos)
+        return size
+    return 0
 
 
 def _data_to_text(data) -> str:
@@ -335,10 +361,36 @@ async def remember(
         # Access raw pipeline result:
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
+    data_size = _estimate_data_size(data)
+    item_count = len(data) if isinstance(data, list) else 1
+    mode = "session" if session_id else "permanent"
+
+    with new_span("cognee.api.remember") as span:
+        span.set_attribute(COGNEE_DATASET_NAME, dataset_name)
+        span.set_attribute(COGNEE_OPERATION_MODE, mode)
+        span.set_attribute(COGNEE_DATA_SIZE_BYTES, data_size)
+        span.set_attribute(COGNEE_DATA_ITEM_COUNT, item_count)
+        if session_id:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+
+        return await _remember_inner(
+            data, dataset_name,
+            session_id=session_id, chunk_size=chunk_size, chunker=chunker,
+            custom_prompt=custom_prompt, run_in_background=run_in_background,
+            self_improvement=self_improvement, session_ids=session_ids,
+            span=span, **kwargs,
+        )
+
+
+async def _remember_inner(
+    data, dataset_name, *, session_id, chunk_size, chunker, custom_prompt,
+    run_in_background, self_improvement, session_ids, span, **kwargs,
+) -> "RememberResult":
     from cognee.api.v2.serve.state import get_remote_client
 
     client = get_remote_client()
     if client is not None:
+        span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
         return await client.remember(data, dataset_name, **kwargs)
 
     from cognee.api.v1.add import add
