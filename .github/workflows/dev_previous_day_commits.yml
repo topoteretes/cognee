@@ -144,7 +144,6 @@ jobs:
           token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
           ref: main
           path: docs-repo
-
       - name: Prepare docs branch
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         working-directory: docs-repo
@@ -245,7 +244,6 @@ jobs:
 
             When done, print a short summary of what you changed and which existing documentation pages you updated.
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 20"
-
       - name: Prepare docs PR content
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: pr_content
@@ -323,7 +321,6 @@ jobs:
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
         working-directory: docs-repo
         run: git push --force-with-lease origin "${{ steps.assessment.outputs.docs_branch }}"
-
       - name: Create or update docs pull request
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: manage_pr
@@ -407,12 +404,7 @@ jobs:
             cat "${{ steps.branch_paths.outputs.assessment_markdown }}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Upload branch notes artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: branch-notes-${{ matrix.safe_branch }}-${{ matrix.short_sha }}
-          path: ${{ steps.branch_paths.outputs.output_dir }}
-          if-no-files-found: error
+
 
   skip-when-no-merges:
     needs: prepare-merged-branches

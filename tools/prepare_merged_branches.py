@@ -226,6 +226,25 @@ def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[st
     }
 
 
+def format_timestamp(value: datetime) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def format_time_window(payload: dict[str, Any]) -> str:
+    return f"{format_timestamp(payload['start'])} to {format_timestamp(payload['end'])}"
+
+
+def format_no_merges_message(payload: dict[str, Any], markdown_branch: bool = False) -> str:
+    branch = f"`{payload['branch']}`" if markdown_branch else payload["branch"]
+    return f"No branches were merged into {branch} during the {payload['window_label']}."
+
+
+def get_merge_summary_lines(payload: dict[str, Any], markdown_branch: bool = False) -> list[str]:
+    if payload["merge_lines"]:
+        return payload["merge_lines"]
+    return [format_no_merges_message(payload, markdown_branch=markdown_branch)]
+
+
 def write_github_output(payload: dict[str, Any]) -> None:
     github_output = os.environ.get("GITHUB_OUTPUT")
     if not github_output:
@@ -233,18 +252,13 @@ def write_github_output(payload: dict[str, Any]) -> None:
 
     output_path = Path(github_output)
     with output_path.open("a", encoding="utf-8") as fh:
-        fh.write(f"start_date={payload['start'].strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
-        fh.write(f"end_date={payload['end'].strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+        fh.write(f"start_date={format_timestamp(payload['start'])}\n")
+        fh.write(f"end_date={format_timestamp(payload['end'])}\n")
         fh.write(f"has_merges={'true' if payload['merges'] else 'false'}\n")
         fh.write(f"matrix={json.dumps(payload['merges'])}\n")
         fh.write("merge_summary<<EOF\n")
-        if payload["merge_lines"]:
-            fh.write("\n".join(payload["merge_lines"]))
-            fh.write("\n")
-        else:
-            fh.write(
-                f"No branches were merged into {payload['branch']} during the {payload['window_label']}.\n"
-            )
+        fh.write("\n".join(get_merge_summary_lines(payload)))
+        fh.write("\n")
         fh.write("EOF\n")
 
 
@@ -258,33 +272,19 @@ def write_github_summary(payload: dict[str, Any]) -> None:
         fh.write("## Merged branches on dev\n\n")
         fh.write(f"- Source branch: `{payload['branch']}`\n")
         fh.write(f"- Lookback days: `{payload['lookback_days']}`\n")
-        fh.write(
-            f"- Time window (UTC): `{payload['start'].strftime('%Y-%m-%dT%H:%M:%SZ')}` to `{payload['end'].strftime('%Y-%m-%dT%H:%M:%SZ')}`\n\n"
-        )
+        fh.write(f"- Time window (UTC): `{format_time_window(payload)}`\n\n")
         if payload["merge_lines"]:
             fh.write("### Merged branches\n\n")
-            fh.write("\n".join(payload["merge_lines"]))
-            fh.write("\n")
-        else:
-            fh.write(
-                f"No branches were merged into `{payload['branch']}` during the {payload['window_label']}.\n"
-            )
+        fh.write("\n".join(get_merge_summary_lines(payload, markdown_branch=True)))
+        fh.write("\n")
 
 
 def print_console_summary(payload: dict[str, Any]) -> None:
     print(f"Merged branches on {payload['branch']}")
     print(f"Lookback days: {payload['lookback_days']}")
-    print(
-        "Time window (UTC): "
-        f"{payload['start'].strftime('%Y-%m-%dT%H:%M:%SZ')} to {payload['end'].strftime('%Y-%m-%dT%H:%M:%SZ')}"
-    )
-    if payload["merge_lines"]:
-        for line in payload["merge_lines"]:
-            print(line)
-    else:
-        print(
-            f"No branches were merged into {payload['branch']} during the {payload['window_label']}."
-        )
+    print(f"Time window (UTC): {format_time_window(payload)}")
+    for line in get_merge_summary_lines(payload):
+        print(line)
 
 
 def main() -> None:
