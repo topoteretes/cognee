@@ -86,6 +86,7 @@ async def run_pipeline(
     # Build typed context — pass caller-supplied context dict as extras
     ctx = PipelineContext(
         user=user,
+        dataset=dataset,
         pipeline_name=pipeline_name,
         extras=context if isinstance(context, dict) else {},
     )
