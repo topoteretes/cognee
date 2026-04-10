@@ -168,11 +168,14 @@ jobs:
           prompt: |
             You are a documentation improvement agent for the Cognee project.
 
-            Update the existing Cognee documentation to reflect this merged branch:
+            Update the existing Cognee documentation to reflect this merged branch.
+            Your job is to document the actual behavior and API changes introduced by this branch, not to make adjacent or generic documentation improvements.
 
             - Branch: `${{ matrix.branch_name }}`
             - Merge SHA: `${{ matrix.merge_sha }}`
             - Short SHA: `${{ matrix.short_sha }}`
+            - First parent: `${{ matrix.first_parent }}`
+            - Second parent: `${{ matrix.second_parent }}`
 
             ## Available resources
 
@@ -181,16 +184,41 @@ jobs:
             - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`): Summary of the merged branch.
             - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`): Candidate docs areas and rationale for the update.
 
+            ## Required approach
+
+            Start by reading the branch notes, then inspect the actual code diff for this branch. Use the branch parents above to identify what really changed. Prefer `git diff ${{ matrix.first_parent }} ${{ matrix.second_parent }}` and read the touched source files before editing docs.
+
             ## Instructions
 
             1. Read the branch notes and documentation assessment first.
-            2. Review the relevant existing documentation pages in `./docs-repo`.
-            3. Search the Cognee source code in the current workspace to verify technical details before editing docs.
-            4. Make focused, minimal documentation updates that match the merged branch.
-            5. Prefer updating existing pages over creating new ones.
-            6. If you create a new page, update `./docs-repo/docs.json` navigation.
-            7. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
-            8. Do NOT create git commits.
+            2. Inspect the source diff for `${{ matrix.first_parent }}..${{ matrix.second_parent }}` and identify which changes are documentation-worthy.
+            3. Only document user-facing behavior, public API changes, examples, or developer-facing pipeline semantics that actually changed in this branch.
+            4. Do not make unrelated cleanup edits or generic improvements to nearby docs sections unless they are required to explain the branch changes.
+            5. Review the relevant existing documentation pages in `./docs-repo`.
+            6. Search the Cognee source code in the current workspace to verify technical details before editing docs.
+            7. Make focused, minimal documentation updates that match the merged branch.
+            8. Prefer updating existing pages over creating new ones.
+            9. If you create a new page, update `./docs-repo/docs.json` navigation.
+            10. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
+            11. Do NOT create git commits.
+
+            ## What to prioritize
+
+            Give priority to documenting changes like:
+
+            - user-facing behavior changes
+            - public API, CLI, SDK, or configuration changes
+            - example code that is now outdated because of the merged branch
+            - developer-facing semantics that custom integrators or extension authors rely on
+            - changes to documented imports, entrypoints, arguments, defaults, return shapes, or supported options
+
+            Lower priority or likely no-doc items unless explicitly exposed in public docs:
+
+            - internal performance optimizations
+            - internal race-condition fixes
+            - private implementation details that users do not interact with directly
+
+            If a change is purely internal and not represented in public docs, leave it undocumented rather than inventing a public-facing explanation.
 
             When done, print a short summary of what you changed and which existing documentation pages you updated.
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 20"
@@ -337,7 +365,10 @@ jobs:
               echo "- Docs branch: \`${{ steps.assessment.outputs.docs_branch }}\`"
               if [ -n "${CHANGED_FILES}" ]; then
                 echo "- Updated docs files:"
-                printf '%s\n' "${CHANGED_FILES}" | sed 's/^/- /'
+                printf '%s\n' "${CHANGED_FILES}" | while IFS= read -r changed_file; do
+                  [ -n "${changed_file}" ] || continue
+                  echo "  - \`${changed_file}\`"
+                done
               else
                 echo "- Updated docs files: none"
               fi
