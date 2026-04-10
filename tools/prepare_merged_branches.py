@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""
+Collect merged branches from a target branch within a configurable UTC lookback window.
+
+When GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are present, this script writes the same
+workflow outputs and summary content expected by dev_previous_day_commits.yml.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import shutil
+import urllib.error
+import urllib.request
+from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+
+def git(*args: str) -> str:
+    return subprocess.check_output(["git", *args], text=True).strip()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Collect merged branches from a git branch")
+    parser.add_argument(
+        "--branch", default="origin/dev", help="Git ref to inspect for merge commits"
+    )
+    parser.add_argument(
+        "--lookback-days",
+        type=int,
+        default=1,
+        help="Number of UTC calendar days to look back, including today",
+    )
+    parser.add_argument(
+        "--repo",
+        default=None,
+        help="GitHub repository in owner/repo form. Defaults to parsing origin remote.",
+    )
+    return parser.parse_args()
+
+
+def try_gh_head_ref(pr_number: str) -> str | None:
+    if shutil.which("gh") is None:
+        return None
+
+    try:
+        result = subprocess.check_output(
+            ["gh", "pr", "view", pr_number, "--json", "headRefName", "--jq", ".headRefName"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+    return result or None
+
+
+def parse_github_repo(repo_url: str) -> str | None:
+    ssh_match = re.match(r"git@github\.com:([^/]+/[^/]+?)(?:\.git)?$", repo_url)
+    if ssh_match:
+        return ssh_match.group(1)
+
+    https_match = re.match(r"https://github\.com/([^/]+/[^/]+?)(?:\.git)?$", repo_url)
+    if https_match:
+        return https_match.group(1)
+
+    return None
+
+
+def get_github_repo(explicit_repo: str | None) -> str | None:
+    if explicit_repo:
+        return explicit_repo
+
+    try:
+        remote_url = git("remote", "get-url", "origin")
+    except subprocess.CalledProcessError:
+        return None
+
+    return parse_github_repo(remote_url)
+
+
+def try_github_api_head_ref(pr_number: str, repo: str | None) -> str | None:
+    if not repo:
+        return None
+
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/pulls/{pr_number}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "prepare_merged_branches.py",
+        },
+    )
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
+        return None
+
+    head = payload.get("head")
+    if isinstance(head, dict):
+        ref = head.get("ref")
+        if isinstance(ref, str) and ref.strip():
+            return ref.strip()
+
+    return None
+
+
+def extract_pr_number(subject: str, body: str) -> str | None:
+    for text in (subject, body):
+        pr_match = re.search(r"#(\d+)", text)
+        if pr_match:
+            return pr_match.group(1)
+    return None
+
+
+def find_branch_ref(text: str) -> str | None:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        pr_match = re.search(
+            r"^Merge pull request #\d+ from [^/\s]+/([A-Za-z0-9._/\-]+)$", stripped
+        )
+        if pr_match:
+            return pr_match.group(1)
+
+        from_match = re.search(r"^from [^/\s]+/([A-Za-z0-9._/\-]+)$", stripped)
+        if from_match:
+            return from_match.group(1)
+
+    return None
+
+
+def get_branch_name(subject: str, body: str, merge_sha: str, repo: str | None) -> str:
+    pr_match = re.search(r"^Merge pull request #\d+ from [^/\s]+/([A-Za-z0-9._/\-]+)$", subject)
+    if pr_match:
+        return pr_match.group(1).strip()
+
+    branch_match = re.search(r"Merge branch '([^']+)'", subject)
+    if branch_match:
+        return branch_match.group(1).strip()
+
+    body_ref = find_branch_ref(body)
+    if body_ref:
+        return body_ref
+
+    pr_number = extract_pr_number(subject, body)
+    if pr_number:
+        api_head_ref = try_github_api_head_ref(pr_number, repo)
+        if api_head_ref:
+            return api_head_ref
+
+        head_ref = try_gh_head_ref(pr_number)
+        if head_ref:
+            return head_ref
+
+    return f"merge-{merge_sha[:7]}"
+
+
+def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[str, Any]:
+    effective_lookback = max(1, lookback_days)
+    now = datetime.now(timezone.utc)
+    start_date = now.date() - timedelta(days=effective_lookback - 1)
+    start = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+    end = now
+    window_label = (
+        "current UTC day" if effective_lookback == 1 else f"last {effective_lookback} UTC days"
+    )
+
+    raw_log = git(
+        "log",
+        branch,
+        "--merges",
+        "--first-parent",
+        f"--since={start.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+        f"--until={end.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+        "--pretty=format:%H%x1f%P%x1f%s%x1f%b%x1e",
+    )
+
+    merges = []
+    for record in raw_log.split("\x1e"):
+        if not record.strip():
+            continue
+        merge_sha, parents, subject, body = record.strip().split("\x1f", 3)
+        parent_parts = parents.split()
+        if len(parent_parts) < 2:
+            continue
+
+        branch_name = get_branch_name(subject, body, merge_sha, repo)
+        safe_branch = (
+            re.sub(r"[^a-z0-9]+", "-", branch_name.lower()).strip("-") or f"merge-{merge_sha[:7]}"
+        )
+        merges.append(
+            {
+                "merge_sha": merge_sha,
+                "short_sha": merge_sha[:7],
+                "first_parent": parent_parts[0],
+                "second_parent": parent_parts[1],
+                "branch_name": branch_name,
+                "safe_branch": safe_branch,
+                "subject": subject,
+            }
+        )
+
+    merge_lines = [
+        f"- {item['branch_name']} ({item['short_sha']}): {item['subject']}" for item in merges
+    ]
+    return {
+        "branch": branch,
+        "lookback_days": effective_lookback,
+        "start": start,
+        "end": end,
+        "window_label": window_label,
+        "merges": merges,
+        "merge_lines": merge_lines,
+    }
+
+
+def write_github_output(payload: dict[str, Any]) -> None:
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if not github_output:
+        return
+
+    output_path = Path(github_output)
+    with output_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"start_date={payload['start'].strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+        fh.write(f"end_date={payload['end'].strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+        fh.write(f"has_merges={'true' if payload['merges'] else 'false'}\n")
+        fh.write(f"matrix={json.dumps(payload['merges'])}\n")
+        fh.write("merge_summary<<EOF\n")
+        if payload["merge_lines"]:
+            fh.write("\n".join(payload["merge_lines"]))
+            fh.write("\n")
+        else:
+            fh.write(
+                f"No branches were merged into {payload['branch']} during the {payload['window_label']}.\n"
+            )
+        fh.write("EOF\n")
+
+
+def write_github_summary(payload: dict[str, Any]) -> None:
+    github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not github_summary:
+        return
+
+    summary_path = Path(github_summary)
+    with summary_path.open("a", encoding="utf-8") as fh:
+        fh.write("## Merged branches on dev\n\n")
+        fh.write(f"- Source branch: `{payload['branch']}`\n")
+        fh.write(f"- Lookback days: `{payload['lookback_days']}`\n")
+        fh.write(
+            f"- Time window (UTC): `{payload['start'].strftime('%Y-%m-%dT%H:%M:%SZ')}` to `{payload['end'].strftime('%Y-%m-%dT%H:%M:%SZ')}`\n\n"
+        )
+        if payload["merge_lines"]:
+            fh.write("### Merged branches\n\n")
+            fh.write("\n".join(payload["merge_lines"]))
+            fh.write("\n")
+        else:
+            fh.write(
+                f"No branches were merged into `{payload['branch']}` during the {payload['window_label']}.\n"
+            )
+
+
+def print_console_summary(payload: dict[str, Any]) -> None:
+    print(f"Merged branches on {payload['branch']}")
+    print(f"Lookback days: {payload['lookback_days']}")
+    print(
+        "Time window (UTC): "
+        f"{payload['start'].strftime('%Y-%m-%dT%H:%M:%SZ')} to {payload['end'].strftime('%Y-%m-%dT%H:%M:%SZ')}"
+    )
+    if payload["merge_lines"]:
+        for line in payload["merge_lines"]:
+            print(line)
+    else:
+        print(
+            f"No branches were merged into {payload['branch']} during the {payload['window_label']}."
+        )
+
+
+def main() -> None:
+    args = parse_args()
+    payload = collect_merges(args.branch, args.lookback_days, get_github_repo(args.repo))
+    print_console_summary(payload)
+    write_github_output(payload)
+    write_github_summary(payload)
+
+
+if __name__ == "__main__":
+    main()
