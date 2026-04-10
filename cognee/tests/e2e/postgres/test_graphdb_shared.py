@@ -31,6 +31,16 @@ async def run_graph_db_test(provider: str):
     data_dir = str((base / f".data_storage/test_{provider}").resolve())
     system_dir = str((base / f".cognee_system/test_{provider}").resolve())
 
+    # Capture current config so we can restore after the test
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+    from cognee.base_config import get_base_config
+
+    graph_config = get_graph_config()
+    base_config = get_base_config()
+    prev_provider = graph_config.graph_database_provider
+    prev_data_root = base_config.data_root_directory
+    prev_system_root = base_config.system_root_directory
+
     try:
         cognee.config.set_graph_database_provider(provider)
         cognee.config.data_root_directory(data_dir)
@@ -118,6 +128,11 @@ async def run_graph_db_test(provider: str):
         assert is_empty, f"{provider}: graph should be empty after prune"
 
     finally:
+        # Restore previous config
+        cognee.config.set_graph_database_provider(prev_provider)
+        cognee.config.data_root_directory(prev_data_root)
+        cognee.config.system_root_directory(prev_system_root)
+
         for path in [data_dir, system_dir]:
             if os.path.exists(path):
                 shutil.rmtree(path)

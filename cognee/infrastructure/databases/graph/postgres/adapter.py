@@ -6,65 +6,19 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
 
-from sqlalchemy import (
-    text, Table, Column, MetaData, String, DateTime, Index, ForeignKey,
-    values, select, exists, func,
-)
+from sqlalchemy import text, values, select, exists, func, String
 from sqlalchemy import column as sa_column
-from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.storage.utils import JSONEncoder
 
+from .tables import _meta, _node_table, _edge_table
+
 logger = get_logger()
-
-_meta = MetaData()
-
-_node_table = Table(
-    "graph_node",
-    _meta,
-    Column("id", String, primary_key=True),
-    Column("name", String),
-    Column("type", String),
-    Column("properties", JSONB),
-    Column("created_at", DateTime(timezone=True), server_default=func.now()),
-    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
-)
-
-_edge_table = Table(
-    "graph_edge",
-    _meta,
-    Column(
-        "source_id", String,
-        ForeignKey("graph_node.id", ondelete="CASCADE"),
-        primary_key=True, nullable=False,
-    ),
-    Column(
-        "target_id", String,
-        ForeignKey("graph_node.id", ondelete="CASCADE"),
-        primary_key=True, nullable=False,
-    ),
-    Column("relationship_name", String, primary_key=True, nullable=False),
-    Column("properties", JSONB),
-    Column("created_at", DateTime(timezone=True), server_default=func.now()),
-    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
-)
-
-Index("idx_edge_source", _edge_table.c.source_id)
-Index("idx_edge_target", _edge_table.c.target_id)
-Index("idx_node_type", _node_table.c.type)
-
-# Covering indexes: neighbor lookups without heap reads
-Index(
-    "idx_edge_source_cover", _edge_table.c.source_id,
-    postgresql_include=["target_id", "relationship_name"],
-)
-Index(
-    "idx_edge_target_cover", _edge_table.c.target_id,
-    postgresql_include=["source_id", "relationship_name"],
-)
 
 
 class PostgresAdapter(GraphDBInterface):
@@ -72,26 +26,21 @@ class PostgresAdapter(GraphDBInterface):
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
-    def __init__(self, relational_engine: Any) -> None:
-        """Accept an existing SQLAlchemyAdapter (shared with the relational layer)."""
-        self.engine = relational_engine
+    def __init__(self, connection_string: str) -> None:
+        """Create engine and sessionmaker from a Postgres connection string."""
+        self.db_uri = connection_string
+        self.engine = create_async_engine(self.db_uri)
+        self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
-        async with self.engine.engine.begin() as conn:
+        async with self.engine.begin() as conn:
             await conn.run_sync(_meta.create_all, checkfirst=True)
-
-    async def _ensure_initialized(self) -> None:
-        """Re-run initialize() if tables were dropped (e.g. by prune_system).
-
-        Uses CREATE IF NOT EXISTS, so this is cheap and idempotent.
-        """
-        await self.initialize()
 
     @asynccontextmanager
     async def _session(self) -> AsyncIterator[Any]:
         """Yield an async session from the underlying engine."""
-        async with self.engine.get_async_session() as session:
+        async with self.sessionmaker() as session:
             yield session
 
     def _serialize_properties(self, props: Dict[str, Any]) -> str:
@@ -101,7 +50,7 @@ class PostgresAdapter(GraphDBInterface):
     def _parse_node_row(self, row) -> Dict[str, Any]:
         """Convert a (id, name, type, properties) row to a merged dict."""
         data = {"id": row.id, "name": row.name, "type": row.type}
-        if row.properties:
+        if row.properties is not None:
             props = (
                 row.properties if isinstance(row.properties, dict) else json.loads(row.properties)
             )
@@ -128,7 +77,7 @@ class PostgresAdapter(GraphDBInterface):
         --------
             bool: True if the graph has no nodes.
         """
-        await self._ensure_initialized()
+        await self.initialize()
         async with self._session() as session:
             result = await session.execute(text("SELECT EXISTS(SELECT 1 FROM graph_node LIMIT 1)"))
             return not result.scalar()
@@ -173,14 +122,19 @@ class PostgresAdapter(GraphDBInterface):
                 props = vars(node)
 
             extra = {k: v for k, v in props.items() if k not in core_keys}
-            rows.append({
-                "id": str(props.get("id", "")),
-                "name": str(props.get("name", "")),
-                "type": str(props.get("type", "")),
-                "properties": json.loads(json.dumps(extra, cls=JSONEncoder)),
-                "created_at": now,
-                "updated_at": now,
-            })
+            rows.append(
+                {
+                    "id": str(props.get("id", "")),
+                    "name": str(props.get("name", "")),
+                    "type": str(props.get("type", "")),
+                    "properties": json.loads(json.dumps(extra, cls=JSONEncoder)),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
+
+        # Deduplicate by id (last wins) to avoid ON CONFLICT errors within one batch
+        rows = list({r["id"]: r for r in rows}.values())
 
         stmt = pg_insert(_node_table).values(rows)
         stmt = stmt.on_conflict_do_update(
@@ -189,7 +143,7 @@ class PostgresAdapter(GraphDBInterface):
                 "name": stmt.excluded.name,
                 "type": stmt.excluded.type,
                 "properties": stmt.excluded.properties,
-                "updated_at": stmt.excluded.updated_at,
+                "updated_at": func.now(),
             },
         )
 
@@ -292,21 +246,28 @@ class PostgresAdapter(GraphDBInterface):
         rows = []
         for edge in edges:
             raw_props = edge[3] if len(edge) > 3 and edge[3] else {}
-            rows.append({
-                "source_id": str(edge[0]),
-                "target_id": str(edge[1]),
-                "relationship_name": edge[2],
-                "properties": json.loads(self._serialize_properties(raw_props)),
-                "created_at": now,
-                "updated_at": now,
-            })
+            rows.append(
+                {
+                    "source_id": str(edge[0]),
+                    "target_id": str(edge[1]),
+                    "relationship_name": edge[2],
+                    "properties": json.loads(self._serialize_properties(raw_props)),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            )
+
+        # Deduplicate by composite key (last wins) to avoid ON CONFLICT errors within one batch
+        rows = list(
+            {(r["source_id"], r["target_id"], r["relationship_name"]): r for r in rows}.values()
+        )
 
         stmt = pg_insert(_edge_table).values(rows)
         stmt = stmt.on_conflict_do_update(
             index_elements=["source_id", "target_id", "relationship_name"],
             set_={
                 "properties": stmt.excluded.properties,
-                "updated_at": stmt.excluded.updated_at,
+                "updated_at": func.now(),
             },
         )
 
@@ -351,16 +312,13 @@ class PostgresAdapter(GraphDBInterface):
             name="q",
         ).data([(str(s), str(t), str(r)) for s, t, r in edges])
 
-        stmt = (
-            select(candidates.c.src, candidates.c.tgt, candidates.c.rel)
-            .where(
-                exists(
-                    select(text("1"))
-                    .select_from(_edge_table)
-                    .where(_edge_table.c.source_id == candidates.c.src)
-                    .where(_edge_table.c.target_id == candidates.c.tgt)
-                    .where(_edge_table.c.relationship_name == candidates.c.rel)
-                )
+        stmt = select(candidates.c.src, candidates.c.tgt, candidates.c.rel).where(
+            exists(
+                select(text("1"))
+                .select_from(_edge_table)
+                .where(_edge_table.c.source_id == candidates.c.src)
+                .where(_edge_table.c.target_id == candidates.c.tgt)
+                .where(_edge_table.c.relationship_name == candidates.c.rel)
             )
         )
 
@@ -590,7 +548,7 @@ class PostgresAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
         """Retrieve a subgraph containing matching nodes, their neighbors, and interconnecting edges.
 
@@ -605,14 +563,10 @@ class PostgresAdapter(GraphDBInterface):
         """
         label = node_type.__name__
 
-        async with self._session() as session:
-            result = await session.execute(
-                text("""
-                    WITH primary_nodes AS (
-                        SELECT DISTINCT id
-                        FROM graph_node
-                        WHERE type = :label AND name = ANY(:names)
-                    ),
+        # OR: neighbor of any primary node qualifies
+        # AND: neighbor must be connected to every primary node
+        if node_name_filter_operator == "OR":
+            neighbor_cte = """
                     neighbor_ids AS (
                         SELECT DISTINCT CASE
                             WHEN e.source_id IN (SELECT id FROM primary_nodes)
@@ -621,7 +575,34 @@ class PostgresAdapter(GraphDBInterface):
                         FROM graph_edge e
                         WHERE e.source_id IN (SELECT id FROM primary_nodes)
                            OR e.target_id IN (SELECT id FROM primary_nodes)
+                    )"""
+        else:
+            neighbor_cte = """
+                    neighbor_ids AS (
+                        SELECT nbr_id AS id FROM (
+                            SELECT CASE
+                                WHEN e.source_id IN (SELECT id FROM primary_nodes)
+                                THEN e.target_id ELSE e.source_id
+                            END AS nbr_id,
+                            CASE
+                                WHEN e.source_id IN (SELECT id FROM primary_nodes)
+                                THEN e.source_id ELSE e.target_id
+                            END AS primary_id
+                            FROM graph_edge e
+                            WHERE e.source_id IN (SELECT id FROM primary_nodes)
+                               OR e.target_id IN (SELECT id FROM primary_nodes)
+                        ) sub
+                        GROUP BY nbr_id
+                        HAVING COUNT(DISTINCT primary_id) = :primary_count
+                    )"""
+
+        query_str = f"""
+                    WITH primary_nodes AS (
+                        SELECT DISTINCT id
+                        FROM graph_node
+                        WHERE type = :label AND name = ANY(:names)
                     ),
+                    {neighbor_cte},
                     all_ids AS (
                         SELECT id FROM primary_nodes
                         UNION
@@ -640,15 +621,20 @@ class PostgresAdapter(GraphDBInterface):
                     FROM graph_edge e
                     WHERE e.source_id IN (SELECT id FROM all_ids)
                       AND e.target_id IN (SELECT id FROM all_ids)
-                """),
-                {"label": label, "names": node_name},
-            )
+                """
+
+        params = {"label": label, "names": node_name}
+        if node_name_filter_operator != "OR":
+            params["primary_count"] = len(node_name)
+
+        async with self._session() as session:
+            result = await session.execute(text(query_str), params)
 
             nodes = []
             edges = []
             for row in result.fetchall():
                 if row[0] == "node":
-                    data = {"id": row[1], "name": row[2], "type": row[3]}
+                    data = {"name": row[2], "type": row[3]}
                     if row[4]:
                         data.update(row[4] if isinstance(row[4], dict) else json.loads(row[4]))
                     nodes.append((row[1], data))
@@ -734,9 +720,90 @@ class PostgresAdapter(GraphDBInterface):
 
             return metrics
 
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        """Get the k-hop neighborhood subgraph around seed nodes.
+
+        Uses a single recursive CTE query to collect all node IDs within
+        `depth` hops, then returns nodes and edges for that subgraph.
+        """
+        if not node_ids:
+            return [], []
+
+        # Optional edge type filter for the CTE traversal
+        edge_filter = ""
+        if edge_types:
+            placeholders = ", ".join(f":et_{i}" for i in range(len(edge_types)))
+            edge_filter = f"AND e.relationship_name IN ({placeholders})"
+
+        # Single query: recursive CTE finds reachable IDs, then joins
+        # nodes and edges in two unioned result sets distinguished by 'kind'
+        query_str = f"""
+            WITH RECURSIVE neighborhood(id, hops) AS (
+                SELECT unnest(:seeds), 0
+              UNION
+                SELECT CASE WHEN e.source_id = n.id THEN e.target_id
+                            ELSE e.source_id END,
+                       n.hops + 1
+                FROM neighborhood n
+                JOIN graph_edge e ON (e.source_id = n.id OR e.target_id = n.id)
+                    {edge_filter}
+                WHERE n.hops < :depth
+            ),
+            ids AS (SELECT DISTINCT id FROM neighborhood)
+
+            SELECT 'node' AS kind,
+                   gn.id, gn.name, gn.type, gn.properties,
+                   NULL AS source_id, NULL AS target_id,
+                   NULL AS relationship_name, NULL AS edge_properties
+            FROM graph_node gn
+            JOIN ids ON gn.id = ids.id
+
+            UNION ALL
+
+            SELECT 'edge' AS kind,
+                   NULL, NULL, NULL, NULL,
+                   ge.source_id, ge.target_id,
+                   ge.relationship_name, ge.properties
+            FROM graph_edge ge
+            WHERE ge.source_id IN (SELECT id FROM ids)
+              AND ge.target_id IN (SELECT id FROM ids)
+        """
+
+        params: Dict[str, Any] = {"seeds": list(node_ids), "depth": depth}
+        if edge_types:
+            for i, et in enumerate(edge_types):
+                params[f"et_{i}"] = et
+
+        async with self._session() as session:
+            result = await session.execute(text(query_str), params)
+
+            nodes = []
+            edges = []
+            for row in result.fetchall():
+                if row.kind == "node":
+                    data = self._parse_node_row(row)
+                    data.pop("id", None)
+                    nodes.append((row.id, data))
+                else:
+                    props = {}
+                    if row.edge_properties is not None:
+                        props = (
+                            row.edge_properties
+                            if isinstance(row.edge_properties, dict)
+                            else json.loads(row.edge_properties)
+                        )
+                    edges.append((row.source_id, row.target_id, row.relationship_name, props))
+
+            return nodes, edges
+
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
-        await self._ensure_initialized()
+        await self.initialize()
         async with self._session() as session:
             await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
@@ -790,9 +857,11 @@ class PostgresAdapter(GraphDBInterface):
                 if row[9]:
                     end_node.update(row[9] if isinstance(row[9], dict) else json.loads(row[9]))
 
-                triplets.append({
-                    "start_node": start_node,
-                    "relationship_properties": rel,
-                    "end_node": end_node,
-                })
+                triplets.append(
+                    {
+                        "start_node": start_node,
+                        "relationship_properties": rel,
+                        "end_node": end_node,
+                    }
+                )
             return triplets

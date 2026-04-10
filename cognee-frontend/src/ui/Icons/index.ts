@@ -1,4 +1,5 @@
 export { default as AddIcon } from "./AddIcon";
+export { default as CopyIcon } from "./CopyIcon";
 export { default as BackIcon } from "./BackIcon";
 export { default as PlayIcon } from "./PlayIcon";
 export { default as MenuIcon } from "./MenuIcon";

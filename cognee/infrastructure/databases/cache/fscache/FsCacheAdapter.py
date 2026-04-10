@@ -20,7 +20,7 @@ logger = get_logger("FSCacheAdapter")
 
 
 class FSCacheAdapter(CacheDBInterface):
-    def __init__(self):
+    def __init__(self, session_ttl_seconds: int | None = 604800):
         default_key = "sessions_db"
 
         storage_config = get_storage_config()
@@ -28,6 +28,8 @@ class FSCacheAdapter(CacheDBInterface):
         self.cache_directory = os.path.join(data_root_directory, ".cognee_fs_cache", default_key)
         os.makedirs(self.cache_directory, exist_ok=True)
         self.cache = dc.Cache(directory=self.cache_directory)
+        self.session_ttl_seconds = session_ttl_seconds
+        # Evict any entries whose TTL has already elapsed
         self.cache.expire()
 
         logger.debug(f"FSCacheAdapter initialized with cache directory: {self.cache_directory}")
@@ -61,6 +63,8 @@ class FSCacheAdapter(CacheDBInterface):
         return entry.model_dump()
 
     def _load_entries(self, session_key: str) -> list:
+        # Evict expired keys so stale sessions don't linger on disk
+        self.cache.expire()
         value = self.cache.get(session_key)
         if value is None:
             return []
@@ -68,7 +72,12 @@ class FSCacheAdapter(CacheDBInterface):
 
     def _save_entries(self, session_key: str, entries: list) -> None:
         if entries:
-            self.cache.set(session_key, json.dumps(entries))
+            expire = (
+                self.session_ttl_seconds
+                if self.session_ttl_seconds and self.session_ttl_seconds > 0
+                else None
+            )
+            self.cache.set(session_key, json.dumps(entries), expire=expire)
         else:
             self.cache.delete(session_key)
 

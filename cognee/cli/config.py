@@ -17,6 +17,11 @@ COMMAND_DESCRIPTIONS = {
     "sessions": "View conversation sessions and Q&A history",
     "feedback": "Add or remove feedback on session Q&A entries",
     "memify": "Run the memory enrichment pipeline on a dataset",
+    "remember": "Ingest data and build the knowledge graph in a single call",
+    "recall": "Search the knowledge graph for relevant information",
+    "improve": "Enrich an existing knowledge graph with additional context and rules",
+    "forget": "Remove data from the knowledge graph",
+    "serve": "Connect to a Cognee instance (cloud or local)",
 }
 
 # Search type choices

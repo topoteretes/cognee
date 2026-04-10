@@ -284,9 +284,9 @@ GRAPH_DATABASE_USERNAME=your_username
 GRAPH_DATABASE_PASSWORD=your_password
 
 # Postgres (requires postgres extra: pip install cognee[postgres])
-# Reuses the relational DB connection (DB_HOST, DB_PORT, etc.)
 # Does not support raw Cypher queries, natural language search, or Graphiti.
 GRAPH_DATABASE_PROVIDER=postgres
+GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
 ### LLM Provider Configuration

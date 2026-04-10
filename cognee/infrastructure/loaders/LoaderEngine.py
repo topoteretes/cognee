@@ -34,6 +34,7 @@ class LoaderEngine:
             "csv_loader",
             "unstructured_loader",
             "advanced_pdf_loader",
+            "docling_loader",
         ]
 
     def register_loader(self, loader: LoaderInterface) -> bool:

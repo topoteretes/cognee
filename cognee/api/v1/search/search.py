@@ -43,7 +43,23 @@ async def search(
     feedback_influence: float = 0.0,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[SearchResult]:
+    if neighborhood_depth is not None and (
+        not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
+    ):
+        raise CogneeValidationError(
+            message="neighborhood_depth must be a positive integer.",
+            name="InvalidNeighborhoodDepth",
+        )
+    if neighborhood_seed_top_k is not None and (
+        not isinstance(neighborhood_seed_top_k, int) or neighborhood_seed_top_k < 1
+    ):
+        raise CogneeValidationError(
+            message="neighborhood_seed_top_k must be a positive integer.",
+            name="InvalidNeighborhoodSeedTopK",
+        )
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -244,6 +260,8 @@ async def search(
             feedback_influence=feedback_influence,
             verbose=verbose,
             retriever_specific_config=retriever_specific_config,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
 
         n = len(filtered_search_results) if filtered_search_results else 0
