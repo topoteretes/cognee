@@ -1327,6 +1327,22 @@ async def main():
         help="Authentication token for the API (optional, required if API has authentication enabled).",
     )
 
+    # Cognee Cloud connection options
+    parser.add_argument(
+        "--serve-url",
+        default=None,
+        help="Cognee Cloud or remote instance URL (e.g., https://your-instance.cognee.ai). "
+        "Calls cognee.serve() at startup so all SDK operations route to the cloud. "
+        "Can also be set via COGNEE_SERVICE_URL env var.",
+    )
+
+    parser.add_argument(
+        "--serve-api-key",
+        default=None,
+        help="API key for the Cognee Cloud instance. "
+        "Can also be set via COGNEE_API_KEY env var.",
+    )
+
     args = parser.parse_args()
 
     # Initialize the global CogneeClient
@@ -1336,8 +1352,23 @@ async def main():
     mcp.settings.port = int(args.port)
     _configure_transport_security(args.host)
 
-    # Skip migrations when in API mode (the API server handles its own database)
-    if not args.no_migration and not args.api_url:
+    # Resolve cloud connection: CLI args take precedence over env vars
+    serve_url = args.serve_url or os.environ.get("COGNEE_SERVICE_URL", "")
+    serve_api_key = args.serve_api_key or os.environ.get("COGNEE_API_KEY", "")
+
+    # Connect to Cognee Cloud if configured (before migrations — cloud handles its own DB)
+    if serve_url and not args.api_url:
+        import cognee
+
+        serve_kwargs = {"url": serve_url}
+        if serve_api_key:
+            serve_kwargs["api_key"] = serve_api_key
+        await cognee.serve(**serve_kwargs)
+        logger.info(f"Connected to Cognee Cloud: {serve_url}")
+
+    # Skip migrations when in API or Cloud mode (remote handles its own database)
+    is_remote = bool(args.api_url) or bool(serve_url)
+    if not args.no_migration and not is_remote:
         from cognee.modules.engine.operations.setup import setup
         from cognee.run_migrations import run_migrations
 
@@ -1347,7 +1378,7 @@ async def main():
         await run_migrations()
 
         logger.info("Database migrations done.")
-    elif not args.api_url:
+    elif not is_remote:
         logger.info("Skipping DB migrations")
 
     match args.transport.lower():
