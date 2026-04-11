@@ -498,6 +498,12 @@ async def _remember_inner(
 
     dataset_id = add_kwargs.pop("dataset_id", None) or shared_kwargs.get("dataset_id")
 
+    # Ensure database is initialized (same as add() does internally).
+    # Must run before get_default_user() which queries the DB.
+    from cognee.modules.engine.operations.setup import setup
+
+    await setup()
+
     # Resolve user early so we can use it for session init
     user = shared_kwargs.get("user")
     if user is None:
