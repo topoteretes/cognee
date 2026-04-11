@@ -1481,6 +1481,106 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to get graph data: {e}")
             raise
 
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        """
+        Get the k-hop neighborhood subgraph around a set of seed nodes.
+
+        Returns all nodes and edges within `depth` hops of any seed node,
+        in the same format as get_graph_data().
+        """
+        import time
+
+        start_time = time.time()
+
+        try:
+            if not node_ids:
+                logger.warning("No node IDs provided for neighborhood retrieval.")
+                return [], []
+
+            # Use variable-length path to find all nodes within depth hops
+            path_query = f"""
+            MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
+            WHERE seed.id IN $node_ids{" AND ALL(rel IN r WHERE rel.relationship_name IN $edge_types)" if edge_types else ""}
+            RETURN DISTINCT neighbor.id
+            """
+            params = {"node_ids": node_ids}
+            if edge_types:
+                params["edge_types"] = edge_types
+
+            neighbor_rows = await self.query(path_query, params)
+            neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
+
+            # Combine seed nodes and neighbor nodes
+            all_ids = list(set(node_ids) | set(neighbor_ids))
+
+            # Fetch all nodes
+            nodes_query = """
+            MATCH (n:Node)
+            WHERE n.id IN $ids
+            RETURN n.id, {
+                name: n.name,
+                type: n.type,
+                properties: n.properties
+            }
+            """
+            node_rows = await self.query(nodes_query, {"ids": all_ids})
+            formatted_nodes = []
+            for n in node_rows:
+                if n[0]:
+                    node_id = str(n[0])
+                    props = n[1]
+                    if props.get("properties"):
+                        try:
+                            additional_props = json.loads(props["properties"])
+                            props.update(additional_props)
+                            del props["properties"]
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse properties JSON for node {node_id}")
+                    formatted_nodes.append((node_id, props))
+
+            if not formatted_nodes:
+                logger.warning("No nodes found in neighborhood.")
+                return [], []
+
+            # Fetch all edges between the collected nodes
+            edges_query = """
+            MATCH (n:Node)-[r]->(m:Node)
+            WHERE n.id IN $ids AND m.id IN $ids
+            RETURN n.id, m.id, r.relationship_name, r.properties
+            """
+            edge_rows = await self.query(edges_query, {"ids": all_ids})
+            formatted_edges = []
+            for e in edge_rows:
+                if e and len(e) >= 3:
+                    source_id = str(e[0])
+                    target_id = str(e[1])
+                    rel_type = str(e[2])
+                    props = {}
+                    if len(e) > 3 and e[3]:
+                        try:
+                            props = json.loads(e[3])
+                        except (json.JSONDecodeError, TypeError):
+                            logger.warning(
+                                f"Failed to parse edge properties for {source_id}->{target_id}"
+                            )
+                    formatted_edges.append((source_id, target_id, rel_type, props))
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"Neighborhood retrieval ({depth}-hop): {len(formatted_nodes)} nodes and "
+                f"{len(formatted_edges)} edges in {retrieval_time:.2f}s"
+            )
+            return formatted_nodes, formatted_edges
+
+        except Exception as e:
+            logger.error(f"Failed to get neighborhood: {e}")
+            raise
+
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:

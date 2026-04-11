@@ -121,7 +121,7 @@ async def memify(
         tasks=memify_tasks,
         user=user,
         data=data,
-        datasets=authorized_dataset.id,
+        datasets=[authorized_dataset.id],
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
         use_pipeline_cache=False,

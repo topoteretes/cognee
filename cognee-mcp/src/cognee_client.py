@@ -191,9 +191,16 @@ class CogneeClient:
             from cognee.modules.search.types import SearchType
 
             with redirect_stdout(sys.stderr):
-                results = await self.cognee.search(
-                    query_type=SearchType[query_type.upper()], query_text=query_text, top_k=top_k
-                )
+                search_kwargs = {
+                    "query_type": SearchType[query_type.upper()],
+                    "query_text": query_text,
+                    "top_k": top_k,
+                }
+                if datasets:
+                    search_kwargs["datasets"] = datasets
+                if system_prompt:
+                    search_kwargs["system_prompt"] = system_prompt
+                results = await self.cognee.search(**search_kwargs)
                 return results
 
     async def delete(self, data_id: UUID, dataset_id: UUID, mode: str = "soft") -> Dict[str, Any]:
@@ -327,6 +334,121 @@ class CogneeClient:
                     {"id": str(d.id), "name": d.name, "created_at": str(d.created_at)}
                     for d in datasets
                 ]
+
+    # -- V2 API methods -----------------------------------------------------
+
+    async def remember(
+        self,
+        data: Any,
+        dataset_name: str = "main_dataset",
+        session_id: Optional[str] = None,
+        custom_prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Store data in memory via remember().
+
+        With session_id: stores in session cache only (fast).
+        Without session_id: full add + cognify pipeline (permanent).
+        """
+        if self.use_api:
+            endpoint = f"{self.api_url}/api/v1/remember"
+            files = {"data": ("data.txt", str(data), "text/plain")}
+            form_data = {"datasetName": dataset_name}
+            if custom_prompt:
+                form_data["custom_prompt"] = custom_prompt
+            headers = {"Authorization": f"Bearer {self.api_token}"} if self.api_token else {}
+            response = await self.client.post(
+                endpoint, files=files, data=form_data, headers=headers
+            )
+            response.raise_for_status()
+            return response.json()
+        else:
+            with redirect_stdout(sys.stderr):
+                kwargs = {
+                    "data": data,
+                    "dataset_name": dataset_name,
+                }
+                if session_id:
+                    kwargs["session_id"] = session_id
+                if custom_prompt:
+                    kwargs["custom_prompt"] = custom_prompt
+                result = await self.cognee.remember(**kwargs)
+                return {
+                    "status": getattr(result, "status", "completed"),
+                    "dataset_name": dataset_name,
+                    "session_id": session_id,
+                }
+
+    async def recall(
+        self,
+        query_text: str,
+        search_type: Optional[str] = None,
+        datasets: Optional[List[str]] = None,
+        session_id: Optional[str] = None,
+        top_k: int = 10,
+    ) -> Any:
+        """Search memory via recall() with auto-routing and session awareness."""
+        if self.use_api:
+            endpoint = f"{self.api_url}/api/v1/recall"
+            payload = {"query": query_text, "top_k": top_k}
+            if search_type:
+                payload["search_type"] = search_type.upper()
+            if datasets:
+                payload["datasets"] = datasets
+            response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
+            response.raise_for_status()
+            return response.json()
+        else:
+            with redirect_stdout(sys.stderr):
+                kwargs = {"top_k": top_k, "auto_route": True}
+                if search_type:
+                    from cognee.modules.search.types import SearchType
+
+                    kwargs["query_type"] = SearchType[search_type.upper()]
+                if datasets:
+                    kwargs["datasets"] = datasets
+                if session_id:
+                    kwargs["session_id"] = session_id
+                return await self.cognee.recall(query_text=query_text, **kwargs)
+
+    async def forget(
+        self,
+        dataset: Optional[str] = None,
+        everything: bool = False,
+    ) -> Dict[str, Any]:
+        """Delete data via forget()."""
+        if self.use_api:
+            endpoint = f"{self.api_url}/api/v1/forget"
+            payload = {"everything": everything}
+            if dataset:
+                payload["dataset"] = dataset
+            response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
+            response.raise_for_status()
+            return response.json()
+        else:
+            with redirect_stdout(sys.stderr):
+                return await self.cognee.forget(dataset=dataset, everything=everything)
+
+    async def improve(
+        self,
+        dataset_name: str = "main_dataset",
+        session_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Enrich knowledge graph and bridge session data via improve()."""
+        if self.use_api:
+            endpoint = f"{self.api_url}/api/v1/improve"
+            payload = {"dataset_name": dataset_name}
+            if session_ids:
+                payload["session_ids"] = session_ids
+            response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
+            response.raise_for_status()
+            return response.json()
+        else:
+            with redirect_stdout(sys.stderr):
+                kwargs = {"dataset": dataset_name}
+                if session_ids:
+                    kwargs["session_ids"] = session_ids
+                result = await self.cognee.improve(**kwargs)
+                return {"status": "success", "result": str(result)}
 
     async def close(self):
         """Close the HTTP client if in API mode."""

@@ -3,7 +3,9 @@ import sys
 import types
 import asyncio
 from pprint import pprint
-from pydantic import BaseModel
+from typing import Any, Union, get_args, get_origin
+from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic_core import PydanticUndefined
 from pydantic.json_schema import GenerateJsonSchema
 from pydantic._internal._core_utils import is_core_schema, CoreSchemaOrField
 from datamodel_code_generator import InputFileType, generate, GenerateConfig, DataModelType
@@ -11,6 +13,96 @@ from datamodel_code_generator import InputFileType, generate, GenerateConfig, Da
 import cognee
 from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.infrastructure.engine import DataPoint
+
+
+def datapoint_model_to_basemodel(model: type[BaseModel]) -> type[BaseModel]:
+    """
+    Convert a DataPoint-derived model into a plain BaseModel-derived model at runtime.
+
+    The converted model keeps only fields declared directly on each DataPoint subclass
+    (excluding inherited DataPoint infrastructure fields).
+    """
+
+    def _replace_datapoint_types(
+        annotation: Any, cache: dict[type[BaseModel], type[BaseModel]]
+    ) -> Any:
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+
+        if origin is None:
+            if (
+                isinstance(annotation, type)
+                and issubclass(annotation, BaseModel)
+                and issubclass(annotation, DataPoint)
+            ):
+                return _to_base_model(annotation, cache)
+            return annotation
+
+        if origin in (list, set, frozenset):
+            inner = _replace_datapoint_types(args[0], cache)
+            return origin[inner]
+
+        if origin is tuple:
+            if len(args) == 2 and args[1] is Ellipsis:
+                return tuple[_replace_datapoint_types(args[0], cache), ...]
+            return tuple[tuple(_replace_datapoint_types(arg, cache) for arg in args)]
+
+        if origin is dict:
+            key_type = _replace_datapoint_types(args[0], cache)
+            value_type = _replace_datapoint_types(args[1], cache)
+            return dict[key_type, value_type]
+
+        if origin in (Union, types.UnionType):
+            return Union[tuple(_replace_datapoint_types(arg, cache) for arg in args)]
+
+        return annotation
+
+    def _to_base_model(
+        model_type: type[BaseModel], cache: dict[type[BaseModel], type[BaseModel]]
+    ) -> type[BaseModel]:
+        if model_type in cache:
+            return cache[model_type]
+        # Break potential cycles in nested model graphs (A -> B -> A).
+        cache[model_type] = model_type
+
+        class ConfiguredBase(BaseModel):
+            model_config = ConfigDict(arbitrary_types_allowed=True)
+
+        model_fields = model_type.model_fields
+        own_annotations = getattr(model_type, "__annotations__", {})
+
+        # For DataPoint subclasses, keep only fields explicitly declared on the subclass.
+        if issubclass(model_type, DataPoint):
+            field_names = [name for name in own_annotations if name in model_fields]
+        else:
+            field_names = list(model_fields.keys())
+
+        converted_fields = {}
+        for field_name in field_names:
+            field_info = model_fields[field_name]
+            default_value = (
+                Field(default_factory=field_info.default_factory)
+                if field_info.default_factory is not None
+                else field_info.default
+            )
+            converted_fields[field_name] = (
+                _replace_datapoint_types(field_info.annotation, cache),
+                default_value if default_value is not PydanticUndefined else PydanticUndefined,
+            )
+
+        converted_model = create_model(
+            model_type.__name__, __base__=ConfiguredBase, **converted_fields
+        )
+        converted_model.model_rebuild()
+        cache[model_type] = converted_model
+
+        return converted_model
+
+    if not issubclass(model, DataPoint):
+        return model
+
+    return _to_base_model(model, {})
 
 
 def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
@@ -57,7 +149,7 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
     return graph_model
 
 
-def graph_model_to_graph_schema(graph_model: BaseModel) -> dict:
+def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
     class GenerateJsonSchemaWithoutDefaultTitles(GenerateJsonSchema):
         def field_title_should_be_set(self, schema: CoreSchemaOrField) -> bool:
             return_value = super().field_title_should_be_set(schema)
@@ -65,7 +157,10 @@ def graph_model_to_graph_schema(graph_model: BaseModel) -> dict:
                 return False
             return return_value
 
-    return graph_model.model_json_schema(schema_generator=GenerateJsonSchemaWithoutDefaultTitles)
+    model_for_schema = datapoint_model_to_basemodel(graph_model)
+    return model_for_schema.model_json_schema(
+        schema_generator=GenerateJsonSchemaWithoutDefaultTitles
+    )
 
 
 if __name__ == "__main__":

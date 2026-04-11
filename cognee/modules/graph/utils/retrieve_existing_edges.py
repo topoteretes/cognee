@@ -1,6 +1,7 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.engine.utils import generate_edge_name, generate_node_id
+from cognee.modules.graph.utils.expand_with_nodes_and_edges import _create_edge_key
 from cognee.shared.data_models import KnowledgeGraph
 
 
@@ -26,7 +27,7 @@ async def retrieve_existing_edges(
 
     Returns:
         dict[str, bool]: A mapping of edge keys to boolean values indicating existence.
-            Edge keys are formatted as concatenated strings: "{source_id}{target_id}{relationship_name}".
+            Edge keys are formatted as "{source_id}_{target_id}_{relationship_name}".
             All values in the returned dictionary are True (indicating the edge exists).
 
     Note:
@@ -43,6 +44,7 @@ async def retrieve_existing_edges(
     type_node_edges = []
     entity_node_edges = []
     type_entity_edges = []
+    graph_node_edges = []
     graph_engine = await get_graph_engine()
 
     for index, data_chunk in enumerate(data_chunks):
@@ -61,10 +63,14 @@ async def retrieve_existing_edges(
                 type_entity_edges.append((entity_node_id, type_node_id, "is_a"))
                 processed_nodes[str(entity_node_id)] = True
 
-        graph_node_edges = [
-            (edge.target_node_id, edge.source_node_id, edge.relationship_name)
+        graph_node_edges.extend(
+            (
+                generate_node_id(edge.source_node_id),
+                generate_node_id(edge.target_node_id),
+                generate_edge_name(edge.relationship_name),
+            )
             for edge in graph.edges
-        ]
+        )
 
     existing_edges = await graph_engine.has_edges(
         [
@@ -78,6 +84,6 @@ async def retrieve_existing_edges(
     existing_edges_map = {}
 
     for edge in existing_edges:
-        existing_edges_map[str(edge[0]) + str(edge[1]) + str(edge[2])] = True
+        existing_edges_map[_create_edge_key(edge[0], edge[1], edge[2])] = True
 
     return existing_edges_map
