@@ -252,9 +252,7 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
             if isinstance(row.get("payload"), dict):
                 # Strip payload to only fields in the new schema
-                raw_payload = {
-                    k: v for k, v in row["payload"].items() if k in valid_payload_fields
-                }
+                raw_payload = {k: v for k, v in row["payload"].items() if k in valid_payload_fields}
                 # Fill in defaults for any new fields
                 for key, val in defaults.items():
                     raw_payload.setdefault(key, val)
