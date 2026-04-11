@@ -49,6 +49,8 @@ class IndexSchema(DataPoint):
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
+    name = "PGVector"
+
     def __init__(
         self,
         connection_string: str,
