@@ -392,17 +392,33 @@ async def remember(
         )
 
         return await _remember_inner(
-            data, dataset_name,
-            session_id=session_id, chunk_size=chunk_size, chunker=chunker,
-            custom_prompt=custom_prompt, run_in_background=run_in_background,
-            self_improvement=self_improvement, session_ids=session_ids,
-            span=span, **kwargs,
+            data,
+            dataset_name,
+            session_id=session_id,
+            chunk_size=chunk_size,
+            chunker=chunker,
+            custom_prompt=custom_prompt,
+            run_in_background=run_in_background,
+            self_improvement=self_improvement,
+            session_ids=session_ids,
+            span=span,
+            **kwargs,
         )
 
 
 async def _remember_inner(
-    data, dataset_name, *, session_id, chunk_size, chunker, custom_prompt,
-    run_in_background, self_improvement, session_ids, span, **kwargs,
+    data,
+    dataset_name,
+    *,
+    session_id,
+    chunk_size,
+    chunker,
+    custom_prompt,
+    run_in_background,
+    self_improvement,
+    session_ids,
+    span,
+    **kwargs,
 ) -> "RememberResult":
     from cognee.api.v2.serve.state import get_remote_client
 

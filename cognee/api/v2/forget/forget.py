@@ -51,7 +51,11 @@ async def forget(
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
 
-    target = "everything" if everything else ("data_item" if data_id else ("dataset" if dataset else "unknown"))
+    target = (
+        "everything"
+        if everything
+        else ("data_item" if data_id else ("dataset" if dataset else "unknown"))
+    )
 
     send_telemetry(
         "cognee.forget",
@@ -74,7 +78,10 @@ async def forget(
         client = get_remote_client()
         if client is not None:
             result = await client.forget(data_id=data_id, dataset=dataset, everything=everything)
-            span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0) if isinstance(result, dict) else 0)
+            span.set_attribute(
+                COGNEE_RESULT_COUNT,
+                result.get("datasets_removed", 0) if isinstance(result, dict) else 0,
+            )
             return result
 
         from cognee.modules.users.methods import get_default_user
