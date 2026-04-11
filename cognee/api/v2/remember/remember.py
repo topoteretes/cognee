@@ -24,6 +24,25 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
+_migrations_done = False
+
+
+async def _ensure_migrations_run():
+    """Run vector migrations once on the first local SDK call.
+
+    Idempotent — subsequent calls are no-ops. Failures propagate
+    to the caller so schema issues surface immediately rather than
+    causing cryptic Rust panics on later searches.
+    """
+    global _migrations_done
+    if _migrations_done:
+        return
+    _migrations_done = True
+
+    from cognee.run_migrations import run_vector_migrations
+
+    await run_vector_migrations()
+
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
@@ -426,6 +445,11 @@ async def _remember_inner(
     if client is not None:
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
         return await client.remember(data, dataset_name, **kwargs)
+
+    # Run vector migrations lazily on the first local SDK call.
+    # This ensures stale LanceDB schemas are migrated before any
+    # writes, even when the API server was never started.
+    await _ensure_migrations_run()
 
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify

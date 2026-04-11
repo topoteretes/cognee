@@ -37,6 +37,9 @@ SEARCH_QUERY = "What is Lorem Ipsum and where does it come from?"
 async def main():
     print(f"Running Phase 2 with cognee version: {cognee.__version__}")
 
+    # ── Step 0: Run database migrations ────────────────────────────────
+    await cognee.run_startup_migrations()
+
     # ── Step 1: backwards compatibility search ────────────────────────────────
     print(f"\n[Step 1] Backwards-compat search on v0.5.7 data: '{SEARCH_QUERY}'")
     await cognee.search(

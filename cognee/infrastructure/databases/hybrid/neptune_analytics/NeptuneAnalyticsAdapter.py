@@ -492,3 +492,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             raise ValueError(
                 "Neptune Analytics requires an embedder defined to make vector operations"
             )
+
+    async def run_migrations(self):
+        """Run Neptune Analytics adapter migrations (currently no-op)."""
+        return None
