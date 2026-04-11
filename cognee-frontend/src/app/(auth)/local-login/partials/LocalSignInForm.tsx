@@ -5,7 +5,7 @@ import { Flex, Text, Title, TextInput, PasswordInput, Button } from "@mantine/co
 
 const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
 
-const DEFAULT_EMAIL = "local-ui@cognee.local";
+const DEFAULT_EMAIL = "default_user@example.com";
 const DEFAULT_PASSWORD = "default_password";
 
 export default function LocalSignInForm() {
