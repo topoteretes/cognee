@@ -148,12 +148,8 @@ async def main(mock_create_structured_output: AsyncMock):
     # 15 data nodes + EdgeType nodes from index_graph_edges (one per unique relationship_name)
     data_nodes = [n for n in initial_nodes if n[1].get("type") != "EdgeType"]
     edge_type_nodes = [n for n in initial_nodes if n[1].get("type") == "EdgeType"]
-    assert len(data_nodes) == 15, (
-        f"Expected 15 data nodes, got {len(data_nodes)}"
-    )
-    assert len(initial_edges) == 19, (
-        f"Expected 19 edges, got {len(initial_edges)}"
-    )
+    assert len(data_nodes) == 15, f"Expected 15 data nodes, got {len(data_nodes)}"
+    assert len(initial_edges) == 19, f"Expected 19 edges, got {len(initial_edges)}"
 
     initial_nodes_by_vector_collection = {}
 
