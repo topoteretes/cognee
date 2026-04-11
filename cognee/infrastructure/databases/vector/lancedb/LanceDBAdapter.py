@@ -510,13 +510,25 @@ class LanceDBAdapter(VectorDBInterface):
                 "Proactive LanceDB migration for '%s' due to payload schema mismatch",
                 collection_name,
             )
-            await self._migrate_collection_schema(
-                collection_name=collection_name,
-                old_collection=collection,
-                payload_schema=payload_schema,
-                new_lance_data_points=[],
-            )
-            migrated_collections.append(collection_name)
+            try:
+                await self._migrate_collection_schema(
+                    collection_name=collection_name,
+                    old_collection=collection,
+                    payload_schema=payload_schema,
+                    new_lance_data_points=[],
+                )
+                migrated_collections.append(collection_name)
+            except TypeError as e:
+                # Models with fields that LanceDB can't convert to Arrow
+                # (e.g. List[tuple], complex Unions) can't be migrated
+                # proactively. The reactive migration in create_data_points
+                # will handle them on the next write.
+                logger.warning(
+                    "Skipping proactive migration for '%s' (unsupported type): %s",
+                    collection_name,
+                    e,
+                )
+                skipped_collections.append(collection_name)
 
         return {
             "checked_collections": checked_collections,
