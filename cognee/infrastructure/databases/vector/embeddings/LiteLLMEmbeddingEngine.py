@@ -127,15 +127,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
   
             - List[List[float]]: A list of vectors representing the embedded texts.  
         """  
+        original_texts = text if isinstance(text, list) else [text]  
+        sanitized_text = sanitize_embedding_text_inputs(original_texts)  
+  
         try:  
             if self.mock:  
-                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}  
-                return [data["embedding"] for data in response["data"]]  
+                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text]}  
+                embeddings = [data["embedding"] for data in response["data"]]  
             else:  
                 async with embedding_rate_limiter_context_manager():  
                     embedding_kwargs = {  
                         "model": self.model,  
-                        "input": text,  
+                        "input": sanitized_text,  
                         "api_key": self.api_key,  
                         "api_base": self.endpoint,  
                         "api_version": self.api_version,  
@@ -150,12 +153,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=30.0,  
                     )  
   
-                return [data["embedding"] for data in response.data]  
+                embeddings = [data["embedding"] for data in response.data]  
   
         except litellm.exceptions.ContextWindowExceededError as error:  
             # Use shared context window handler  
             from .context_window_handler import handle_context_window_exceeded  
-            return await handle_context_window_exceeded(self._do_raw_embedding, text)  
+            embeddings = await handle_context_window_exceeded(  
+                self._do_raw_embedding, sanitized_text  
+            )  
   
         except asyncio.TimeoutError as e:  
             # Per-attempt timeout – likely an unreachable endpoint  
@@ -195,19 +200,25 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(  
                 "Embedding failed due to an unexpected error. Verify EMBEDDING_ENDPOINT and provider settings."  
             ) from error 
+
+        return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
     async def _do_raw_embedding(self, text: List[str]) -> List[List[float]]:  
         """  
         Perform raw embedding without context window handling.  
         This is called by the shared context window handler.  
         """  
+        text_list = text if isinstance(text, list) else [text]  
+        sanitized_text = sanitize_embedding_text_inputs(text_list)  
+  
         if self.mock:  
-            response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}  
+            response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text]}  
             return [data["embedding"] for data in response["data"]]  
           
         async with embedding_rate_limiter_context_manager():  
             embedding_kwargs = {  
                 "model": self.model,  
-                "input": text,  
+                "input": sanitized_text,  
                 "api_key": self.api_key,  
                 "api_base": self.endpoint,  
                 "api_version": self.api_version,  

@@ -95,21 +95,26 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
   
             - List[List[float]]: A list of embedding vectors corresponding to the text prompts.  
         """  
-        if self.mock:  
-            return [[0.0] * self.dimensions for _ in text]  
+        original_texts = text if isinstance(text, list) else [text]  
+        sanitized_text = sanitize_embedding_text_inputs(original_texts)  
   
-        # Handle case when a single string is passed instead of a list  
-        if not isinstance(text, list):  
-            text = [text]  
+        if self.mock:  
+            embeddings = [[0.0] * self.dimensions for _ in sanitized_text]  
+            return handle_embedding_response(original_texts, embeddings, self.dimensions)  
   
         try:  
-            embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])  
-            return embeddings  
+            embeddings = await asyncio.gather(  
+                *[self._get_embedding(prompt) for prompt in sanitized_text]  
+            )  
+            return handle_embedding_response(original_texts, embeddings, self.dimensions)  
         except Exception as error:  
             # Handle context window errors using shared handler  
             if "context" in str(error).lower() or "token" in str(error).lower():  
                 from .context_window_handler import handle_context_window_exceeded  
-                return await handle_context_window_exceeded(self._raw_embed_text, text)  
+                embeddings = await handle_context_window_exceeded(  
+                    self._raw_embed_text, sanitized_text  
+                )  
+                return handle_embedding_response(original_texts, embeddings, self.dimensions)  
               
             logger.error(f"Embedding error in OllamaEmbeddingEngine: {str(error)}")  
             raise EmbeddingException(  
@@ -118,14 +123,17 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
   
     async def _raw_embed_text(self, text: List[str]) -> List[List[float]]:  
         """Raw embedding without context handling."""  
+        text_list = text if isinstance(text, list) else [text]  
+        sanitized_text = sanitize_embedding_text_inputs(text_list)  
+  
         if self.mock:  
-            return [[0.0] * self.dimensions for _ in text]  
+            return [[0.0] * self.dimensions for _ in sanitized_text]  
           
-        if not isinstance(text, list):  
-            text = [text]  
-          
-        embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])  
+        embeddings = await asyncio.gather(  
+            *[self._get_embedding(prompt) for prompt in sanitized_text]  
+        )  
         return embeddings  
+
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
