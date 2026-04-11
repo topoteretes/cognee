@@ -21,20 +21,18 @@ _migrations_done = False
 async def _ensure_migrations_run():
     """Run vector migrations once on the first local SDK call.
 
-    Idempotent — subsequent calls are no-ops. Failures are logged
-    but don't block the remember() call (the reactive migration in
-    create_data_points will catch schema mismatches on write).
+    Idempotent — subsequent calls are no-ops. Failures propagate
+    to the caller so schema issues surface immediately rather than
+    causing cryptic Rust panics on later searches.
     """
     global _migrations_done
     if _migrations_done:
         return
     _migrations_done = True
-    try:
-        from cognee.run_migrations import run_vector_migrations
 
-        await run_vector_migrations()
-    except Exception as e:
-        logger.debug("Lazy vector migration skipped: %s", e)
+    from cognee.run_migrations import run_vector_migrations
+
+    await run_vector_migrations()
 
 
 class RememberKwargs(TypedDict, total=False):
