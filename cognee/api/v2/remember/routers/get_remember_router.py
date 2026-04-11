@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import Form, File, UploadFile, Depends
 from typing import List, Optional, Union, Literal
@@ -81,7 +82,7 @@ def get_remember_router() -> APIRouter:
                 chunks_per_batch=chunks_per_batch,
             )
 
-            return result
+            return jsonable_encoder(result.to_dict())
         except Exception as error:
             logger.error("Remember endpoint error: %s", error, exc_info=True)
             return JSONResponse(
