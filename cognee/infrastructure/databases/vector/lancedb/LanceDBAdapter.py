@@ -245,43 +245,55 @@ class LanceDBAdapter(VectorDBInterface):
         valid_payload_fields = set(schema_model.model_fields.keys())
         defaults = self._get_payload_defaults(payload_schema)
 
+        class MigrationLanceDataPoint(LanceModel):
+            id: data_point_types["id"]
+            vector: Vector(vector_size)
+            payload: schema_model
+
         new_ids = {dp.id for dp in new_lance_data_points}
-        old_rows = []
+        typed_old_rows = []
+        skipped = 0
         for row in rows:
             if row.get("id") in new_ids:
                 continue
 
             raw_payload = row.get("payload")
-
             if raw_payload is None or not isinstance(raw_payload, dict):
-                # Payload is null or non-dict — build an empty payload from
-                # schema defaults. Without this, inserting a null payload into
-                # a non-nullable struct column causes LanceDB Rust to panic:
-                # "Column 'payload' is declared as non-nullable but contains null values"
                 raw_payload = dict(defaults)
 
-            # Strip to only fields in the new schema
+            # Strip to only fields in the new schema and fill defaults
             raw_payload = {k: v for k, v in raw_payload.items() if k in valid_payload_fields}
-
-            # Fill in defaults for any new fields
             for key, val in defaults.items():
                 raw_payload.setdefault(key, val)
 
-            # Validate through Pydantic to ensure Arrow-compatible types.
-            # Without this, None values in old data can create Arrow type
-            # mismatches (e.g. null vs list<string>) that cause Rust panics
-            # during subsequent vector searches.
+            # Convert to typed LanceModel instances to ensure exact Arrow
+            # type compatibility. Using collection.add(dicts) causes LanceDB
+            # to infer Arrow types from Python values, which can differ from
+            # the schema's declared types and cause Rust panics on subsequent
+            # vector searches.
             try:
-                row["payload"] = schema_model.model_validate(raw_payload).model_dump()
-            except Exception:
-                row["payload"] = raw_payload
+                validated_payload = schema_model.model_validate(raw_payload).model_dump()
+                typed_old_rows.append(
+                    MigrationLanceDataPoint(
+                        id=row["id"],
+                        vector=row["vector"],
+                        payload=validated_payload,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    "Skipping row %s during migration (validation failed): %s",
+                    row.get("id", "?"),
+                    e,
+                )
+                skipped += 1
 
-            old_rows.append(row)
-
-        class MigrationLanceDataPoint(LanceModel):
-            id: data_point_types["id"]
-            vector: Vector(vector_size)
-            payload: schema_model
+        if skipped:
+            logger.warning(
+                "Migration of '%s': skipped %d rows due to validation errors",
+                collection_name,
+                skipped,
+            )
 
         async with self.VECTOR_DB_LOCK:
             connection = await self.get_connection()
@@ -292,8 +304,8 @@ class LanceDBAdapter(VectorDBInterface):
             )
             collection = await connection.open_table(collection_name)
 
-            if old_rows:
-                await collection.add(old_rows)
+            if typed_old_rows:
+                await collection.add(typed_old_rows)
 
             if new_lance_data_points:
                 await (
