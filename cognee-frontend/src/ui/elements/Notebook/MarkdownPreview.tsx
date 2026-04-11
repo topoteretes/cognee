@@ -74,4 +74,3 @@ function MarkdownPreview({ content, className = "" }: MarkdownPreviewProps) {
 }
 
 export default memo(MarkdownPreview);
-
