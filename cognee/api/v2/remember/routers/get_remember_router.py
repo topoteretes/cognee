@@ -81,7 +81,7 @@ def get_remember_router() -> APIRouter:
                 chunks_per_batch=chunks_per_batch,
             )
 
-            return result
+            return result.to_dict()
         except Exception as error:
             logger.error("Remember endpoint error: %s", error, exc_info=True)
             return JSONResponse(

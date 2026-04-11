@@ -229,6 +229,26 @@ class RememberResult:
     def __str__(self):
         return repr(self)
 
+    def to_dict(self) -> dict:
+        """Serialize to a plain dict suitable for JSON API responses."""
+        d = {
+            "status": self.status,
+            "dataset_name": self.dataset_name,
+            "dataset_id": self.dataset_id,
+            "pipeline_run_id": self.pipeline_run_id,
+            "items_processed": self.items_processed,
+            "elapsed_seconds": self.elapsed_seconds,
+        }
+        if self.session_ids:
+            d["session_ids"] = self.session_ids
+        if self.content_hash:
+            d["content_hash"] = self.content_hash
+        if self.items:
+            d["items"] = self.items
+        if self.error:
+            d["error"] = self.error
+        return d
+
     def __bool__(self):
         """True if status is completed or session_stored."""
         return self.status in ("completed", "session_stored")
