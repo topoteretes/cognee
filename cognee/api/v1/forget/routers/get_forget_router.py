@@ -23,7 +23,7 @@ def get_forget_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("")
-    @log_usage(function_name="POST /v2/forget", log_type="api_endpoint")
+    @log_usage(function_name="POST /v1/forget", log_type="api_endpoint")
     async def forget_endpoint(
         payload: ForgetPayloadDTO, user: User = Depends(get_authenticated_user)
     ):
@@ -37,12 +37,12 @@ def get_forget_router() -> APIRouter:
             "Forget API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": "POST /v2/forget",
+                "endpoint": "POST /v1/forget",
                 "cognee_version": cognee_version,
             },
         )
 
-        from cognee.api.v2.forget import forget
+        from cognee.api.v1.forget import forget
 
         try:
             result = await forget(

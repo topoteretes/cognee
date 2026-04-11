@@ -71,7 +71,7 @@ def get_improve_router() -> APIRouter:
             )
 
         try:
-            from cognee.api.v2.improve import improve as cognee_improve
+            from cognee.api.v1.improve import improve as cognee_improve
 
             improve_run = await cognee_improve(
                 extraction_tasks=payload.extraction_tasks,

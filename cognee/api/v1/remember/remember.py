@@ -459,7 +459,7 @@ async def _remember_inner(
     span,
     **kwargs,
 ) -> "RememberResult":
-    from cognee.api.v2.serve.state import get_remote_client
+    from cognee.api.v1.serve.state import get_remote_client
 
     client = get_remote_client()
     if client is not None:
@@ -518,7 +518,7 @@ async def _remember_inner(
 
         # Bridge session data to permanent graph in the background
         if self_improvement:
-            from cognee.api.v2.improve import improve
+            from cognee.api.v1.improve import improve
 
             async def _session_improve():
                 try:
@@ -567,7 +567,7 @@ async def _remember_inner(
         result._resolve(cognify_result)
 
         if self_improvement:
-            from cognee.api.v2.improve import improve
+            from cognee.api.v1.improve import improve
 
             logger.info("remember: running self-improvement on dataset '%s'", dataset_name)
             improve_kwargs = {"dataset": dataset_name, "user": user}

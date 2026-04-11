@@ -7,7 +7,7 @@ import time
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from cognee.api.v2.serve.cloud_client import CloudClient
+    from cognee.api.v1.serve.cloud_client import CloudClient
 
 from cognee.shared.logging_utils import get_logger
 
@@ -41,7 +41,7 @@ async def serve(
 
         await cognee.serve()
 
-    In both modes, all V2 operations (remember, recall, improve, forget,
+    In both modes, all operations (remember, recall, improve, forget,
     visualize) route to the connected instance instead of running locally.
 
     Args:
@@ -74,9 +74,9 @@ async def serve(
 
 async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
     """Connect directly to a Cognee instance — no Auth0, no Management API."""
-    from cognee.api.v2.serve.cloud_client import CloudClient
-    from cognee.api.v2.serve.credentials import CloudCredentials, save_credentials
-    from cognee.api.v2.serve.state import set_remote_client
+    from cognee.api.v1.serve.cloud_client import CloudClient
+    from cognee.api.v1.serve.credentials import CloudCredentials, save_credentials
+    from cognee.api.v1.serve.state import set_remote_client
 
     service_url = service_url.rstrip("/")
     client = CloudClient(service_url, api_key)
@@ -108,25 +108,25 @@ async def _serve_cloud(
     auth0_audience: Optional[str] = None,
 ) -> CloudClient:
     """Full cloud flow: Auth0 Device Code → tenant discovery → API key → connect."""
-    from cognee.api.v2.serve.cloud_client import CloudClient
-    from cognee.api.v2.serve.credentials import (
+    from cognee.api.v1.serve.cloud_client import CloudClient
+    from cognee.api.v1.serve.credentials import (
         CloudCredentials,
         is_token_expired,
         load_credentials,
         save_credentials,
     )
-    from cognee.api.v2.serve.device_auth import (
+    from cognee.api.v1.serve.device_auth import (
         device_code_login,
         extract_email_from_id_token,
         refresh_access_token,
     )
-    from cognee.api.v2.serve.management_api import (
+    from cognee.api.v1.serve.management_api import (
         create_tenant,
         get_current_tenant,
         get_or_create_api_key,
         get_service_url,
     )
-    from cognee.api.v2.serve.state import set_remote_client
+    from cognee.api.v1.serve.state import set_remote_client
 
     mgmt_url = management_url or os.getenv(
         "COGNEE_CLOUD_URL", "https://api.dev.cloud.topoteretes.com"

@@ -68,7 +68,7 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        from cognee.api.v2.remember import remember as cognee_remember
+        from cognee.api.v1.remember import remember as cognee_remember
 
         try:
             result = await cognee_remember(

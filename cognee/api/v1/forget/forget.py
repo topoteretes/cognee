@@ -73,7 +73,7 @@ async def forget(
         if dataset:
             span.set_attribute(COGNEE_DATASET_NAME, str(dataset))
 
-        from cognee.api.v2.serve.state import get_remote_client
+        from cognee.api.v1.serve.state import get_remote_client
 
         client = get_remote_client()
         if client is not None:
