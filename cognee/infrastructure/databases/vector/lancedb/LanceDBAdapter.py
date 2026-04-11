@@ -318,7 +318,7 @@ class LanceDBAdapter(VectorDBInterface):
         logger.info(
             "Migrated collection '%s' schema (%d existing rows preserved)",
             collection_name,
-            len(old_rows),
+            len(typed_old_rows),
         )
 
     @staticmethod
