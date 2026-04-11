@@ -15,6 +15,27 @@ from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("remember")
 
+_migrations_done = False
+
+
+async def _ensure_migrations_run():
+    """Run vector migrations once on the first local SDK call.
+
+    Idempotent — subsequent calls are no-ops. Failures are logged
+    but don't block the remember() call (the reactive migration in
+    create_data_points will catch schema mismatches on write).
+    """
+    global _migrations_done
+    if _migrations_done:
+        return
+    _migrations_done = True
+    try:
+        from cognee.run_migrations import run_vector_migrations
+
+        await run_vector_migrations()
+    except Exception as e:
+        logger.debug("Lazy vector migration skipped: %s", e)
+
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
@@ -339,6 +360,11 @@ async def remember(
     client = get_remote_client()
     if client is not None:
         return await client.remember(data, dataset_name, **kwargs)
+
+    # Run vector migrations lazily on the first local SDK call.
+    # This ensures stale LanceDB schemas are migrated before any
+    # writes, even when the API server was never started.
+    await _ensure_migrations_run()
 
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
