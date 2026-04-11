@@ -133,6 +133,24 @@ async def _send_telemetry_request(payload: dict) -> None:
         logger.debug("Telemetry request failed: %s", e)
 
 
+def _get_api_key_fingerprint() -> str:
+    """Hash the last 5 chars of the LLM API key into a fingerprint.
+
+    The last 5 characters carry the real entropy — provider prefixes
+    (sk-proj-, sk-ant-, AIzaSy-) are shared across all users. Hashing
+    the tail gives a stable identity signal that works across machines
+    and reinstalls without exposing the key.
+
+    Returns empty string if no key is configured or too short.
+    """
+    import hashlib
+
+    key = os.getenv("LLM_API_KEY", "")
+    if not key or len(key) < 5:
+        return ""
+    return hashlib.sha256(key[-5:].encode()).hexdigest()[:8]
+
+
 def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = None):
     """Send a product telemetry event.
 
@@ -159,6 +177,7 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
     )
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
+    api_key_hash = _get_api_key_fingerprint()
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -166,12 +185,14 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
         "user_properties": {
             "user_id": str(user_id),
             "persistent_id": persistent_id,
+            "api_key_hash": api_key_hash,
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
             "user_id": str(user_id),
             "anonymous_id": anonymous_id,
             "persistent_id": persistent_id,
+            "api_key_hash": api_key_hash,
             **additional_properties,
         },
     }
