@@ -33,7 +33,7 @@ def get_remember_router() -> APIRouter:
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         run_in_background: Optional[bool] = Form(default=False),
         custom_prompt: Optional[str] = Form(default=""),
-        chunks_per_batch: Optional[int] = Form(default=None),
+        chunks_per_batch: Optional[int] = Form(default=10),
         user: User = Depends(get_authenticated_user),
     ):
         """
