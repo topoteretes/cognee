@@ -1,12 +1,10 @@
-"use server";
-
-import managementFetch from "@/modules/instances/managementFetch";
+import localFetch from "@/modules/instances/localFetch";
 
 export default async function createWorkspace(tenantName: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await managementFetch(`/tenants?tenant_name=${encodeURIComponent(tenantName)}`, {
+    const response = await localFetch(`/tenants?tenant_name=${encodeURIComponent(tenantName)}`, {
       method: "POST",
-    }, { noRedirectOnAuth: true });
+    });
 
     if (!response.ok) {
       const text = await response.text();
