@@ -572,13 +572,12 @@ def setup_logging(log_level=None, name=None):
 def _log_deferred_info(logger):
     """Log lightweight startup info. Heavy DB config is logged on first pipeline call."""
     logger.warning(
-        "From version 0.5.0 onwards, Cognee will run with multi-user access control "
-        "mode set to on by default. Data isolation between different users and datasets "
-        "will be enforced and data created before multi-user access control mode was "
-        "turned on won't be accessible by default. To disable multi-user access control "
-        "mode and regain access to old data set the environment variable "
-        "ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more "
-        "information, please refer to the Cognee documentation."
+        "Cognee 1.0 changes: "
+        "New API — remember/recall/forget/improve (V1 add/cognify/search still work). "
+        "Session memory enabled by default (CACHING=false to disable). "
+        "Multi-user access control on by default (ENABLE_BACKEND_ACCESS_CONTROL=false to disable). "
+        "Agents (@cognee.agent) auto-verified on registration. "
+        "See https://docs.cognee.ai/"
     )
 
     try:
