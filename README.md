@@ -172,7 +172,7 @@ cognee-cli -ui
 
 ### Claude Code
 
-Install the [Cognee memory plugin](https://github.com/topoteretes/cognee/tree/dev/cognee-integrations/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin automatically captures tool calls into session memory via hooks and syncs to the permanent knowledge graph at session end.
+Install the [Cognee memory plugin](https://github.com/topoteretes/cognee-integrations/tree/feat/claude-code-v2/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin automatically captures tool calls into session memory via hooks and syncs to the permanent knowledge graph at session end.
 
 **Setup:**
 
@@ -180,8 +180,15 @@ Install the [Cognee memory plugin](https://github.com/topoteretes/cognee/tree/de
 # Install cognee
 pip install cognee
 
-# Set your LLM key (needed for entity extraction)
+# Configure
 export LLM_API_KEY="your-openai-key"
+export CACHING=true
+
+# Clone the plugin
+git clone https://github.com/topoteretes/cognee-integrations.git
+
+# Enable it (add to ~/.zshrc for permanent use)
+claude --plugin-dir ./cognee-integrations/integrations/claude-code
 ```
 
 Or connect to Cognee Cloud instead of running locally:
