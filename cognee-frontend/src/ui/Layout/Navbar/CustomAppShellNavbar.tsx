@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useNavbar } from "../NavbarContext";
 import NavbarIconLink from "./NavbarIconLink";
 import { ReactNode } from "react";
@@ -48,15 +48,6 @@ function GraphIcon({ active }: { active: boolean }) {
   );
 }
 
-function PromptsIcon({ active }: { active: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={active ? "#7C5CFC" : "#6B7280"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-      <line x1="3" y1="9" x2="21" y2="9" />
-      <line x1="9" y1="21" x2="9" y2="9" />
-    </svg>
-  );
-}
 
 function ConnectionsIcon({ active }: { active: boolean }) {
   return (
@@ -116,7 +107,6 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: "CONFIGURE",
     items: [
-      { text: "Prompts", link: "/prompts", icon: PromptsIcon },
       { text: "Connections", link: "/connections", icon: ConnectionsIcon },
     ],
   },
@@ -131,6 +121,7 @@ const NAV_SECTIONS: NavSection[] = [
 
 export default function CustomAppShellNavbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { isOpen, close } = useNavbar();
 
   return (
@@ -200,6 +191,7 @@ export default function CustomAppShellNavbar() {
         {isCloudEnvironment() && (
           <div className="px-3 pb-4 mt-auto">
             <button
+              onClick={() => router.push("/plan")}
               className="w-full rounded-[6px] text-white cursor-pointer"
               style={{
                 background: "#6510F4",
