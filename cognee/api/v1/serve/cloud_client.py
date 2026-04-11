@@ -47,7 +47,7 @@ class CloudClient:
     # ----- V2 Operations -----
 
     async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
-        """POST /api/v2/remember — ingest data and build knowledge graph."""
+        """POST /api/v1/remember — ingest data and build knowledge graph."""
         session = await self._get_session()
 
         form = aiohttp.FormData()
@@ -82,14 +82,14 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
-        async with session.post(f"{self.service_url}/api/v2/remember", data=form) as resp:
+        async with session.post(f"{self.service_url}/api/v1/remember", data=form) as resp:
             if resp.status >= 400:
                 body = await resp.text()
                 raise RuntimeError(f"Remote remember failed ({resp.status}): {body}")
             return await resp.json()
 
     async def recall(self, query_text: str, query_type: Optional[str] = None, **kwargs) -> list:
-        """POST /api/v2/recall — query the knowledge graph."""
+        """POST /api/v1/recall — query the knowledge graph."""
         session = await self._get_session()
 
         payload = {"query": query_text}
@@ -103,7 +103,7 @@ class CloudClient:
             payload["system_prompt"] = kwargs["system_prompt"]
 
         async with session.post(
-            f"{self.service_url}/api/v2/recall",
+            f"{self.service_url}/api/v1/recall",
             json=payload,
         ) as resp:
             if resp.status >= 400:
@@ -112,7 +112,7 @@ class CloudClient:
             return await resp.json()
 
     async def improve(self, dataset: Any = "main_dataset", **kwargs) -> dict:
-        """POST /api/v2/improve — enrich the knowledge graph."""
+        """POST /api/v1/improve — enrich the knowledge graph."""
         session = await self._get_session()
 
         payload = {}
@@ -126,7 +126,7 @@ class CloudClient:
             payload["node_name"] = kwargs["node_name"]
 
         async with session.post(
-            f"{self.service_url}/api/v2/improve",
+            f"{self.service_url}/api/v1/improve",
             json=payload,
         ) as resp:
             if resp.status >= 400:
@@ -135,7 +135,7 @@ class CloudClient:
             return await resp.json()
 
     async def forget(self, **kwargs) -> dict:
-        """POST /api/v2/forget — delete data from the knowledge graph."""
+        """POST /api/v1/forget — delete data from the knowledge graph."""
         session = await self._get_session()
 
         payload = {}
@@ -148,7 +148,7 @@ class CloudClient:
             payload["data_id"] = str(kwargs["data_id"])
 
         async with session.post(
-            f"{self.service_url}/api/v2/forget",
+            f"{self.service_url}/api/v1/forget",
             json=payload,
         ) as resp:
             if resp.status >= 400:
