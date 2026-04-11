@@ -99,6 +99,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
+          extra-dependencies: postgres
 
       - name: Run Postgres Adapter Unit Tests
         env:
