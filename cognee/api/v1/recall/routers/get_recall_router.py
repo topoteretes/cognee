@@ -49,7 +49,7 @@ def get_recall_router() -> APIRouter:
         send_telemetry(
             "Recall API Endpoint Invoked",
             user.id,
-            additional_properties={"endpoint": "GET /v2/recall", "cognee_version": cognee_version},
+            additional_properties={"endpoint": "GET /v1/recall", "cognee_version": cognee_version},
         )
 
         try:
@@ -64,7 +64,7 @@ def get_recall_router() -> APIRouter:
             )
 
     @router.post("", response_model=Union[List[SearchResult], List])
-    @log_usage(function_name="POST /v2/recall", log_type="api_endpoint")
+    @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
     async def recall(payload: RecallPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Recall information from the knowledge graph.
@@ -91,7 +91,7 @@ def get_recall_router() -> APIRouter:
             "Recall API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": "POST /v2/recall",
+                "endpoint": "POST /v1/recall",
                 "search_type": str(payload.search_type),
                 "cognee_version": cognee_version,
             },

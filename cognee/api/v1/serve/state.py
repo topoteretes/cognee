@@ -7,7 +7,7 @@ cloud instead of executing locally.
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from cognee.api.v2.serve.cloud_client import CloudClient
+    from cognee.api.v1.serve.cloud_client import CloudClient
 
 _remote_client: Optional["CloudClient"] = None
 

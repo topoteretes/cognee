@@ -20,7 +20,7 @@ def get_remember_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
-    @log_usage(function_name="POST /v2/remember", log_type="api_endpoint")
+    @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
@@ -56,7 +56,7 @@ def get_remember_router() -> APIRouter:
             "Remember API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": "POST /v2/remember",
+                "endpoint": "POST /v1/remember",
                 "node_set": node_set,
                 "cognee_version": cognee_version,
             },
@@ -68,7 +68,7 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        from cognee.api.v2.remember import remember as cognee_remember
+        from cognee.api.v1.remember import remember as cognee_remember
 
         try:
             result = await cognee_remember(

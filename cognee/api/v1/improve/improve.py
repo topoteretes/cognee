@@ -105,7 +105,7 @@ async def improve(
         if session_ids:
             span.set_attribute(COGNEE_SESSION_ID, ",".join(session_ids))
 
-        from cognee.api.v2.serve.state import get_remote_client
+        from cognee.api.v1.serve.state import get_remote_client
 
         client = get_remote_client()
         if client is not None:

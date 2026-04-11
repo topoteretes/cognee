@@ -187,7 +187,7 @@ async def recall(
             span.set_attribute(COGNEE_SESSION_ID, session_id)
         span.set_attribute("cognee.recall.top_k", top_k)
 
-        from cognee.api.v2.serve.state import get_remote_client
+        from cognee.api.v1.serve.state import get_remote_client
 
         client = get_remote_client()
         if client is not None:
@@ -224,13 +224,13 @@ async def recall(
 
         if query_type is not None:
             if auto_route:
-                from cognee.api.v2.recall.query_router import route_query, record_override
+                from cognee.api.v1.recall.query_router import route_query, record_override
 
                 result = route_query(query_text)
                 routed_type = result.search_type
                 record_override(routed_type, query_type)
         elif auto_route:
-            from cognee.api.v2.recall.query_router import route_query
+            from cognee.api.v1.recall.query_router import route_query
 
             result = route_query(query_text)
             query_type = result.search_type

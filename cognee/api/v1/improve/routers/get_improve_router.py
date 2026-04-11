@@ -32,7 +32,7 @@ def get_improve_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
-    @log_usage(function_name="POST /v2/improve", log_type="api_endpoint")
+    @log_usage(function_name="POST /v1/improve", log_type="api_endpoint")
     async def improve(payload: ImprovePayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Enrich and improve the knowledge graph.
@@ -59,7 +59,7 @@ def get_improve_router() -> APIRouter:
             "Improve API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": "POST /v2/improve",
+                "endpoint": "POST /v1/improve",
                 "cognee_version": cognee_version,
             },
         )
@@ -71,7 +71,7 @@ def get_improve_router() -> APIRouter:
             )
 
         try:
-            from cognee.api.v2.improve import improve as cognee_improve
+            from cognee.api.v1.improve import improve as cognee_improve
 
             improve_run = await cognee_improve(
                 extraction_tasks=payload.extraction_tasks,

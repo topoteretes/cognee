@@ -17,7 +17,7 @@ async def disconnect(clear_saved: bool = False) -> None:
             are preserved so ``cognee.serve()`` can reconnect without
             re-authenticating.
     """
-    from cognee.api.v2.serve.state import get_remote_client, set_remote_client
+    from cognee.api.v1.serve.state import get_remote_client, set_remote_client
 
     client = get_remote_client()
     if client:
@@ -29,7 +29,7 @@ async def disconnect(clear_saved: bool = False) -> None:
         print("  Not connected to Cognee Cloud.")
 
     if clear_saved:
-        from cognee.api.v2.serve.credentials import clear_credentials
+        from cognee.api.v1.serve.credentials import clear_credentials
 
         clear_credentials()
         print("  Saved credentials cleared.")
