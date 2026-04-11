@@ -44,9 +44,15 @@ async def run_migrations():
     )
 
     if migration_result.returncode != 0:
+
+        class MigrationError(Exception):
+            """Raised when migrations fail."""
+
+            pass
+
         migration_output = migration_result.stderr + migration_result.stdout
         logger.error("Migration failed with unexpected error: %s", migration_output)
-        sys.exit(1)
+        raise MigrationError("Relational DB Migrations failed.")
 
     logger.info("Migration completed successfully.")
 
