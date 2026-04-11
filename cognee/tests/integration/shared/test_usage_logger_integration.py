@@ -22,7 +22,6 @@ def usage_logging_config():
     original_env = os.environ.copy()
     os.environ["USAGE_LOGGING"] = "true"
     os.environ["CACHE_BACKEND"] = "redis"
-    os.environ["CACHE_HOST"] = "localhost"
     os.environ["CACHE_PORT"] = "6379"
     get_cache_config.cache_clear()
     create_cache_engine.cache_clear()
@@ -53,8 +52,9 @@ def redis_adapter():
     """Real RedisAdapter instance for testing."""
     from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
+    host = os.getenv("CACHE_HOST")
     try:
-        yield RedisAdapter(host="localhost", port=6379, log_key="test_usage_logs")
+        yield RedisAdapter(host=host, port=6379, log_key="test_usage_logs")
     except Exception as e:
         pytest.skip(f"Redis not available: {e}")
 

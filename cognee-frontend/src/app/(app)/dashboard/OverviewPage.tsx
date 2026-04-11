@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
 import searchDataset from "@/modules/datasets/searchDataset";
+import addData from "@/modules/ingestion/addData";
+import cognifyDataset from "@/modules/datasets/cognifyDataset";
+import createDataset from "@/modules/datasets/createDataset";
+import { notifications } from "@mantine/notifications";
 
 interface PipelineRun { id: string; pipeline_name: string; status: string; dataset_id: string | null; dataset_name: string | null; owner_email: string | null; created_at: string | null; pipeline_run_id: string | null }
 
@@ -53,7 +57,31 @@ export default function OverviewPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [traceCount, setTraceCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+
+  async function handleDashboardUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!cogniInstance || !e.target.files?.length) return;
+    const files = Array.from(e.target.files);
+    e.target.value = "";
+    setIsUploading(true);
+    try {
+      let ds = datasets[0];
+      if (!ds) {
+        ds = await createDataset({ name: "default_dataset" }, cogniInstance);
+      }
+      await addData({ id: ds.id, name: ds.name }, files, cogniInstance);
+      notifications.show({ title: "Files uploaded — building knowledge graph...", message: `${files.length} file(s) added. Cognify running.`, color: "blue", autoClose: 5000 });
+      await cognifyDataset({ id: ds.id, name: ds.name, data: [], status: "" }, cogniInstance);
+      notifications.show({ title: "Knowledge graph built", message: `"${ds.name}" is now searchable.`, color: "green" });
+    } catch (err) {
+      console.error("Dashboard upload failed:", err);
+      notifications.show({ title: "Upload failed", message: err instanceof Error ? err.message : String(err), color: "red" });
+    } finally {
+      setIsUploading(false);
+    }
+  }
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
@@ -63,7 +91,8 @@ export default function OverviewPage() {
     ]).then(([runData, spanData]) => {
       setRuns(Array.isArray(runData) ? runData : []);
       setTraceCount(Array.isArray(spanData) ? spanData.length : 0);
-      if (datasets.length === 0 && !filterLoading && !localStorage.getItem("cognee-onboarding-dismissed")) {
+      // Only redirect to onboarding if user has never dismissed it
+      if (datasets.length === 0 && !filterLoading && !sessionStorage.getItem("cognee-onboarding-skipped")) {
         router.replace("/onboarding");
       }
     }).finally(() => setLoading(false));
@@ -104,6 +133,9 @@ export default function OverviewPage() {
 
   return (
     <div style={{ padding: 32, display: "flex", flexDirection: "column", gap: 28, fontFamily: '"Inter", system-ui, sans-serif' }}>
+      {/* Hidden file input for dashboard upload */}
+      <input ref={uploadInputRef} type="file" multiple accept=".pdf,.csv,.txt,.md,.json,.docx" className="hidden" onChange={handleDashboardUpload} />
+
       {/* Context indicator */}
       {(selectedAgent || selectedDataset) && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -141,11 +173,22 @@ export default function OverviewPage() {
             <span style={{ fontSize: 13, fontWeight: 500, color: "#333333" }}>Agents</span>
             <span style={{ fontSize: 11, color: "#999999" }}>{agentCount} connected</span>
           </Link>
-          <Link href="/datasets" className="cursor-pointer hover:bg-cognee-hover transition-colors" style={{ flex: 1, background: "#fff", border: "1px solid #EEEEEE", borderRadius: 10, padding: "20px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, textDecoration: "none" }}>
-            <UploadIcon />
-            <span style={{ fontSize: 13, fontWeight: 500, color: "#333333" }}>Upload Data</span>
-            <span style={{ fontSize: 11, color: "#999999" }}>Drop files here</span>
-          </Link>
+          <button onClick={() => uploadInputRef.current?.click()} className="cursor-pointer hover:bg-cognee-hover transition-colors" style={{ flex: 1, background: isUploading ? "#F5F3FF" : "#fff", border: isUploading ? "1px solid #D4D0F8" : "1px solid #EEEEEE", borderRadius: 10, padding: "20px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8, textDecoration: "none" }}>
+            {isUploading ? (
+              <>
+                <div style={{ width: 24, height: 24, border: "2px solid", borderColor: "#6510F4 transparent #6510F4 transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#6510F4" }}>Processing...</span>
+                <span style={{ fontSize: 11, color: "#7C3AED" }}>Building knowledge graph</span>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </>
+            ) : (
+              <>
+                <UploadIcon />
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#333333" }}>Upload Data</span>
+                <span style={{ fontSize: 11, color: "#999999" }}>Click to select files</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -414,6 +457,17 @@ print(results)`}
           </div>
         </div>
       )}
+
+      {/* Dev: onboarding toggle */}
+      <div style={{ display: "flex", gap: 8, paddingTop: 8 }}>
+        <Link href="/onboarding" style={{ fontSize: 12, color: "#A1A1AA", textDecoration: "none" }}>
+          Open onboarding
+        </Link>
+        <span style={{ color: "#E4E4E7" }}>|</span>
+        <Link href="/onboarding?source=serve" style={{ fontSize: 12, color: "#A1A1AA", textDecoration: "none" }}>
+          Serve onboarding
+        </Link>
+      </div>
     </div>
   );
 }

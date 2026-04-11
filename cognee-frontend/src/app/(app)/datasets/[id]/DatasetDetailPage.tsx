@@ -5,8 +5,8 @@ import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import getDatasets from "@/modules/datasets/getDatasets";
 import getDatasetData from "@/modules/datasets/getDatasetData";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
+import deleteDataset from "@/modules/datasets/deleteDataset";
 import addData from "@/modules/ingestion/addData";
-import cognifyDataset from "@/modules/datasets/cognifyDataset";
 
 interface FileEntry {
   id: string;
@@ -78,24 +78,26 @@ interface Agent {
 
 export default function DatasetDetailPage({ datasetId }: { datasetId: string }) {
   const { cogniInstance, isInitializing } = useCogniInstance();
+  const [datasetName, setDatasetName] = useState<string>(datasetId);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [cognifying, setCognifying] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [search, setSearch] = useState("");
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sharedWith, setSharedWith] = useState<Set<string>>(new Set());
   const [sharing, setSharing] = useState<string | null>(null);
-  const [datasetName, setDatasetName] = useState(decodeURIComponent(datasetId));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
-    getDatasets(cogniInstance).then((datasets: { id: string; name: string }[]) => {
-      const match = Array.isArray(datasets) ? datasets.find((d) => d.id === datasetId) : undefined;
-      if (match) setDatasetName(match.name);
+    // Fetch real dataset name from the datasets list
+    getDatasets(cogniInstance).then((datasets) => {
+      const ds = Array.isArray(datasets) ? datasets.find((d: { id: string; name: string }) => d.id === datasetId) : null;
+      if (ds) setDatasetName(ds.name);
     }).catch(() => {});
     loadFiles();
     // Load agents for sharing (graceful — endpoint may not exist on cloud)
@@ -126,16 +128,12 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     if (!cogniInstance) return;
     setUploading(true);
     try {
-      await addData({ name: datasetName }, Array.from(newFiles), cogniInstance);
+      await addData({ id: datasetId }, Array.from(newFiles), cogniInstance);
       await loadFiles();
-      setUploading(false);
-      setCognifying(true);
-      await cognifyDataset({ id: datasetId, name: datasetName }, cogniInstance);
     } catch (err) {
-      console.error("Upload or cognify failed:", err);
+      console.error("Upload failed:", err);
     } finally {
       setUploading(false);
-      setCognifying(false);
     }
   }
 
@@ -146,6 +144,19 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       setFiles((prev) => prev.filter((f) => f.id !== fileId));
     } catch (err) {
       console.error("Delete failed:", err);
+    }
+  }
+
+  async function handleDeleteDataset() {
+    if (!cogniInstance) return;
+    setDeleting(true);
+    try {
+      await deleteDataset(datasetId, cogniInstance);
+      window.location.href = "/datasets";
+    } catch (err) {
+      console.error("Delete dataset failed:", err);
+      setDeleting(false);
+      setShowDeleteConfirm(false);
     }
   }
 
@@ -209,31 +220,6 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         onChange={(e) => { if (e.target.files) handleUpload(e.target.files); e.target.value = ""; }}
       />
 
-      {/* Status banner */}
-      {(uploading || cognifying) && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 10, padding: "12px 16px",
-          background: cognifying ? "#EDE9FE" : "#EFF6FF",
-          border: `1px solid ${cognifying ? "#DDD6FE" : "#BFDBFE"}`,
-          borderRadius: 10,
-        }}>
-          <div style={{
-            width: 16, height: 16, border: "2px solid", borderRadius: "50%",
-            borderColor: cognifying ? "#7C3AED transparent #7C3AED transparent" : "#3B82F6 transparent #3B82F6 transparent",
-            animation: "spin 0.8s linear infinite",
-          }} />
-          <span style={{ fontSize: 14, color: cognifying ? "#5B21B6" : "#1E40AF", fontWeight: 500 }}>
-            {uploading ? "Uploading files..." : "Building knowledge graph..."}
-          </span>
-          {cognifying && (
-            <span style={{ fontSize: 12, color: "#7C3AED" }}>
-              Extracting entities and relationships — this may take a minute
-            </span>
-          )}
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
-      )}
-
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -246,6 +232,14 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
           <span style={{ fontSize: 14, color: "#71717A" }}>{files.length} documents</span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="cursor-pointer hover:bg-red-50"
+            style={{ background: "#fff", color: "#EF4444", border: "1px solid #E4E4E7", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <TrashIcon />
+            Delete
+          </button>
           <button
             onClick={() => setShowShareModal(true)}
             className="cursor-pointer hover:bg-cognee-hover"
@@ -326,6 +320,24 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         </div>
       )}
 
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowDeleteConfirm(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Delete dataset</h2>
+            <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>
+              Are you sure you want to delete <strong>{datasetName}</strong>? This will permanently remove the dataset and all its files. This action cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setShowDeleteConfirm(false)} className="cursor-pointer" style={{ background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#3F3F46", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={handleDeleteDataset} disabled={deleting} className="cursor-pointer" style={{ background: "#EF4444", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#fff", fontFamily: "inherit" }}>
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Search */}
       <div style={{ background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, display: "flex", alignItems: "center", gap: 10, height: 40, paddingInline: 14 }}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="#A1A1AA" strokeWidth="1.5" /><path d="M10.5 10.5L14 14" stroke="#A1A1AA" strokeWidth="1.5" strokeLinecap="round" /></svg>
@@ -370,7 +382,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
               >
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
                   <FileIcon fill={meta.fill} stroke={meta.stroke} text={meta.text} label={meta.label} />
-                  <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>{file.name}</span>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>{decodeURIComponent(file.name)}</span>
                 </div>
                 <span style={{ width: 100, fontSize: 13, color: "#52525B", flexShrink: 0 }}>{typeName}</span>
                 <span style={{ width: 80, fontSize: 13, color: "#52525B", flexShrink: 0 }}>—</span>

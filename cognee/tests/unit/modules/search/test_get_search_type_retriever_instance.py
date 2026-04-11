@@ -3,6 +3,10 @@ import pytest
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.types import SearchType
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
+    DecompositionMode,
+    GraphCompletionDecompositionRetriever,
+)
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
@@ -139,6 +143,7 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
     ("search_type", "expected_class"),
     [
         (SearchType.GRAPH_COMPLETION, GraphCompletionRetriever),
+        (SearchType.GRAPH_COMPLETION_DECOMPOSITION, GraphCompletionDecompositionRetriever),
         (SearchType.GRAPH_COMPLETION_COT, GraphCompletionCotRetriever),
         (
             SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
@@ -167,6 +172,7 @@ async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
 
     for search_type in [
         SearchType.GRAPH_COMPLETION,
+        SearchType.GRAPH_COMPLETION_DECOMPOSITION,
         SearchType.GRAPH_COMPLETION_COT,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         SearchType.GRAPH_SUMMARY_COMPLETION,
@@ -176,3 +182,30 @@ async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
             search_type, query_text="q"
         )
         assert retriever_instance.triplet_distance_penalty == 6.5
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_decomposition_uses_retriever_specific_mode():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        query_text="q",
+        retriever_specific_config={"decomposition_mode": "combined_triplets_context"},
+    )
+
+    assert isinstance(retriever_instance, GraphCompletionDecompositionRetriever)
+    assert retriever_instance.decomposition_mode is DecompositionMode.COMBINED_TRIPLETS_CONTEXT
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_decomposition_defaults_to_answer_per_subquery():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        query_text="q",
+    )
+
+    assert isinstance(retriever_instance, GraphCompletionDecompositionRetriever)
+    assert retriever_instance.decomposition_mode is DecompositionMode.ANSWER_PER_SUBQUERY

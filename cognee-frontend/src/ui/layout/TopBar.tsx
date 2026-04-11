@@ -6,6 +6,7 @@ import getUser from "@/modules/users/getUser";
 import getLocalUser from "@/modules/users/getLocalUser";
 import CogneeUser from "@/modules/users/CogneeUser";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
+import createWorkspace from "@/modules/tenant/createWorkspace";
 import HelpMenu from "./HelpMenu";
 import ProfileMenu from "./ProfileMenu";
 import { useFilter, Agent, Dataset } from "./FilterContext";
@@ -63,7 +64,7 @@ function Dropdown({ trigger, children, width = 280 }: { trigger: React.ReactNode
 const ROUTE_LABELS: Record<string, string> = {
   "/": "Overview", "/dashboard": "Overview",
   "/datasets": "Datasets", "/search": "Search",
-  "/knowledge-graph": "Knowledge Graph", "/prompts": "Prompts",
+  "/knowledge-graph": "Knowledge Graph",
   "/connections": "Connections", "/api-keys": "API Keys",
   "/activity": "Activity", "/settings": "Settings",
   "/onboarding": "Onboarding",
@@ -77,6 +78,27 @@ export default function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { workspace, workspaces, setWorkspace, selectedAgent, selectedDataset, setSelectedAgent, setSelectedDataset, agents, datasets } = useFilter();
+
+  // Create workspace modal state
+  const [showCreateWsModal, setShowCreateWsModal] = useState(false);
+  const [wsName, setWsName] = useState("");
+  const [wsCreating, setWsCreating] = useState(false);
+  const [wsError, setWsError] = useState<string | null>(null);
+
+  async function handleCreateWorkspace() {
+    if (!wsName.trim()) return;
+    setWsCreating(true);
+    setWsError(null);
+    const result = await createWorkspace(wsName.trim());
+    setWsCreating(false);
+    if (result.success) {
+      setWsName("");
+      setShowCreateWsModal(false);
+      window.location.reload();
+    } else {
+      setWsError(result.error || "Failed to create workspace");
+    }
+  }
 
   useEffect(() => {
     if (cloud) { getUser().then(setUser); }
@@ -123,7 +145,7 @@ export default function TopBar() {
             </div>
           ))}
           <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-          <div className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6 }}>
+          <div onClick={(e) => { e.stopPropagation(); setShowCreateWsModal(true); }} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6 }}>
             <PlusIcon />
             <span style={{ fontSize: 13, color: "#A1A1AA" }}>Create workspace</span>
           </div>
@@ -168,7 +190,7 @@ export default function TopBar() {
                 </div>
               ))}
               <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-              <div className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+              <div onClick={() => router.push("/connections")} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
                 <PlusIcon />
                 <span style={{ fontSize: 13, color: "#A1A1AA" }}>Connect agent</span>
               </div>
@@ -224,31 +246,36 @@ export default function TopBar() {
               <span style={{ fontSize: 13, fontWeight: !selectedDataset ? 500 : 400, color: !selectedDataset ? "#6510F4" : "#3F3F46" }}>All datasets</span>
               {!selectedDataset && <Check />}
             </div>
-            {datasets.map((d) => (
-              <div key={d.id} onClick={() => setSelectedDataset(d)} className={`cursor-pointer transition-colors ${selectedDataset?.id === d.id ? "bg-[#F0EDFF]" : "hover:bg-[#F4F4F5]"}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
-                <DatasetIcon color={selectedDataset?.id === d.id ? "#6510F4" : "#3F3F46"} />
-                <span style={{ fontSize: 13, fontWeight: selectedDataset?.id === d.id ? 500 : 400, color: selectedDataset?.id === d.id ? "#6510F4" : "#3F3F46" }}>{d.name}</span>
-                {selectedDataset?.id === d.id && <Check />}
-              </div>
-            ))}
-            <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-            {/* Agents section */}
-            <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Agents</div>
-            {agentList.length > 0 ? (
-              agentList.map((a) => (
-                <div key={a.id} onClick={() => setSelectedAgent(a)} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
-                  <AgentIcon color="#3F3F46" />
-                  <span style={{ fontSize: 13, color: "#3F3F46" }}>{a.agent_type}</span>
-                  <span style={{ marginLeft: "auto" }}><StatusDot status={a.status} /></span>
-                </div>
-              ))
-            ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px" }}>
-                <span style={{ fontSize: 13, color: "#A1A1AA" }}>No agents connected</span>
-              </div>
+
+            {agentList.length > 0 && (
+              <>
+                <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
+                <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Agents</div>
+                {agentList.map((a) => (
+                  <div key={a.id} onClick={() => setSelectedAgent(a)} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+                    <AgentIcon color="#3F3F46" />
+                    <span style={{ fontSize: 13, color: "#3F3F46" }}>{a.agent_type}</span>
+                    <span style={{ marginLeft: "auto" }}><StatusDot status={a.status} /></span>
+                  </div>
+                ))}
+              </>
             )}
+
+            {datasets.length > 0 && (
+              <>
+                <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
+                <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "#999", textTransform: "uppercase", letterSpacing: "0.06em" }}>Datasets</div>
+                {datasets.map((d) => (
+                  <div key={d.id} onClick={() => setSelectedDataset(d)} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+                    <DatasetIcon color="#3F3F46" />
+                    <span style={{ fontSize: 13, color: "#3F3F46" }}>{d.name}</span>
+                  </div>
+                ))}
+              </>
+            )}
+
             <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-            <div onClick={() => router.push("/datasets?create=true")} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+            <div onClick={() => router.push("/connections")} className="cursor-pointer hover:bg-[#F4F4F5] transition-colors" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
               <PlusIcon />
               <span style={{ fontSize: 13, color: "#A1A1AA" }}>New dataset</span>
             </div>
@@ -273,6 +300,37 @@ export default function TopBar() {
           logoutHref={cloud ? "/api/signout" : "/api/local-signout"}
         />
       </div>
+
+      {/* Create workspace modal */}
+      {showCreateWsModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { setShowCreateWsModal(false); setWsError(null); setWsName(""); }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", fontFamily: '"Inter", system-ui, sans-serif' }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Create workspace</h2>
+            <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>Workspaces let you organize users and resources into isolated environments.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 13, fontWeight: 500, color: "#3F3F46" }}>Workspace name</label>
+              <input
+                autoFocus
+                type="text"
+                value={wsName}
+                onChange={(e) => setWsName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreateWorkspace(); }}
+                placeholder="e.g. My Team, Production, Research..."
+                style={{ width: "100%", height: 40, border: `1px solid ${wsError ? "#EF4444" : "#E4E4E7"}`, borderRadius: 8, paddingInline: 14, fontSize: 14, color: "#18181B", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
+                onFocus={(e) => { e.target.style.borderColor = "#6510F4"; e.target.style.boxShadow = "0 0 0 3px rgba(101,16,244,0.1)"; }}
+                onBlur={(e) => { e.target.style.borderColor = wsError ? "#EF4444" : "#E4E4E7"; e.target.style.boxShadow = "none"; }}
+              />
+              {wsError && <span style={{ fontSize: 12, color: "#EF4444" }}>{wsError}</span>}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { setShowCreateWsModal(false); setWsError(null); setWsName(""); }} className="cursor-pointer" style={{ background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#3F3F46", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={handleCreateWorkspace} disabled={wsCreating || !wsName.trim()} className="cursor-pointer" style={{ background: wsName.trim() ? "#6510F4" : "#E4E4E7", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: wsName.trim() ? "#fff" : "#A1A1AA", fontFamily: "inherit" }}>
+                {wsCreating ? "Creating..." : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

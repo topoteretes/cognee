@@ -2,7 +2,7 @@
 End-to-end integration test for conversation history feature.
 
 Covers retrievers that save conversation history (via SessionManager / cache):
-  GRAPH_COMPLETION, RAG_COMPLETION, GRAPH_COMPLETION_COT,
+  GRAPH_COMPLETION, GRAPH_COMPLETION_DECOMPOSITION, RAG_COMPLETION, GRAPH_COMPLETION_COT,
   GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL, TRIPLET_COMPLETION.
 Uses cache_engine.get_latest_qa for legacy assertions and cognee.session.get_session for
 session history; e2e for session SDK (get_session, add_feedback, delete_feedback) at end.
@@ -168,6 +168,59 @@ async def main():
     our_qa_rag = [h for h in history_rag if h["question"] == "What companies are mentioned?"]
     assert len(our_qa_rag) == 1, "Should find RAG question in history"
     _assert_used_graph_element_ids_shape(our_qa_rag[0])
+
+    session_id_decomposition = "test_session_decomposition"
+
+    result_decomposition = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        query_text="What do you know about TechCorp and DataCo?",
+        session_id=session_id_decomposition,
+    )
+
+    assert isinstance(result_decomposition, list) and len(result_decomposition) > 0, (
+        "GRAPH_COMPLETION_DECOMPOSITION should return non-empty list, "
+        f"got: {result_decomposition!r}"
+    )
+
+    history_decomposition = await cache_engine.get_latest_qa(
+        str(user.id), session_id_decomposition, last_n=10
+    )
+    our_qa_decomposition = [
+        h
+        for h in history_decomposition
+        if h["question"] == "What do you know about TechCorp and DataCo?"
+    ]
+    assert len(our_qa_decomposition) == 1, "Should find decomposition question in history"
+    _assert_used_graph_element_ids_shape(our_qa_decomposition[0])
+
+    session_id_decomposition_combined = "test_session_decomposition_combined"
+
+    result_decomposition_combined = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        query_text="What do you know about TechCorp and DataCo?",
+        session_id=session_id_decomposition_combined,
+        retriever_specific_config={"decomposition_mode": "combined_triplets_context"},
+    )
+
+    assert (
+        isinstance(result_decomposition_combined, list) and len(result_decomposition_combined) > 0
+    ), (
+        "GRAPH_COMPLETION_DECOMPOSITION combined mode should return non-empty list, "
+        f"got: {result_decomposition_combined!r}"
+    )
+
+    history_decomposition_combined = await cache_engine.get_latest_qa(
+        str(user.id), session_id_decomposition_combined, last_n=10
+    )
+    our_qa_decomposition_combined = [
+        h
+        for h in history_decomposition_combined
+        if h["question"] == "What do you know about TechCorp and DataCo?"
+    ]
+    assert len(our_qa_decomposition_combined) == 1, (
+        "Should find combined decomposition question in history"
+    )
+    _assert_used_graph_element_ids_shape(our_qa_decomposition_combined[0])
 
     session_id_cot = "test_session_cot"
 
