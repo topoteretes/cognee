@@ -793,65 +793,6 @@ async def list_data(dataset_id: str = None) -> list:
             return [types.TextContent(type="text", text=error_msg)]
 
 
-@mcp.tool()
-@log_usage(function_name="MCP delete_dataset", log_type="mcp_tool")
-async def delete_dataset(dataset_name: str) -> list:
-    """
-    Delete an entire dataset and all its data from the knowledge graph.
-
-    This removes the dataset completely: graph data, vector indices,
-    and metadata in the relational database. This operation cannot be undone.
-
-    Parameters
-    ----------
-    dataset_name : str
-        The name of the dataset to delete (e.g. 'main_dataset').
-
-    Returns
-    -------
-    list
-        A list containing a TextContent with deletion status.
-    """
-    with redirect_stdout(sys.stderr):
-        try:
-            if cognee_client.use_api:
-                return [
-                    types.TextContent(
-                        type="text",
-                        text="❌ delete_dataset is not available in API mode. Use the API directly.",
-                    )
-                ]
-
-            from cognee.modules.users.methods import get_default_user
-            from cognee.modules.data.methods import delete_dataset as _delete_dataset
-            from cognee.modules.data.methods import get_datasets
-
-            user = await get_default_user()
-            datasets = await get_datasets(user.id)
-            matching = [ds for ds in datasets if ds.name == dataset_name]
-
-            if not matching:
-                return [types.TextContent(type="text", text=f"Dataset '{dataset_name}' not found.")]
-
-            if len(matching) > 1:
-                ids = ", ".join(str(ds.id) for ds in matching)
-                return [
-                    types.TextContent(
-                        type="text",
-                        text=f"Multiple datasets named '{dataset_name}' found (IDs: {ids}). Please delete by ID instead.",
-                    )
-                ]
-
-            await _delete_dataset(matching[0])
-            return [
-                types.TextContent(
-                    type="text",
-                    text=f"Dataset '{dataset_name}' deleted successfully. Graph, vectors, and metadata removed.",
-                )
-            ]
-        except Exception as e:
-            return [types.TextContent(type="text", text=f"Error deleting dataset: {str(e)}")]
-
 
 @mcp.tool()
 @log_usage(function_name="MCP delete", log_type="mcp_tool")
@@ -930,43 +871,6 @@ async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
             # Handle all other errors (DocumentNotFoundError, DatasetNotFoundError, etc.)
             error_msg = f"❌ Delete operation failed: {str(e)}"
             logger.error(f"Delete operation error: {str(e)}")
-            return [types.TextContent(type="text", text=error_msg)]
-
-
-@mcp.tool()
-@log_usage(function_name="MCP prune", log_type="mcp_tool")
-async def prune():
-    """
-    Reset the Cognee knowledge graph by removing all stored information.
-
-    This function performs a complete reset of both the data layer and system layer
-    of the Cognee knowledge graph, removing all nodes, edges, and associated metadata.
-    It is typically used during development or when needing to start fresh with a new
-    knowledge base.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with confirmation of the prune operation.
-
-    Notes
-    -----
-    - This operation cannot be undone. All memory data will be permanently deleted.
-    - The function prunes both data content (using prune_data) and system metadata (using prune_system)
-    - This operation is not available in API mode
-    """
-    with redirect_stdout(sys.stderr):
-        try:
-            await cognee_client.prune_data()
-            await cognee_client.prune_system(metadata=True)
-            return [types.TextContent(type="text", text="Pruned")]
-        except NotImplementedError:
-            error_msg = "❌ Prune operation is not available in API mode"
-            logger.error(error_msg)
-            return [types.TextContent(type="text", text=error_msg)]
-        except Exception as e:
-            error_msg = f"❌ Prune operation failed: {str(e)}"
-            logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
 
