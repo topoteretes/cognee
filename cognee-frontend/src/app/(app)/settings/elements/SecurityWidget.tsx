@@ -35,11 +35,18 @@ export default function SecurityWidget() {
           <Text size="sm" c={tokens.textMuted} mb="0.5rem">
             Sign out of your account on this device.
           </Text>
-          <a href="/api/signout" className="self-start" onClick={() => trackPageEvent({ pageName: "Settings", eventName: "sign_out" })}>
-            <Button variant="outline" color="gray" size="sm" radius="0.5rem">
-              Log out
-            </Button>
-          </a>
+          <Button
+            component="a"
+            href="/api/signout"
+            variant="outline"
+            color="gray"
+            size="sm"
+            radius="0.5rem"
+            className="self-start"
+            onClick={() => trackPageEvent({ pageName: "Settings", eventName: "sign_out" })}
+          >
+            Log out
+          </Button>
         </Stack>
       </Stack>
     </Stack>

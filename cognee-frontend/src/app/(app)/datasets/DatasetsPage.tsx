@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
+import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
 import getDatasetData from "@/modules/datasets/getDatasetData";
 import createDataset from "@/modules/datasets/createDataset";
+import deleteDataset from "@/modules/datasets/deleteDataset";
 
 interface DatasetRaw {
   id: string;
@@ -39,12 +41,15 @@ function formatDate(dateStr?: string): string {
 
 export default function DatasetsPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
+  const { refreshDatasets: refreshFilterDatasets } = useFilter();
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Dataset | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -77,6 +82,21 @@ export default function DatasetsPage() {
     }
   }
 
+  const handleDelete = async (ds: Dataset) => {
+    if (!cogniInstance) return;
+    setDeletingId(ds.id);
+    try {
+      await deleteDataset(ds.id, cogniInstance);
+      setDatasets((prev) => prev.filter((d) => d.id !== ds.id));
+      setDeleteTarget(null);
+      refreshFilterDatasets();
+    } catch (err) {
+      console.error("Failed to delete dataset:", err);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const handleCreate = async () => {
     if (!newName.trim() || !cogniInstance) return;
     setCreating(true);
@@ -85,6 +105,7 @@ export default function DatasetsPage() {
       setDatasets((prev) => [...prev, { ...ds, documents: 0 }]);
       setNewName("");
       setShowCreateModal(false);
+      refreshFilterDatasets();
     } catch (err) {
       console.error("Failed to create dataset:", err);
     } finally {
@@ -134,6 +155,24 @@ export default function DatasetsPage() {
         </div>
       )}
 
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setDeleteTarget(null)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Delete dataset</h2>
+            <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>
+              Are you sure you want to delete <strong>{deleteTarget.name}</strong>? This will permanently remove the dataset and all its files. This action cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setDeleteTarget(null)} className="cursor-pointer" style={{ background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#3F3F46", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={() => handleDelete(deleteTarget)} disabled={deletingId === deleteTarget.id} className="cursor-pointer" style={{ background: "#EF4444", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#fff", fontFamily: "inherit" }}>
+                {deletingId === deleteTarget.id ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {datasets.length > 0 ? (
         <>
           {/* Header */}
@@ -168,6 +207,7 @@ export default function DatasetsPage() {
               <span style={{ width: 100, fontSize: 12, fontWeight: 600, color: "#71717A", flexShrink: 0 }}>Status</span>
               <span style={{ width: 140, fontSize: 12, fontWeight: 600, color: "#71717A", flexShrink: 0 }}>Graph Model</span>
               <span style={{ width: 140, fontSize: 12, fontWeight: 600, color: "#71717A", flexShrink: 0 }}>Created</span>
+              <span style={{ width: 60, flexShrink: 0 }} />
             </div>
             {filtered.map((ds, i) => (
               <Link
@@ -190,6 +230,18 @@ export default function DatasetsPage() {
                 </div>
                 <span style={{ width: 140, fontSize: 13, color: "#52525B", flexShrink: 0 }}>Automatic</span>
                 <span style={{ width: 140, fontSize: 13, color: "#A1A1AA", flexShrink: 0 }}>{formatDate(ds.createdAt)}</span>
+                <div style={{ width: 60, display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(ds); }}
+                    className="cursor-pointer hover:text-red-500"
+                    style={{ background: "none", border: "none", padding: 4, opacity: 0.5, transition: "opacity 150ms" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
+                    title="Delete dataset"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V3h4v1M5 4v8.5a.5.5 0 00.5.5h5a.5.5 0 00.5-.5V4" stroke="#A1A1AA" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  </button>
+                </div>
               </Link>
             ))}
             {filtered.length === 0 && search && (

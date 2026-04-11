@@ -564,3 +564,7 @@ class ChromaDBAdapter(VectorDBInterface):
         """
         client = await self.get_connection()
         return await client.list_collections()
+
+    async def run_migrations(self):
+        """Run ChromaDB adapter migrations (currently no-op)."""
+        return None

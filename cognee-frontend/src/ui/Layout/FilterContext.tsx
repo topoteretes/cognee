@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from "react";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import getDatasets from "@/modules/datasets/getDatasets";
 
@@ -43,6 +43,9 @@ interface FilterContextValue {
   agents: Agent[];
   datasets: Dataset[];
   loading: boolean;
+
+  // Refresh
+  refreshDatasets: () => void;
 }
 
 const DEFAULT_WORKSPACES: Workspace[] = [
@@ -61,6 +64,7 @@ const FilterContext = createContext<FilterContextValue>({
   agents: [],
   datasets: [],
   loading: true,
+  refreshDatasets: () => {},
 });
 
 export function FilterProvider({ children }: { children: ReactNode }) {
@@ -71,6 +75,13 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
   const [workspace, setWorkspaceState] = useState<Workspace>(DEFAULT_WORKSPACES[1]);
   const [loading, setLoading] = useState(true);
+
+  const refreshDatasets = useCallback(() => {
+    if (!cogniInstance) return;
+    getDatasets(cogniInstance).then((d: Dataset[]) => {
+      setDatasets(Array.isArray(d) ? d : []);
+    }).catch(() => {});
+  }, [cogniInstance]);
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
@@ -84,30 +95,33 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }).finally(() => setLoading(false));
   }, [cogniInstance, isInitializing]);
 
-  const handleAgentChange = (agent: Agent | null) => {
+  const handleAgentChange = useCallback((agent: Agent | null) => {
     setSelectedAgent(agent);
     setSelectedDataset(null);
-  };
+  }, []);
 
-  const handleWorkspaceChange = (ws: Workspace) => {
+  const handleWorkspaceChange = useCallback((ws: Workspace) => {
     setWorkspaceState(ws);
     setSelectedAgent(null);
     setSelectedDataset(null);
-  };
+  }, []);
+
+  const value = useMemo(() => ({
+    workspace,
+    workspaces: DEFAULT_WORKSPACES,
+    setWorkspace: handleWorkspaceChange,
+    selectedAgent,
+    selectedDataset,
+    setSelectedAgent: handleAgentChange,
+    setSelectedDataset,
+    agents,
+    datasets,
+    loading,
+    refreshDatasets,
+  }), [workspace, selectedAgent, selectedDataset, agents, datasets, loading, handleAgentChange, handleWorkspaceChange, refreshDatasets]);
 
   return (
-    <FilterContext.Provider value={{
-      workspace,
-      workspaces: DEFAULT_WORKSPACES,
-      setWorkspace: handleWorkspaceChange,
-      selectedAgent,
-      selectedDataset,
-      setSelectedAgent: handleAgentChange,
-      setSelectedDataset,
-      agents,
-      datasets,
-      loading,
-    }}>
+    <FilterContext.Provider value={value}>
       {children}
     </FilterContext.Provider>
   );

@@ -468,3 +468,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def prune(self):
         self._metadata.clear()
         await self.delete_database()
+
+    async def run_migrations(self):
+        """Run PGVector adapter migrations (currently no-op)."""
+        return None

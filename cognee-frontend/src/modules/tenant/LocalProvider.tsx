@@ -41,7 +41,7 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
 
         // Authenticated — set up the local instance
-        setTenant({ id: "local", name: "local" });
+        setTenant({ tenant_id: "local", tenant_name: "local" });
       } catch (err) {
         if (cancelled) return;
 
@@ -81,6 +81,9 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       isInitializing,
       error,
       statusMessage: null,
+      availableTenants: [],
+      switchTenant: () => {},
+      planType: null,
     }}>
       {children}
     </TenantContext.Provider>

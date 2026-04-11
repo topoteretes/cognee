@@ -12,8 +12,36 @@ from typing_extensions import TypedDict
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_DATASET_NAME,
+    COGNEE_SESSION_ID,
+    COGNEE_DATA_SIZE_BYTES,
+    COGNEE_OPERATION_MODE,
+    COGNEE_DATA_ITEM_COUNT,
+    OtelStatusCode,
+)
 
 logger = get_logger("remember")
+
+_migrations_done = False
+
+
+async def _ensure_migrations_run():
+    """Run vector migrations once on the first local SDK call.
+
+    Idempotent — subsequent calls are no-ops. Failures propagate
+    to the caller so schema issues surface immediately rather than
+    causing cryptic Rust panics on later searches.
+    """
+    global _migrations_done
+    if _migrations_done:
+        return
+    _migrations_done = True
+
+    from cognee.run_migrations import run_vector_migrations
+
+    await run_vector_migrations()
 
 
 class RememberKwargs(TypedDict, total=False):
@@ -45,6 +73,23 @@ _SHARED = frozenset(
         "run_in_background",
     }
 )
+
+
+def _estimate_data_size(data) -> int:
+    """Estimate the byte size of input data."""
+    if isinstance(data, str):
+        return len(data.encode("utf-8", errors="replace"))
+    if isinstance(data, bytes):
+        return len(data)
+    if isinstance(data, list):
+        return sum(_estimate_data_size(item) for item in data)
+    if hasattr(data, "seek") and hasattr(data, "tell"):
+        pos = data.tell()
+        data.seek(0, 2)
+        size = data.tell()
+        data.seek(pos)
+        return size
+    return 0
 
 
 def _data_to_text(data) -> str:
@@ -292,9 +337,10 @@ async def remember(
     ``cognify()`` to ingest data and build the knowledge graph.
 
     **With session_id (session memory):** Stores the data in the
-    session cache only. The data is NOT ingested into the permanent
-    graph. Use ``improve(session_ids=[...])`` later to sync session
-    content into the permanent graph.
+    session cache for fast retrieval. When ``self_improvement`` is
+    True (default), also bridges the session data into the permanent
+    graph in the background via ``improve()``. The call returns
+    immediately — await the result to wait for the background sync.
 
     Args:
         data: The data to store (text, file paths, binary streams, etc.).
@@ -334,11 +380,76 @@ async def remember(
         # Access raw pipeline result:
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
+    from cognee.shared.utils import send_telemetry
+    from cognee import __version__ as cognee_version
+
+    data_size = _estimate_data_size(data)
+    item_count = len(data) if isinstance(data, list) else 1
+    mode = "session" if session_id else "permanent"
+
+    with new_span("cognee.api.remember") as span:
+        span.set_attribute(COGNEE_DATASET_NAME, dataset_name)
+        span.set_attribute(COGNEE_OPERATION_MODE, mode)
+        span.set_attribute(COGNEE_DATA_SIZE_BYTES, data_size)
+        span.set_attribute(COGNEE_DATA_ITEM_COUNT, item_count)
+        if session_id:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+
+        send_telemetry(
+            "cognee.remember",
+            kwargs.get("user", "sdk"),
+            additional_properties={
+                "mode": mode,
+                "dataset_name": dataset_name,
+                "data_size_bytes": data_size,
+                "item_count": item_count,
+                "session_id": session_id or "",
+                "self_improvement": self_improvement,
+                "run_in_background": run_in_background,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        return await _remember_inner(
+            data,
+            dataset_name,
+            session_id=session_id,
+            chunk_size=chunk_size,
+            chunker=chunker,
+            custom_prompt=custom_prompt,
+            run_in_background=run_in_background,
+            self_improvement=self_improvement,
+            session_ids=session_ids,
+            span=span,
+            **kwargs,
+        )
+
+
+async def _remember_inner(
+    data,
+    dataset_name,
+    *,
+    session_id,
+    chunk_size,
+    chunker,
+    custom_prompt,
+    run_in_background,
+    self_improvement,
+    session_ids,
+    span,
+    **kwargs,
+) -> "RememberResult":
     from cognee.api.v2.serve.state import get_remote_client
 
     client = get_remote_client()
     if client is not None:
+        span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
         return await client.remember(data, dataset_name, **kwargs)
+
+    # Run vector migrations lazily on the first local SDK call.
+    # This ensures stale LanceDB schemas are migrated before any
+    # writes, even when the API server was never started.
+    await _ensure_migrations_run()
 
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
@@ -375,7 +486,7 @@ async def remember(
         user = await get_default_user()
         shared_kwargs["user"] = user
 
-    # Session memory: store in session cache only, skip permanent graph
+    # Session memory: store in session cache, then optionally bridge to graph
     if session_id:
         await _add_to_session(session_id, data, user)
         result = RememberResult(
@@ -384,6 +495,24 @@ async def remember(
             session_ids=[session_id],
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
+
+        # Bridge session data to permanent graph in the background
+        if self_improvement:
+            from cognee.api.v2.improve import improve
+
+            async def _session_improve():
+                try:
+                    await improve(
+                        dataset=dataset_name,
+                        session_ids=[session_id],
+                        user=user,
+                    )
+                    logger.info("remember: session '%s' bridged to permanent graph", session_id)
+                except Exception as exc:
+                    logger.warning("remember: session improve failed (non-fatal): %s", exc)
+
+            result._task = asyncio.create_task(_session_improve())
+
         return result
 
     # Build the result object — starts as "running"
