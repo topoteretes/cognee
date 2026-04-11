@@ -190,14 +190,19 @@ export default function ConnectionsPage() {
       )}
 
       {/* Agents tab */}
-      {tab === "agents" && (
+      {tab === "agents" && agentUsers.length === 0 && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: "60px 20px", flex: 1 }}>
+          <span style={{ color: "#A1A1AA" }}><AgentIconSmall /></span>
+          <span style={{ fontSize: 15, fontWeight: 500, color: "#18181B" }}>No agents connected yet</span>
+          <span style={{ fontSize: 13, color: "#71717A", textAlign: "center", maxWidth: 360 }}>Connect an agent framework to start syncing data. Go to API Keys to create a key, or use the onboarding to set up a connection.</span>
+        </div>
+      )}
+
+      {tab === "agents" && agentUsers.length > 0 && (
         <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0 }}>
           {/* Agent sidebar */}
           <div style={{ width: 260, display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
-            {agentUsers.length === 0 ? (
-              <span style={{ fontSize: 13, color: "#A1A1AA", padding: 12 }}>No agents connected yet.</span>
-            ) : (
-              agentUsers.map((a) => (
+            {agentUsers.map((a) => (
                 <div
                   key={a.id}
                   onClick={() => setSelectedAgentId(a.id)}
@@ -213,8 +218,7 @@ export default function ConnectionsPage() {
                   <span style={{ fontSize: 14, fontWeight: selectedAgentId === a.id ? 500 : 400, color: selectedAgentId === a.id ? "#6510F4" : "#18181B", flex: 1 }}>{a.agent_type}</span>
                   <StatusBadge status={a.status} />
                 </div>
-              ))
-            )}
+              ))}
           </div>
 
           {/* Agent detail */}
