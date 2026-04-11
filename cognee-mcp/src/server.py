@@ -793,7 +793,6 @@ async def list_data(dataset_id: str = None) -> list:
             return [types.TextContent(type="text", text=error_msg)]
 
 
-
 @mcp.tool()
 @log_usage(function_name="MCP delete", log_type="mcp_tool")
 async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
