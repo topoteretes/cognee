@@ -252,12 +252,20 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
             if isinstance(row.get("payload"), dict):
                 # Strip payload to only fields in the new schema
-                row["payload"] = {
+                raw_payload = {
                     k: v for k, v in row["payload"].items() if k in valid_payload_fields
                 }
                 # Fill in defaults for any new fields
                 for key, val in defaults.items():
-                    row["payload"].setdefault(key, val)
+                    raw_payload.setdefault(key, val)
+                # Validate through Pydantic to ensure Arrow-compatible types.
+                # Without this, None values in old data can create Arrow type
+                # mismatches (e.g. null vs list<string>) that cause Rust panics
+                # during subsequent vector searches.
+                try:
+                    row["payload"] = schema_model.model_validate(raw_payload).model_dump()
+                except Exception:
+                    row["payload"] = raw_payload
             old_rows.append(row)
 
         class MigrationLanceDataPoint(LanceModel):
