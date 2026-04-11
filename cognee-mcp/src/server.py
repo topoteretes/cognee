@@ -971,7 +971,7 @@ async def prune():
 
 
 # ---------------------------------------------------------------------------
-# V2 API tools — session-aware memory operations
+# Session-aware memory operations (remember, recall, forget, improve)
 # ---------------------------------------------------------------------------
 
 

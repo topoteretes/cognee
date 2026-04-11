@@ -344,13 +344,13 @@ class CogneeClient:
         session_id: Optional[str] = None,
         custom_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Store data in memory via V2 remember().
+        """Store data in memory via remember().
 
         With session_id: stores in session cache only (fast).
         Without session_id: full add + cognify pipeline (permanent).
         """
         if self.use_api:
-            endpoint = f"{self.api_url}/api/v2/remember"
+            endpoint = f"{self.api_url}/api/v1/remember"
             files = {"data": ("data.txt", str(data), "text/plain")}
             form_data = {"datasetName": dataset_name}
             if custom_prompt:
@@ -386,9 +386,9 @@ class CogneeClient:
         session_id: Optional[str] = None,
         top_k: int = 10,
     ) -> Any:
-        """Search memory via V2 recall() with auto-routing and session awareness."""
+        """Search memory via recall() with auto-routing and session awareness."""
         if self.use_api:
-            endpoint = f"{self.api_url}/api/v2/recall"
+            endpoint = f"{self.api_url}/api/v1/recall"
             payload = {"query": query_text, "top_k": top_k}
             if search_type:
                 payload["search_type"] = search_type.upper()
@@ -415,9 +415,9 @@ class CogneeClient:
         dataset: Optional[str] = None,
         everything: bool = False,
     ) -> Dict[str, Any]:
-        """Delete data via V2 forget()."""
+        """Delete data via forget()."""
         if self.use_api:
-            endpoint = f"{self.api_url}/api/v2/forget"
+            endpoint = f"{self.api_url}/api/v1/forget"
             payload = {"everything": everything}
             if dataset:
                 payload["dataset"] = dataset
@@ -433,9 +433,9 @@ class CogneeClient:
         dataset_name: str = "main_dataset",
         session_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Enrich knowledge graph and bridge session data via V2 improve()."""
+        """Enrich knowledge graph and bridge session data via improve()."""
         if self.use_api:
-            endpoint = f"{self.api_url}/api/v2/improve"
+            endpoint = f"{self.api_url}/api/v1/improve"
             payload = {"dataset_name": dataset_name}
             if session_ids:
                 payload["session_ids"] = session_ids
