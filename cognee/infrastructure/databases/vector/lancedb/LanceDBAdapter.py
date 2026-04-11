@@ -437,7 +437,13 @@ class LanceDBAdapter(VectorDBInterface):
         if not callable(to_arrow_schema):
             return None
 
-        target_schema = to_arrow_schema()
+        try:
+            target_schema = to_arrow_schema()
+        except TypeError:
+            # Models with complex Union types (e.g. List[Union[Entity, Event,
+            # tuple[Edge, Entity]]]) can't be converted to Arrow. Fall back to
+            # field-name comparison in _is_payload_schema_compatible.
+            return None
         payload_field_index = target_schema.get_field_index("payload")
         if payload_field_index < 0:
             return None
