@@ -250,20 +250,32 @@ class LanceDBAdapter(VectorDBInterface):
         for row in rows:
             if row.get("id") in new_ids:
                 continue
-            if isinstance(row.get("payload"), dict):
-                # Strip payload to only fields in the new schema
-                raw_payload = {k: v for k, v in row["payload"].items() if k in valid_payload_fields}
-                # Fill in defaults for any new fields
-                for key, val in defaults.items():
-                    raw_payload.setdefault(key, val)
-                # Validate through Pydantic to ensure Arrow-compatible types.
-                # Without this, None values in old data can create Arrow type
-                # mismatches (e.g. null vs list<string>) that cause Rust panics
-                # during subsequent vector searches.
-                try:
-                    row["payload"] = schema_model.model_validate(raw_payload).model_dump()
-                except Exception:
-                    row["payload"] = raw_payload
+
+            raw_payload = row.get("payload")
+
+            if raw_payload is None or not isinstance(raw_payload, dict):
+                # Payload is null or non-dict — build an empty payload from
+                # schema defaults. Without this, inserting a null payload into
+                # a non-nullable struct column causes LanceDB Rust to panic:
+                # "Column 'payload' is declared as non-nullable but contains null values"
+                raw_payload = dict(defaults)
+
+            # Strip to only fields in the new schema
+            raw_payload = {k: v for k, v in raw_payload.items() if k in valid_payload_fields}
+
+            # Fill in defaults for any new fields
+            for key, val in defaults.items():
+                raw_payload.setdefault(key, val)
+
+            # Validate through Pydantic to ensure Arrow-compatible types.
+            # Without this, None values in old data can create Arrow type
+            # mismatches (e.g. null vs list<string>) that cause Rust panics
+            # during subsequent vector searches.
+            try:
+                row["payload"] = schema_model.model_validate(raw_payload).model_dump()
+            except Exception:
+                row["payload"] = raw_payload
+
             old_rows.append(row)
 
         class MigrationLanceDataPoint(LanceModel):
