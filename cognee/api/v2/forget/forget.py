@@ -48,7 +48,21 @@ async def forget(
     Returns:
         Dict with deletion summary: items removed, datasets removed.
     """
+    from cognee.shared.utils import send_telemetry
+    from cognee import __version__ as cognee_version
+
     target = "everything" if everything else ("data_item" if data_id else ("dataset" if dataset else "unknown"))
+
+    send_telemetry(
+        "cognee.forget",
+        user if user and hasattr(user, "id") else "sdk",
+        additional_properties={
+            "target": target,
+            "dataset": str(dataset) if dataset else "",
+            "data_id": str(data_id) if data_id else "",
+            "cognee_version": cognee_version,
+        },
+    )
 
     with new_span("cognee.api.forget") as span:
         span.set_attribute(COGNEE_FORGET_TARGET, target)

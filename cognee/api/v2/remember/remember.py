@@ -361,6 +361,9 @@ async def remember(
         # Access raw pipeline result:
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
+    from cognee.shared.utils import send_telemetry
+    from cognee import __version__ as cognee_version
+
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
     mode = "session" if session_id else "permanent"
@@ -372,6 +375,21 @@ async def remember(
         span.set_attribute(COGNEE_DATA_ITEM_COUNT, item_count)
         if session_id:
             span.set_attribute(COGNEE_SESSION_ID, session_id)
+
+        send_telemetry(
+            "cognee.remember",
+            kwargs.get("user", "sdk"),
+            additional_properties={
+                "mode": mode,
+                "dataset_name": dataset_name,
+                "data_size_bytes": data_size,
+                "item_count": item_count,
+                "session_id": session_id or "",
+                "self_improvement": self_improvement,
+                "run_in_background": run_in_background,
+                "cognee_version": cognee_version,
+            },
+        )
 
         return await _remember_inner(
             data, dataset_name,

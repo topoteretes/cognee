@@ -157,10 +157,28 @@ async def recall(
         Search results. When searching session-only, returns a list of
         matching QA entry dicts with ``_source="session"``.
     """
+    from cognee.shared.utils import send_telemetry
+    from cognee import __version__ as cognee_version
+
     session_id = kwargs.get("session_id")
     scope = "session" if (session_id and not datasets and query_type is None) else "graph"
     if session_id and datasets:
         scope = "auto"
+
+    send_telemetry(
+        "cognee.recall",
+        kwargs.get("user", "sdk"),
+        additional_properties={
+            "query_length": len(query_text),
+            "scope": scope,
+            "auto_route": auto_route,
+            "top_k": top_k,
+            "search_type": str(query_type.value) if query_type else "auto",
+            "session_id": session_id or "",
+            "datasets": ",".join(datasets) if datasets else "",
+            "cognee_version": cognee_version,
+        },
+    )
 
     with new_span("cognee.api.recall") as span:
         span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])

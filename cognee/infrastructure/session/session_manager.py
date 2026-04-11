@@ -9,6 +9,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_session_completion_with_optional_summary,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 from cognee.modules.observability import (
     new_span,
     COGNEE_SESSION_ID,
@@ -109,6 +110,17 @@ class SessionManager:
         with new_span("cognee.session.add_qa") as span:
             span.set_attribute(COGNEE_SESSION_ID, session_id)
             span.set_attribute(COGNEE_DATA_SIZE_BYTES, data_size)
+
+            send_telemetry(
+                "cognee.session.add_qa",
+                user_id,
+                additional_properties={
+                    "session_id": session_id,
+                    "data_size_bytes": data_size,
+                    "has_feedback": feedback_score is not None,
+                    "has_graph_elements": used_graph_element_ids is not None,
+                },
+            )
 
             qa_id = str(uuid.uuid4())
             await self._cache.create_qa_entry(

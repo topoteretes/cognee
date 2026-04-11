@@ -83,7 +83,22 @@ async def improve(
         # Enrich graph only (no session bridging)
         await cognee.improve(dataset="docs")
     """
+    from cognee.shared.utils import send_telemetry
+    from cognee import __version__ as cognee_version
+
     stages_run = []
+
+    send_telemetry(
+        "cognee.improve",
+        kwargs.get("user", "sdk"),
+        additional_properties={
+            "dataset": str(dataset),
+            "session_count": len(session_ids) if session_ids else 0,
+            "session_ids": ",".join(session_ids) if session_ids else "",
+            "run_in_background": run_in_background,
+            "cognee_version": cognee_version,
+        },
+    )
 
     with new_span("cognee.api.improve") as span:
         span.set_attribute(COGNEE_DATASET_NAME, str(dataset))
