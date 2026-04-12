@@ -1,6 +1,6 @@
 """Tests for the rule-based query router."""
 
-from cognee.api.v2.recall.query_router import route_query, record_override, override_counts
+from cognee.api.v1.recall.query_router import route_query, record_override, override_counts
 from cognee.modules.search.types import SearchType
 
 

@@ -96,8 +96,8 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
 
           <div style={{ height: 1, background: "#EEEEEE", margin: "2px -6px" }} />
 
-          {/* Log out */}
-          <Link
+          {/* Log out — use <a> instead of <Link> to trigger a full page navigation to the API route */}
+          <a
             href={logoutHref}
             onClick={close}
             className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] hover:bg-cognee-hover"
@@ -105,7 +105,7 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
           >
             <LogoutIcon />
             Log out
-          </Link>
+          </a>
         </div>
       )}
     </div>

@@ -40,6 +40,18 @@ def create_graph_engine(
     Wrapper function to call create graph engine with caching.
     For a detailed description, see _create_graph_engine.
     """
+    # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
+    import os
+
+    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified_provider == "pghybrid":
+        from .postgres.adapter import PostgresAdapter
+        from cognee.infrastructure.databases.relational.get_relational_engine import (
+            get_relational_engine,
+        )
+
+        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+
     return _create_graph_engine(
         graph_database_provider,
         graph_file_path,
@@ -121,6 +133,14 @@ def _create_graph_engine(
             graph_database_allow_anonymous=graph_database_allow_anonymous,
         )
 
+    elif graph_database_provider == "postgres":
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Postgres GRAPH_DATABASE_URL.")
+
+        from .postgres.adapter import PostgresAdapter
+
+        return PostgresAdapter(connection_string=graph_database_url)
+
     elif graph_database_provider == "kuzu":
         if not graph_file_path:
             raise EnvironmentError("Missing required Kuzu database path.")
@@ -197,7 +217,15 @@ def _create_graph_engine(
             graph_id=graph_identifier,
         )
 
+    all_providers = list(supported_databases.keys()) + [
+        "neo4j",
+        "kuzu",
+        "kuzu-remote",
+        "postgres",
+        "neptune",
+        "neptune_analytics",
+    ]
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(all_providers)}"
     )

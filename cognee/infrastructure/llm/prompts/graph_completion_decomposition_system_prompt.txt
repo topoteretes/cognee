@@ -1,0 +1,10 @@
+Decompose the user's question into 1 to 5 focused retrieval subqueries.
+
+Rules:
+- Return only subqueries that help retrieve graph context for the original question.
+- Preserve the original order of reasoning from broadest to most specific when possible.
+- Keep each subquery concise and self-contained.
+- Do not answer the question.
+- Do not include explanations or metadata.
+- Avoid duplicates or near-duplicates.
+- If the original question is already focused, return it as a single subquery.

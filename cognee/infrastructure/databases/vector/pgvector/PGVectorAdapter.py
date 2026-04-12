@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy import exc
 from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
@@ -48,6 +49,8 @@ class IndexSchema(DataPoint):
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
+    name = "PGVector"
+
     def __init__(
         self,
         connection_string: str,
@@ -58,6 +61,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
         self.VECTOR_DB_LOCK = asyncio.Lock()
+        self._metadata = MetaData()
 
         relational_db = get_relational_engine()
 
@@ -113,16 +117,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
             - bool: Returns True if the collection exists, False otherwise.
         """
-        async with self.engine.begin() as connection:
-            # Create a MetaData instance to load table information
-            metadata = MetaData()
-            # Load table information from schema into MetaData
-            await connection.run_sync(metadata.reflect)
+        if collection_name in self._metadata.tables:
+            return True
 
-            if collection_name in metadata.tables:
-                return True
-            else:
-                return False
+        try:
+            async with self.engine.begin() as connection:
+                await connection.run_sync(self._metadata.reflect, only=[collection_name])
+        except exc.InvalidRequestError:
+            return False
+
+        return collection_name in self._metadata.tables
 
     @retry(
         retry=retry_if_exception_type(
@@ -170,6 +174,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         if len(Base.metadata.tables.keys()) > 0:
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
+                            )
+                            await connection.run_sync(
+                                self._metadata.reflect, only=[collection_name]
                             )
 
     @retry(
@@ -278,17 +285,23 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         Dynamically loads a table using the given collection name
         with an async engine.
         """
-        async with self.engine.begin() as connection:
-            # Create a MetaData instance to load table information
-            metadata = MetaData()
-            # Load table information from schema into MetaData
-            await connection.run_sync(metadata.reflect)
-            if collection_name in metadata.tables:
-                return metadata.tables[collection_name]
-            else:
-                raise CollectionNotFoundError(
-                    f"Collection '{collection_name}' not found!",
-                )
+        if collection_name in self._metadata.tables:
+            return self._metadata.tables[collection_name]
+
+        try:
+            async with self.engine.begin() as connection:
+                await connection.run_sync(self._metadata.reflect, only=[collection_name])
+        except exc.InvalidRequestError:
+            raise CollectionNotFoundError(
+                f"Collection '{collection_name}' not found!",
+            )
+
+        if collection_name in self._metadata.tables:
+            return self._metadata.tables[collection_name]
+
+        raise CollectionNotFoundError(
+            f"Collection '{collection_name}' not found!",
+        )
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         # Get PGVectorDataPoint Table from database
@@ -455,5 +468,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return results
 
     async def prune(self):
-        # Clean up the database if it was set up as temporary
+        self._metadata.clear()
         await self.delete_database()
+
+    async def run_migrations(self):
+        """Run PGVector adapter migrations (currently no-op)."""
+        return None
