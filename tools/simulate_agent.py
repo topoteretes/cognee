@@ -13,6 +13,7 @@ import uuid
 
 import requests
 
+
 def main():
     parser = argparse.ArgumentParser(description="Simulate an agent connecting to Cognee")
     parser.add_argument("--type", required=True, help="Agent type name (e.g. SecFilingAgent)")
@@ -37,11 +38,14 @@ def main():
 
     # 1. Register
     print("[1/6] Registering agent...")
-    r = requests.post(f"{base}/api/v1/auth/register", json={
-        "email": email,
-        "password": password,
-        "is_verified": True,
-    })
+    r = requests.post(
+        f"{base}/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": password,
+            "is_verified": True,
+        },
+    )
     if r.status_code == 201 or r.status_code == 200:
         user_data = r.json()
         print(f"  Registered: {user_data.get('id', 'ok')}")
@@ -53,10 +57,14 @@ def main():
 
     # 2. Login
     print("[2/6] Logging in...")
-    r = requests.post(f"{base}/api/v1/auth/login", data={
-        "username": email,
-        "password": password,
-    }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    r = requests.post(
+        f"{base}/api/v1/auth/login",
+        data={
+            "username": email,
+            "password": password,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
     if r.status_code != 200:
         print(f"  Login failed: {r.status_code} {r.text}")
         sys.exit(1)
@@ -67,9 +75,13 @@ def main():
 
     # 3. Create API key
     print("[3/6] Creating API key...")
-    r = requests.post(f"{base}/api/v1/auth/api-keys", headers=auth, json={
-        "name": f"{args.type}-{short_id}",
-    })
+    r = requests.post(
+        f"{base}/api/v1/auth/api-keys",
+        headers=auth,
+        json={
+            "name": f"{args.type}-{short_id}",
+        },
+    )
     if r.status_code in (200, 201):
         key_data = r.json()
         api_key = key_data.get("key") or key_data.get("api_key", "")
@@ -86,14 +98,23 @@ def main():
         print(f"[4/6] Adding data to dataset '{dataset_name}'...")
         if args.data_file:
             with open(args.data_file, "rb") as f:
-                r = requests.post(f"{base}/api/v1/add", headers=api_auth, files={
-                    "data": (args.data_file.split("/")[-1], f),
-                }, data={"datasetName": dataset_name})
+                r = requests.post(
+                    f"{base}/api/v1/add",
+                    headers=api_auth,
+                    files={
+                        "data": (args.data_file.split("/")[-1], f),
+                    },
+                    data={"datasetName": dataset_name},
+                )
         else:
-            r = requests.post(f"{base}/api/v1/add", headers={**api_auth, "Content-Type": "application/json"}, json={
-                "textData": [args.data_text],
-                "datasetName": dataset_name,
-            })
+            r = requests.post(
+                f"{base}/api/v1/add",
+                headers={**api_auth, "Content-Type": "application/json"},
+                json={
+                    "textData": [args.data_text],
+                    "datasetName": dataset_name,
+                },
+            )
         if r.status_code == 200:
             info = r.json()
             print(f"  Added: dataset_id={info.get('dataset_id', 'ok')}")
@@ -105,12 +126,16 @@ def main():
     # 5. Cognify
     if args.cognify:
         print(f"[5/6] Cognifying dataset '{dataset_name}'...")
-        r = requests.post(f"{base}/api/v1/cognify", headers={**api_auth, "Content-Type": "application/json"}, json={
-            "datasets": [dataset_name],
-            "runInBackground": False,
-        })
+        r = requests.post(
+            f"{base}/api/v1/cognify",
+            headers={**api_auth, "Content-Type": "application/json"},
+            json={
+                "datasets": [dataset_name],
+                "runInBackground": False,
+            },
+        )
         if r.status_code == 200:
-            print(f"  Cognify complete.")
+            print("  Cognify complete.")
         else:
             print(f"  Failed: {r.status_code} {r.text[:200]}")
     else:
@@ -119,14 +144,18 @@ def main():
     # 6. Search
     if args.search:
         print(f'[6/6] Searching: "{args.search}"...')
-        r = requests.post(f"{base}/api/v1/search", headers={**api_auth, "Content-Type": "application/json"}, json={
-            "query": args.search,
-            "searchType": "GRAPH_COMPLETION",
-            "datasets": [dataset_name],
-        })
+        r = requests.post(
+            f"{base}/api/v1/search",
+            headers={**api_auth, "Content-Type": "application/json"},
+            json={
+                "query": args.search,
+                "searchType": "GRAPH_COMPLETION",
+                "datasets": [dataset_name],
+            },
+        )
         if r.status_code == 200:
             results = r.json()
-            for item in (results if isinstance(results, list) else []):
+            for item in results if isinstance(results, list) else []:
                 for text in item.get("search_result", []):
                     print(f"  → {text}")
         else:
@@ -136,7 +165,8 @@ def main():
 
     print()
     print(f"Agent '{args.type}-{short_id}' connected successfully.")
-    print(f"Check the UI at http://localhost:3000/connections")
+    print("Check the UI at http://localhost:3000/connections")
+
 
 if __name__ == "__main__":
     main()
