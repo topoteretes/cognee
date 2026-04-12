@@ -1,11 +1,12 @@
 import logging
-from uuid import UUID, uuid4
+from uuid import UUID, NAMESPACE_OID, uuid4, uuid5
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from typing_extensions import NotRequired, TypedDict
 
+from cognee.infrastructure.engine.models.FieldAnnotations import _Embeddable, _Dedup
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ class DataPoint(BaseModel):
     source_task: Optional[str] = None
     source_node_set: Optional[str] = None
     source_user: Optional[str] = None
+    source_content_hash: Optional[str] = None
     feedback_weight: float = 0.5
     importance_weight: Optional[float] = 0.5
 
@@ -99,29 +101,65 @@ class DataPoint(BaseModel):
             return identity
         return None
 
-    @staticmethod
+    @classmethod
     def _generate_identity_id(
-        identity_fields: list[str], data: dict, class_name: str
+        cls, identity_fields: list[str], data: dict, class_name: str
     ) -> Optional[UUID]:
         """Generate a deterministic UUID5 from identity field values.
 
-        Returns None if any identity field is missing from data,
-        causing fallback to the default UUID4.
+        Returns None if any identity field is missing from both data
+        and Pydantic field defaults, causing fallback to the default UUID4.
         """
         parts = []
         for field_name in identity_fields:
-            if field_name not in data:
-                logger.warning(
-                    "identity_fields references missing field '%s' on %s; falling back to UUID4",
-                    field_name,
-                    class_name,
-                )
-                return None
-            value = data[field_name]
-            parts.append(str(value) if not isinstance(value, str) else value)
+            if field_name in data:
+                value = data[field_name]
+            else:
+                # Check Pydantic field default
+                field_info = cls.model_fields.get(field_name)
+                if field_info is not None and field_info.default is not None:
+                    value = field_info.default
+                else:
+                    return None
+            if isinstance(value, str):
+                value = value.lower().replace(" ", "_").replace("'", "")
+            else:
+                value = str(value)
+            parts.append(value)
         joined = "|".join(parts)
         identity_string = f"{class_name}:{joined}"
-        return generate_node_id(identity_string)
+        return uuid5(NAMESPACE_OID, identity_string)
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs):
+        """Auto-derive metadata index_fields and identity_fields from Annotated markers.
+
+        If a subclass uses Annotated[str, Embeddable()] or Annotated[str, Dedup()]
+        on its fields, and does NOT explicitly set metadata, the metadata default
+        is automatically populated from those annotations.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+
+        # Only auto-derive if the subclass didn't explicitly declare metadata
+        if "metadata" in cls.__annotations__:
+            return
+
+        embeddable_fields = []
+        dedup_fields = []
+
+        for field_name, field_info in cls.model_fields.items():
+            if field_info.metadata:
+                for meta in field_info.metadata:
+                    if isinstance(meta, _Embeddable):
+                        embeddable_fields.append(field_name)
+                    if isinstance(meta, _Dedup):
+                        dedup_fields.append(field_name)
+
+        if embeddable_fields or dedup_fields:
+            new_metadata = {"index_fields": embeddable_fields}
+            if dedup_fields:
+                new_metadata["identity_fields"] = dedup_fields
+            cls.model_fields["metadata"].default = new_metadata
 
     @classmethod
     def get_embeddable_data(self, data_point: "DataPoint"):

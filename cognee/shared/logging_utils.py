@@ -8,55 +8,74 @@ import traceback
 import platform
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 import importlib.metadata
 
-from cognee import __version__ as cognee_version
-from typing import Protocol
+
+def _get_cognee_version() -> str:
+    """Get version without importing cognee (avoids triggering __init__.py)."""
+    import importlib.metadata as _meta
+    from contextlib import suppress
+
+    with suppress(FileNotFoundError, StopIteration):
+        _pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
+        with open(_pyproject, encoding="utf-8") as f:
+            _ver = (
+                next(line for line in f if line.startswith("version")).split("=")[1].strip("'\"\n ")
+            )
+            return f"{_ver}-local"
+    try:
+        return _meta.version("cognee")
+    except _meta.PackageNotFoundError:
+        return "unknown"
+
+
+cognee_version = _get_cognee_version()
 
 
 # Configure external library logging
 def configure_external_library_logging():
-    """Configure logging for external libraries to reduce verbosity"""
-    # Set environment variables to suppress LiteLLM logging
+    """Configure logging for external libraries to reduce verbosity.
+
+    Sets env vars eagerly (cheap) but only configures litellm's Python
+    objects if litellm is already imported. If not, the env vars are
+    enough — litellm reads them on its own import.
+    """
+    # Set environment variables to suppress LiteLLM logging.
+    # litellm reads these on import, so setting them early is sufficient
+    # even if litellm hasn't been imported yet.
     os.environ.setdefault("LITELLM_LOG", "ERROR")
     os.environ.setdefault("LITELLM_SET_VERBOSE", "False")
 
-    # Configure LiteLLM logging to reduce verbosity
-    try:
-        import litellm
+    # Suppress loggers by name (works even before litellm is imported —
+    # Python's logging module pre-creates the logger objects).
+    loggers_to_suppress = [
+        "litellm",
+        "litellm.litellm_core_utils.logging_worker",
+        "litellm.litellm_core_utils",
+        "litellm.proxy",
+        "litellm.router",
+        "openai._base_client",
+        "LiteLLM",
+        "LiteLLM.core",
+        "LiteLLM.logging_worker",
+        "litellm.logging_worker",
+    ]
+    for logger_name in loggers_to_suppress:
+        logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+        logging.getLogger(logger_name).disabled = True
 
-        # Disable verbose logging
+    # Only touch litellm's module-level flags if it's already imported.
+    # This avoids a ~900ms cold import just to set verbose=False.
+    litellm = sys.modules.get("litellm")
+    if litellm is not None:
         litellm.set_verbose = False
-
-        # Set additional LiteLLM configuration
         if hasattr(litellm, "suppress_debug_info"):
             litellm.suppress_debug_info = True
         if hasattr(litellm, "turn_off_message"):
             litellm.turn_off_message = True
         if hasattr(litellm, "_turn_on_debug"):
             litellm._turn_on_debug = False
-
-        # Comprehensive logger suppression
-        loggers_to_suppress = [
-            "litellm",
-            "litellm.litellm_core_utils.logging_worker",
-            "litellm.litellm_core_utils",
-            "litellm.proxy",
-            "litellm.router",
-            "openai._base_client",
-            "LiteLLM",  # Capital case variant
-            "LiteLLM.core",
-            "LiteLLM.logging_worker",
-            "litellm.logging_worker",
-        ]
-
-        for logger_name in loggers_to_suppress:
-            logging.getLogger(logger_name).setLevel(logging.CRITICAL)
-            logging.getLogger(logger_name).disabled = True
-
-    except ImportError:
-        # LiteLLM not available, skip configuration
-        pass
 
 
 # Export common log levels
@@ -536,34 +555,39 @@ def setup_logging(log_level=None, name=None):
     # Mark logging as configured
     _is_structlog_configured = True
 
-    from cognee.infrastructure.databases.relational.config import get_relational_config
-    from cognee.infrastructure.databases.vector.config import get_vectordb_config
-    from cognee.infrastructure.databases.graph.config import get_graph_config
-
-    graph_config = get_graph_config()
-    vector_config = get_vectordb_config()
-    relational_config = get_relational_config()
-
-    try:
-        # Get base database directory path
-        from cognee.base_config import get_base_config
-
-        base_config = get_base_config()
-        databases_path = os.path.join(base_config.system_root_directory, "databases")
-    except Exception as e:
-        raise ValueError from e
-
-    # Get a configured logger and log system information
+    # Get a configured logger
     logger = structlog.get_logger(name if name else __name__)
-
-    logger.warning(
-        "From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on won't be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation."
-    )
 
     if log_file_path is not None:
         logger.info(f"Log file created at: {log_file_path}", log_file=log_file_path)
 
-    # Detailed initialization for regular usage
+    # Defer heavy database config logging to first actual pipeline use.
+    # Importing graph/vector/relational configs triggers litellm (~900ms)
+    # and other heavy dependencies. Log basic info now, details later.
+    _log_deferred_info(logger)
+
+    return logger
+
+
+def _log_deferred_info(logger):
+    """Log lightweight startup info. Heavy DB config is logged on first pipeline call."""
+    logger.warning(
+        "Cognee 1.0 changes: "
+        "New API — remember/recall/forget/improve (V1 add/cognify/search still work). "
+        "Session memory enabled by default (CACHING=false to disable). "
+        "Multi-user access control on by default (ENABLE_BACKEND_ACCESS_CONTROL=false to disable). "
+        "Agents (@cognee.agent) auto-verified on registration. "
+        "See https://docs.cognee.ai/"
+    )
+
+    try:
+        from cognee.base_config import get_base_config
+
+        base_config = get_base_config()
+        databases_path = os.path.join(base_config.system_root_directory, "databases")
+    except Exception:
+        databases_path = "unknown"
+
     logger.info(
         "Logging initialized",
         python_version=PYTHON_VERSION,
@@ -571,16 +595,9 @@ def setup_logging(log_level=None, name=None):
         cognee_version=COGNEE_VERSION,
         os_info=OS_INFO,
         database_path=databases_path,
-        graph_database_name=graph_config.graph_database_name,
-        vector_config=vector_config.vector_db_provider,
-        relational_config=relational_config.db_name,
     )
 
-    # Log database configuration
-    log_database_configuration(logger)
-
-    # Return the configured logger
-    return logger
+    logger.info(f"Database storage: {databases_path}")
 
 
 def get_log_file_location():
