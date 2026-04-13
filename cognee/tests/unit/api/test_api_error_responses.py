@@ -179,6 +179,33 @@ class TestCognifyEndpoint:
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
 
+    def test_cognify_accepts_single_dataset_string(self, client):
+        import cognee.api.v1.cognify as cognify_pkg
+
+        completed = _make_completed()
+        cognify_pkg.cognify = AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+
+        resp = client.post(
+            "/cognify",
+            json={"datasets": "test_dataset"},
+        )
+        assert resp.status_code == 200
+        call_args = cognify_pkg.cognify.call_args
+        datasets_arg = call_args.args[0] if call_args.args else call_args.kwargs.get("datasets")
+        assert datasets_arg == ["test_dataset"]
+
+    def test_cognify_accepts_single_dataset_id(self, client):
+        import cognee.api.v1.cognify as cognify_pkg
+
+        completed = _make_completed()
+        cognify_pkg.cognify = AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+
+        resp = client.post(
+            "/cognify",
+            json={"dataset_ids": str(MOCK_DATASET_ID)},
+        )
+        assert resp.status_code == 200
+
 
 # ---------------------------------------------------------------------------
 # Search endpoint
@@ -238,6 +265,32 @@ class TestSearchEndpoint:
         )
         assert resp.status_code == 500
         assert resp.json()["error"] == "Internal server error"
+
+    def test_search_accepts_single_dataset_string(self, client):
+        import cognee.api.v1.search as search_pkg
+
+        search_pkg.search = AsyncMock(return_value=[])
+
+        resp = client.post(
+            "/search",
+            json={"query": "What is Cognee?", "datasets": "test_dataset"},
+        )
+        assert resp.status_code == 200
+        call_kwargs = search_pkg.search.call_args.kwargs
+        assert call_kwargs["datasets"] == ["test_dataset"]
+
+    def test_search_accepts_single_dataset_id(self, client):
+        import cognee.api.v1.search as search_pkg
+
+        search_pkg.search = AsyncMock(return_value=[])
+
+        resp = client.post(
+            "/search",
+            json={"query": "What is Cognee?", "dataset_ids": str(MOCK_DATASET_ID)},
+        )
+        assert resp.status_code == 200
+        call_kwargs = search_pkg.search.call_args.kwargs
+        assert call_kwargs["dataset_ids"] == [MOCK_DATASET_ID]
 
 
 # ---------------------------------------------------------------------------
