@@ -167,9 +167,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         self.embed_text(original_texts[mid:]),
                     )
                     embeddings = left_vecs + right_vecs
-                    return handle_embedding_response(
-                        original_texts, embeddings, self.dimensions
-                    )
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
                 if isinstance(original_texts, list) and len(original_texts) == 1:
                     s = original_texts[0]
@@ -185,9 +183,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     )
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
-                    return handle_embedding_response(
-                        original_texts, embeddings, self.dimensions
-                    )
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
             if isinstance(error, asyncio.TimeoutError):
                 logger.error(

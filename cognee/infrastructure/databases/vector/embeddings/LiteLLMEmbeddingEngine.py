@@ -108,129 +108,132 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:  
-        """  
-        Embed a list of text strings into vector representations.  
-  
-        If the input exceeds the model's context window, the method will recursively split the  
-        input and combine the results. It handles both mock and live embedding scenarios,  
-        logging errors for any encountered exceptions, and raising specific exceptions for  
-        context window issues and embedding failures.  
-  
-        Parameters:  
-        -----------  
-  
-            - text (List[str]): A list of strings to be embedded.  
-  
-        Returns:  
-        --------  
-  
-            - List[List[float]]: A list of vectors representing the embedded texts.  
-        """  
-        original_texts = text if isinstance(text, list) else [text]  
-        sanitized_text = sanitize_embedding_text_inputs(original_texts)  
-  
-        try:  
-            if self.mock:  
-                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text]}  
-                embeddings = [data["embedding"] for data in response["data"]]  
-            else:  
-                async with embedding_rate_limiter_context_manager():  
-                    embedding_kwargs = {  
-                        "model": self.model,  
-                        "input": sanitized_text,  
-                        "api_key": self.api_key,  
-                        "api_base": self.endpoint,  
-                        "api_version": self.api_version,  
-                    }  
-                    # Pass through target embedding dimensions when supported  
-                    if self.dimensions is not None:  
-                        embedding_kwargs["dimensions"] = self.dimensions  
-  
-                    # Ensure each attempt does not hang indefinitely  
-                    response = await asyncio.wait_for(  
-                        litellm.aembedding(**embedding_kwargs),  
-                        timeout=30.0,  
-                    )  
-  
-                embeddings = [data["embedding"] for data in response.data]  
-  
-        except litellm.exceptions.ContextWindowExceededError as error:  
-            # Use shared context window handler  
-            from .context_window_handler import handle_context_window_exceeded  
-            embeddings = await handle_context_window_exceeded(  
-                self._do_raw_embedding, sanitized_text  
-            )  
-  
-        except asyncio.TimeoutError as e:  
-            # Per-attempt timeout – likely an unreachable endpoint  
-            logger.error(  
-                "Embedding endpoint timed out. EMBEDDING_ENDPOINT='%s'. "  
-                "Verify that the endpoint is reachable and correct.",  
-                str(self.endpoint),  
-            )  
-            raise EmbeddingException(  
-                "Embedding request timed out. Check EMBEDDING_ENDPOINT connectivity."  
-            ) from e  
-  
-        except (httpx.ConnectError, httpx.ReadTimeout) as e:  
-            logger.error(  
-                "Failed to connect to embedding endpoint. EMBEDDING_ENDPOINT='%s'. "  
-                "Ensure the URL is correct and the server is running.",  
-                str(self.endpoint),  
-            )  
-            raise EmbeddingException(  
-                "Cannot connect to embedding endpoint. Check EMBEDDING_ENDPOINT."  
-            ) from e  
-  
-        except (  
-            litellm.exceptions.BadRequestError,  
-            litellm.exceptions.NotFoundError,  
-        ) as e:  
-            logger.error(f"Embedding error with model {self.model}: {str(e)}")  
-            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e  
-  
-        except Exception as error:  
-            # Fall back to a clear, actionable message for connectivity/misconfiguration issues  
-            logger.error(  
-                "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",  
-                str(error),  
-                str(self.endpoint),  
-            )  
-            raise EmbeddingException(  
-                "Embedding failed due to an unexpected error. Verify EMBEDDING_ENDPOINT and provider settings."  
-            ) from error 
+    async def embed_text(self, text: List[str]) -> List[List[float]]:
+        """
+        Embed a list of text strings into vector representations.
+
+        If the input exceeds the model's context window, the method will recursively split the
+        input and combine the results. It handles both mock and live embedding scenarios,
+        logging errors for any encountered exceptions, and raising specific exceptions for
+        context window issues and embedding failures.
+
+        Parameters:
+        -----------
+
+            - text (List[str]): A list of strings to be embedded.
+
+        Returns:
+        --------
+
+            - List[List[float]]: A list of vectors representing the embedded texts.
+        """
+        original_texts = text if isinstance(text, list) else [text]
+        sanitized_text = sanitize_embedding_text_inputs(original_texts)
+
+        try:
+            if self.mock:
+                response = {
+                    "data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text]
+                }
+                embeddings = [data["embedding"] for data in response["data"]]
+            else:
+                async with embedding_rate_limiter_context_manager():
+                    embedding_kwargs = {
+                        "model": self.model,
+                        "input": sanitized_text,
+                        "api_key": self.api_key,
+                        "api_base": self.endpoint,
+                        "api_version": self.api_version,
+                    }
+                    # Pass through target embedding dimensions when supported
+                    if self.dimensions is not None:
+                        embedding_kwargs["dimensions"] = self.dimensions
+
+                    # Ensure each attempt does not hang indefinitely
+                    response = await asyncio.wait_for(
+                        litellm.aembedding(**embedding_kwargs),
+                        timeout=30.0,
+                    )
+
+                embeddings = [data["embedding"] for data in response.data]
+
+        except litellm.exceptions.ContextWindowExceededError:
+            # Use shared context window handler
+            from .context_window_handler import handle_context_window_exceeded
+
+            embeddings = await handle_context_window_exceeded(
+                self._do_raw_embedding, sanitized_text
+            )
+
+        except asyncio.TimeoutError as e:
+            # Per-attempt timeout – likely an unreachable endpoint
+            logger.error(
+                "Embedding endpoint timed out. EMBEDDING_ENDPOINT='%s'. "
+                "Verify that the endpoint is reachable and correct.",
+                str(self.endpoint),
+            )
+            raise EmbeddingException(
+                "Embedding request timed out. Check EMBEDDING_ENDPOINT connectivity."
+            ) from e
+
+        except (httpx.ConnectError, httpx.ReadTimeout) as e:
+            logger.error(
+                "Failed to connect to embedding endpoint. EMBEDDING_ENDPOINT='%s'. "
+                "Ensure the URL is correct and the server is running.",
+                str(self.endpoint),
+            )
+            raise EmbeddingException(
+                "Cannot connect to embedding endpoint. Check EMBEDDING_ENDPOINT."
+            ) from e
+
+        except (
+            litellm.exceptions.BadRequestError,
+            litellm.exceptions.NotFoundError,
+        ) as e:
+            logger.error(f"Embedding error with model {self.model}: {str(e)}")
+            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
+
+        except Exception as error:
+            # Fall back to a clear, actionable message for connectivity/misconfiguration issues
+            logger.error(
+                "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",
+                str(error),
+                str(self.endpoint),
+            )
+            raise EmbeddingException(
+                "Embedding failed due to an unexpected error. Verify EMBEDDING_ENDPOINT and provider settings."
+            ) from error
 
         return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
-    async def _do_raw_embedding(self, text: List[str]) -> List[List[float]]:  
-        """  
-        Perform raw embedding without context window handling.  
-        This is called by the shared context window handler.  
-        """  
-        text_list = text if isinstance(text, list) else [text]  
-        sanitized_text = sanitize_embedding_text_inputs(text_list)  
-  
-        if self.mock:  
-            response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text]}  
-            return [data["embedding"] for data in response["data"]]  
-          
-        async with embedding_rate_limiter_context_manager():  
-            embedding_kwargs = {  
-                "model": self.model,  
-                "input": sanitized_text,  
-                "api_key": self.api_key,  
-                "api_base": self.endpoint,  
-                "api_version": self.api_version,  
-            }  
-            if self.dimensions is not None:  
-                embedding_kwargs["dimensions"] = self.dimensions  
-  
-            response = await asyncio.wait_for(  
-                litellm.aembedding(**embedding_kwargs),  
-                timeout=30.0,  
-            )  
-          
+    async def _do_raw_embedding(self, text: List[str]) -> List[List[float]]:
+        """
+        Perform raw embedding without context window handling.
+        This is called by the shared context window handler.
+        """
+        text_list = text if isinstance(text, list) else [text]
+        sanitized_text = sanitize_embedding_text_inputs(text_list)
+
+        if self.mock:
+            response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text]}
+            return [data["embedding"] for data in response["data"]]
+
+        async with embedding_rate_limiter_context_manager():
+            embedding_kwargs = {
+                "model": self.model,
+                "input": sanitized_text,
+                "api_key": self.api_key,
+                "api_base": self.endpoint,
+                "api_version": self.api_version,
+            }
+            if self.dimensions is not None:
+                embedding_kwargs["dimensions"] = self.dimensions
+
+            response = await asyncio.wait_for(
+                litellm.aembedding(**embedding_kwargs),
+                timeout=30.0,
+            )
+
         return [data["embedding"] for data in response.data]
 
     def get_vector_size(self) -> int:
