@@ -76,12 +76,13 @@ def upgrade() -> None:
 
         result = conn.execute(sa.text("PRAGMA index_list('tenants')"))
         rows = result.fetchall()
-        unique_auto_indexes = [row for row in rows if row[3] == "u"]
+        # Check if there's a unique index on the name column. If third element in row is 1, it's a unique index
+        unique_auto_indexes = [row for row in rows if row[2] == 1]
         for row in unique_auto_indexes:
             result = conn.execute(sa.text(f"PRAGMA index_info('{row[1]}')"))
             index_info = result.fetchall()
-            if index_info[0][2] == "tenant_name":
-                # In case a unique index exists on vector_database_name, drop it and the graph_database_name one
+            if index_info[0][2] == "name":
+                # In case a unique index exists on tenant name remove uniqueness
                 _recreate_tenants_table_sqlite(unique_name=False)
         return
 
