@@ -34,10 +34,13 @@ class CypherSearchRetriever(BaseRetriever):
         try:
             graph_engine = await get_graph_engine()
 
-            # Postgres backend does not support raw Cypher queries
+            # Postgres backends do not support raw Cypher queries
             from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+            from cognee.infrastructure.databases.hybrid.postgres.adapter import (
+                PostgresHybridAdapter,
+            )
 
-            if isinstance(graph_engine, PostgresAdapter):
+            if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
                 raise SearchTypeNotSupported(
                     "Cypher search is not supported with the Postgres graph backend. "
                     "Use a graph-native backend (Neo4j, Kuzu) for raw Cypher queries."

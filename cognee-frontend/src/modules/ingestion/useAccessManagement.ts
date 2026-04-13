@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { CogneeInstance } from '@/modules/instances/types';
 import fetchTenants from '../users/fetchTenants';
 import fetchUsers from '../users/fetchUsers';
+import addUserToTenant from '../users/addUserToTenant';
 
 interface Tenant {
   id: string;
@@ -25,11 +26,7 @@ const useAccessManagement = (cogniInstance?: CogneeInstance | null) => {
     const [tenants, setTenants] = useState<Tenant[]>([{id: '1', name: "Cognee's organization"}])
 
     const allManagedUsers = useRef<ManagedUser[]>([])
-    const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([
-        {id: '1', email: 'john.doe@unknown.com', roles: [{id: '1', name: 'Admin'}]},
-        {id: '2', email: 'jane.smith@unknown.com', roles: [{id: '1', name: 'Admin'}]},
-        {id: '3', email: 'bob.ross@art.com', roles: [{id: '1', name: 'Admin'}]}
-    ]);
+    const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
 
     const getTenants = useCallback(() => {
         return fetchTenants().then((response) => {
@@ -41,23 +38,27 @@ const useAccessManagement = (cogniInstance?: CogneeInstance | null) => {
         }).catch((error) => {
             console.error("Error fetching tenants: ", error.detail || error.message);
             throw error;
-        });;
+        });
     }, []);
 
     const getManagedUsers = useCallback((tenantId: string) => {
-        if (!cogniInstance) return Promise.resolve([]);
+        return fetchUsers(tenantId).then((response) => {
+            const users = Array.isArray(response) ? response : [];
+            allManagedUsers.current = users;
+            setManagedUsers(users);
+            return users;
+        }).catch(() => {
+            // Gracefully handle 403 etc. (e.g. guest on another tenant)
+            setManagedUsers([]);
+            return [];
+        });
+    }, []);
 
-        return fetchUsers(tenantId, cogniInstance).then((response) => {
-            allManagedUsers.current = response;
-            setManagedUsers(response);
-            return response;
-        }).catch((error) => {
-            console.error("Error fetching users: ", error.detail || error.message);
-            throw error;
-        });;
-    }, [cogniInstance]);
+    const addUser = useCallback((email: string, tenantId: string) => {
+        return addUserToTenant(email, tenantId).catch(() => {});
+    }, []);
 
-  return { tenantId, tenants, managedUsers, getTenants, getManagedUsers };
+  return { tenantId, tenants, managedUsers, getTenants, getManagedUsers, addUser };
 };
 
 export default useAccessManagement;
