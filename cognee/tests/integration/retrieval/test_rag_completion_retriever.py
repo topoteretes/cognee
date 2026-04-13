@@ -285,7 +285,6 @@ async def test_rag_completion_context_multiple_chunks(setup_test_environment_wit
 @pytest.mark.asyncio
 async def test_rag_completion_context_complex(setup_test_environment_with_chunks_complex):
     """Integration test: verify CompletionRetriever can retrieve context (complex)."""
-    # TODO: top_k doesn't affect the output, it should be fixed.
     retriever = CompletionRetriever(top_k=20)
     query = "Christina"
 
@@ -295,7 +294,22 @@ async def test_rag_completion_context_complex(setup_test_environment_with_chunks
         query=query, retrieved_objects=retrieved_objects
     )
 
+    assert len(retrieved_objects) <= 20, "Retrieved objects should be limited by top_k"
     assert context[0:15] == "Christina Mayer", "Failed to get Christina Mayer"
+
+
+@pytest.mark.asyncio
+async def test_rag_completion_context_top_k_limits_results(setup_test_environment_with_chunks_complex):
+    """Integration test: verify top_k parameter limits the number of retrieved chunks."""
+    top_k = 2
+    retriever = CompletionRetriever(top_k=top_k)
+    query = "Christina"
+
+    retrieved_objects = await retriever.get_retrieved_objects(query)
+
+    assert len(retrieved_objects) <= top_k, (
+        f"Retrieved {len(retrieved_objects)} objects but top_k={top_k} should limit results"
+    )
 
 
 @pytest.mark.asyncio
