@@ -1,8 +1,8 @@
-"""BEAM paper rubric metric with 3-level scoring (0.0, 0.5, 1.0).
+"""BEAM rubric metric with 3-level scoring (0.0, 0.5, 1.0).
 
-Implements the official BEAM evaluation methodology where each rubric criterion
-is scored as 0.0 (no compliance), 0.5 (partial compliance), or 1.0 (complete compliance).
-Final score = sum of per-item scores / number of rubric items.
+Uses the judge prompt from the official BEAM paper repository. Each rubric
+criterion is scored independently by an LLM judge. Final score = mean across
+all criteria for that question.
 
 Reference: https://github.com/mohammadtavakoli78/BEAM/blob/main/src/evaluation/compute_metrics.py
 """
@@ -11,29 +11,18 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
-def _get_llm_client():
-    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
-        get_llm_client,
-    )
-
-    return get_llm_client()
-
-
-class BEAMJudgeVerdict(BaseModel):
-    score: float
-    reason: str
-
-
-_BEAM_JUDGE_SYSTEM_PROMPT = """You are an expert evaluator tasked with judging whether the LLM's response demonstrates compliance with the specified RUBRIC CRITERION.
+# Exact prompt from the BEAM paper repository (src/prompts.py, line 11547).
+# Fix applied: <question> is actually substituted — the paper's code never fills
+# it in, leaving the literal string "<question>" for the judge.
+_BEAM_JUDGE_PROMPT = """You are an expert evaluator tasked with judging whether the LLM's response demonstrates compliance with the specified RUBRIC CRITERION.
 
 ## EVALUATION INPUTS
+- QUESTION (what the user asked): {question}
 - RUBRIC CRITERION (what to check): {criterion}
 - RESPONSE TO EVALUATE: {response}
 
@@ -43,6 +32,11 @@ The rubric defines a specific requirement, constraint, or expected behavior that
 **IMPORTANT**: Pay careful attention to whether the rubric specifies:
 - **Positive requirements** (things the response SHOULD include/do)
 - **Negative constraints** (things the response SHOULD NOT include/do, often indicated by "no", "not", "avoid", "absent")
+
+## RESPONSIVENESS REQUIREMENT (anchored to the QUESTION)
+A compliant response must be **on-topic with respect to the QUESTION** and attempt to answer it.
+- If the response does not address the QUESTION, score **0.0** and stop.
+- For negative constraints, both must hold: (a) the response is responsive to the QUESTION, and (b) the prohibited element is absent.
 
 ## SEMANTIC TOLERANCE RULES:
 Judge by meaning, not exact wording.
@@ -87,49 +81,46 @@ Return your evaluation as JSON with two fields:
 NOTE: ONLY output the JSON object, without any explanation before or after."""
 
 
-def _parse_verdict(raw: str) -> BEAMJudgeVerdict:
-    """Parse LLM response into a BEAMJudgeVerdict, with fallback regex extraction."""
+def _parse_verdict(raw: str) -> tuple[float, str]:
+    """Parse score and reason from LLM judge response. Returns (score, reason)."""
     text = raw.strip()
 
-    # Strip markdown code fences if present
     fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence_match:
         text = fence_match.group(1).strip()
 
+    data: dict = {}
     try:
         data = json.loads(text)
         score = float(data["score"])
-        # Clamp to valid values
-        if score >= 0.75:
-            score = 1.0
-        elif score >= 0.25:
-            score = 0.5
-        else:
-            score = 0.0
-        return BEAMJudgeVerdict(score=score, reason=data.get("reason", ""))
     except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-        pass
-
-    # Fallback: extract score from text
-    score_match = re.search(r'"score"\s*:\s*([\d.]+)', text)
-    if score_match:
-        score = float(score_match.group(1))
-        if score >= 0.75:
-            score = 1.0
-        elif score >= 0.25:
-            score = 0.5
+        obj_match = re.search(r"\{.*\}", text, re.DOTALL)
+        if obj_match:
+            try:
+                data = json.loads(obj_match.group())
+                score = float(data["score"])
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                score_match = re.search(r'"score"\s*:\s*([\d.]+)', text)
+                score = float(score_match.group(1)) if score_match else 0.0
         else:
             score = 0.0
-        return BEAMJudgeVerdict(score=score, reason=text)
 
-    return BEAMJudgeVerdict(score=0.0, reason=f"Failed to parse judge response: {text[:200]}")
+    if score >= 0.75:
+        score = 1.0
+    elif score >= 0.25:
+        score = 0.5
+    else:
+        score = 0.0
+
+    reason = data.get("reason", "") if isinstance(data, dict) else ""
+    return score, reason
 
 
 class BEAMRubricMetric:
-    """BEAM paper rubric metric with 3-level scoring.
+    """BEAM rubric metric using the paper's judge prompt.
 
     Each rubric criterion is scored 0.0, 0.5, or 1.0 by an LLM judge.
-    Final score = sum of per-item scores / number of items.
+    Final score = mean across all criteria for that question.
     """
 
     def __init__(self):
@@ -156,6 +147,9 @@ class BEAMRubricMetric:
         return result
 
     async def a_measure(self, test_case) -> float:
+        from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+        question = test_case.input
         response = test_case.actual_output
         metadata = getattr(test_case, "additional_metadata", {}) or {}
         rubric: List[str] = metadata.get("rubric", [])
@@ -166,52 +160,36 @@ class BEAMRubricMetric:
             self._verdicts = []
             return self.score
 
-        llm_client = _get_llm_client()
-
         verdicts = []
         total_score = 0.0
 
         for criterion in rubric:
-            prompt = _BEAM_JUDGE_SYSTEM_PROMPT.format(
+            prompt = _BEAM_JUDGE_PROMPT.format(
+                question=question,
                 criterion=criterion,
                 response=response,
             )
 
             try:
-                judge_response = await llm_client.acreate_structured_output(
+                raw = await LLMGateway.acreate_structured_output(
                     text_input=prompt,
                     system_prompt="You are an evaluation judge. Return only valid JSON.",
                     response_model=str,
                 )
-
-                verdict = _parse_verdict(str(judge_response))
-                total_score += verdict.score
-
-                verdicts.append(
-                    {
-                        "criterion": criterion,
-                        "score": verdict.score,
-                        "reason": verdict.reason,
-                    }
-                )
-
+                score, reason = _parse_verdict(str(raw))
             except Exception as e:
-                logger.warning(f"BEAM judge failed for criterion: {criterion}: {e}")
-                verdicts.append(
-                    {
-                        "criterion": criterion,
-                        "score": 0.0,
-                        "reason": f"ERROR: {e}",
-                    }
-                )
+                logger.warning(f"BEAM judge failed for criterion '{criterion}': {e}")
+                score, reason = 0.0, f"ERROR: {e}"
+
+            total_score += score
+            verdicts.append({"criterion": criterion, "score": score, "reason": reason})
 
         self._verdicts = verdicts
-        self.score = total_score / len(rubric) if rubric else 0.0
+        self.score = total_score / len(rubric)
 
-        scores = [v["score"] for v in verdicts]
-        full = scores.count(1.0)
-        partial = scores.count(0.5)
-        none_ = scores.count(0.0)
+        full = sum(1 for v in verdicts if v["score"] == 1.0)
+        partial = sum(1 for v in verdicts if v["score"] == 0.5)
+        none_ = sum(1 for v in verdicts if v["score"] == 0.0)
         self.reason = (
             f"BEAM rubric: {full} full, {partial} partial, {none_} none "
             f"out of {len(rubric)} criteria (score={self.score:.3f})"

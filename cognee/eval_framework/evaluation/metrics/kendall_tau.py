@@ -19,14 +19,6 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-def _get_llm_client():
-    from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
-        get_llm_client,
-    )
-
-    return get_llm_client()
-
-
 def _kendall_tau_b(x: List[int], y: List[int]) -> float:
     """Compute Kendall's tau-b rank correlation coefficient.
 
@@ -192,14 +184,14 @@ class KendallTauMetric:
             self.reason = "Missing rubric or actual output"
             return self.score
 
-        llm_client = _get_llm_client()
+        from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
         try:
             # The rubric for event_ordering IS the reference ordered list
             reference_events = rubric
 
             # Extract events from actual output
-            extract_response = await llm_client.acreate_structured_output(
+            extract_response = await LLMGateway.acreate_structured_output(
                 text_input=_EXTRACT_EVENTS_PROMPT.format(text=actual_output),
                 system_prompt="You extract events from text. Return only valid JSON.",
                 response_model=str,
@@ -212,14 +204,10 @@ class KendallTauMetric:
                 return self.score
 
             # Align system events to reference events via LLM
-            ref_formatted = "\n".join(
-                f"{i}: {e}" for i, e in enumerate(reference_events)
-            )
-            sys_formatted = "\n".join(
-                f"{i}: {e}" for i, e in enumerate(system_events)
-            )
+            ref_formatted = "\n".join(f"{i}: {e}" for i, e in enumerate(reference_events))
+            sys_formatted = "\n".join(f"{i}: {e}" for i, e in enumerate(system_events))
 
-            align_response = await llm_client.acreate_structured_output(
+            align_response = await LLMGateway.acreate_structured_output(
                 text_input=_ALIGN_SYSTEM_PROMPT.format(
                     reference=ref_formatted, system=sys_formatted
                 ),
@@ -238,11 +226,7 @@ class KendallTauMetric:
 
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-            f1 = (
-                2 * precision * recall / (precision + recall)
-                if (precision + recall) > 0
-                else 0.0
-            )
+            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
 
             # Build rank vectors for matched events
             # Union of all events (reference order first, then unmatched system)
