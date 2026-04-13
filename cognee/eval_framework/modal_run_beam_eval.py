@@ -50,6 +50,7 @@ image = Image.from_dockerfile(
 )
 async def run_beam_conversation(
     conversation_index: int,
+    run_timestamp: str,
     split: str = "100K",
     question_types: Optional[List[str]] = None,
     beam_max_batches: Optional[int] = None,
@@ -143,7 +144,7 @@ async def run_beam_conversation(
         "per_question": per_question,
     }
 
-    result_path = f"/results/conv_{conversation_index}.json"
+    result_path = f"/results/conv_{conversation_index}_{run_timestamp}.json"
     with open(result_path, "w") as f:
         json.dump(result, f, indent=2)
     vol.commit()
@@ -187,6 +188,7 @@ async def main(
     tasks = [
         run_beam_conversation.remote.aio(
             conversation_index=i,
+            run_timestamp=timestamp,
             split=split,
             question_types=types_list,
             beam_max_batches=batches,
@@ -213,9 +215,7 @@ async def main(
     # Per-type averages
     avg_per_type = {}
     for qtype, metrics in sorted(type_scores.items()):
-        avg_per_type[qtype] = {
-            m: sum(s) / len(s) if s else None for m, s in metrics.items()
-        }
+        avg_per_type[qtype] = {m: sum(s) / len(s) if s else None for m, s in metrics.items()}
 
     combined = {
         "split": split,
@@ -227,7 +227,7 @@ async def main(
     }
 
     # Save combined results to volume
-    combined_path = f"/results/beam_combined_{split}_{timestamp}.json"
+    # combined_path = f"/results/beam_combined_{split}_{timestamp}.json"
     # Also save locally
     local_path = f"beam_combined_{split}_{timestamp}.json"
     with open(local_path, "w") as f:
