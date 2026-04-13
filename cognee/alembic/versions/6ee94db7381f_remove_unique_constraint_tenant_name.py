@@ -72,7 +72,17 @@ def _recreate_tenants_table_sqlite(unique_name: bool) -> None:
 
 def upgrade() -> None:
     if op.get_context().dialect.name == "sqlite":
-        _recreate_tenants_table_sqlite(unique_name=False)
+        conn = op.get_bind()
+
+        result = conn.execute(sa.text("PRAGMA index_list('tenants')"))
+        rows = result.fetchall()
+        unique_auto_indexes = [row for row in rows if row[3] == "u"]
+        for row in unique_auto_indexes:
+            result = conn.execute(sa.text(f"PRAGMA index_info('{row[1]}')"))
+            index_info = result.fetchall()
+            if index_info[0][2] == "tenant_name":
+                # In case a unique index exists on vector_database_name, drop it and the graph_database_name one
+                _recreate_tenants_table_sqlite(unique_name=False)
         return
 
     conn = op.get_bind()
