@@ -29,14 +29,16 @@ class SearchPayloadDTO(InDTO):
 
     @field_validator("datasets", mode="before")
     @classmethod
-    def coerce_datasets_to_list(cls, v):
+    def coerce_datasets_to_list(cls, v: Any) -> Any:
+        """Coerce a single dataset name string into a one-element list."""
         if isinstance(v, str):
             return [v]
         return v
 
     @field_validator("dataset_ids", mode="before")
     @classmethod
-    def coerce_dataset_ids_to_list(cls, v):
+    def coerce_dataset_ids_to_list(cls, v: Any) -> Any:
+        """Coerce a single dataset UUID (or its string representation) into a one-element list."""
         if isinstance(v, (str, UUID)):
             return [v]
         return v

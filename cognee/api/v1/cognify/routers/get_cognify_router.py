@@ -2,7 +2,7 @@ import os
 import asyncio
 from uuid import UUID
 from pydantic import Field, field_validator
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
@@ -44,14 +44,16 @@ class CognifyPayloadDTO(InDTO):
 
     @field_validator("datasets", mode="before")
     @classmethod
-    def coerce_datasets_to_list(cls, v):
+    def coerce_datasets_to_list(cls, v: Any) -> Any:
+        """Coerce a single dataset name string into a one-element list."""
         if isinstance(v, str):
             return [v]
         return v
 
     @field_validator("dataset_ids", mode="before")
     @classmethod
-    def coerce_dataset_ids_to_list(cls, v):
+    def coerce_dataset_ids_to_list(cls, v: Any) -> Any:
+        """Coerce a single dataset UUID (or its string representation) into a one-element list."""
         if isinstance(v, (str, UUID)):
             return [v]
         return v

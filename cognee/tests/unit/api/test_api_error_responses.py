@@ -205,6 +205,9 @@ class TestCognifyEndpoint:
             json={"dataset_ids": str(MOCK_DATASET_ID)},
         )
         assert resp.status_code == 200
+        body = resp.json()
+        assert str(MOCK_DATASET_ID) in body
+        assert body[str(MOCK_DATASET_ID)]["status"] == "completed"
 
 
 # ---------------------------------------------------------------------------
