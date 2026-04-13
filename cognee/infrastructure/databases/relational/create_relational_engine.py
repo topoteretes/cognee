@@ -1,9 +1,10 @@
 from sqlalchemy import URL
 from .sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from functools import lru_cache
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 
-@lru_cache
+@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def create_relational_engine(
     db_path: str,
     db_name: str,
