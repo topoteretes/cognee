@@ -340,6 +340,37 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO
 
+  test-agent-memory:
+    name: Test agent memory end-to-end in Cognee
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
+
+      - name: Run agent memory e2e test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          ENABLE_BACKEND_ACCESS_CONTROL: "True"
+        run: uv run pytest cognee/tests/test_agent_memory_e2e.py -v --log-level=INFO
+
   test-multi-tenancy:
     name: Test multi tenancy with different situations in Cognee
     runs-on: ubuntu-22.04
@@ -1311,3 +1342,195 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           ENABLE_BACKEND_ACCESS_CONTROL: "false"
         run: uv run python ./cognee/tests/api/test_conditional_authentication_endpoints.py
+
+  run_backend_auth_tests:
+    name: Backend Authentication Tests
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Backend Authentication Tests
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/api/test_backend_auth.py
+
+  backwards-compatibility-sqlite:
+    name: Backwards compatibility — SQLite + LanceDB + Kuzu
+    runs-on: ubuntu-22.04
+
+    env:
+      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.6
+
+      ENV: dev
+      LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER }}
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+      EMBEDDING_DIMENSIONS: 300
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      # Save test scripts — they won't exist on the legacy version tag
+      - name: Save compatibility test scripts
+        run: cp -r cognee/tests/backwards_compatibility /tmp/compat_scripts
+
+      # ── Phase 1: legacy version ────────────────────────────────────────────
+      - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+        run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+
+      - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies
+        run: uv sync --extra api --extra docs --extra dev
+
+      - name: "Phase 1 — add, cognify, search (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
+        run: uv run python /tmp/compat_scripts/phase1_seed.py
+
+      # ── Alembic migrations ─────────────────────────────────────────────────
+      - name: Switch back to current branch
+        run: git checkout ${{ github.sha }}
+
+      - name: Install current branch dependencies
+        run: uv sync --extra api --extra docs --extra dev
+
+      - name: Run Alembic migrations (current branch schema → legacy version databases)
+        working-directory: cognee
+        run: uv run alembic upgrade head
+
+      # ── Phase 2: current branch ────────────────────────────────────────────
+      - name: "Phase 2 — search legacy version data, then add, cognify, search (current branch)"
+        run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py
+
+  backwards-compatibility-postgres:
+    name: Backwards compatibility — PostgreSQL + PGVector + Kuzu
+    runs-on: ubuntu-22.04
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      COGNEE_COMPATIBILITY_TEST_VERSION: v0.5.6
+
+      # Relational DB — PostgreSQL
+      DB_PROVIDER: postgres
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: cognee
+      DB_PASSWORD: cognee
+      DB_NAME: cognee_db
+
+      # Vector DB — PGVector (same postgres instance)
+      VECTOR_DB_PROVIDER: pgvector
+      VECTOR_DB_HOST: localhost
+      VECTOR_DB_PORT: 5432
+      VECTOR_DB_USERNAME: cognee
+      VECTOR_DB_PASSWORD: cognee
+      VECTOR_DATASET_DATABASE_HANDLER: "pgvector"
+
+      ENV: dev
+      LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER }}
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+      EMBEDDING_DIMENSIONS: 300
+
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      # Save test scripts — they won't exist on the legacy version tag
+      - name: Save compatibility test scripts
+        run: cp -r cognee/tests/backwards_compatibility /tmp/compat_scripts
+
+      # ── Phase 1: legacy version ────────────────────────────────────────────
+      - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+        run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+
+      - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies (with postgres extra)
+        run: uv sync --extra api --extra docs --extra dev --extra postgres
+
+      - name: "Phase 1 — add, cognify, search (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} / postgres)"
+        run: uv run python /tmp/compat_scripts/phase1_seed.py
+
+      # ── Alembic migrations ─────────────────────────────────────────────────
+      - name: Switch back to current branch
+        run: git checkout ${{ github.sha }}
+
+      - name: Install current branch dependencies (with postgres extra)
+        run: uv sync --extra api --extra docs --extra dev --extra postgres
+
+      - name: Run Alembic migrations (current branch schema → legacy version databases)
+        working-directory: cognee
+        run: uv run alembic upgrade head
+
+      # ── Phase 2: current branch ────────────────────────────────────────────
+      - name: "Phase 2 — search legacy version data, then add, cognify, search (current branch)"
+        run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py

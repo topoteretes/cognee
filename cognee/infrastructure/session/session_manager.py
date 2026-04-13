@@ -9,6 +9,13 @@ from cognee.modules.retrieval.utils.completion import (
     generate_session_completion_with_optional_summary,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_SESSION_ID,
+    COGNEE_SESSION_ENTRY_COUNT,
+    COGNEE_DATA_SIZE_BYTES,
+)
 
 logger = get_logger("SessionManager")
 
@@ -96,19 +103,38 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
 
-        qa_id = str(uuid.uuid4())
-        await self._cache.create_qa_entry(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=qa_id,
-            question=question,
-            context=context,
-            answer=answer,
-            feedback_text=feedback_text,
-            feedback_score=feedback_score,
-            used_graph_element_ids=used_graph_element_ids,
-        )
-        return qa_id
+        data_size = len(answer.encode("utf-8", errors="replace")) if answer else 0
+        data_size += len(question.encode("utf-8", errors="replace")) if question else 0
+        data_size += len(context.encode("utf-8", errors="replace")) if context else 0
+
+        with new_span("cognee.session.add_qa") as span:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+            span.set_attribute(COGNEE_DATA_SIZE_BYTES, data_size)
+
+            send_telemetry(
+                "cognee.session.add_qa",
+                user_id,
+                additional_properties={
+                    "session_id": session_id,
+                    "data_size_bytes": data_size,
+                    "has_feedback": feedback_score is not None,
+                    "has_graph_elements": used_graph_element_ids is not None,
+                },
+            )
+
+            qa_id = str(uuid.uuid4())
+            await self._cache.create_qa_entry(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=qa_id,
+                question=question,
+                context=context,
+                answer=answer,
+                feedback_text=feedback_text,
+                feedback_score=feedback_score,
+                used_graph_element_ids=used_graph_element_ids,
+            )
+            return qa_id
 
     def is_session_available_for_completion(self, user_id: Optional[str]) -> bool:
         """Return True if session (history + save) is available for completion."""
@@ -140,6 +166,7 @@ class SessionManager:
         response_model: Type = str,
         summarize_context: bool = False,
         used_graph_element_ids: Optional[dict] = None,
+        max_context_chars: Optional[int] = None,
     ) -> Any:
         """
         Run single-query completion with session: read history, generate, save QA.
@@ -178,6 +205,24 @@ class SessionManager:
 
         resolved_session_id = self._resolve_session_id(session_id)
         conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
+
+        # Prepend graph knowledge snapshot (from improve() sync) if available
+        graph_context = await self.get_graph_context(
+            user_id=str(user_id), session_id=resolved_session_id
+        )
+        if graph_context:
+            # Apply context char limit: explicit param > config > unlimited
+            char_limit = max_context_chars
+            if char_limit is None:
+                char_limit = CacheConfig().max_session_context_chars
+            if char_limit is not None:
+                graph_context = graph_context[:char_limit]
+            conversation_history = (
+                "Background knowledge from the knowledge graph:\n"
+                + graph_context
+                + "\n\n"
+                + conversation_history
+            )
 
         cache_config = CacheConfig()
         run_auto_feedback = cache_config.caching and cache_config.auto_feedback
@@ -307,10 +352,18 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []
 
-        if last_n is not None:
-            entries = await self._cache.get_latest_qa_entries(user_id, session_id, last_n=last_n)
-        else:
-            entries = await self._cache.get_all_qa_entries(user_id, session_id)
+        with new_span("cognee.session.get_session") as span:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+
+            if last_n is not None:
+                entries = await self._cache.get_latest_qa_entries(
+                    user_id, session_id, last_n=last_n
+                )
+            else:
+                entries = await self._cache.get_all_qa_entries(user_id, session_id)
+
+            entry_count = len(entries) if entries else 0
+            span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, entry_count)
 
         if entries is None:
             return "" if formatted else []
@@ -436,6 +489,52 @@ class SessionManager:
             qa_id=qa_id,
         )
 
+    # -- Graph knowledge context (separate from QA history) -----------------
+
+    @staticmethod
+    def _graph_context_key(user_id: str, session_id: str) -> str:
+        return f"graph_knowledge:{user_id}:{session_id}"
+
+    async def get_graph_context(self, *, user_id: str, session_id: Optional[str] = None) -> str:
+        """Return the graph knowledge snapshot for this session, or empty string."""
+        if not self.is_available:
+            return ""
+        session_id = self._resolve_session_id(session_id)
+        key = self._graph_context_key(user_id, session_id)
+        try:
+            raw = await self._cache.async_redis.get(key)
+            if raw:
+                return raw.decode() if isinstance(raw, bytes) else raw
+        except AttributeError:
+            # FsCacheAdapter
+            try:
+                raw = self._cache._cache.get(key)
+                if raw:
+                    return raw
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return ""
+
+    async def set_graph_context(
+        self, *, user_id: str, session_id: Optional[str] = None, context: str
+    ) -> None:
+        """Store (or overwrite) the graph knowledge snapshot for this session."""
+        if not self.is_available:
+            return
+        session_id = self._resolve_session_id(session_id)
+        key = self._graph_context_key(user_id, session_id)
+        try:
+            await self._cache.async_redis.set(key, context)
+            if self._cache.session_ttl_seconds:
+                await self._cache.async_redis.expire(key, self._cache.session_ttl_seconds)
+        except AttributeError:
+            try:
+                self._cache._cache.set(key, context)
+            except Exception:
+                pass
+
     async def delete_session(self, *, user_id: str, session_id: Optional[str] = None) -> bool:
         """
         Delete the entire session and all its QA entries.
@@ -447,6 +546,18 @@ class SessionManager:
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session")
             return False
+
+        # Also clean up the graph knowledge context key
+        graph_key = self._graph_context_key(user_id, session_id)
+        try:
+            await self._cache.async_redis.delete(graph_key)
+        except AttributeError:
+            try:
+                del self._cache._cache[graph_key]
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         return await self._cache.delete_session(
             user_id=user_id,

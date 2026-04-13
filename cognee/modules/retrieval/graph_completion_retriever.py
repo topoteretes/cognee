@@ -48,6 +48,8 @@ class GraphCompletionRetriever(BaseRetriever):
         feedback_influence: float = 0.0,
         session_id: Optional[str] = None,
         response_model: Type = str,
+        neighborhood_depth: Optional[int] = None,
+        neighborhood_seed_top_k: Optional[int] = 10,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
@@ -64,6 +66,8 @@ class GraphCompletionRetriever(BaseRetriever):
         self.session_id = session_id
         # response_model (Type): The Pydantic model or type for the expected response.
         self.response_model = response_model
+        self.neighborhood_depth = neighborhood_depth
+        self.neighborhood_seed_top_k = neighborhood_seed_top_k
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -170,7 +174,29 @@ class GraphCompletionRetriever(BaseRetriever):
             triplet_distance_penalty=self.triplet_distance_penalty,
             feedback_influence=self.feedback_influence,
             unified_engine=unified_engine,
+            neighborhood_depth=self.neighborhood_depth,
+            neighborhood_seed_top_k=self.neighborhood_seed_top_k,
         )
+
+    async def get_triplets_batch(
+        self,
+        queries: List[str],
+    ) -> List[List[Edge]]:
+        """
+        Retrieves triplets for a list of queries, using single-query mode when
+        possible to enable ID-filtered graph projection.
+
+        When there is only one query, delegates to single-query mode (query=)
+        which computes relevant node IDs and filters the graph projection.
+        For multiple queries, uses batch mode (query_batch=).
+
+        Returns:
+            List[List[Edge]]: One list of edges per query.
+        """
+        if len(queries) == 1:
+            triplets = await self.get_triplets(query=queries[0])
+            return [triplets]
+        return await self.get_triplets(query_batch=queries)
 
     async def get_context_from_objects(
         self,
@@ -283,6 +309,7 @@ class GraphCompletionRetriever(BaseRetriever):
                 response_model=self.response_model,
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
+                max_context_chars=getattr(self, "max_context_chars", None),
             )
             return [completion]
         return await self._generate_completion_without_session(query, query_batch, context)

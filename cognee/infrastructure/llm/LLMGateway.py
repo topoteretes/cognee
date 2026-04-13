@@ -3,6 +3,21 @@ from pydantic import BaseModel
 from cognee.infrastructure.llm import get_llm_config
 
 
+def _inject_agent_memory(text_input: str) -> str:
+    from cognee.modules.agent_memory import get_current_agent_memory_context
+
+    context = get_current_agent_memory_context()
+    if context is None or not context.config.with_memory or not context.memory_context:
+        return text_input
+
+    return (
+        "Additional Cognee Memory Context:\n"
+        f"{context.memory_context}\n\n"
+        "Original Input:\n"
+        f"{text_input}"
+    )
+
+
 class LLMGateway:
     """
     Class handles selection of structured output frameworks and LLM functions.
@@ -13,6 +28,7 @@ class LLMGateway:
     def acreate_structured_output(
         text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> Coroutine:
+        text_input = _inject_agent_memory(text_input)
         llm_config = get_llm_config()
         if llm_config.structured_output_framework.upper() == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (

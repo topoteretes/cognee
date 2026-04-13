@@ -54,7 +54,7 @@ def create_cache_engine(
                 session_ttl_seconds=session_ttl_seconds,
             )
         elif config.cache_backend == "fs":
-            return FSCacheAdapter()
+            return FSCacheAdapter(session_ttl_seconds=session_ttl_seconds)
         else:
             raise ValueError(
                 f"Unsupported cache backend: '{config.cache_backend}'. "

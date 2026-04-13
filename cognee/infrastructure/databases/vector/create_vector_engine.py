@@ -22,6 +22,29 @@ def create_vector_engine(
     Wrapper function to call create vector engine with caching.
     For a detailed description, see _create_vector_engine.
     """
+    # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
+    import os
+
+    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified_provider == "pghybrid":
+        from cognee.infrastructure.databases.relational import get_relational_config
+
+        embedding_engine = get_embedding_engine()
+        relational_config = get_relational_config()
+        connection_string = (
+            f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
+            f"@{relational_config.db_host}:{relational_config.db_port}"
+            f"/{relational_config.db_name}"
+        )
+
+        from .pgvector.PGVectorAdapter import PGVectorAdapter
+
+        return PGVectorAdapter(
+            connection_string,
+            vector_db_key,
+            embedding_engine,
+        )
+
     return _create_vector_engine(
         vector_db_provider,
         vector_db_url,

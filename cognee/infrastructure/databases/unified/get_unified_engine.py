@@ -7,17 +7,34 @@ from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
 
 HYBRID_PROVIDERS = {"neptune_analytics"}
+UNIFIED_PROVIDERS = {"pghybrid"}
 
 
 def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
+    import os
+
+    # USE_UNIFIED_PROVIDER flag overrides both graph and vector providers
+    unified = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified and unified in UNIFIED_PROVIDERS:
+        return True
+
+    # Original logic for neptune and future paired providers
     graph_provider = graph_config.get("graph_database_provider", "")
     vector_provider = vector_config.get("vector_db_provider", "")
     return graph_provider in HYBRID_PROVIDERS and graph_provider == vector_provider
 
 
-def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
-    """Create a single adapter instance for a hybrid backend."""
-    provider = graph_config["graph_database_provider"]
+async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
+    """Create a single adapter instance for a hybrid backend.
+
+    For pghybrid, reuses the cached PGVectorAdapter from get_vector_engine()
+    (requires VECTOR_DB_PROVIDER=pgvector) so that metadata caches persist
+    across calls.
+    """
+    import os
+
+    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    provider = unified_provider or graph_config["graph_database_provider"]
 
     if provider == "neptune_analytics":
         from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
@@ -44,6 +61,27 @@ def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
             embedding_engine=embedding_engine,
         )
 
+    if provider == "pghybrid":
+        from cognee.infrastructure.databases.hybrid.postgres.adapter import (
+            PostgresHybridAdapter,
+        )
+        from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+        from cognee.infrastructure.databases.relational.get_relational_engine import (
+            get_relational_engine,
+        )
+
+        # Graph adapter gets its own engine from the relational connection string
+        graph_adapter = PostgresAdapter(connection_string=get_relational_engine().db_uri)
+
+        # Vector adapter: reuse the cached PGVectorAdapter from the
+        # vector engine factory. This requires VECTOR_DB_PROVIDER=pgvector.
+        vector_adapter = get_vector_engine()
+
+        return PostgresHybridAdapter(
+            graph_adapter=graph_adapter,
+            vector_adapter=vector_adapter,
+        )
+
     raise EnvironmentError(f"Unsupported hybrid provider: {provider}")
 
 
@@ -64,7 +102,7 @@ async def get_unified_engine() -> UnifiedStoreEngine:
     vector_config = get_vectordb_context_config()
 
     if _is_hybrid_provider(graph_config, vector_config):
-        adapter = _create_hybrid_adapter(graph_config, vector_config)
+        adapter = await _create_hybrid_adapter(graph_config, vector_config)
         if hasattr(adapter, "initialize"):
             await adapter.initialize()
         return UnifiedStoreEngine(

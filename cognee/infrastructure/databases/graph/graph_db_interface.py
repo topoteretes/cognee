@@ -278,6 +278,30 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Node], List[EdgeData]]:
+        """
+        Get the k-hop neighborhood subgraph around a set of seed nodes.
+
+        Returns all nodes and edges within `depth` hops of any seed node,
+        in the same format as get_graph_data().
+        Optional edge_type filtering to constrain traversal paths.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): Seed node identifiers to start traversal from.
+            - depth (int): Number of hops to traverse from each seed node. (default 1)
+            - edge_types (Optional[List[str]]): If provided, only traverse edges of these
+              relationship types. (default None)
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Node], List[EdgeData]]:
@@ -323,3 +347,17 @@ class GraphDBInterface(ABC):
         Returns per-id update success.
         """
         raise NotImplementedError("set_edge_feedback_weights is not implemented for this adapter")
+
+    async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+        """Retrieve a batch of triplets (source, edge, target).
+
+        Optional extension — implemented by PostgresAdapter, Neo4jAdapter,
+        and KuzuAdapter but not NeptuneGraphDB.
+
+        Parameters:
+        -----------
+
+            - offset: Number of triplets to skip.
+            - limit: Maximum number of triplets to return.
+        """
+        raise NotImplementedError("get_triplets_batch is not implemented for this adapter")

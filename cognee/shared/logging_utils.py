@@ -1,61 +1,81 @@
 import os
 import sys
 import logging
+import logging.handlers
 import tempfile
 import structlog
 import traceback
 import platform
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 import importlib.metadata
 
-from cognee import __version__ as cognee_version
-from typing import Protocol
+
+def _get_cognee_version() -> str:
+    """Get version without importing cognee (avoids triggering __init__.py)."""
+    import importlib.metadata as _meta
+    from contextlib import suppress
+
+    with suppress(FileNotFoundError, StopIteration):
+        _pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
+        with open(_pyproject, encoding="utf-8") as f:
+            _ver = (
+                next(line for line in f if line.startswith("version")).split("=")[1].strip("'\"\n ")
+            )
+            return f"{_ver}-local"
+    try:
+        return _meta.version("cognee")
+    except _meta.PackageNotFoundError:
+        return "unknown"
+
+
+cognee_version = _get_cognee_version()
 
 
 # Configure external library logging
 def configure_external_library_logging():
-    """Configure logging for external libraries to reduce verbosity"""
-    # Set environment variables to suppress LiteLLM logging
+    """Configure logging for external libraries to reduce verbosity.
+
+    Sets env vars eagerly (cheap) but only configures litellm's Python
+    objects if litellm is already imported. If not, the env vars are
+    enough — litellm reads them on its own import.
+    """
+    # Set environment variables to suppress LiteLLM logging.
+    # litellm reads these on import, so setting them early is sufficient
+    # even if litellm hasn't been imported yet.
     os.environ.setdefault("LITELLM_LOG", "ERROR")
     os.environ.setdefault("LITELLM_SET_VERBOSE", "False")
 
-    # Configure LiteLLM logging to reduce verbosity
-    try:
-        import litellm
+    # Suppress loggers by name (works even before litellm is imported —
+    # Python's logging module pre-creates the logger objects).
+    loggers_to_suppress = [
+        "litellm",
+        "litellm.litellm_core_utils.logging_worker",
+        "litellm.litellm_core_utils",
+        "litellm.proxy",
+        "litellm.router",
+        "openai._base_client",
+        "LiteLLM",
+        "LiteLLM.core",
+        "LiteLLM.logging_worker",
+        "litellm.logging_worker",
+    ]
+    for logger_name in loggers_to_suppress:
+        logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+        logging.getLogger(logger_name).disabled = True
 
-        # Disable verbose logging
+    # Only touch litellm's module-level flags if it's already imported.
+    # This avoids a ~900ms cold import just to set verbose=False.
+    litellm = sys.modules.get("litellm")
+    if litellm is not None:
         litellm.set_verbose = False
-
-        # Set additional LiteLLM configuration
         if hasattr(litellm, "suppress_debug_info"):
             litellm.suppress_debug_info = True
         if hasattr(litellm, "turn_off_message"):
             litellm.turn_off_message = True
         if hasattr(litellm, "_turn_on_debug"):
             litellm._turn_on_debug = False
-
-        # Comprehensive logger suppression
-        loggers_to_suppress = [
-            "litellm",
-            "litellm.litellm_core_utils.logging_worker",
-            "litellm.litellm_core_utils",
-            "litellm.proxy",
-            "litellm.router",
-            "openai._base_client",
-            "LiteLLM",  # Capital case variant
-            "LiteLLM.core",
-            "LiteLLM.logging_worker",
-            "litellm.logging_worker",
-        ]
-
-        for logger_name in loggers_to_suppress:
-            logging.getLogger(logger_name).setLevel(logging.CRITICAL)
-            logging.getLogger(logger_name).disabled = True
-
-    except ImportError:
-        # LiteLLM not available, skip configuration
-        pass
 
 
 # Export common log levels
@@ -113,6 +133,10 @@ def resolve_logs_dir():
 # Maximum number of log files to keep
 MAX_LOG_FILES = 10
 
+# Log rotation defaults — override via COGNEE_LOG_MAX_BYTES / COGNEE_LOG_BACKUP_COUNT
+LOG_MAX_BYTES = int(os.getenv("COGNEE_LOG_MAX_BYTES", 50 * 1024 * 1024))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("COGNEE_LOG_BACKUP_COUNT", 5))  # 5 backups → 300 MB cap
+
 # Version information
 PYTHON_VERSION = platform.python_version()
 STRUCTLOG_VERSION = structlog.__version__
@@ -121,8 +145,12 @@ COGNEE_VERSION = cognee_version
 OS_INFO = f"{platform.system()} {platform.release()} ({platform.version()})"
 
 
-class PlainFileHandler(logging.FileHandler):
-    """A custom file handler that writes simpler plain text log entries."""
+class PlainFileHandler(logging.handlers.RotatingFileHandler):
+    """A rotating file handler that writes simpler plain text log entries.
+
+    Inherits from RotatingFileHandler so log files are automatically rotated
+    when they reach maxBytes, keeping at most backupCount old files.
+    """
 
     def emit(self, record):
         try:
@@ -471,29 +499,42 @@ def setup_logging(log_level=None, name=None):
     # can define their own levels.
     root_logger.setLevel(logging.NOTSET)
 
-    # Resolve logs directory with env and safe fallbacks
-    logs_dir = resolve_logs_dir()
+    # --- File logging (opt-out via COGNEE_LOG_FILE=false) ---
+    # Set COGNEE_LOG_FILE=false to disable file logging entirely.
+    log_file_enabled = os.getenv("COGNEE_LOG_FILE", "true").lower() not in ("false", "0", "no")
+    log_file_path = None
 
-    # Check if we already have a log file path from the environment
-    # NOTE: environment variable must be used here as it allows us to
-    # log to a single file with a name based on a timestamp in a multiprocess setting.
-    # Without it, we would have a separate log file for every process.
-    log_file_path = os.environ.get("LOG_FILE_NAME")
-    if not log_file_path and logs_dir is not None:
-        # Create a new log file name with the cognee start time
-        start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file_path = str((logs_dir / f"{start_time}.log").resolve())
-        os.environ["LOG_FILE_NAME"] = log_file_path
+    if log_file_enabled:
+        # Resolve logs directory with env and safe fallbacks
+        logs_dir = resolve_logs_dir()
 
-    try:
-        # Create a file handler that uses our custom PlainFileHandler
-        file_handler = PlainFileHandler(log_file_path, encoding="utf-8")
-        file_handler.setLevel(DEBUG)
-        root_logger.addHandler(file_handler)
-    except Exception as e:
-        # Note: Exceptions happen in case of read only file systems or log file path poiting to location where it does
-        # not have write permission. Logging to file is not mandatory so we just log a warning to console.
-        root_logger.warning(f"Warning: Could not create log file handler at {log_file_path}: {e}")
+        # Check if we already have a log file path from the environment
+        # NOTE: environment variable must be used here as it allows us to
+        # log to a single file with a name based on a timestamp in a multiprocess setting.
+        # Without it, we would have a separate log file for every process.
+        log_file_path = os.environ.get("LOG_FILE_NAME")
+        if not log_file_path and logs_dir is not None:
+            # Create a new log file name with the cognee start time
+            start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            log_file_path = str((logs_dir / f"{start_time}.log").resolve())
+            os.environ["LOG_FILE_NAME"] = log_file_path
+
+        try:
+            # Rotating file handler: caps each file at LOG_MAX_BYTES,
+            # keeps LOG_BACKUP_COUNT old files (default 50 MB × 5 = 250 MB total).
+            file_handler = PlainFileHandler(
+                log_file_path,
+                maxBytes=LOG_MAX_BYTES,
+                backupCount=LOG_BACKUP_COUNT,
+                encoding="utf-8",
+            )
+            file_handler.setLevel(log_level)
+            root_logger.addHandler(file_handler)
+        except Exception as e:
+            # Logging to file is not mandatory — warn on console and continue.
+            root_logger.warning(
+                f"Warning: Could not create log file handler at {log_file_path}: {e}"
+            )
 
     if log_level > logging.DEBUG:
         import warnings
@@ -508,40 +549,45 @@ def setup_logging(log_level=None, name=None):
         )
 
     # Clean up old log files, keeping only the most recent ones
-    if logs_dir is not None:
+    if log_file_enabled and logs_dir is not None:
         cleanup_old_logs(logs_dir, MAX_LOG_FILES)
 
     # Mark logging as configured
     _is_structlog_configured = True
 
-    from cognee.infrastructure.databases.relational.config import get_relational_config
-    from cognee.infrastructure.databases.vector.config import get_vectordb_config
-    from cognee.infrastructure.databases.graph.config import get_graph_config
+    # Get a configured logger
+    logger = structlog.get_logger(name if name else __name__)
 
-    graph_config = get_graph_config()
-    vector_config = get_vectordb_config()
-    relational_config = get_relational_config()
+    if log_file_path is not None:
+        logger.info(f"Log file created at: {log_file_path}", log_file=log_file_path)
+
+    # Defer heavy database config logging to first actual pipeline use.
+    # Importing graph/vector/relational configs triggers litellm (~900ms)
+    # and other heavy dependencies. Log basic info now, details later.
+    _log_deferred_info(logger)
+
+    return logger
+
+
+def _log_deferred_info(logger):
+    """Log lightweight startup info. Heavy DB config is logged on first pipeline call."""
+    logger.warning(
+        "Cognee 1.0 changes: "
+        "New API — remember/recall/forget/improve (V1 add/cognify/search still work). "
+        "Session memory enabled by default (CACHING=false to disable). "
+        "Multi-user access control on by default (ENABLE_BACKEND_ACCESS_CONTROL=false to disable). "
+        "Agents (@cognee.agent) auto-verified on registration. "
+        "See https://docs.cognee.ai/"
+    )
 
     try:
-        # Get base database directory path
         from cognee.base_config import get_base_config
 
         base_config = get_base_config()
         databases_path = os.path.join(base_config.system_root_directory, "databases")
-    except Exception as e:
-        raise ValueError from e
+    except Exception:
+        databases_path = "unknown"
 
-    # Get a configured logger and log system information
-    logger = structlog.get_logger(name if name else __name__)
-
-    logger.warning(
-        "From version 0.5.0 onwards, Cognee will run with multi-user access control mode set to on by default. Data isolation between different users and datasets will be enforced and data created before multi-user access control mode was turned on won't be accessible by default. To disable multi-user access control mode and regain access to old data set the environment variable ENABLE_BACKEND_ACCESS_CONTROL to false before starting Cognee. For more information, please refer to the Cognee documentation."
-    )
-
-    if logs_dir is not None:
-        logger.info(f"Log file created at: {log_file_path}", log_file=log_file_path)
-
-    # Detailed initialization for regular usage
     logger.info(
         "Logging initialized",
         python_version=PYTHON_VERSION,
@@ -549,16 +595,9 @@ def setup_logging(log_level=None, name=None):
         cognee_version=COGNEE_VERSION,
         os_info=OS_INFO,
         database_path=databases_path,
-        graph_database_name=graph_config.graph_database_name,
-        vector_config=vector_config.vector_db_provider,
-        relational_config=relational_config.db_name,
     )
 
-    # Log database configuration
-    log_database_configuration(logger)
-
-    # Return the configured logger
-    return logger
+    logger.info(f"Database storage: {databases_path}")
 
 
 def get_log_file_location():

@@ -50,7 +50,7 @@ if modal:
         pipeline_name: str,
         pipeline_id: str,
         pipeline_run_id: str,
-        context: Optional[dict],
+        ctx,
         user: User,
         incremental_loading: bool,
     ):
@@ -58,7 +58,7 @@ if modal:
         Wrapper that runs the run_tasks_data_item function.
         This is the function/code that runs on modal executor and produces the graph/vector db objects
         """
-        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.pipelines.models import PipelineContext
 
         result = await run_tasks_data_item(
             data_item=data_item,
@@ -67,12 +67,12 @@ if modal:
             pipeline_name=pipeline_name,
             pipeline_id=pipeline_id,
             pipeline_run_id=pipeline_run_id,
-            context={
-                **(context or {}),
-                "user": user,
-                "data": data_item,
-                "dataset": dataset,
-            },
+            ctx=PipelineContext(
+                user=user,
+                data_item=data_item,
+                dataset=dataset,
+                pipeline_name=pipeline_name,
+            ),
             user=user,
             incremental_loading=incremental_loading,
         )
@@ -86,7 +86,6 @@ async def run_tasks_distributed(
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
     pipeline_name: str = "unknown_pipeline",
-    context: Optional[dict] = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
 ):
@@ -124,7 +123,7 @@ async def run_tasks_distributed(
             [pipeline_name] * number_of_data_items,
             [pipeline_id] * number_of_data_items,
             [pipeline_run_id] * number_of_data_items,
-            [context] * number_of_data_items,
+            [None] * number_of_data_items,
             [user] * number_of_data_items,
             [incremental_loading] * number_of_data_items,
         ]

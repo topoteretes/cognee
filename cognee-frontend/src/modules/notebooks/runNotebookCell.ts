@@ -10,5 +10,5 @@ export default function runNotebookCell(notebookId: string, cell: Cell, instance
     headers: {
       "Content-Type": "application/json",
     },
-  }).then((response: Response) => response.json());
+  }).then((response) => response.json());
 }
