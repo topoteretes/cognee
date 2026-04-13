@@ -183,7 +183,6 @@ class Task:
     task_type: str = None
     enriches: bool = False
     _execute_method: Callable = None
-    _next_batch_size: int = 1
 
     def __init__(
         self, executable, *args, task_config=None, batch_size=None, enriches=False, **kwargs
@@ -249,7 +248,7 @@ class Task:
 
         return self.executable(*combined_args, **combined_kwargs)
 
-    async def execute_async_generator(self, args, kwargs):
+    async def execute_async_generator(self, args, kwargs, batch_size):
         """Execute async generator task and collect results in batches."""
         results = []
         async_iterator = self.run(*args, **kwargs)
@@ -259,14 +258,14 @@ class Task:
                 continue
             results.append(partial_result)
 
-            if len(results) == self._next_batch_size:
+            if len(results) == batch_size:
                 yield results
                 results = []
 
         if results:
             yield results
 
-    async def execute_generator(self, args, kwargs):
+    async def execute_generator(self, args, kwargs, batch_size):
         """Execute generator task and collect results in batches."""
         results = []
 
@@ -275,14 +274,14 @@ class Task:
                 continue
             results.append(partial_result)
 
-            if len(results) == self._next_batch_size:
+            if len(results) == batch_size:
                 yield results
                 results = []
 
         if results:
             yield results
 
-    async def execute_coroutine(self, args, kwargs):
+    async def execute_coroutine(self, args, kwargs, batch_size):
         """Execute coroutine task and yield the result."""
         task_result = await self.run(*args, **kwargs)
         if isinstance(task_result, _Drop):
@@ -292,7 +291,7 @@ class Task:
             return
         yield task_result
 
-    async def execute_function(self, args, kwargs):
+    async def execute_function(self, args, kwargs, batch_size):
         """Execute function task and yield the result."""
         task_result = self.run(*args, **kwargs)
         if isinstance(task_result, _Drop):
@@ -304,8 +303,7 @@ class Task:
 
     async def execute(self, args, kwargs, next_batch_size=None):
         """Execute the task based on its type and yield results with the next task's batch size."""
-        if next_batch_size is not None:
-            self._next_batch_size = next_batch_size
+        batch_size = next_batch_size if next_batch_size is not None else 1
 
-        async for result in self._execute_method(args, kwargs):
+        async for result in self._execute_method(args, kwargs, batch_size):
             yield result

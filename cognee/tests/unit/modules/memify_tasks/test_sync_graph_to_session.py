@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,9 +15,16 @@ from cognee.tasks.memify.sync_graph_to_session import (
 
 sync_module = sys.modules["cognee.tasks.memify.sync_graph_to_session"]
 
-# Patch paths for lazy imports inside sync_graph_to_session()
-_PATCH_GET_CACHE = "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine"
-_PATCH_GET_SM = "cognee.infrastructure.session.get_session_manager.get_session_manager"
+# Import actual modules via importlib to avoid __init__.py name shadowing.
+# Several __init__.py files re-export functions with the same name as their
+# module (e.g., `from .get_session_manager import get_session_manager`),
+# which causes mock.patch()'s getattr-based resolution to find the function
+# instead of the submodule on Python ≤3.12.
+_mod_sm = importlib.import_module("cognee.infrastructure.session.get_session_manager")
+_mod_cache = importlib.import_module("cognee.infrastructure.databases.cache.get_cache_engine")
+_pkg_improve = importlib.import_module("cognee.api.v1.improve")
+_mod_query_router = importlib.import_module("cognee.api.v1.recall.query_router")
+
 _PATCH_GET_REL = "cognee.tasks.memify.sync_graph_to_session.get_relational_engine"
 
 
@@ -94,6 +102,26 @@ def _mock_db_engine_empty():
     return _mock_db_engine_returning([], [])
 
 
+def _get_cache_module():
+    return importlib.import_module("cognee.infrastructure.databases.cache.get_cache_engine")
+
+
+def _get_session_manager_module():
+    return importlib.import_module("cognee.infrastructure.session.get_session_manager")
+
+
+def _get_remember_module():
+    return importlib.import_module("cognee.api.v1.remember.remember")
+
+
+def _get_improve_module():
+    return importlib.import_module("cognee.api.v1.improve")
+
+
+def _get_query_router_module():
+    return importlib.import_module("cognee.api.v1.recall.query_router")
+
+
 # ---------------------------------------------------------------------------
 # _edge_to_text
 # ---------------------------------------------------------------------------
@@ -154,8 +182,8 @@ async def test_sync_no_new_edges():
     db_engine = _mock_db_engine_empty()
 
     with (
-        patch(_PATCH_GET_SM, return_value=sm),
-        patch(_PATCH_GET_CACHE, return_value=cache_engine),
+        patch.object(_mod_sm, "get_session_manager", return_value=sm),
+        patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
     ):
         result = await sync_graph_to_session(
@@ -179,8 +207,8 @@ async def test_sync_cache_unavailable():
     sm.is_available = False
 
     with (
-        patch(_PATCH_GET_SM, return_value=sm),
-        patch(_PATCH_GET_CACHE, return_value=None),
+        patch.object(_mod_sm, "get_session_manager", return_value=sm),
+        patch.object(_mod_cache, "get_cache_engine", return_value=None),
     ):
         result = await sync_graph_to_session(
             user_id="u1",
@@ -212,8 +240,8 @@ async def test_sync_merges_with_existing():
     db_engine = _mock_db_engine_returning([edge], [n1, n2])
 
     with (
-        patch(_PATCH_GET_SM, return_value=sm),
-        patch(_PATCH_GET_CACHE, return_value=cache_engine),
+        patch.object(_mod_sm, "get_session_manager", return_value=sm),
+        patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
     ):
         result = await sync_graph_to_session(
@@ -254,8 +282,8 @@ async def test_sync_caps_at_max_lines():
     db_engine = _mock_db_engine_returning(edges, list(nodes.values()))
 
     with (
-        patch(_PATCH_GET_SM, return_value=sm),
-        patch(_PATCH_GET_CACHE, return_value=cache_engine),
+        patch.object(_mod_sm, "get_session_manager", return_value=sm),
+        patch.object(_mod_cache, "get_cache_engine", return_value=cache_engine),
         patch(_PATCH_GET_REL, return_value=db_engine),
     ):
         result = await sync_graph_to_session(
@@ -426,13 +454,13 @@ async def test_remember_passes_session_ids_to_improve():
     with (
         patch("cognee.api.v1.add.add", AsyncMock()),
         patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={"status": "ok"})),
-        patch("cognee.api.v2.improve.improve", mock_improve),
+        patch.object(_pkg_improve, "improve", mock_improve),
         patch(
             "cognee.modules.users.methods.get_default_user",
             AsyncMock(return_value=mock_user),
         ),
     ):
-        from cognee.api.v2.remember.remember import remember
+        from cognee.api.v1.remember.remember import remember
 
         await remember(
             "test data",
@@ -460,13 +488,13 @@ async def test_remember_no_session_ids_skips_in_improve():
     with (
         patch("cognee.api.v1.add.add", AsyncMock()),
         patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={"status": "ok"})),
-        patch("cognee.api.v2.improve.improve", mock_improve),
+        patch.object(_pkg_improve, "improve", mock_improve),
         patch(
             "cognee.modules.users.methods.get_default_user",
             AsyncMock(return_value=mock_user),
         ),
     ):
-        from cognee.api.v2.remember.remember import remember
+        from cognee.api.v1.remember.remember import remember
 
         await remember("test data", self_improvement=True)
 
@@ -481,47 +509,47 @@ async def test_remember_no_session_ids_skips_in_improve():
 
 class TestRememberResult:
     def test_repr_basic(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="completed", dataset_name="test")
         assert "completed" in repr(r)
         assert "test" in repr(r)
 
     def test_repr_includes_elapsed(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="completed", dataset_name="test")
         r.elapsed_seconds = 4.2
         assert "elapsed=4.2s" in repr(r)
 
     def test_repr_includes_error(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="errored", dataset_name="test")
         r.error = "something broke"
         assert "something broke" in repr(r)
 
     def test_bool_completed_is_true(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         assert bool(RememberResult(status="completed", dataset_name="x"))
         assert bool(RememberResult(status="session_stored", dataset_name="x"))
 
     def test_bool_running_is_false(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         assert not bool(RememberResult(status="running", dataset_name="x"))
         assert not bool(RememberResult(status="errored", dataset_name="x"))
 
     def test_done_without_task(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         assert RememberResult(status="completed", dataset_name="x").done is True
         assert RememberResult(status="errored", dataset_name="x").done is True
         assert RememberResult(status="running", dataset_name="x").done is False
 
     def test_done_with_task(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="running", dataset_name="x")
         mock_task = MagicMock()
@@ -534,7 +562,7 @@ class TestRememberResult:
 
     @pytest.mark.asyncio
     async def test_await_completed_returns_self(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="completed", dataset_name="x")
         result = await r
@@ -543,7 +571,7 @@ class TestRememberResult:
     @pytest.mark.asyncio
     async def test_await_background_task(self):
         """Awaiting a result with a background task waits for the task."""
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="running", dataset_name="x")
         completed = False
@@ -562,7 +590,7 @@ class TestRememberResult:
         assert r.status == "completed"
 
     def test_resolve_extracts_pipeline_info(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="running", dataset_name="test")
 
@@ -581,7 +609,7 @@ class TestRememberResult:
         assert r.elapsed_seconds >= 0
 
     def test_resolve_extracts_item_info(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="running", dataset_name="test")
 
@@ -611,7 +639,7 @@ class TestRememberResult:
         assert "abc123" in repr(r)
 
     def test_resolve_detects_error(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="running", dataset_name="test")
 
@@ -622,7 +650,7 @@ class TestRememberResult:
         assert r.status == "errored"
 
     def test_fail_sets_error_and_elapsed(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="running", dataset_name="test")
         r._fail(ValueError("test error"))
@@ -633,7 +661,7 @@ class TestRememberResult:
     @pytest.mark.asyncio
     async def test_remember_returns_remember_result(self):
         """Blocking remember() returns a properly resolved RememberResult."""
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         mock_user = MagicMock()
         mock_user.id = "u1"
@@ -644,13 +672,13 @@ class TestRememberResult:
                 "cognee.api.v1.cognify.cognify",
                 AsyncMock(return_value={}),
             ),
-            patch("cognee.api.v2.improve.improve", AsyncMock()),
+            patch.object(_pkg_improve, "improve", AsyncMock()),
             patch(
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
             ),
         ):
-            from cognee.api.v2.remember.remember import remember
+            from cognee.api.v1.remember.remember import remember
 
             result = await remember("test data")
 
@@ -675,12 +703,13 @@ class TestRememberResult:
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
             ),
-            patch(
-                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            patch.object(
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
-            from cognee.api.v2.remember.remember import remember, RememberResult
+            from cognee.api.v1.remember.remember import remember, RememberResult
 
             result = await remember("test data", session_id="s1")
 
@@ -698,35 +727,35 @@ class TestRememberResult:
 
 class TestRememberResultSessions:
     def test_session_id_property_single(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="completed", dataset_name="x", session_ids=["s1"])
         assert r.session_id == "s1"
         assert r.session_ids == ["s1"]
 
     def test_session_id_property_multiple(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="completed", dataset_name="x", session_ids=["s1", "s2"])
         assert r.session_id is None
         assert r.session_ids == ["s1", "s2"]
 
     def test_session_id_property_none(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="completed", dataset_name="x")
         assert r.session_id is None
         assert r.session_ids is None
 
     def test_repr_single_session(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="completed", dataset_name="x", session_ids=["s1"])
         assert "session_id='s1'" in repr(r)
         assert "session_ids" not in repr(r)
 
     def test_repr_multiple_sessions(self):
-        from cognee.api.v2.remember.remember import RememberResult
+        from cognee.api.v1.remember.remember import RememberResult
 
         r = RememberResult(status="completed", dataset_name="x", session_ids=["s1", "s2"])
         assert "session_ids=" in repr(r)
@@ -740,13 +769,13 @@ class TestRememberResultSessions:
         with (
             patch("cognee.api.v1.add.add", AsyncMock()),
             patch("cognee.api.v1.cognify.cognify", AsyncMock(return_value={})),
-            patch("cognee.api.v2.improve.improve", AsyncMock()),
+            patch.object(_pkg_improve, "improve", AsyncMock()),
             patch(
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
             ),
         ):
-            from cognee.api.v2.remember.remember import remember
+            from cognee.api.v1.remember.remember import remember
 
             result = await remember("test data", session_ids=["s1", "s2"], self_improvement=True)
 
@@ -763,7 +792,7 @@ class TestSearchSession:
     @pytest.mark.asyncio
     async def test_word_boundary_matching(self):
         """'graph' should NOT match 'paragraph'."""
-        from cognee.api.v2.recall.recall import _search_session
+        from cognee.api.v1.recall.recall import _search_session
 
         mock_user = MagicMock()
         mock_user.id = "u1"
@@ -778,8 +807,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=entries)
 
         with (
-            patch(
-                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            patch.object(
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -791,7 +821,7 @@ class TestSearchSession:
     @pytest.mark.asyncio
     async def test_multiple_word_ranking(self):
         """Entries matching more query words rank higher."""
-        from cognee.api.v2.recall.recall import _search_session
+        from cognee.api.v1.recall.recall import _search_session
 
         mock_user = MagicMock()
         mock_user.id = "u1"
@@ -810,8 +840,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=entries)
 
         with (
-            patch(
-                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            patch.object(
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -824,7 +855,7 @@ class TestSearchSession:
     @pytest.mark.asyncio
     async def test_source_tagging(self):
         """Session results should have _source='session'."""
-        from cognee.api.v2.recall.recall import _search_session
+        from cognee.api.v1.recall.recall import _search_session
 
         mock_user = MagicMock()
         mock_user.id = "u1"
@@ -838,8 +869,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=entries)
 
         with (
-            patch(
-                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            patch.object(
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -850,7 +882,7 @@ class TestSearchSession:
     @pytest.mark.asyncio
     async def test_empty_session(self):
         """Empty session returns empty list."""
-        from cognee.api.v2.recall.recall import _search_session
+        from cognee.api.v1.recall.recall import _search_session
 
         mock_user = MagicMock()
         mock_user.id = "u1"
@@ -860,8 +892,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=[])
 
         with (
-            patch(
-                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            patch.object(
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -872,7 +905,7 @@ class TestSearchSession:
     @pytest.mark.asyncio
     async def test_short_words_ignored(self):
         """Single-character words like 'a' and 'I' are skipped."""
-        from cognee.api.v2.recall.recall import _search_session
+        from cognee.api.v1.recall.recall import _search_session
 
         mock_user = MagicMock()
         mock_user.id = "u1"
@@ -886,8 +919,9 @@ class TestSearchSession:
         mock_sm.get_session = AsyncMock(return_value=entries)
 
         with (
-            patch(
-                "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            patch.object(
+                _mod_sm,
+                "get_session_manager",
                 return_value=mock_sm,
             ),
         ):
@@ -906,7 +940,7 @@ def _get_recall_module():
     """Import the recall module by full path to avoid __init__.py name collision."""
     import importlib
 
-    return importlib.import_module("cognee.api.v2.recall.recall")
+    return importlib.import_module("cognee.api.v1.recall.recall")
 
 
 class TestRecallSessionMode:
@@ -950,8 +984,9 @@ class TestRecallSessionMode:
                 "cognee.api.v1.search.search",
                 AsyncMock(return_value=mock_graph_results),
             ),
-            patch(
-                "cognee.api.v2.recall.query_router.route_query",
+            patch.object(
+                _mod_query_router,
+                "route_query",
                 return_value=MagicMock(search_type=MagicMock()),
             ),
         ):

@@ -20,6 +20,12 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.graph.models.Edge import Edge
 from cognee.modules.graph.models.Node import Node
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_SESSION_ID,
+    COGNEE_DATASET_NAME,
+    COGNEE_GRAPH_EDGES_SYNCED,
+)
 
 logger = get_logger("sync_graph_to_session")
 
@@ -213,6 +219,11 @@ async def sync_graph_to_session(
 
     if latest_ts and latest_ts != since:
         await _save_checkpoint(cache_engine, ck, latest_ts)
+
+    with new_span("cognee.task.sync_graph_to_session") as span:
+        span.set_attribute(COGNEE_SESSION_ID, session_id)
+        span.set_attribute(COGNEE_DATASET_NAME, dataset_name)
+        span.set_attribute(COGNEE_GRAPH_EDGES_SYNCED, len(new_lines))
 
     logger.info(
         "sync_graph_to_session: synced %d new edges (total %d, cap %d)",

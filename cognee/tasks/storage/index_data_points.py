@@ -30,6 +30,11 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
     vector_engine = vector_engine or get_vector_engine()
 
     for data_point in data_points:
+        # Skip non-DataPoint objects (e.g. CogneeGraph) that may be
+        # passed through the memify pipeline without metadata.
+        if not hasattr(data_point, "metadata") or not data_point.metadata:
+            continue
+
         data_point_type = type(data_point)
         type_name = data_point_type.__name__
 

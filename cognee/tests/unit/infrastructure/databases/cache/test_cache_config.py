@@ -26,7 +26,7 @@ def test_cache_config_defaults(monkeypatch):
     config = CacheConfig(_env_file=None)
 
     assert config.cache_backend == "fs"
-    assert config.caching is False
+    assert config.caching is True
     assert config.shared_kuzu_lock is False
     assert config.cache_host == "localhost"
     assert config.cache_port == 6379

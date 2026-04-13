@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useCogniInstance } from "@/modules/tenant/TenantProvider";
+import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
+import getApiKeys from "@/modules/apiKeys/getApiKeys";
+import createApiKey from "@/modules/apiKeys/createAPIKey";
+import deleteApiKey from "@/modules/apiKeys/deleteAPIKey";
 
 interface ApiKey {
   id: string;
@@ -32,6 +35,7 @@ const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8
 
 export default function ApiKeysPage() {
   const { cogniInstance, serviceUrl, isInitializing } = useCogniInstance();
+  const { tenant } = useTenant();
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -39,27 +43,28 @@ export default function ApiKeysPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newName, setNewName] = useState("");
-  const [tenantId, setTenantId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
+  // Use tenant ID from context (set during provisioning), not from /users/me
+  const tenantId = tenant?.tenant_id || null;
+  const isDev = serviceUrl?.includes("dev-aws") || serviceUrl?.includes("dev.cloud");
+  const apiDocsUrl = serviceUrl ? `${serviceUrl}/docs` : null;
+
   useEffect(() => {
-    if (!cogniInstance || isInitializing) return;
+    if (isInitializing) return;
     loadKeys();
-    // Fetch user info for tenant_id (graceful — may not exist on all backends)
-    cogniInstance.fetch("/v1/users/me").then((r) => r.ok ? r.json() : null).then((data) => {
-      if (data) {
-        setTenantId(data.tenant_id || null);
-        setUserId(data.id || null);
-      }
-    }).catch(() => {});
+    // Fetch user ID (graceful) — only if tenant instance is available
+    if (cogniInstance) {
+      cogniInstance.fetch("/v1/users/me").then((r) => r.ok ? r.json() : null).then((data) => {
+        if (data) setUserId(data.id || null);
+      }).catch(() => {});
+    }
   }, [cogniInstance, isInitializing]);
 
   async function loadKeys() {
-    if (!cogniInstance) return;
     try {
-      const response = await cogniInstance.fetch("/v1/auth/api-keys");
-      const data = await response.json();
-      setKeys(Array.isArray(data) ? data.map((k: ApiKey) => ({ ...k, isNew: false })) : []);
+      const data = await getApiKeys();
+      setKeys(Array.isArray(data) ? data.map((k) => ({ ...k, name: k.label || "", isNew: false })) : []);
     } catch {
       setKeys([]);
     } finally {
@@ -68,19 +73,14 @@ export default function ApiKeysPage() {
   }
 
   async function handleCreate() {
-    if (!cogniInstance || !newName.trim()) return;
+    if (!newName.trim()) return;
     setCreating(true);
     try {
-      const response = await cogniInstance.fetch("/v1/auth/api-keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName.trim() }),
-      });
-      const data = await response.json();
-      // New key has the full key visible once
-      setKeys((prev) => [{ ...data, isNew: true }, ...prev]);
+      await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
       setNewName("");
       setShowCreateModal(false);
+      // Reload the list to pick up the newly created key
+      await loadKeys();
     } catch (err) {
       console.error("Failed to create key:", err);
     } finally {
@@ -89,9 +89,8 @@ export default function ApiKeysPage() {
   }
 
   async function handleRevoke(id: string) {
-    if (!cogniInstance) return;
     try {
-      await cogniInstance.fetch(`/v1/auth/api-keys/${id}`, { method: "DELETE" });
+      await deleteApiKey(id);
       setKeys((prev) => prev.filter((k) => k.id !== id));
     } catch (err) {
       console.error("Failed to revoke key:", err);
@@ -211,6 +210,40 @@ export default function ApiKeysPage() {
           <span style={{ fontSize: 12, color: "#A1A1AA", fontFamily: '"Fira Code", monospace', flex: 1 }}>X-Api-Key: {"<your-api-key>"}{tenantId ? `  •  X-Tenant-Id: ${tenantId}` : ""}</span>
           <CopyBtn id="header" text={`X-Api-Key: <your-api-key>${tenantId ? `\nX-Tenant-Id: ${tenantId}` : ""}`} copiedField={copiedField} setCopiedField={setCopiedField} light />
         </div>
+      </div>
+
+      {/* Documentation links */}
+      <div style={{ display: "flex", gap: 12 }}>
+        <a
+          href={isDev ? "https://api.dev-aws.cognee.ai/docs" : "https://api.aws.cognee.ai/docs"}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "1px solid #E4E4E7", borderRadius: 10, padding: "14px 18px", textDecoration: "none", transition: "border-color 150ms" }}
+          className="hover:border-cognee-purple"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>API Reference</span>
+            <span style={{ fontSize: 12, color: "#A1A1AA" }}>Interactive Swagger docs for the shared API</span>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A1A1AA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: "auto", flexShrink: 0 }}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+        </a>
+        {apiDocsUrl && (
+          <a
+            href={apiDocsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "1px solid #E4E4E7", borderRadius: 10, padding: "14px 18px", textDecoration: "none", transition: "border-color 150ms" }}
+            className="hover:border-cognee-purple"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#18181B" }}>API Tenant Reference</span>
+              <span style={{ fontSize: 12, color: "#A1A1AA" }}>Swagger docs for your tenant instance</span>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A1A1AA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: "auto", flexShrink: 0 }}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+          </a>
+        )}
       </div>
 
       {/* Info banner */}
