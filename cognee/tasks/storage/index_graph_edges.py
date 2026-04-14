@@ -53,8 +53,7 @@ async def index_graph_edges(
     Steps:
     1. Initialize the graph engine if needed and retrieve edge data.
     2. Transform edge data into EdgeType datapoints.
-    3. Persist EdgeType nodes in the graph database for triplet search.
-    4. Index the EdgeType datapoints using the standard indexing function.
+    3. Index the EdgeType datapoints using the standard indexing function.
 
     Raises:
         RuntimeError: If initialization of the graph engine fails.
@@ -62,7 +61,6 @@ async def index_graph_edges(
     Returns:
         None
     """
-    graph_engine = None
     try:
         if edges_data is None:
             graph_engine = await get_graph_engine()
@@ -72,15 +70,6 @@ async def index_graph_edges(
             )
 
         edge_type_datapoints = create_edge_type_datapoints(edges_data)
-
-        # Persist EdgeType nodes in the graph database so they are available for
-        # GRAPH_COMPLETION triplet search.  Without this, adapters that don't
-        # store nodes via index_data_points (e.g. FalkorDB) will have EdgeType
-        # entries without vector embeddings, causing triplet search to fail.
-        if edge_type_datapoints:
-            if graph_engine is None:
-                graph_engine = await get_graph_engine()
-            await graph_engine.add_nodes(edge_type_datapoints)
 
         await index_data_points(edge_type_datapoints, vector_engine=vector_engine)
     except Exception as e:
