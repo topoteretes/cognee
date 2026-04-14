@@ -137,6 +137,110 @@ async def test_create_qa_entry_invalid_used_graph_element_ids_raises(adapter):
 
 
 @pytest.mark.asyncio
+async def test_append_agent_trace_step_and_get_session(adapter):
+    """Append trace steps and retrieve them as a flat ordered session list."""
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        memory_query="trip preferences",
+        memory_context="User likes quiet places",
+        method_params={"city": "Tokyo"},
+        method_return_value="Plan created",
+        session_feedback="plan_trip succeeded.",
+    )
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t2",
+        origin_function="book_hotel",
+        status="error",
+        method_params={"area": "Shibuya"},
+        error_message="No availability",
+        session_feedback="book_hotel failed. Reason: No availability.",
+    )
+
+    entries = await adapter.get_agent_trace_session("u1", "s1")
+    assert [entry["trace_id"] for entry in entries] == ["t1", "t2"]
+    assert entries[0]["origin_function"] == "plan_trip"
+    assert entries[1]["origin_function"] == "book_hotel"
+    assert entries[1]["error_message"] == "No availability"
+
+
+@pytest.mark.asyncio
+async def test_append_agent_trace_step_sets_trace_ttl_when_enabled(adapter, redis_store):
+    """Trace keys receive TTL on append when Redis session TTL is enabled."""
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        session_feedback="plan_trip succeeded.",
+    )
+
+    trace_key = "agent_traces:u1:s1"
+    assert await redis_store.ttl(trace_key) == 604800
+    assert redis_store.expire_calls[-1] == (trace_key, 604800)
+
+
+@pytest.mark.asyncio
+async def test_get_agent_trace_feedback_returns_feedback_only(adapter):
+    """Trace feedback helper returns ordered feedback strings only."""
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        session_feedback="plan_trip succeeded.",
+    )
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t2",
+        origin_function="book_hotel",
+        status="error",
+        error_message="No availability",
+        session_feedback="book_hotel failed. Reason: No availability.",
+    )
+
+    feedback = await adapter.get_agent_trace_feedback("u1", "s1")
+    assert feedback == [
+        "plan_trip succeeded.",
+        "book_hotel failed. Reason: No availability.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_agent_trace_session_missing_returns_empty(adapter):
+    """Missing trace sessions return an empty list."""
+    assert await adapter.get_agent_trace_session("u1", "missing") == []
+    assert await adapter.get_agent_trace_feedback("u1", "missing") == []
+
+
+@pytest.mark.asyncio
+async def test_get_agent_trace_session_does_not_refresh_ttl(adapter, redis_store):
+    """Read-only trace access should not refresh TTL."""
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        session_feedback="plan_trip succeeded.",
+    )
+    redis_store.expire_calls.clear()
+
+    entries = await adapter.get_agent_trace_session("u1", "s1")
+
+    assert len(entries) == 1
+    assert redis_store.expire_calls == []
+
+
+@pytest.mark.asyncio
 async def test_update(adapter):
     """Update a QA entry by qa_id."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
