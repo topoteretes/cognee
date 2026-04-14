@@ -21,7 +21,7 @@ logger = get_logger()
 
 
 async def main():
-    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
 
     data_directory_path = os.path.join(
         pathlib.Path(__file__).parent, ".data_storage/test_delete_permission"
