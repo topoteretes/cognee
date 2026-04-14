@@ -53,6 +53,8 @@ class CloudClient:
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
 
+        if kwargs.get("session_id"):
+            form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
             form.add_field("run_in_background", "true")
         if kwargs.get("custom_prompt"):
