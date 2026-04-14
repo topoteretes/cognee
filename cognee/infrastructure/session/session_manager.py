@@ -136,6 +136,68 @@ class SessionManager:
             )
             return qa_id
 
+    @staticmethod
+    def _generate_agent_trace_feedback(
+        origin_function: str,
+        status: str,
+        error_message: str = "",
+    ) -> str:
+        """Generate per-step feedback from the stored trace step only."""
+        normalized_origin = origin_function.strip()
+        normalized_status = status.strip().lower()
+        normalized_error = error_message.strip()
+
+        if normalized_status == "error":
+            if normalized_error:
+                return f"{normalized_origin} failed. Reason: {normalized_error}."
+            return f"{normalized_origin} failed."
+        return f"{normalized_origin} succeeded."
+
+    async def add_agent_trace_step(
+        self,
+        *,
+        user_id: str,
+        origin_function: str,
+        status: str,
+        session_id: Optional[str] = None,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: Optional[dict] = None,
+        method_return_value: Any = None,
+        error_message: str = "",
+    ) -> Optional[str]:
+        """
+        Append one agent trace step to the session trace payload.
+
+        Returns trace_id, or None if cache unavailable.
+        """
+        session_id = self._resolve_session_id(session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping add_agent_trace_step")
+            return None
+
+        trace_id = str(uuid.uuid4())
+        session_feedback = self._generate_agent_trace_feedback(
+            origin_function=origin_function,
+            status=status,
+            error_message=error_message,
+        )
+        await self._cache.append_agent_trace_step(
+            user_id=user_id,
+            session_id=session_id,
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            memory_query=memory_query,
+            memory_context=memory_context,
+            method_params=method_params,
+            method_return_value=method_return_value,
+            error_message=error_message,
+            session_feedback=session_feedback,
+        )
+        return trace_id
+
     def is_session_available_for_completion(self, user_id: Optional[str]) -> bool:
         """Return True if session (history + save) is available for completion."""
         if not user_id or not self.is_available:
@@ -373,6 +435,42 @@ class SessionManager:
             if formatted
             else entries_list
         )
+
+    async def get_agent_trace_session(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        Get the full agent trace session for the given user/session pair.
+        """
+        session_id = self._resolve_session_id(session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
+            return []
+
+        entries = await self._cache.get_agent_trace_session(user_id, session_id)
+        return list(entries) if entries else []
+
+    async def get_agent_trace_feedback(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str] = None,
+    ) -> list[str]:
+        """
+        Get only per-step feedback strings for the trace session.
+        """
+        session_id = self._resolve_session_id(session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty agent trace feedback")
+            return []
+
+        feedback_list = await self._cache.get_agent_trace_feedback(user_id, session_id)
+        return list(feedback_list) if feedback_list else []
 
     async def update_qa(
         self,
