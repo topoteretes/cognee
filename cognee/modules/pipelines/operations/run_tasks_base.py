@@ -33,7 +33,12 @@ def _build_result_summary(executable, task_name: str, count: int) -> str:
 def _stamp_provenance(
     data, pipeline_name, task_name, visited=None, node_set=None, user_label=None, content_hash=None
 ):
-    """Recursively stamp DataPoints with provenance. Only sets if currently None."""
+    """Recursively stamp DataPoints with provenance. Only sets if currently None.
+
+    The ``visited`` set should be persisted across task calls (via
+    PipelineContext._provenance_visited) so that DataPoints stamped in
+    earlier stages are skipped in later ones.
+    """
     if visited is None:
         visited = set()
 
@@ -88,6 +93,8 @@ def _stamp_provenance(
 def _extract_node_set(args):
     """Extract source_node_set from input args to propagate across task boundaries."""
     for arg in args:
+        if isinstance(arg, DataPoint) and arg.source_node_set is not None:
+            return arg.source_node_set
         if isinstance(arg, (list, tuple)):
             for item in arg:
                 if isinstance(item, DataPoint) and item.source_node_set is not None:
@@ -102,6 +109,8 @@ def _extract_content_hash(args):
     for arg in args:
         if isinstance(arg, Data) and arg.content_hash is not None:
             return arg.content_hash
+        if isinstance(arg, DataPoint) and arg.source_content_hash is not None:
+            return arg.source_content_hash
         if isinstance(arg, (list, tuple)):
             for item in arg:
                 if isinstance(item, Data) and item.content_hash is not None:
@@ -150,6 +159,9 @@ async def handle_task(
             input_node_set = _extract_node_set(args)
             input_content_hash = _extract_content_hash(args)
             user_label = getattr(user, "email", None) or (str(user.id) if user else None)
+            # Reuse the visited set across tasks so already-stamped
+            # DataPoints are skipped in subsequent pipeline stages.
+            provenance_visited = ctx._provenance_visited if ctx else None
 
             async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
                 if isinstance(result_data, list):
@@ -161,6 +173,7 @@ async def handle_task(
                     result_data,
                     pipe_name,
                     task_name,
+                    visited=provenance_visited,
                     node_set=input_node_set,
                     user_label=user_label,
                     content_hash=input_content_hash,

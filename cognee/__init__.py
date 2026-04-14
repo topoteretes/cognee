@@ -40,12 +40,12 @@ from .modules import pipelines
 from .pipelines import Drop
 
 # Migrations
-from cognee.run_migrations import run_migrations
+from cognee.run_migrations import run_startup_migrations
 
 # ---------------------------------------------------------------------------
 # V2 memory-oriented API
 # ---------------------------------------------------------------------------
-from .api.v2 import remember, RememberResult, recall, improve, forget, serve, disconnect, visualize
+from .api.v1 import remember, RememberResult, recall, improve, forget, serve, disconnect, visualize
 
 # Tracing / Observability
 from cognee.modules.observability.trace_context import (

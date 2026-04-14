@@ -24,7 +24,7 @@ _LEGACY_IMPORTS = {
     "task": "cognee.modules.pipelines.tasks.task",
     "run_tasks": "cognee.modules.pipelines.operations.run_tasks",
     "run_tasks_parallel": "cognee.modules.pipelines.operations.run_parallel",
-    "run_pipeline": "cognee.modules.pipelines.operations.pipeline",
+    "run_pipeline": "cognee.modules.pipelines.operations.run_pipeline",
 }
 
 

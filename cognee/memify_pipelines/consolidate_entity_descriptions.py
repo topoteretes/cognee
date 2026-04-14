@@ -58,8 +58,38 @@ def get_entity_properties(
 
 
 def format_edges(edges: List[Any]) -> Dict[str, str]:
-    """Map target node IDs to relationship names."""
-    return {edge[1]: edge[2]["relationship_name"] for edge in edges}
+    """Map target node IDs to relationship names.
+
+    Handles multiple graph adapter edge tuple formats:
+    - Neo4j / Neptune: (source_id, target_id, {"relationship_name": name})
+    - Kuzu:            (source_node_dict, relationship_name_str, target_node_dict)
+    - EdgeData:        (source_id, target_id, relationship_name, properties)
+    """
+    result = {}
+    for edge in edges:
+        if not isinstance(edge, (list, tuple)) or len(edge) < 3:
+            continue
+
+        if isinstance(edge[2], dict) and "relationship_name" in edge[2]:
+            # Neo4j / Neptune format
+            target_id = edge[1]
+            rel_name = edge[2]["relationship_name"]
+        elif len(edge) >= 4 and isinstance(edge[1], str) and isinstance(edge[2], str):
+            # EdgeData: (source_id, target_id, relationship_name, properties)
+            target_id = edge[1]
+            rel_name = edge[2]
+        elif isinstance(edge[1], str) and isinstance(edge[2], dict):
+            # Kuzu format: (source_dict, rel_name_str, target_dict)
+            target_id = edge[2].get("id", str(edge[2]))
+            rel_name = edge[1]
+        else:
+            # Fallback: best-effort extraction
+            target_id = (
+                edge[2].get("id", str(edge[2])) if isinstance(edge[2], dict) else str(edge[1])
+            )
+            rel_name = edge[1] if isinstance(edge[1], str) else str(edge[2])
+        result[str(target_id)] = str(rel_name)
+    return result
 
 
 def format_neighbors(

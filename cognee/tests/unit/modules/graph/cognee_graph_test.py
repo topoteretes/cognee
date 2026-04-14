@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
-from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
+from cognee.modules.graph.exceptions import EntityNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 
@@ -46,12 +46,14 @@ def test_add_node_success(setup_graph):
 
 
 def test_add_duplicate_node(setup_graph):
-    """Test adding a duplicate node raises an exception."""
+    """Test adding a duplicate node is silently skipped."""
     graph = setup_graph
-    node = Node("node1")
-    graph.add_node(node)
-    with pytest.raises(EntityAlreadyExistsError, match="Node with id node1 already exists."):
-        graph.add_node(node)
+    node1 = Node("node1")
+    graph.add_node(node1)
+    # Adding duplicate should be a no-op (keeps first occurrence)
+    node1_dup = Node("node1")
+    graph.add_node(node1_dup)
+    assert graph.get_node("node1") is node1
 
 
 def test_add_edge_success(setup_graph):

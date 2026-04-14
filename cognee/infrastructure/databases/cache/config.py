@@ -21,7 +21,7 @@ class CacheConfig(BaseSettings):
     """
 
     cache_backend: Literal["redis", "fs"] = "fs"
-    caching: bool = False
+    caching: bool = True
     auto_feedback: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
