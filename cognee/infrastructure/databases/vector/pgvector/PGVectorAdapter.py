@@ -5,7 +5,6 @@ from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy import exc
 from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -93,6 +92,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         from pgvector.sqlalchemy import Vector
 
         self.Vector = Vector
+
+    def reset_metadata_cache(self):
+        """
+        Reset SQLAlchemy metadata reflection cache for this adapter instance.
+        """
+        self._metadata = MetaData()
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """

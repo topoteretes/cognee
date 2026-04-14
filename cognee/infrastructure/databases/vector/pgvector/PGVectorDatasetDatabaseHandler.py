@@ -1,12 +1,15 @@
 from uuid import UUID
 from typing import Optional
+from sqlalchemy import MetaData
 
-from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
 from cognee.infrastructure.databases.vector.pgvector.create_db_and_tables import delete_pg_database
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
-from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.infrastructure.databases.vector import get_vectordb_config, get_vector_engine
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.infrastructure.databases.vector.create_vector_engine import (
+    _create_vector_engine,
+)
 
 
 class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -74,3 +77,7 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         # Drop entire database
         await delete_pg_database(dataset_database)
+
+        # Reset cached metadata from the vector adapter
+        vector_engine = get_vector_engine()
+        vector_engine.reset_metadata_cache()
