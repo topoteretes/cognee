@@ -8,7 +8,7 @@ from cognee.modules.users.models import DatasetDatabase
 from cognee.infrastructure.databases.vector import get_vectordb_config, get_vector_engine
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 from cognee.infrastructure.databases.vector.create_vector_engine import (
-    _create_vector_engine,
+    create_vector_engine,
 )
 
 
@@ -78,6 +78,16 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # Drop entire database
         await delete_pg_database(dataset_database)
 
+        vector_engine = create_vector_engine(
+            vector_db_provider=dataset_database.vector_database_provider,
+            vector_db_url=dataset_database.vector_database_url,
+            vector_db_name=dataset_database.vector_database_name,
+            vector_db_port=dataset_database.vector_database_connection_info["port"],
+            vector_db_key=dataset_database.vector_database_key,
+            vector_db_username=dataset_database.vector_database_connection_info["username"],
+            vector_db_password=dataset_database.vector_database_connection_info["password"],
+            vector_db_host=dataset_database.vector_database_connection_info["host"],
+        )
+
         # Reset cached metadata from the vector adapter
-        vector_engine = get_vector_engine()
         vector_engine.reset_metadata_cache()
