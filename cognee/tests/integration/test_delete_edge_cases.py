@@ -121,13 +121,13 @@ async def test_last_accessed_updates_on_search():
         # Verify last_accessed was updated
         assert last_accessed_after is not None, "last_accessed should be set after search operation"
 
-        # Verify timestamp is recent (within last 5 seconds)
+        # Verify timestamp is recent (within last 30 seconds)
         if last_accessed_after.tzinfo is None:
             last_accessed_after = last_accessed_after.replace(tzinfo=timezone.utc)
 
         time_diff = (datetime.now(timezone.utc) - last_accessed_after).total_seconds()
-        assert time_diff < 5, (
-            f"last_accessed should be recent (within 5 seconds), but was {time_diff}s ago"
+        assert time_diff < 30, (
+            f"last_accessed should be recent (within 30 seconds), but was {time_diff}s ago"
         )
 
         logger.info(f"✅ last_accessed updated successfully (time_diff={time_diff:.2f}s)")

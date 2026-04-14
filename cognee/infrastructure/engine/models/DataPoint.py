@@ -1,9 +1,15 @@
-from uuid import UUID, uuid4
+import logging
+from uuid import UUID, NAMESPACE_OID, uuid4, uuid5
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
+
+from cognee.infrastructure.engine.models.FieldAnnotations import _Embeddable, _Dedup
+from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
+
+logger = logging.getLogger(__name__)
 
 
 # Define metadata type
@@ -14,6 +20,7 @@ class MetaData(TypedDict):
 
     type: str
     index_fields: list[str]
+    identity_fields: NotRequired[list[str]]
 
 
 # Updated DataPoint model with versioning and new fields
@@ -51,11 +58,108 @@ class DataPoint(BaseModel):
     source_task: Optional[str] = None
     source_node_set: Optional[str] = None
     source_user: Optional[str] = None
+    source_content_hash: Optional[str] = None
     feedback_weight: float = 0.5
+    importance_weight: Optional[float] = 0.5
 
-    def __init__(self, **data):
+    def __init__(self, **data: Any) -> None:
+        explicit_id = "id" in data
         super().__init__(**data)
         object.__setattr__(self, "type", self.__class__.__name__)
+        if not explicit_id:
+            identity_fields = self.__class__._get_identity_fields()
+            if identity_fields:
+                identity_id = self.__class__._generate_identity_id(
+                    identity_fields, self.model_dump(), self.__class__.__name__
+                )
+                if identity_id is not None:
+                    object.__setattr__(self, "id", identity_id)
+
+    @classmethod
+    def _get_identity_fields(cls) -> Optional[list[str]]:
+        """Get identity_fields from the class's metadata field default, if defined.
+
+        Walks the MRO to detect if a parent class defined identity_fields that a
+        subclass accidentally dropped when overriding metadata.
+        """
+        metadata_field = cls.model_fields.get("metadata")
+        if metadata_field is not None and metadata_field.default is not None:
+            identity = metadata_field.default.get("identity_fields")
+            if identity is None:
+                for parent in cls.__mro__[1:]:
+                    parent_meta = getattr(parent, "model_fields", {}).get("metadata")
+                    if parent_meta is not None and parent_meta.default is not None:
+                        parent_identity = parent_meta.default.get("identity_fields")
+                        if parent_identity is not None:
+                            logger.warning(
+                                "%s overrides metadata but drops identity_fields "
+                                "defined in parent %s",
+                                cls.__name__,
+                                parent.__name__,
+                            )
+                            break
+            return identity
+        return None
+
+    @classmethod
+    def _generate_identity_id(
+        cls, identity_fields: list[str], data: dict, class_name: str
+    ) -> Optional[UUID]:
+        """Generate a deterministic UUID5 from identity field values.
+
+        Returns None if any identity field is missing from both data
+        and Pydantic field defaults, causing fallback to the default UUID4.
+        """
+        parts = []
+        for field_name in identity_fields:
+            if field_name in data:
+                value = data[field_name]
+            else:
+                # Check Pydantic field default
+                field_info = cls.model_fields.get(field_name)
+                if field_info is not None and field_info.default is not None:
+                    value = field_info.default
+                else:
+                    return None
+            if isinstance(value, str):
+                value = value.lower().replace(" ", "_").replace("'", "")
+            else:
+                value = str(value)
+            parts.append(value)
+        joined = "|".join(parts)
+        identity_string = f"{class_name}:{joined}"
+        return uuid5(NAMESPACE_OID, identity_string)
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs):
+        """Auto-derive metadata index_fields and identity_fields from Annotated markers.
+
+        If a subclass uses Annotated[str, Embeddable()] or Annotated[str, Dedup()]
+        on its fields, and does NOT explicitly set metadata, the metadata default
+        is automatically populated from those annotations.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+
+        # Only auto-derive if the subclass didn't explicitly declare metadata
+        if "metadata" in cls.__annotations__:
+            return
+
+        embeddable_fields = []
+        dedup_fields = []
+
+        for field_name, field_info in cls.model_fields.items():
+            if field_info.metadata:
+                for meta in field_info.metadata:
+                    if isinstance(meta, _Embeddable):
+                        embeddable_fields.append(field_name)
+                    if isinstance(meta, _Dedup):
+                        dedup_fields.append(field_name)
+
+        if embeddable_fields or dedup_fields:
+            new_metadata = {"index_fields": embeddable_fields}
+            if dedup_fields:
+                new_metadata["identity_fields"] = dedup_fields
+            cls.model_fields["metadata"].default = new_metadata
 
     @classmethod
     def get_embeddable_data(self, data_point: "DataPoint"):

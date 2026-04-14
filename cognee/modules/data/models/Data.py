@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer
+from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer, Float
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
 
@@ -37,6 +37,7 @@ class Data(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
     last_accessed = Column(DateTime(timezone=True), nullable=True)
+    importance_weight = Column(Float, nullable=True)
 
     datasets = relationship(
         "Dataset",

@@ -1,12 +1,12 @@
-import { fetch } from "@/utils";
+import { CogneeInstance } from "../instances/types";
 
-export default function createDataset(dataset: { name: string }, useCloud = false) {
-  return fetch(`/v1/datasets/`, {
+export default function createDataset(dataset: { name: string }, instance: CogneeInstance) {
+  return instance.fetch(`/v1/datasets/`, {
     method: "POST",
     body: JSON.stringify(dataset),
     headers: {
       "Content-Type": "application/json",
     },
-  }, useCloud)
+  })
     .then((response) => response.json());
 }

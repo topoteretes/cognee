@@ -1,3 +1,3 @@
-export { default as TextLogo } from './Logo/TextLogo';
-export { default as LoadingIndicator } from './Loading/DefaultLoadingIndicator/LoadingIndicator';
-export { default as CognifyLoadingIndicator } from './Loading/CognifyLoadingIndicator/CognifyLoadingIndicator';
+export { default as TextLogo } from "./logo/TextLogo";
+export { default as LoadingIndicator } from "./loading/DefaultLoadingIndicator/LoadingIndicator";
+export { default as CognifyLoadingIndicator } from "./loading/CognifyLoadingIndicator/CognifyLoadingIndicator";

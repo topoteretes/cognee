@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.5.6"
+version = "1.0.0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -29,7 +29,7 @@ dependencies = [
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
     "tiktoken>=0.8.0,<1.0.0",
-    "litellm>=1.76.0",
+    "litellm>=1.83.0",
     "instructor>=1.9.1,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.13.3,<4.0.0",
@@ -136,7 +136,7 @@ evals = [
     "scikit-learn>=1.6.1,<2",
 ]
 
-graphiti = ["graphiti-core>=0.7.0,<0.8"]
+graphiti = ["graphiti-core>=0.28.0"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]

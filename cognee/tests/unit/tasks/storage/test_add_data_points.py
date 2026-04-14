@@ -27,6 +27,7 @@ def _make_unified_mock():
     unified = AsyncMock()
     unified.graph = graph_engine
     unified.vector = vector_engine
+    unified.has_capability = MagicMock(return_value=False)
     return unified, graph_engine, vector_engine
 
 
@@ -312,3 +313,44 @@ async def test_add_data_points_with_empty_custom_edges(
 
     assert result == [dp]
     assert graph_engine.add_edges.await_count == 1
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_hybrid_write_path(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """When unified engine has HYBRID_WRITE, use add_nodes_with_vectors and add_edges_with_vectors."""
+    from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    custom_edges = [(str(dp2.id), str(dp1.id), "custom_edge", {})]
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    unified.has_capability = MagicMock(side_effect=lambda cap: cap == EngineCapability.HYBRID_WRITE)
+    mock_get_unified.return_value = unified
+
+    result = await add_data_points([dp1, dp2], custom_edges=custom_edges)
+
+    assert result == [dp1, dp2]
+
+    # Hybrid path: add_nodes_with_vectors called, not add_nodes
+    graph_engine.add_nodes_with_vectors.assert_awaited_once()
+    graph_engine.add_nodes.assert_not_awaited()
+
+    # Hybrid path: add_edges_with_vectors called, not add_edges
+    assert graph_engine.add_edges_with_vectors.await_count == 2
+    graph_engine.add_edges.assert_not_awaited()
+
+    # Standard index_data_points and index_graph_edges should NOT be called
+    mock_index_nodes.assert_not_awaited()
+    mock_index_edges.assert_not_awaited()

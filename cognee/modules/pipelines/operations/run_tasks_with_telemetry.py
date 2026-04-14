@@ -1,10 +1,12 @@
 import json
+from typing import Optional
 
 from cognee.modules.settings import get_current_settings
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
+from cognee.modules.pipelines.models import PipelineContext
 
 from .run_tasks_base import run_tasks_base
 from ..tasks.task import Task
@@ -14,7 +16,7 @@ logger = get_logger("run_tasks_with_telemetry()")
 
 
 async def run_tasks_with_telemetry(
-    tasks: list[Task], data, user: User, pipeline_name: str, context: dict = None
+    tasks: list[Task], data, user: User, pipeline_name: str, ctx: Optional[PipelineContext] = None
 ):
     config = get_current_settings()
 
@@ -33,7 +35,7 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        async for result in run_tasks_base(tasks, data, user, context):
+        async for result in run_tasks_base(tasks, data, user, ctx):
             yield result
 
         logger.info("Pipeline run completed: `%s`", pipeline_name)
