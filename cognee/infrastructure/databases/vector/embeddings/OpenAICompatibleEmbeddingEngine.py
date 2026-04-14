@@ -32,6 +32,8 @@ from tenacity import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
+from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.logging_utils import get_logger
 
@@ -69,24 +71,29 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
     model: str
     dimensions: int
+    max_completion_tokens: int
     endpoint: str
     api_key: str
     mock: bool
     batch_size: int
+    tokenizer: object
 
     def __init__(
         self,
         model: Optional[str] = "default",
         dimensions: int = 3072,
+        max_completion_tokens: int = 8191,
         endpoint: Optional[str] = "http://localhost:8080",
         api_key: Optional[str] = "no-key-required",
         batch_size: int = 36,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
+        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
+        self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
         self.mock = enable_mocking in ("true", "1", "yes")
@@ -223,3 +230,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             - int: The batch size.
         """
         return self.batch_size
+
+    def get_tokenizer(self):
+        """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers."""
+        logger.debug("Loading HuggingfaceTokenizer for OpenAICompatibleEmbeddingEngine...")
+        try:
+            tokenizer = HuggingFaceTokenizer(
+                model=self.model,
+                max_completion_tokens=self.max_completion_tokens,
+            )
+        except Exception as error:
+            logger.warning("Could not get tokenizer from HuggingFace due to: %s", error)
+            logger.info("Switching to TikToken default tokenizer.")
+            tokenizer = TikTokenTokenizer(model=None, max_completion_tokens=self.max_completion_tokens)
+        return tokenizer
