@@ -50,6 +50,13 @@ async def adapter():
         embedding_engine=get_embedding_engine(),
     )
 
+    # Enable pgvector extension -- normally done by cognee's create_db_and_tables()
+    # during startup, but this test constructs adapters directly.
+    from sqlalchemy import text as sa_text
+
+    async with graph_adapter.engine.begin() as conn:
+        await conn.execute(sa_text("CREATE EXTENSION IF NOT EXISTS vector"))
+
     a = PostgresHybridAdapter(
         graph_adapter=graph_adapter,
         vector_adapter=vector_adapter,
