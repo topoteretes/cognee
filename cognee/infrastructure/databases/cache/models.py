@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
+from cognee.modules.agent_memory.sanitization import MAX_SERIALIZED_VALUE_LENGTH, sanitize_value, truncate_text
 
 
 def _validate_list_of_str(value: object, key: str) -> List[str]:
@@ -105,3 +106,35 @@ class SessionAgentTraceEntry(BaseModel):
     method_return_value: Any = None
     error_message: str = ""
     session_feedback: str = ""
+
+    @field_validator("trace_id", "origin_function", "status")
+    @classmethod
+    def required_non_empty_string(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("value must be a string")
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("value must be a non-empty string")
+        return truncate_text(stripped, MAX_SERIALIZED_VALUE_LENGTH)
+
+    @field_validator("memory_query", "memory_context", "error_message", "session_feedback")
+    @classmethod
+    def normalize_optional_text_fields(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("value must be a string")
+        return truncate_text(v.strip(), MAX_SERIALIZED_VALUE_LENGTH)
+
+    @field_validator("method_params")
+    @classmethod
+    def sanitize_method_params(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(v, dict):
+            raise ValueError("method_params must be a dict")
+        sanitized = sanitize_value(v)
+        if not isinstance(sanitized, dict):
+            raise ValueError("method_params must sanitize to a dict")
+        return sanitized
+
+    @field_validator("method_return_value")
+    @classmethod
+    def sanitize_method_return_value(cls, v: Any) -> Any:
+        return sanitize_value(v)
