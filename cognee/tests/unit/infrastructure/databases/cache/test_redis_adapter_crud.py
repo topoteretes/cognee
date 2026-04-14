@@ -1,5 +1,7 @@
 """Unit tests for RedisAdapter CRUD operations."""
 
+from datetime import datetime
+from uuid import uuid4
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -219,6 +221,61 @@ async def test_get_agent_trace_session_missing_returns_empty(adapter):
     """Missing trace sessions return an empty list."""
     assert await adapter.get_agent_trace_session("u1", "missing") == []
     assert await adapter.get_agent_trace_feedback("u1", "missing") == []
+
+
+@pytest.mark.asyncio
+async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
+    """Trace persistence sanitizes UUIDs, datetimes, and custom objects into JSON-safe values."""
+
+    class _Obj:
+        def __init__(self):
+            self.id = "obj-1"
+
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        method_params={
+            "trip_id": uuid4(),
+            "created_at": datetime(2026, 4, 14, 12, 0, 0),
+            "obj": _Obj(),
+        },
+        method_return_value={"result_id": uuid4(), "owner": _Obj()},
+        session_feedback="plan_trip succeeded.",
+    )
+
+    entries = await adapter.get_agent_trace_session("u1", "s1")
+    assert isinstance(entries[0]["method_params"]["trip_id"], str)
+    assert isinstance(entries[0]["method_params"]["created_at"], str)
+    assert entries[0]["method_params"]["obj"] == {"type": "_Obj", "id": "obj-1"}
+    assert isinstance(entries[0]["method_return_value"]["result_id"], str)
+    assert entries[0]["method_return_value"]["owner"] == {"type": "_Obj", "id": "obj-1"}
+
+
+@pytest.mark.asyncio
+async def test_append_agent_trace_step_rejects_blank_required_fields(adapter):
+    """Trace persistence rejects blank required fields via model validation."""
+    with pytest.raises(CacheConnectionError):
+        await adapter.append_agent_trace_step(
+            "u1",
+            "s1",
+            trace_id=" ",
+            origin_function="plan_trip",
+            status="success",
+            session_feedback="plan_trip succeeded.",
+        )
+
+    with pytest.raises(CacheConnectionError):
+        await adapter.append_agent_trace_step(
+            "u1",
+            "s1",
+            trace_id="t1",
+            origin_function=" ",
+            status="success",
+            session_feedback="plan_trip succeeded.",
+        )
 
 
 @pytest.mark.asyncio
