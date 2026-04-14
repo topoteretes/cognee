@@ -120,6 +120,35 @@ def _build_adapter(
     return adapter_cls(*constructor_args, **constructor_kwargs)
 
 
+def _set_pdeathsig() -> None:
+    """Ask the kernel to send SIGTERM to this process when its parent exits.
+
+    This is Linux-specific (prctl PR_SET_PDEATHSIG).  It complements
+    ``daemon=True``: daemon mode relies on Python's atexit machinery, which is
+    bypassed on SIGKILL or abnormal parent termination.  With pdeathsig the
+    kernel itself sends SIGTERM to this child regardless of *how* the parent
+    dies, preventing orphaned DB subprocesses that hold file locks.
+
+    The call is a no-op on non-Linux platforms so it is always safe to call.
+    """
+    import sys
+
+    if sys.platform != "linux":
+        return
+    try:
+        import ctypes
+        import signal
+
+        PR_SET_PDEATHSIG = 1
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        ret = libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+        if ret != 0:
+            errno = ctypes.get_errno()
+            raise OSError(errno, f"prctl(PR_SET_PDEATHSIG) failed: errno={errno}")
+    except Exception:
+        pass  # best-effort; daemon=True is still the fallback
+
+
 def _worker(
     adapter_module: str,
     adapter_name: str,
@@ -130,6 +159,9 @@ def _worker(
     resp_q: mp.Queue,
 ):
     """Subprocess entry point. Creates the adapter and processes requests."""
+    # Ensure this process dies when the parent dies, even on SIGKILL.
+    _set_pdeathsig()
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -249,6 +281,12 @@ class SubprocessVectorDBWrapper(VectorDBInterface):
 
         self._adapter_attrs: set = resp.result or set()
         self.embedding_engine = None
+
+        logger.info(
+            "SubprocessVectorDBWrapper: subprocess started",
+            adapter=adapter_cls.__name__,
+            pid=self._proc.pid,
+        )
 
         if "embedding_engine" in self._adapter_attrs:
             self.embedding_engine = _EmbeddingEngineProxy(self)
@@ -395,6 +433,9 @@ class SubprocessVectorDBWrapper(VectorDBInterface):
         if not hasattr(self, "_proc") or not self._proc.is_alive():
             return
 
+        pid = self._proc.pid
+        logger.info("SubprocessVectorDBWrapper: stopping subprocess", pid=pid)
+
         try:
             self._req_q.put(_SHUTDOWN)
             self._proc.join(timeout=self._shutdown_timeout)
@@ -402,9 +443,12 @@ class SubprocessVectorDBWrapper(VectorDBInterface):
             logger.warning("Error during graceful subprocess shutdown", exc_info=True)
 
         if self._proc.is_alive():
-            logger.warning("Subprocess did not exit gracefully, terminating forcibly")
+            logger.warning("SubprocessVectorDBWrapper: subprocess did not exit gracefully, terminating forcibly", pid=pid)
             self._proc.terminate()
             self._proc.join(timeout=5)
+            logger.info("SubprocessVectorDBWrapper: subprocess forcibly terminated", pid=pid)
+        else:
+            logger.info("SubprocessVectorDBWrapper: subprocess stopped gracefully", pid=pid)
 
     def memory_used(self) -> int:
         if self._closed or not hasattr(self, "_proc") or not self._proc.is_alive():
