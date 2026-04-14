@@ -5,6 +5,7 @@ from .embeddings import get_embedding_engine
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
 
 from functools import lru_cache
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 
 def create_vector_engine(
@@ -58,7 +59,7 @@ def create_vector_engine(
     )
 
 
-@lru_cache
+@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
