@@ -127,20 +127,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             - List[List[float]]: A list of vectors representing the embedded texts.
         """
-        original_texts = text if isinstance(text, list) else [text]
-        sanitized_text = sanitize_embedding_text_inputs(original_texts)
+
+        sanitized_text_input = sanitize_embedding_text_inputs(text)
 
         try:
             if self.mock:
                 response = {
-                    "data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text]
+                    "data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text_input]
                 }
-                embeddings = [data["embedding"] for data in response["data"]]
+                return [data["embedding"] for data in response["data"]]
             else:
                 async with embedding_rate_limiter_context_manager():
                     embedding_kwargs = {
                         "model": self.model,
-                        "input": sanitized_text,
+                        "input": sanitized_text_input,
                         "api_key": self.api_key,
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
@@ -155,15 +155,41 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=30.0,
                     )
 
-                embeddings = [data["embedding"] for data in response.data]
+                embedding_response = [data["embedding"] for data in response.data]
+                return handle_embedding_response(text, embedding_response, self.dimensions)
 
-        except litellm.exceptions.ContextWindowExceededError:
-            # Use shared context window handler
-            from .context_window_handler import handle_context_window_exceeded
+        except litellm.exceptions.ContextWindowExceededError as error:
+            if isinstance(text, list) and len(text) > 1:
+                mid = math.ceil(len(text) / 2)
+                left, right = text[:mid], text[mid:]
+                left_vecs, right_vecs = await asyncio.gather(
+                    self.embed_text(left),
+                    self.embed_text(right),
+                )
+                return left_vecs + right_vecs
 
-            embeddings = await handle_context_window_exceeded(
-                self._do_raw_embedding, sanitized_text
-            )
+                # If caller passed ONE oversize string split the string itself into
+                # half so we can process it
+            if isinstance(text, list) and len(text) == 1:
+                logger.debug(f"Pooling embeddings of text string with size: {len(text[0])}")
+                s = text[0]
+                third = len(s) // 3
+                # We are using thirds to intentionally have overlap between split parts
+                # for better embedding calculation
+                left_part, right_part = s[: third * 2], s[third:]
+
+                # Recursively embed the split parts in parallel
+                (left_vec,), (right_vec,) = await asyncio.gather(
+                    self.embed_text([left_part]),
+                    self.embed_text([right_part]),
+                )
+
+                # POOL the two embeddings into one
+                pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+                return [pooled.tolist()]
+
+            logger.error("Context window exceeded for embedding text: %s", str(error))
+            raise error
 
         except asyncio.TimeoutError as e:
             # Per-attempt timeout – likely an unreachable endpoint
@@ -203,38 +229,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(
                 "Embedding failed due to an unexpected error. Verify EMBEDDING_ENDPOINT and provider settings."
             ) from error
-
-        return handle_embedding_response(original_texts, embeddings, self.dimensions)
-
-    async def _do_raw_embedding(self, text: List[str]) -> List[List[float]]:
-        """
-        Perform raw embedding without context window handling.
-        This is called by the shared context window handler.
-        """
-        text_list = text if isinstance(text, list) else [text]
-        sanitized_text = sanitize_embedding_text_inputs(text_list)
-
-        if self.mock:
-            response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text]}
-            return [data["embedding"] for data in response["data"]]
-
-        async with embedding_rate_limiter_context_manager():
-            embedding_kwargs = {
-                "model": self.model,
-                "input": sanitized_text,
-                "api_key": self.api_key,
-                "api_base": self.endpoint,
-                "api_version": self.api_version,
-            }
-            if self.dimensions is not None:
-                embedding_kwargs["dimensions"] = self.dimensions
-
-            response = await asyncio.wait_for(
-                litellm.aembedding(**embedding_kwargs),
-                timeout=30.0,
-            )
-
-        return [data["embedding"] for data in response.data]
 
     def get_vector_size(self) -> int:
         """
