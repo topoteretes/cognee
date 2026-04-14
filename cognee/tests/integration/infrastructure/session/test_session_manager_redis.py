@@ -110,6 +110,75 @@ async def test_get_session_does_not_refresh_session_ttl(session_manager, redis_a
 
 
 @pytest.mark.asyncio
+async def test_add_agent_trace_step_and_get_trace_session(session_manager):
+    """Trace steps appended via SessionManager are returned in append order."""
+    trace_id_1 = await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="plan_trip",
+        status="success",
+        memory_query="trip preferences",
+        memory_context="User likes quiet places",
+        method_params={"city": "Tokyo"},
+        method_return_value="Plan created",
+    )
+    trace_id_2 = await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="book_hotel",
+        status="error",
+        method_params={"area": "Shibuya"},
+        error_message="No availability",
+    )
+
+    entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    feedback = await session_manager.get_agent_trace_feedback(user_id="u1", session_id="s1")
+
+    assert [entry["trace_id"] for entry in entries] == [trace_id_1, trace_id_2]
+    assert entries[0]["origin_function"] == "plan_trip"
+    assert entries[1]["origin_function"] == "book_hotel"
+    assert feedback == [
+        "plan_trip succeeded.",
+        "book_hotel failed. Reason: No availability.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_trace_session_isolated_by_user_and_session(session_manager):
+    """Agent trace sessions remain isolated by user_id and session_id."""
+    await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="plan_trip",
+        status="success",
+    )
+    await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s2",
+        origin_function="book_hotel",
+        status="error",
+        error_message="No availability",
+    )
+    await session_manager.add_agent_trace_step(
+        user_id="u2",
+        session_id="s1",
+        origin_function="book_flight",
+        status="success",
+    )
+
+    u1s1 = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    u1s2 = await session_manager.get_agent_trace_session(user_id="u1", session_id="s2")
+    u2s1 = await session_manager.get_agent_trace_session(user_id="u2", session_id="s1")
+
+    assert len(u1s1) == 1
+    assert u1s1[0]["origin_function"] == "plan_trip"
+    assert len(u1s2) == 1
+    assert u1s2[0]["origin_function"] == "book_hotel"
+    assert len(u2s1) == 1
+    assert u2s1[0]["origin_function"] == "book_flight"
+
+
+@pytest.mark.asyncio
 async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
     """add_qa with used_graph_element_ids stores and returns it via get_session."""
     used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
@@ -216,6 +285,28 @@ async def test_delete_session(session_manager):
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert entries == []
+
+
+@pytest.mark.asyncio
+async def test_delete_session_leaves_agent_trace_session_intact(session_manager):
+    """delete_session remains QA-only and does not delete trace sessions."""
+    await session_manager.add_qa(
+        user_id="u1", question="Q", context="C", answer="A", session_id="s1"
+    )
+    trace_id = await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="plan_trip",
+        status="success",
+    )
+
+    ok = await session_manager.delete_session(user_id="u1", session_id="s1")
+
+    assert ok is True
+    assert await session_manager.get_session(user_id="u1", session_id="s1") == []
+    trace_entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    assert len(trace_entries) == 1
+    assert trace_entries[0]["trace_id"] == trace_id
 
 
 @pytest.mark.asyncio
