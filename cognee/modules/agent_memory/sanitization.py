@@ -8,14 +8,14 @@ MAX_TRACE_CONTAINER_ITEMS = 20
 
 
 def truncate_text(value: str, limit: int) -> str:
-    """Truncate text to a fixed limit while preserving an ellipsis suffix."""
+    """Bound stored trace strings so large params/returns do not bloat session cache payloads."""
     if len(value) <= limit:
         return value
     return value[: limit - 3] + "..."
 
 
 def sanitize_value(value: Any) -> Any:
-    """Convert arbitrary values into bounded, persistence-safe structures."""
+    """Convert runtime values into bounded JSON-safe data before trace persistence in cache/graph."""
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, UUID):
