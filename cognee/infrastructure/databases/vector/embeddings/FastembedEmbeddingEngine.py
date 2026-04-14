@@ -1,6 +1,9 @@
+import asyncio
 import os
 import logging
+import math
 from typing import List, Optional
+import numpy as np
 
 try:
     from fastembed import TextEmbedding
@@ -82,7 +85,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type((litellm.exceptions.NotFoundError, EmbeddingException)),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -122,12 +125,42 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 embeddings = list(embeddings)  
   
         except Exception as error:  
-            # Handle context window errors using shared handler  
-            if "context" in str(error).lower() or "token" in str(error).lower():  
-                from .context_window_handler import handle_context_window_exceeded  
-                embeddings = await handle_context_window_exceeded(  
-                    self._raw_embed_text, sanitized_text  
-                )  
+            error_str = str(error).lower()
+            context_error_patterns = (
+                "context length",
+                "context window",
+                "input length",
+                "too long",
+                "maximum context",
+                "maximum tokens",
+                "max tokens",
+            )
+            if any(pattern in error_str for pattern in context_error_patterns):
+                if len(original_texts) > 1:
+                    mid = math.ceil(len(original_texts) / 2)
+                    left_vecs, right_vecs = await asyncio.gather(
+                        self.embed_text(original_texts[:mid]),
+                        self.embed_text(original_texts[mid:]),
+                    )
+                    embeddings = left_vecs + right_vecs
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
+                if len(original_texts) == 1:
+                    s = original_texts[0]
+                    third = len(s) // 3
+                    if third == 0:
+                        raise EmbeddingException(
+                            "Text is too short to split further but exceeds context window."
+                        ) from error
+                    left_part, right_part = s[: third * 2], s[third:]
+                    (left_vec,), (right_vec,) = await asyncio.gather(
+                        self.embed_text([left_part]),
+                        self.embed_text([right_part]),
+                    )
+                    pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+                    embeddings = [pooled.tolist()]
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)  
+
                 return handle_embedding_response(original_texts, embeddings, self.dimensions)  
   
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")  
