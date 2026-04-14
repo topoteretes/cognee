@@ -1,6 +1,10 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
-from cognee.modules.agent_memory.sanitization import MAX_SERIALIZED_VALUE_LENGTH, sanitize_value, truncate_text
+from cognee.modules.agent_memory.sanitization import (
+    MAX_SERIALIZED_VALUE_LENGTH,
+    sanitize_value,
+    truncate_text,
+)
 
 
 def _validate_list_of_str(value: object, key: str) -> List[str]:
