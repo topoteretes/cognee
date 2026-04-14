@@ -1,5 +1,5 @@
-from typing import Dict, List, Optional
-from pydantic import BaseModel, field_validator
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, field_validator
 
 
 def _validate_list_of_str(value: object, key: str) -> List[str]:
@@ -78,3 +78,30 @@ class SessionQAEntry(BaseModel):
                 raise ValueError("memify_metadata may only have string keys and bool values")
             out[key] = val
         return out if out else None
+
+
+class SessionAgentTraceEntry(BaseModel):
+    """
+    Canonical format for one agent trace step stored in session cache.
+
+    Fields:
+        trace_id: Unique identifier for the trace step.
+        origin_function: Agent method/function that produced the step.
+        status: Execution status for the step.
+        memory_query: Optional memory lookup query used by the step.
+        memory_context: Optional memory context returned to the step.
+        method_params: Serialized method parameters for the step.
+        method_return_value: Serialized method return value for the step.
+        error_message: Error details for failed steps.
+        session_feedback: Per-step feedback generated from the step only.
+    """
+
+    trace_id: str
+    origin_function: str
+    status: str
+    memory_query: str = ""
+    memory_context: str = ""
+    method_params: Dict[str, Any] = Field(default_factory=dict)
+    method_return_value: Any = None
+    error_message: str = ""
+    session_feedback: str = ""
