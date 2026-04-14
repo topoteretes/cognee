@@ -347,7 +347,18 @@ async def cognify(
 
                     graph_model = load_class(graph_model_file, graph_model_name)
 
-            await cognee_client.add(data, dataset_name=dataset_name)
+            # Support JSON array of items (file paths, text, URLs) for batch add
+            items = [data]
+            try:
+                parsed = json.loads(data)
+                if isinstance(parsed, list):
+                    items = parsed
+                    logger.info(f"Batch mode: adding {len(items)} items to '{dataset_name}'")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            for item in items:
+                await cognee_client.add(item, dataset_name=dataset_name)
 
             try:
                 await cognee_client.cognify(
