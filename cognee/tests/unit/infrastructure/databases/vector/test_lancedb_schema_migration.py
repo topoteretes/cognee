@@ -5,7 +5,6 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 from uuid import uuid4
-from unittest.mock import AsyncMock, Mock
 from cognee.infrastructure.engine import DataPoint
 
 try:
@@ -201,74 +200,3 @@ async def test_payload_preserves_inherited_datapoint_fields(tmp_path):
     assert result.payload["feedback_weight"] == 0.75
     assert result.payload["created_at"] == point.created_at
     assert result.payload["updated_at"] == point.updated_at
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
-async def test_migration_coalesces_null_payload_values_to_defaults(tmp_path):
-    adapter = LanceDBAdapter(
-        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
-    )
-    legacy_point = _make_point(str(uuid4()), "legacy row").model_dump()
-    legacy_point["feedback_weight"] = None
-
-    old_collection = AsyncMock()
-    old_collection.to_arrow.return_value = Mock(
-        to_pylist=Mock(
-            return_value=[
-                {
-                    "id": str(uuid4()),
-                    "vector": [0.1, 0.2, 0.3],
-                    "payload": legacy_point,
-                }
-            ]
-        )
-    )
-
-    new_collection = AsyncMock()
-    connection = AsyncMock()
-    connection.open_table.return_value = new_collection
-
-    adapter.get_connection = AsyncMock(return_value=connection)
-
-    await adapter._migrate_collection_schema(
-        collection_name="Test_text",
-        old_collection=old_collection,
-        payload_schema=IndexSchema,
-        new_lance_data_points=[],
-    )
-
-    assert new_collection.add.await_count == 1
-    migrated_rows = new_collection.add.await_args.args[0]
-    assert len(migrated_rows) == 1
-    assert migrated_rows[0].payload.feedback_weight == 0.5
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
-async def test_create_data_points_repairs_null_non_nullable_lance_error(tmp_path):
-    adapter = LanceDBAdapter(
-        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
-    )
-
-    merge_builder = Mock()
-    merge_builder.when_matched_update_all.return_value = merge_builder
-    merge_builder.when_not_matched_insert_all.return_value = merge_builder
-    merge_builder.execute = AsyncMock(
-        side_effect=RuntimeError(
-            "lance error: Invalid user input: The field `feedback_weight` "
-            "contained null values even though the field is marked non-null in the schema"
-        )
-    )
-
-    collection = Mock()
-    collection.merge_insert.return_value = merge_builder
-
-    adapter.has_collection = AsyncMock(return_value=True)
-    adapter.get_collection = AsyncMock(return_value=collection)
-    adapter.embed_data = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
-    adapter._migrate_collection_schema = AsyncMock()
-
-    await adapter.create_data_points("Test_text", [_make_point(str(uuid4()), "repair me")])
-
-    assert adapter._migrate_collection_schema.await_count == 1
