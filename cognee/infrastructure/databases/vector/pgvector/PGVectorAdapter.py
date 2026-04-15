@@ -66,6 +66,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.db_uri: str = connection_string
         self.VECTOR_DB_LOCK = asyncio.Lock()
         self._metadata = MetaData()
+        # True when this adapter created its own engine and must dispose it on close().
+        # False when the engine is borrowed from the relational adapter.
+        self._owns_engine: bool = False
 
         relational_db = get_relational_engine()
         relational_config = get_relational_config()
@@ -94,6 +97,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 connection_string=self.db_uri,
                 pool_args=effective_pool_args,
             )
+            self._owns_engine = True
         elif relational_db.engine.dialect.name == "postgresql":
             # If postgreSQL is used and not backend access control we must use the same engine and sessionmaker
             self.engine = relational_db.engine
@@ -104,6 +108,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 connection_string=self.db_uri,
                 pool_args=effective_pool_args,
             )
+            self._owns_engine = True
 
         # Has to be imported at class level
         # Functions reading tables from database need to know what a Vector column type is
@@ -116,6 +121,22 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         Reset SQLAlchemy metadata reflection cache for this adapter instance.
         """
         self._metadata = MetaData()
+
+    async def close(self) -> None:
+        """
+        Release connection-pool resources held by this adapter.
+
+        Only disposes the engine when this adapter owns it (i.e. it was created
+        with its own pool). When the engine is borrowed from the relational adapter
+        (shared-engine mode), disposal is left to the relational adapter's own
+        ``close()`` so the pool is not torn down while the relational layer is
+        still using it.
+
+        Called automatically by ``closing_lru_cache`` when this adapter is
+        evicted from ``_create_vector_engine``'s cache.
+        """
+        if self._owns_engine:
+            await self.engine.dispose(close=True)
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
