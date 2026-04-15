@@ -1,7 +1,6 @@
 import json
 import asyncio
 from uuid import UUID
-from fastapi.encoders import jsonable_encoder
 from typing import Any, List, Optional, Tuple, Type, Union
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -122,9 +121,19 @@ async def search(
         },
     )
 
+    # Log only the completion text (what the user sees), not the full
+    # serialized graph payload. The raw result_objects can be 50-100 KB
+    # each and cause unbounded DB growth in long-running deployments.
+    completions = []
+    for item in search_results:
+        payload = item[0] if isinstance(item, tuple) else item
+        if hasattr(payload, "completion") and payload.completion:
+            completions.append(payload.completion)
+        elif hasattr(payload, "context") and payload.context:
+            completions.append(payload.context)
     await log_result(
         query.id,
-        json.dumps(jsonable_encoder(search_results)),
+        json.dumps(completions) if completions else "[]",
         user.id,
     )
 
