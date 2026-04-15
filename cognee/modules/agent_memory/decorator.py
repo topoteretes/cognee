@@ -12,7 +12,8 @@ from .runtime import (
     build_method_params,
     persist_trace,
     reset_current_agent_memory_context,
-    resolve_agent_scope,
+    resolve_agent_dataset_scope,
+    resolve_agent_user,
     retrieve_memory_context,
     set_current_agent_memory_context,
     validate_agent_memory_config,
@@ -22,22 +23,28 @@ from .runtime import (
 def agent_memory(
     *,
     with_memory: bool = True,
+    with_session_memory: bool = False,
     save_traces: bool = False,
     memory_query_fixed: Optional[str] = None,
     memory_query_from_method: Optional[str] = None,
     memory_system_prompt: Optional[str] = None,
     memory_top_k: int = 5,
+    session_memory_last_n: int = 5,
+    session_id: Optional[str] = None,
     user: Optional[User] = None,
     dataset_name: Optional[str] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorate an async agent entrypoint with optional Cognee memory and trace persistence."""
     config = validate_agent_memory_config(
         with_memory=with_memory,
+        with_session_memory=with_session_memory,
         save_traces=save_traces,
         memory_query_fixed=memory_query_fixed,
         memory_query_from_method=memory_query_from_method,
         memory_system_prompt=memory_system_prompt,
         memory_top_k=memory_top_k,
+        session_memory_last_n=session_memory_last_n,
+        session_id=session_id,
         user=user,
         dataset_name=dataset_name,
     )
@@ -61,13 +68,17 @@ def agent_memory(
 
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            resolved_user = None
             scope = None
-            if config.with_memory or config.save_traces:
-                scope = await resolve_agent_scope(config)
+            if config.with_memory or config.with_session_memory or config.save_traces:
+                resolved_user = await resolve_agent_user(config)
+                if config.with_memory:
+                    scope = await resolve_agent_dataset_scope(config, resolved_user)
             context = AgentMemoryContext(
                 origin_function=fn.__qualname__,
                 config=config,
                 method_params=build_method_params(fn, args, kwargs),
+                user=resolved_user,
                 scope=scope,
             )
             token = set_current_agent_memory_context(context)
