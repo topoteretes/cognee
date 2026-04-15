@@ -200,9 +200,10 @@ class FSCacheAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
             )
-            entries = self._load_entries(session_key)
-            entries.append(qa_entry)
-            self._save_entries(session_key, entries)
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                entries.append(qa_entry)
+                self._save_entries(session_key, entries)
         except Exception as e:
             error_msg = f"Unexpected error while adding Q&A to diskcache: {str(e)}"
             logger.error(error_msg)
@@ -239,23 +240,24 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            merged = self._merge_entry_update(
-                entries[idx],
-                question,
-                context,
-                answer,
-                feedback_text,
-                feedback_score,
-                used_graph_element_ids=used_graph_element_ids,
-                memify_metadata=memify_metadata,
-            )
-            entries[idx] = self._validate_entry_dict(merged)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                merged = self._merge_entry_update(
+                    entries[idx],
+                    question,
+                    context,
+                    answer,
+                    feedback_text,
+                    feedback_score,
+                    used_graph_element_ids=used_graph_element_ids,
+                    memify_metadata=memify_metadata,
+                )
+                entries[idx] = self._validate_entry_dict(merged)
+                self._save_entries(session_key, entries)
+                return True
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
@@ -269,14 +271,15 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            merged = self._merge_entry_clear_feedback(entries[idx])
-            entries[idx] = self._validate_entry_dict(merged)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                merged = self._merge_entry_clear_feedback(entries[idx])
+                entries[idx] = self._validate_entry_dict(merged)
+                self._save_entries(session_key, entries)
+                return True
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
@@ -291,13 +294,14 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            entries.pop(idx)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                entries.pop(idx)
+                self._save_entries(session_key, entries)
+                return True
         except Exception as e:
             error_msg = f"Unexpected error while deleting Q&A from diskcache: {str(e)}"
             logger.error(error_msg)
@@ -348,9 +352,10 @@ class FSCacheAdapter(CacheDBInterface):
                 error_message=error_message,
                 session_feedback=session_feedback,
             )
-            entries = self._load_entries(trace_key)
-            entries.append(trace_entry)
-            self._save_entries(trace_key, entries)
+            with self.cache.transact():
+                entries = self._load_entries(trace_key)
+                entries.append(trace_entry)
+                self._save_entries(trace_key, entries)
         except Exception as e:
             error_msg = f"Unexpected error while appending agent trace step to diskcache: {str(e)}"
             logger.error(error_msg)
