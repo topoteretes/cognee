@@ -1,0 +1,14 @@
+# Additional deps beyond what cognee itself installs.
+# Run `pip install -r community-bot/requirements.txt` after activating the cognee venv.
+
+httpx>=0.27
+python-dotenv>=1.0
+
+# Day 3+
+discord.py>=2.3
+
+# Day 4+
+flask>=3.0
+
+# Day 2 (optional — Claude Code CLI subprocess; no Python dep needed if `claude` is installed)
+anthropic>=0.40
