@@ -200,9 +200,7 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "Trip plan created successfully."
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_falls_back_when_summary_is_empty(
-        self, sm, mock_cache
-    ):
+    async def test_add_agent_trace_step_falls_back_when_summary_is_empty(self, sm, mock_cache):
         """Empty LLM summaries fall back to the deterministic feedback string."""
         with (
             patch(
