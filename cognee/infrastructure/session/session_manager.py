@@ -1,13 +1,18 @@
+import json
 import uuid
 from typing import Any, Optional, Type, Union
 
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.session.feedback_models import AgentTraceFeedbackSummary
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_session_completion_with_optional_summary,
 )
+from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.modules.observability import (
@@ -137,12 +142,12 @@ class SessionManager:
             return qa_id
 
     @staticmethod
-    def _generate_agent_trace_feedback(
+    def _fallback_agent_trace_feedback(
         origin_function: str,
         status: str,
         error_message: str = "",
     ) -> str:
-        """Generate per-step feedback from the stored trace step only."""
+        """Generate deterministic fallback feedback for a trace step."""
         normalized_origin = origin_function.strip()
         normalized_status = status.strip().lower()
         normalized_error = error_message.strip()
@@ -152,6 +157,52 @@ class SessionManager:
                 return f"{normalized_origin} failed. Reason: {normalized_error}."
             return f"{normalized_origin} failed."
         return f"{normalized_origin} succeeded."
+
+    async def _generate_agent_trace_feedback(
+        self,
+        *,
+        origin_function: str,
+        status: str,
+        method_return_value: Any,
+        error_message: str = "",
+    ) -> str:
+        """Generate per-step feedback from method_return_value, or fall back deterministically."""
+        fallback_feedback = self._fallback_agent_trace_feedback(
+            origin_function=origin_function,
+            status=status,
+            error_message=error_message,
+        )
+
+        if method_return_value is None:
+            return fallback_feedback
+
+        try:
+            system_prompt = read_query_prompt("agent_trace_feedback_summary_system.txt")
+            if not system_prompt:
+                logger.warning("Agent trace feedback: system prompt not found, using fallback")
+                return fallback_feedback
+
+            sanitized_return_value = sanitize_value(method_return_value)
+            serialized_return_value = json.dumps(sanitized_return_value, ensure_ascii=False)
+
+            result = await LLMGateway.acreate_structured_output(
+                text_input=serialized_return_value,
+                system_prompt=system_prompt,
+                response_model=AgentTraceFeedbackSummary,
+            )
+            session_feedback = (
+                result.session_feedback.strip()
+                if isinstance(result, AgentTraceFeedbackSummary)
+                else ""
+            )
+            return session_feedback if session_feedback else fallback_feedback
+        except Exception as e:
+            logger.warning(
+                "Agent trace feedback generation failed, using fallback: %s",
+                e,
+                exc_info=False,
+            )
+            return fallback_feedback
 
     async def add_agent_trace_step(
         self,
@@ -178,9 +229,10 @@ class SessionManager:
             return None
 
         trace_id = str(uuid.uuid4())
-        session_feedback = self._generate_agent_trace_feedback(
+        session_feedback = await self._generate_agent_trace_feedback(
             origin_function=origin_function,
             status=status,
+            method_return_value=method_return_value,
             error_message=error_message,
         )
         await self._cache.append_agent_trace_step(
