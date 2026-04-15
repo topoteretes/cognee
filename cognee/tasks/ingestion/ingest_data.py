@@ -81,6 +81,34 @@ async def ingest_data(
 
         db_engine = get_relational_engine()
 
+        from sqlalchemy import select
+
+        # Pre-loop: compute data_id for every item and load all existing Data records
+        # in a single bulk query so the main loop needs no per-item DB sessions.
+        data_point_ids = []
+        for data_item in data:
+            underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
+            item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
+
+            original_file_path = await save_data_item_to_storage(underlying_data)
+            actual_file_path = get_data_file_path(original_file_path)
+
+            async with open_data_file(actual_file_path) as file:
+                classified_data = ingestion.classify(file)
+                data_id = await ingestion.identify(classified_data, user)
+
+            if item_data_id is not None:
+                data_id = item_data_id
+
+            data_point_ids.append(data_id)
+
+        existing_data_map: dict = {}
+        if data_point_ids:
+            async with db_engine.get_async_session() as session:
+                result = await session.execute(select(Data).filter(Data.id.in_(data_point_ids)))
+                for dp in result.scalars().all():
+                    existing_data_map[str(dp.id)] = dp
+
         for data_item in data:
             # Support for DataItem (custom label + data + optional data_id / external_metadata)
             current_label = None
@@ -127,13 +155,7 @@ async def ingest_data(
             if item_data_id is not None:
                 data_id = item_data_id
 
-            from sqlalchemy import select
-
-            # Check to see if data should be updated
-            async with db_engine.get_async_session() as session:
-                data_point = (
-                    await session.execute(select(Data).filter(Data.id == data_id))
-                ).scalar_one_or_none()
+            data_point = existing_data_map.get(str(data_id))
 
             # TODO: Maybe allow getting of external metadata through ingestion loader?
             ext_metadata = get_external_metadata_dict(data_item)
