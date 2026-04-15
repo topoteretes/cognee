@@ -1,6 +1,8 @@
 import asyncio
+import copy
 from os import path
 from uuid import UUID
+from enum import Enum
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
@@ -27,6 +29,22 @@ from cognee.modules.observability.tracing import (
 )
 
 logger = get_logger("LanceDBAdapter")
+_NO_DEFAULT = object()
+_SIMPLE_TYPE_DEFAULTS = {
+    str: "",
+    int: 0,
+    float: 0.0,
+    bool: False,
+    bytes: b"",
+    UUID: UUID(int=0),
+}
+_ORIGIN_DEFAULT_FACTORIES = {
+    list: list,
+    List: list,
+    dict: dict,
+    set: set,
+    tuple: tuple,
+}
 
 
 class IndexSchema(DataPoint):
@@ -253,6 +271,7 @@ class LanceDBAdapter(VectorDBInterface):
         new_ids = {dp.id for dp in new_lance_data_points}
         typed_old_rows = []
         skipped = 0
+        failed_rows = []
         for row in rows:
             if row.get("id") in new_ids:
                 continue
@@ -281,18 +300,32 @@ class LanceDBAdapter(VectorDBInterface):
                     )
                 )
             except Exception as e:
+                row_id = str(row.get("id", "?"))
                 logger.warning(
                     "Skipping row %s during migration (validation failed): %s",
-                    row.get("id", "?"),
+                    row_id,
                     e,
                 )
                 skipped += 1
+                failed_rows.append((row_id, str(e)))
 
         if skipped:
-            logger.warning(
-                "Migration of '%s': skipped %d rows due to validation errors",
+            example_failures = "; ".join(
+                [f"{row_id}: {error}" for row_id, error in failed_rows[:5]]
+            )
+            logger.error(
+                "Migration of '%s' aborted: %d rows cannot be migrated to the new schema. "
+                "No data was modified. Add explicit defaults for newly required fields or make "
+                "them optional. Example validation failures: %s",
                 collection_name,
                 skipped,
+                example_failures or "<no details>",
+            )
+            raise RuntimeError(
+                f"LanceDB migration aborted for '{collection_name}': {skipped} existing rows "
+                "cannot be backfilled to the new payload schema. "
+                "Add an explicit default value for newly required fields "
+                "(or make them optional) and re-run migration."
             )
 
         async with self.VECTOR_DB_LOCK:
@@ -484,15 +517,54 @@ class LanceDBAdapter(VectorDBInterface):
         }
 
     def _get_payload_defaults(self, payload_schema: type) -> dict:
-        """Extract default values from the Pydantic payload model."""
+        """Extract default values from payload model, including inferred defaults for required fields."""
         schema_model = self.get_data_point_schema(payload_schema)
         defaults = {}
         for name, field_info in schema_model.model_fields.items():
-            if field_info.default is not None and not (
-                hasattr(field_info, "is_required") and field_info.is_required()
-            ):
-                defaults[name] = field_info.default
+            is_required = hasattr(field_info, "is_required") and field_info.is_required()
+            if not is_required:
+                default_value = field_info.get_default(call_default_factory=True)
+                defaults[name] = copy.deepcopy(default_value)
+                continue
+
+            inferred_default = self._infer_default_for_annotation(field_info.annotation)
+            if inferred_default is not _NO_DEFAULT:
+                defaults[name] = inferred_default
         return defaults
+
+    @staticmethod
+    def _infer_default_for_annotation(annotation):
+        """Infer a safe fallback default for required fields without explicit defaults."""
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+
+        if annotation in _SIMPLE_TYPE_DEFAULTS:
+            return _SIMPLE_TYPE_DEFAULTS[annotation]
+
+        if origin in _ORIGIN_DEFAULT_FACTORIES:
+            return _ORIGIN_DEFAULT_FACTORIES[origin]()
+
+        if str(origin).endswith("Literal"):
+            return args[0] if args else _NO_DEFAULT
+
+        if origin is Union:
+            non_none_args = [arg for arg in args if arg is not type(None)]
+            if len(non_none_args) != len(args):
+                return None
+            for arg in non_none_args:
+                inferred = LanceDBAdapter._infer_default_for_annotation(arg)
+                if inferred is not _NO_DEFAULT:
+                    return inferred
+            return _NO_DEFAULT
+
+        if isinstance(annotation, type):
+            if issubclass(annotation, Enum):
+                members = list(annotation)
+                return members[0] if members else _NO_DEFAULT
+            if hasattr(annotation, "model_fields"):
+                return {}
+
+        return _NO_DEFAULT
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         try:
