@@ -124,6 +124,25 @@ class SQLAlchemyAdapter:
         except FileNotFoundError:
             pass
 
+    async def close(self) -> None:
+        """
+        Release all connection-pool resources held by this adapter.
+
+        For SQLite-on-S3 deployments, the local temp database is first pushed
+        back to S3 so that pending writes are not lost when the adapter is
+        evicted from a cache. Errors during S3 push are logged but do not
+        block engine disposal.
+
+        Called automatically by ``closing_lru_cache`` when this adapter is
+        evicted from ``create_relational_engine``'s cache.
+        """
+        try:
+            await self.push_to_s3()
+        except Exception as e:
+            logger.warning(f"Failed to push SQLite database to S3 during close: {e}")
+
+        await self.engine.dispose(close=True)
+
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
         """
