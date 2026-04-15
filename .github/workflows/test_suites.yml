@@ -18,7 +18,6 @@ concurrency:
 env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
-  TEST_SUITES_PARALLEL: 'false'
 
 jobs:
   # ── Build pre-baked CI container ──────────────────────────────────────
@@ -123,16 +122,7 @@ jobs:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
     needs: [ e2e-tests, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.e2e-tests.result == 'success' }}
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  slow-e2e-tests-parallel:
-    name: Slow End-to-End Tests
-    uses: ./.github/workflows/slow_e2e_tests.yml
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.e2e-tests.result == 'success' }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -140,16 +130,7 @@ jobs:
   graph-db-tests:
     name: Graph Database Tests
     needs: [basic-tests, e2e-tests, build-ci-env]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
-    uses: ./.github/workflows/graph_db_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  graph-db-tests-parallel:
-    name: Graph Database Tests
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
     uses: ./.github/workflows/graph_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -158,16 +139,7 @@ jobs:
   vector-db-tests:
     name: Vector DB Tests
     needs: [basic-tests, e2e-tests, build-ci-env]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
-    uses: ./.github/workflows/vector_db_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  vector-db-tests-parallel:
-    name: Vector DB Tests
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
     uses: ./.github/workflows/vector_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -176,16 +148,7 @@ jobs:
   example-tests:
     name: Example Tests
     needs: [basic-tests, e2e-tests, build-ci-env]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
-    uses: ./.github/workflows/examples_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  example-tests-parallel:
-    name: Example Tests
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
     uses: ./.github/workflows/examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -194,16 +157,7 @@ jobs:
   notebook-tests:
     name: Notebook Tests
     needs: [basic-tests, e2e-tests, build-ci-env]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
-    uses: ./.github/workflows/notebooks_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  notebook-tests-parallel:
-    name: Notebook Tests
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
     uses: ./.github/workflows/notebooks_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -212,17 +166,7 @@ jobs:
   different-os-tests-basic:
     name: OS and Python Tests Ubuntu
     needs: [basic-tests, e2e-tests]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.basic-tests.result == 'success' }}
-    uses: ./.github/workflows/test_different_operating_systems.yml
-    with:
-      python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x"]'
-      os: '["ubuntu-22.04"]'
-    secrets: inherit
-
-  different-os-tests-basic-parallel:
-    name: OS and Python Tests Ubuntu
-    needs: [ pre-test ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.basic-tests.result == 'success' }}
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x"]'
@@ -232,17 +176,7 @@ jobs:
   different-os-tests-extended:
     name: OS and Python Tests Extended
     needs: [basic-tests, e2e-tests]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.basic-tests.result == 'success' }}
-    uses: ./.github/workflows/test_different_operating_systems.yml
-    with:
-      python-versions: '["3.13.x"]'
-      os: '["macos-15", "windows-latest"]'
-    secrets: inherit
-
-  different-os-tests-extended-parallel:
-    name: OS and Python Tests Extended
-    needs: [ pre-test ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.basic-tests.result == 'success' }}
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.13.x"]'
@@ -252,16 +186,7 @@ jobs:
   llm-tests:
     name: LLM Test Suite
     needs: [ basic-tests, e2e-tests, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
-    uses: ./.github/workflows/test_llms.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  llm-tests-parallel:
-    name: LLM Test Suite
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
     uses: ./.github/workflows/test_llms.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -270,16 +195,7 @@ jobs:
   s3-file-storage-test:
     name: S3 File Storage Test
     needs: [basic-tests, e2e-tests, build-ci-env]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
-    uses: ./.github/workflows/test_s3_file_storage.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  s3-file-storage-test-parallel:
-    name: S3 File Storage Test
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.basic-tests.result == 'success' && needs.e2e-tests.result == 'success' }}
     uses: ./.github/workflows/test_s3_file_storage.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -297,42 +213,18 @@ jobs:
   mcp-test:
     name: MCP Tests
     needs: [basic-tests, e2e-tests]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' }}
-    uses: ./.github/workflows/test_mcp.yml
-    secrets: inherit
-
-  mcp-test-parallel:
-    name: MCP Tests
-    needs: [ pre-test ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
     uses: ./.github/workflows/test_mcp.yml
     secrets: inherit
 
   docker-compose-test:
     name: Docker Compose Test
     needs: [basic-tests, e2e-tests]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' }}
-    uses: ./.github/workflows/docker_compose.yml
-    secrets: inherit
-
-  docker-compose-test-parallel:
-    name: Docker Compose Test
-    needs: [ pre-test ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
     uses: ./.github/workflows/docker_compose.yml
     secrets: inherit
 
   docker-ci-test:
     name: Docker CI test
     needs: [basic-tests, e2e-tests]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' }}
-    uses: ./.github/workflows/backend_docker_build_test.yml
-    secrets: inherit
-
-  docker-ci-test-parallel:
-    name: Docker CI test
-    needs: [ pre-test ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
@@ -340,16 +232,7 @@ jobs:
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ basic-tests, e2e-tests, graph-db-tests, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.graph-db-tests.result == 'success' }}
-    uses: ./.github/workflows/temporal_graph_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  temporal-graph-tests-parallel:
-    name: Temporal Graph Test
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.graph-db-tests.result == 'success' }}
     uses: ./.github/workflows/temporal_graph_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -358,16 +241,7 @@ jobs:
   search-db-tests:
     name: Search Test on Different DBs
     needs: [basic-tests, e2e-tests, graph-db-tests, build-ci-env]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.graph-db-tests.result == 'success' }}
-    uses: ./.github/workflows/search_db_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  search-db-tests-parallel:
-    name: Search Test on Different DBs
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.graph-db-tests.result == 'success' }}
     uses: ./.github/workflows/search_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -376,16 +250,7 @@ jobs:
   relational-db-migration-tests:
     name: Relational DB Migration Tests
     needs: [basic-tests, e2e-tests, graph-db-tests, build-ci-env]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.graph-db-tests.result == 'success' }}
-    uses: ./.github/workflows/relational_db_migration_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  relational-db-migration-tests-parallel:
-    name: Relational DB Migration Tests
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.graph-db-tests.result == 'success' }}
     uses: ./.github/workflows/relational_db_migration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -394,16 +259,7 @@ jobs:
   distributed-tests:
     name: Distributed Cognee Test
     needs: [ basic-tests, e2e-tests, graph-db-tests, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.graph-db-tests.result == 'success' }}
-    uses: ./.github/workflows/distributed_test.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  distributed-tests-parallel:
-    name: Distributed Cognee Test
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.graph-db-tests.result == 'success' }}
     uses: ./.github/workflows/distributed_test.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -413,16 +269,7 @@ jobs:
   db-examples-tests:
     name: DB Examples Tests
     needs: [vector-db-tests, graph-db-tests, relational-db-migration-tests, distributed-tests, build-ci-env]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' && needs.vector-db-tests.result == 'success' && needs.graph-db-tests.result == 'success' }}
-    uses: ./.github/workflows/db_examples_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
-  db-examples-tests-parallel:
-    name: DB Examples Tests
-    needs: [ pre-test, build-ci-env ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
+    if: ${{ !cancelled() && needs.vector-db-tests.result == 'success' && needs.graph-db-tests.result == 'success' }}
     uses: ./.github/workflows/db_examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -448,30 +295,6 @@ jobs:
       integration-tests,
       slow-e2e-tests,
     ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' }}
-    uses: ./.github/workflows/test_ollama.yml
-    secrets: inherit
-
-  ollama-tests-parallel:
-    name: Ollama Tests
-    needs: [
-      basic-tests,
-      e2e-tests,
-      graph-db-tests-parallel,
-      notebook-tests-parallel,
-      different-os-tests-basic-parallel,
-      different-os-tests-extended-parallel,
-      vector-db-tests-parallel,
-      example-tests-parallel,
-      llm-tests-parallel,
-      mcp-test-parallel,
-      relational-db-migration-tests-parallel,
-      docker-compose-test-parallel,
-      docker-ci-test-parallel,
-      integration-tests,
-      slow-e2e-tests-parallel,
-    ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' }}
     uses: ./.github/workflows/test_ollama.yml
     secrets: inherit
 
@@ -493,14 +316,6 @@ jobs:
       docker-compose-test,
       docker-ci-test,
     ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' }}
-    uses: ./.github/workflows/test_llamacpp.yml
-    secrets: inherit
-
-  llamacpp-tests-parallel:
-    name: Llama-cpp Tests
-    needs: [ pre-test ]
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' && needs.pre-test.result == 'success' }}
     uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
 
@@ -528,7 +343,7 @@ jobs:
       slow-e2e-tests,
     ]
     runs-on: ubuntu-latest
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL != 'true' }}
+    if: ${{ !cancelled() }}
     steps:
       - name: Check Status
         run: |
@@ -549,70 +364,6 @@ jobs:
                 "${{ needs.ollama-tests.result }}" == "success" &&
                 "${{ needs.integration-tests.result }}" == "success" &&
                 "${{ needs.slow-e2e-tests.result }}" == "success" ]]; then
-            echo "All test suites completed successfully!"
-          else
-            echo "One or more test suites failed."
-            exit 1
-          fi
-
-  notify-parallel:
-    name: Test Completion Status
-    needs: [
-      pre-test,
-      build-ci-env,
-      basic-tests,
-      e2e-tests,
-      cli-tests,
-      integration-tests,
-      slow-e2e-tests-parallel,
-      graph-db-tests-parallel,
-      vector-db-tests-parallel,
-      example-tests-parallel,
-      notebook-tests-parallel,
-      different-os-tests-basic-parallel,
-      different-os-tests-extended-parallel,
-      llm-tests-parallel,
-      s3-file-storage-test-parallel,
-      mcp-test-parallel,
-      docker-compose-test-parallel,
-      docker-ci-test-parallel,
-      temporal-graph-tests-parallel,
-      search-db-tests-parallel,
-      relational-db-migration-tests-parallel,
-      distributed-tests-parallel,
-      db-examples-tests-parallel,
-      ollama-tests-parallel,
-      llamacpp-tests-parallel,
-    ]
-    runs-on: ubuntu-latest
-    if: ${{ !cancelled() && env.TEST_SUITES_PARALLEL == 'true' }}
-    steps:
-      - name: Check Status
-        run: |
-          if [[ "${{ needs.pre-test.result }}" == "success" &&
-                "${{ needs.basic-tests.result }}" == "success" &&
-                "${{ needs.e2e-tests.result }}" == "success" &&
-                "${{ needs.cli-tests.result }}" == "success" &&
-                "${{ needs.integration-tests.result }}" == "success" &&
-                "${{ needs.slow-e2e-tests-parallel.result }}" == "success" &&
-                "${{ needs.graph-db-tests-parallel.result }}" == "success" &&
-                "${{ needs.vector-db-tests-parallel.result }}" == "success" &&
-                "${{ needs.example-tests-parallel.result }}" == "success" &&
-                "${{ needs.notebook-tests-parallel.result }}" == "success" &&
-                "${{ needs.different-os-tests-basic-parallel.result }}" == "success" &&
-                "${{ needs.different-os-tests-extended-parallel.result }}" == "success" &&
-                "${{ needs.llm-tests-parallel.result }}" == "success" &&
-                "${{ needs.s3-file-storage-test-parallel.result }}" == "success" &&
-                "${{ needs.mcp-test-parallel.result }}" == "success" &&
-                "${{ needs.docker-compose-test-parallel.result }}" == "success" &&
-                "${{ needs.docker-ci-test-parallel.result }}" == "success" &&
-                "${{ needs.temporal-graph-tests-parallel.result }}" == "success" &&
-                "${{ needs.search-db-tests-parallel.result }}" == "success" &&
-                "${{ needs.relational-db-migration-tests-parallel.result }}" == "success" &&
-                "${{ needs.distributed-tests-parallel.result }}" == "success" &&
-                "${{ needs.db-examples-tests-parallel.result }}" == "success" &&
-                "${{ needs.ollama-tests-parallel.result }}" == "success" &&
-                "${{ needs.llamacpp-tests-parallel.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
           else
             echo "One or more test suites failed."
