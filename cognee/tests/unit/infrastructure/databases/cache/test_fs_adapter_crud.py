@@ -3,6 +3,7 @@
 from datetime import datetime
 from uuid import uuid4
 import tempfile
+from contextlib import contextmanager
 import pytest
 from unittest.mock import patch
 
@@ -188,6 +189,48 @@ async def test_append_agent_trace_step_rejects_blank_required_fields(adapter):
             status="success",
             session_feedback="plan_trip succeeded.",
         )
+
+
+@pytest.mark.asyncio
+async def test_mutating_methods_use_diskcache_transactions(adapter, monkeypatch):
+    """Mutating FS session operations should run inside a diskcache transaction."""
+    transaction_entries: list[str] = []
+
+    @contextmanager
+    def track_transaction():
+        transaction_entries.append("entered")
+        try:
+            yield
+        finally:
+            transaction_entries.append("exited")
+
+    monkeypatch.setattr(adapter.cache, "transact", track_transaction)
+
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    assert transaction_entries == ["entered", "exited"]
+
+    transaction_entries.clear()
+    await adapter.update_qa_entry("u1", "s1", "id1", feedback_score=5)
+    assert transaction_entries == ["entered", "exited"]
+
+    transaction_entries.clear()
+    await adapter.delete_feedback("u1", "s1", "id1")
+    assert transaction_entries == ["entered", "exited"]
+
+    transaction_entries.clear()
+    await adapter.delete_qa_entry("u1", "s1", "id1")
+    assert transaction_entries == ["entered", "exited"]
+
+    transaction_entries.clear()
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        session_feedback="plan_trip succeeded.",
+    )
+    assert transaction_entries == ["entered", "exited"]
 
 
 @pytest.mark.asyncio
