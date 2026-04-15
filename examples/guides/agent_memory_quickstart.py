@@ -4,6 +4,7 @@ Minimal quickstart for `cognee.agent_memory`.
 What this script demonstrates:
 - fixed memory query retrieval
 - dynamic memory query retrieval from a wrapped method parameter
+- session-backed memory retrieval from recent trace feedback
 - the same downstream LLM path with memory disabled
 - trace persistence enabled on decorated calls
 
@@ -75,6 +76,17 @@ async def trace_test() -> str:
     return await ask_llm("Just write out: results")
 
 
+@cognee.agent_memory(
+    with_memory=False,
+    with_session_memory=True,
+    save_traces=True,
+    session_memory_last_n=5,
+)
+async def with_session_memory_agent() -> str:
+    # Uses recent session-backed trace feedback without dataset search retrieval.
+    return await ask_llm("What animal does cognee internal name refer to?")
+
+
 async def main() -> None:
     await setup_memory()
 
@@ -86,6 +98,7 @@ async def main() -> None:
     with_dynamic_memory = await with_dynamic_memory_agent(
         question="What animal does cognee internal name refer to?"
     )
+    with_session_memory = await with_session_memory_agent()
     without_memory = await without_memory_agent()
     trace_result = await trace_test()
 
@@ -103,6 +116,9 @@ async def main() -> None:
     print()
     print("TRACE TEST:")
     print(trace_result)
+    print()
+    print("WITH SESSION MEMORY:")
+    print(with_session_memory)
 
 
 if __name__ == "__main__":
