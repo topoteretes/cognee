@@ -31,7 +31,10 @@ async def main():
     )
     await visualize_graph(visualize_graph_path)
 
-    result = await cognee.remember("In which cities did Andreas live?")
+    result = await cognee.recall(
+        "In which cities did Andreas live?",
+        datasets=["importance_demo"],
+    )
     print(result)
 
 

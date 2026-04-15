@@ -17,6 +17,11 @@ import cognee
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
+def pretty_print_section(title: str, body: str) -> None:
+    print(f"\n[{title}]")
+    print(body)
+
+
 async def setup_memory() -> None:
     # Start from a clean slate and add a fact the base model is unlikely to know.
     await cognee.prune.prune_data()
@@ -78,9 +83,10 @@ async def trace_test() -> str:
 async def main() -> None:
     await setup_memory()
 
-    print("This quickstart compares the same LLM path with memory on, memory off,")
-    print("and dynamic query resolution from a wrapped method parameter.")
-    print()
+    print("Agent memory quickstart")
+    print("======================")
+    print("Prompt: What animal does cognee internal name refer to?")
+    print("Stored memory: Maple Panda")
 
     with_memory = await with_memory_agent()
     with_dynamic_memory = await with_dynamic_memory_agent(
@@ -89,20 +95,10 @@ async def main() -> None:
     without_memory = await without_memory_agent()
     trace_result = await trace_test()
 
-    print("The in-memory knowledge is that the feature is called Maple Panda")
-
-    print("AGENT ANSWERS:")
-    print("WITH MEMORY:")
-    print(with_memory)
-    print()
-    print("WITHOUT MEMORY:")
-    print(without_memory)
-    print()
-    print("WITH DYNAMIC MEMORY QUERY:")
-    print(with_dynamic_memory)
-    print()
-    print("TRACE TEST:")
-    print(trace_result)
+    pretty_print_section("Memory enabled", with_memory)
+    pretty_print_section("Memory disabled", without_memory)
+    pretty_print_section("Dynamic memory query", with_dynamic_memory)
+    pretty_print_section("Trace test", trace_result)
 
 
 if __name__ == "__main__":

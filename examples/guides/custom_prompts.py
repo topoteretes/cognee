@@ -10,8 +10,8 @@ Ignore all other entities.
 
 
 async def main():
-    # await cognee.prune.prune_data()
-    # await cognee.prune.prune_system(metadata=True)
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
     await cognee.remember(
         [
             "Alice moved to Paris in 2010, while Bob has always lived in New York.",

@@ -46,11 +46,9 @@ async def main():
         query_text="Give me a confident answer: What is NLP?",
         system_prompt="Answer succinctly and state confidence at the end.",
     )
-    print(answers)
     assert len(answers) > 0
 
     answers = await cognee.recall(query_text="Tell me about NLP", only_context=True)
-    print(answers)
     assert len(answers) > 0
 
 
