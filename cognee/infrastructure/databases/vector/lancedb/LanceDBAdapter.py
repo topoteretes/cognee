@@ -321,66 +321,13 @@ class LanceDBAdapter(VectorDBInterface):
             len(typed_old_rows),
         )
 
-    @staticmethod
-    def _all_datapoint_subclasses():
-        seen = set()
-        stack = list(DataPoint.__subclasses__())
-        subclasses = []
-
-        while stack:
-            subclass = stack.pop()
-            if subclass in seen:
-                continue
-            seen.add(subclass)
-            subclasses.append(subclass)
-            stack.extend(subclass.__subclasses__())
-
-        return subclasses
-
-    @staticmethod
-    def _warm_up_common_datapoint_models():
-        # Import commonly indexed data points so they are present in __subclasses__.
-        # Imports are best-effort to avoid hard dependency on optional modules.
-
-        # TODO: Hard-coded for now, might be cumbersome
-        modules_to_import = [
-            "cognee.modules.chunking.models",
-            "cognee.tasks.summarization.models",
-            "cognee.modules.engine.models",
-            "cognee.modules.data.processing.document_types",
-            "cognee.modules.graph.models.EdgeType",
-        ]
-
-        for module_name in modules_to_import:
-            try:
-                __import__(module_name)
-            except Exception:
-                logger.debug("Skipping optional datapoint import during migration: %s", module_name)
-
     @classmethod
     def _resolve_collection_payload_schema(cls, collection_name: str):
         if "_" not in collection_name:
             return None
-        # Important note: Depends on naming convention (e.g. DocumentChunk_text)
-        type_name, _, index_field = collection_name.rpartition("_")
-        if not type_name or not index_field:
-            return None
-
-        cls._warm_up_common_datapoint_models()
-        for data_point_cls in cls._all_datapoint_subclasses():
-            if data_point_cls.__name__ != type_name:
-                continue
-
-            metadata_field = data_point_cls.model_fields.get("metadata")
-            metadata_default = metadata_field.default if metadata_field else None
-            if isinstance(metadata_default, dict):
-                index_fields = metadata_default.get("index_fields", [])
-                if index_fields and index_field not in index_fields:
-                    continue
-
-            return data_point_cls
-
-        return None
+        # Vector index collections store IndexSchema payloads regardless of the
+        # source DataPoint type encoded in the collection name.
+        return IndexSchema
 
     @staticmethod
     def _normalize_arrow_type(arrow_type):

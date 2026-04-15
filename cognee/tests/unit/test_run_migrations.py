@@ -3,7 +3,7 @@
 import sys
 import unittest
 import importlib
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestRunMigrations(unittest.TestCase):
@@ -37,6 +37,86 @@ class TestRunMigrations(unittest.TestCase):
             "Using bare 'python' breaks venv/uv setups on Windows.",
         )
         self.assertEqual(cmd[1:], ["-m", "alembic", "upgrade", "head"])
+
+    def test_run_vector_migrations_sweeps_dataset_database_rows(self):
+        import asyncio
+
+        module = importlib.import_module("cognee.run_migrations")
+
+        class _FakeScalarResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def all(self):
+                return self._rows
+
+        class _FakeSession:
+            def __init__(self, rows):
+                self.scalars = AsyncMock(return_value=_FakeScalarResult(rows))
+
+        class _FakeSessionContextManager:
+            def __init__(self, session):
+                self._session = session
+
+            async def __aenter__(self):
+                return self._session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        dataset_rows = [
+            MagicMock(
+                dataset_id="dataset-1",
+                vector_database_provider="lancedb",
+                vector_database_url="/tmp/dataset-1.lance.db",
+                vector_database_name="dataset-1.lance.db",
+                vector_database_key="",
+                vector_database_connection_info={},
+                vector_dataset_database_handler="lancedb",
+            ),
+            MagicMock(
+                dataset_id="dataset-2",
+                vector_database_provider="pgvector",
+                vector_database_url="postgres://ignored",
+                vector_database_name="dataset-2",
+                vector_database_key="",
+                vector_database_connection_info={},
+                vector_dataset_database_handler="pgvector",
+            ),
+        ]
+        fake_session = _FakeSession(dataset_rows)
+
+        relational_engine = MagicMock()
+        relational_engine.get_async_session = MagicMock(
+            return_value=_FakeSessionContextManager(fake_session)
+        )
+
+        vector_engine = MagicMock()
+        vector_engine.run_migrations = AsyncMock(return_value={"ok": True})
+
+        with (
+            patch(
+                "cognee.infrastructure.databases.relational.get_relational_engine",
+                return_value=relational_engine,
+            ),
+            patch(
+                "cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info.resolve_dataset_database_connection_info",
+                new=AsyncMock(side_effect=lambda dataset_database: dataset_database),
+            ),
+            patch(
+                "cognee.infrastructure.databases.vector.create_vector_engine.create_vector_engine",
+                return_value=vector_engine,
+            ) as mock_create_vector_engine,
+        ):
+            result = asyncio.run(module.run_vector_migrations())
+
+        self.assertEqual(relational_engine.get_async_session.call_count, 1)
+        self.assertEqual(fake_session.scalars.await_count, 1)
+        self.assertEqual(mock_create_vector_engine.call_count, 2)
+        self.assertEqual(vector_engine.run_migrations.await_count, 2)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["dataset_id"], "dataset-1")
+        self.assertEqual(result[1]["dataset_id"], "dataset-2")
 
 
 if __name__ == "__main__":
