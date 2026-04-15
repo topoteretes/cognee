@@ -2,7 +2,10 @@ import tempfile
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+from cognee.infrastructure.session.feedback_models import (
+    AgentTraceFeedbackSummary,
+    FeedbackDetectionResult,
+)
 from cognee.infrastructure.session.session_manager import SessionManager
 
 
@@ -76,24 +79,35 @@ async def test_get_session_formatted(session_manager):
 @pytest.mark.asyncio
 async def test_add_agent_trace_step_and_get_trace_session(session_manager):
     """Trace steps appended via SessionManager are returned in append order."""
-    trace_id_1 = await session_manager.add_agent_trace_step(
-        user_id="u1",
-        session_id="s1",
-        origin_function="plan_trip",
-        status="success",
-        memory_query="trip preferences",
-        memory_context="User likes quiet places",
-        method_params={"city": "Tokyo"},
-        method_return_value="Plan created",
-    )
-    trace_id_2 = await session_manager.add_agent_trace_step(
-        user_id="u1",
-        session_id="s1",
-        origin_function="book_hotel",
-        status="error",
-        method_params={"area": "Shibuya"},
-        error_message="No availability",
-    )
+    with (
+        patch(
+            "cognee.infrastructure.session.session_manager.read_query_prompt",
+            return_value="summarize this",
+        ),
+        patch(
+            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=AgentTraceFeedbackSummary(session_feedback="Plan created successfully."),
+        ),
+    ):
+        trace_id_1 = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="plan_trip",
+            status="success",
+            memory_query="trip preferences",
+            memory_context="User likes quiet places",
+            method_params={"city": "Tokyo"},
+            method_return_value="Plan created",
+        )
+        trace_id_2 = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="book_hotel",
+            status="error",
+            method_params={"area": "Shibuya"},
+            error_message="No availability",
+        )
 
     entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
     feedback = await session_manager.get_agent_trace_feedback(user_id="u1", session_id="s1")
@@ -102,7 +116,7 @@ async def test_add_agent_trace_step_and_get_trace_session(session_manager):
     assert entries[0]["origin_function"] == "plan_trip"
     assert entries[1]["origin_function"] == "book_hotel"
     assert feedback == [
-        "plan_trip succeeded.",
+        "Plan created successfully.",
         "book_hotel failed. Reason: No availability.",
     ]
 
