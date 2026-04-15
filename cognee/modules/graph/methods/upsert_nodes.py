@@ -9,6 +9,8 @@ from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.databases.relational.with_async_session import with_async_session
 
 
+# When `session` is passed by the caller the decorator does NOT commit —
+# the caller is responsible for committing the session.
 @with_async_session
 async def upsert_nodes(
     nodes: List[DataPoint],
@@ -54,5 +56,3 @@ async def upsert_nodes(
     )
 
     await session.execute(upsert_statement)
-
-    await session.commit()
