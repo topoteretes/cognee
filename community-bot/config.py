@@ -10,9 +10,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load community-bot/.env relative to this file (not CWD)
-_ENV_PATH = Path(__file__).parent / ".env"
-load_dotenv(_ENV_PATH)
+# Load repo-root .env first (LLM_API_KEY, LLM_MODEL, etc.) then overlay the
+# community-bot-specific .env (GITHUB_TOKEN, DOCS_REPO_*, etc.).
+_REPO_ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
+_BOT_ENV = Path(__file__).parent / ".env"
+load_dotenv(_REPO_ROOT_ENV)
+load_dotenv(_BOT_ENV, override=True)
 
 # --- Cognee datasets -------------------------------------------------------
 ORG_DATASET = "org_community"

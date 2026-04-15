@@ -49,13 +49,15 @@ async def _paginate_issues(client: httpx.AsyncClient) -> list[dict[str, Any]]:
         )
         resp = await client.get(url, headers=_gh_headers())
         resp.raise_for_status()
-        batch = resp.json()
-        if not batch:
+        raw_batch = resp.json()
+        # Stop only when the RAW response is short — GitHub returns PRs and
+        # issues mixed together on this endpoint, so a PR-heavy page can
+        # produce a small filtered batch while further pages still have real
+        # issues on them.
+        if not raw_batch:
             break
-        # Filter out PRs (the issues endpoint returns both)
-        batch = [i for i in batch if "pull_request" not in i]
-        issues.extend(batch)
-        if len(batch) < PER_PAGE:
+        issues.extend(i for i in raw_batch if "pull_request" not in i)
+        if len(raw_batch) < PER_PAGE:
             break
         if 0 < MAX_ISSUES <= len(issues):
             break
