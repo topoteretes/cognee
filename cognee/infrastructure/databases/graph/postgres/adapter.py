@@ -32,6 +32,10 @@ class PostgresAdapter(GraphDBInterface):
         self.engine = create_async_engine(self.db_uri)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
+    async def close(self) -> None:
+        """Dispose the connection pool. Called by ``closing_lru_cache`` on eviction."""
+        await self.engine.dispose(close=True)
+
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
         async with self.engine.begin() as conn:
