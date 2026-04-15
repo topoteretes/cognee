@@ -7,14 +7,14 @@ def _inject_agent_memory(text_input: str) -> str:
     from cognee.modules.agent_memory import get_current_agent_memory_context
 
     context = get_current_agent_memory_context()
-    if context is None or not context.config.with_memory or not context.memory_context:
+    if context is None or not context.memory_context:
         return text_input
 
     return (
-        "Additional Cognee Memory Context:\n"
-        f"{context.memory_context}\n\n"
-        "Original Input:\n"
-        f"{text_input}"
+        'Memory Context:\n'
+        f'{context.memory_context}\n\n'
+        'Original Input:\n'
+        f'{text_input}'
     )
 
 
