@@ -62,19 +62,15 @@ async def run_vector_migrations():
     Run adapter-specific vector storage migrations at startup.
     """
     from sqlalchemy.exc import OperationalError
-    from sqlalchemy import select
     from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
     from cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info import (
         resolve_dataset_database_connection_info,
     )
-    from cognee.modules.users.models import DatasetDatabase
+    from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 
-    db_engine = get_relational_engine()
     try:
-        async with db_engine.get_async_session() as session:
-            dataset_databases = (await session.scalars(select(DatasetDatabase))).all()
+        dataset_databases = await get_dataset_databases()
     except (OperationalError, EntityNotFoundError) as e:
         logger.debug(
             "Skipping vector startup migrations. Could not access dataset_database table: %s",

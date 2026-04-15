@@ -43,27 +43,6 @@ class TestRunMigrations(unittest.TestCase):
 
         module = importlib.import_module("cognee.run_migrations")
 
-        class _FakeScalarResult:
-            def __init__(self, rows):
-                self._rows = rows
-
-            def all(self):
-                return self._rows
-
-        class _FakeSession:
-            def __init__(self, rows):
-                self.scalars = AsyncMock(return_value=_FakeScalarResult(rows))
-
-        class _FakeSessionContextManager:
-            def __init__(self, session):
-                self._session = session
-
-            async def __aenter__(self):
-                return self._session
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
         dataset_rows = [
             MagicMock(
                 dataset_id="dataset-1",
@@ -84,20 +63,14 @@ class TestRunMigrations(unittest.TestCase):
                 vector_dataset_database_handler="pgvector",
             ),
         ]
-        fake_session = _FakeSession(dataset_rows)
-
-        relational_engine = MagicMock()
-        relational_engine.get_async_session = MagicMock(
-            return_value=_FakeSessionContextManager(fake_session)
-        )
 
         vector_engine = MagicMock()
         vector_engine.run_migrations = AsyncMock(return_value={"ok": True})
 
         with (
             patch(
-                "cognee.infrastructure.databases.relational.get_relational_engine",
-                return_value=relational_engine,
+                "cognee.modules.data.methods.get_dataset_databases.get_dataset_databases",
+                new=AsyncMock(return_value=dataset_rows),
             ),
             patch(
                 "cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info.resolve_dataset_database_connection_info",
@@ -110,8 +83,6 @@ class TestRunMigrations(unittest.TestCase):
         ):
             result = asyncio.run(module.run_vector_migrations())
 
-        self.assertEqual(relational_engine.get_async_session.call_count, 1)
-        self.assertEqual(fake_session.scalars.await_count, 1)
         self.assertEqual(mock_create_vector_engine.call_count, 2)
         self.assertEqual(vector_engine.run_migrations.await_count, 2)
         self.assertEqual(len(result), 2)
