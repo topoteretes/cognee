@@ -19,32 +19,38 @@ async def main():
     lettuce, mustard, and salt & pepper.
     """
 
-    await cognee.add(text, dataset_name="NLP_coding")
-    await cognee.add(text2, dataset_name="Sandwiches")
-    await cognee.add(text2)
+    await cognee.remember(text, dataset_name="NLP_coding", self_improvement=False)
+    await cognee.remember(text2, dataset_name="Sandwiches", self_improvement=False)
+    await cognee.remember(text2, self_improvement=False)
 
-    await cognee.cognify()
-
-    # Make sure you've already run cognee.cognify(...) so the graph has content
-    answers = await cognee.search(query_text="What are the main themes in my data?")
+    # Make sure you've already run cognee.remember(...) so the graph has content.
+    answers = await cognee.recall(
+        query_text="Give me an overview of this dataset.",
+        datasets=["NLP_coding"],
+    )
     assert len(answers) > 0
 
-    answers = await cognee.search(
+    answers = await cognee.recall(
+        query_text="Give me an overview of this dataset.",
+        datasets=["Sandwiches"],
+    )
+    assert len(answers) > 0
+
+    answers = await cognee.recall(
         query_text="List coding guidelines",
         query_type=SearchType.CODING_RULES,
     )
     assert len(answers) == 0
 
-    answers = await cognee.search(
+    answers = await cognee.recall(
         query_text="Give me a confident answer: What is NLP?",
         system_prompt="Answer succinctly and state confidence at the end.",
     )
+    print(answers)
     assert len(answers) > 0
 
-    answers = await cognee.search(
-        query_text="Tell me about NLP",
-        only_context=True,
-    )
+    answers = await cognee.recall(query_text="Tell me about NLP", only_context=True)
+    print(answers)
     assert len(answers) > 0
 
 

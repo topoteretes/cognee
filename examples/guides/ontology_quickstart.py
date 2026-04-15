@@ -8,9 +8,6 @@ from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntolog
 async def main():
     texts = ["Audi produces the R8 and e-tron.", "Apple develops iPhone and MacBook."]
 
-    await cognee.add(texts)
-    # or: await cognee.add("/path/to/folder/of/files")
-
     ontology_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "ontology_input_example/basic_ontology.owl"
     )
@@ -22,7 +19,8 @@ async def main():
         }
     }
 
-    await cognee.cognify(config=config)
+    await cognee.remember(texts, config=config, self_improvement=False)
+    # or: await cognee.remember("/path/to/folder/of/files", config=config, self_improvement=False)
 
 
 if __name__ == "__main__":

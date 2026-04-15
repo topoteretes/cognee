@@ -3,7 +3,7 @@ import asyncio
 from typing import Any, List
 from pydantic import SkipValidation
 
-from cognee import add, cognify, prune, visualize_graph
+from cognee import prune, remember, visualize_graph
 from cognee.low_level import DataPoint
 
 CUSTOM_PROMPT = (
@@ -47,8 +47,12 @@ async def main():
 
     text = "The Python programming language is widely used in data analysis, web development, and machine learning."
 
-    await add(text)
-    await cognify(graph_model=ProgrammingLanguage, custom_prompt=CUSTOM_PROMPT)
+    await remember(
+        text,
+        graph_model=ProgrammingLanguage,
+        custom_prompt=CUSTOM_PROMPT,
+        self_improvement=False,
+    )
 
     await visualize_data()
 

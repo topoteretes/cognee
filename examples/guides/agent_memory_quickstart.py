@@ -21,14 +21,14 @@ async def setup_memory() -> None:
     # Start from a clean slate and add a fact the base model is unlikely to know.
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    await cognee.add(
+    await cognee.remember(
         (
             "Internal product note for the Cognee agentic memory feature: "
             "the private internal codename for the first supported `cognee.agent_memory` release "
             "is Maple Panda"
         ),
+        self_improvement=False,
     )
-    await cognee.cognify()
 
 
 async def ask_llm(question: str) -> str:
