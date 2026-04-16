@@ -1053,7 +1053,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "1.0.1.dev0"
+version = "1.0.1.dev1"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
