@@ -181,6 +181,17 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
+    # Route to remote instance if connected via serve()
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        result = await client.add(data, dataset_name)
+        # Wrap in a simple namespace so callers expecting .model_dump() still work
+        from types import SimpleNamespace
+
+        return SimpleNamespace(**result)
+
     if preferred_loaders is not None:
         transformed = {}
         for item in preferred_loaders:

@@ -86,8 +86,8 @@ export default function ConnectAgentPage() {
         />
         <ConnectionCard
           icon={<DatabaseIcon />}
-          title="Connect a Database"
-          subtitle="PostgreSQL, MySQL, SQLite, MongoDB"
+          title="Ingest from Any Source"
+          subtitle="Databases, Slack, Notion, GitHub, CSV, REST APIs"
           onClick={() => setView("database")}
         />
       </div>

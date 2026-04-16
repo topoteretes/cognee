@@ -67,35 +67,16 @@ export default function ConnectionsPage() {
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
     Promise.all([
-      cogniInstance.fetch("/v1/activity/agents", { signal: controller.signal })
-        .then((r) => r.ok ? r.json() : [])
-        .catch(() => []),
-      getDatasets(cogniInstance)
-        .then((d: Dataset[]) => Array.isArray(d) ? d : [])
-        .catch(() => []),
+      cogniInstance.fetch("/v1/activity/agents").then((r) => r.ok ? r.json() : []).catch(() => []),
+      getDatasets(cogniInstance).then((d: Dataset[]) => Array.isArray(d) ? d : []).catch(() => []),
     ]).then(([a, d]) => {
       const agentData = Array.isArray(a) ? a : [];
       setAgents(agentData);
       setDatasets(d);
-      // Auto-select first agent
       const firstAgent = agentData.find((x: Agent) => x.is_agent);
       if (firstAgent) setSelectedAgentId(firstAgent.id);
-    }).catch(() => {
-      // Ensure page renders even if everything fails
-    }).finally(() => {
-      clearTimeout(timeout);
-      setLoading(false);
-    });
-
-    return () => {
-      controller.abort();
-      clearTimeout(timeout);
-    };
+    }).finally(() => setLoading(false));
   }, [cogniInstance, isInitializing]);
 
   const agentUsers = agents.filter((a) => a.is_agent);
