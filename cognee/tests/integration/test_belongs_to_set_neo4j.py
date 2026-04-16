@@ -185,3 +185,89 @@ async def test_remove_belongs_to_set_tags_scoped_by_node_ids():
         assert await _read_tag_property(adapter, untouched_same_tag_id) == ["alfa"]
     finally:
         await adapter.delete_nodes([str(targeted_id), str(untouched_same_tag_id)])
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_NEO4J, reason="neo4j extra not installed")
+async def test_remove_belongs_to_set_tags_prunes_edges_to_surviving_nodeset():
+    """When the detag strips a tag from a shared node but the NodeSet
+    itself survives (scoped detag path), the `belongs_to_set` edge
+    from the node to that NodeSet becomes stale — the property says
+    the node is no longer in the set, but the graph still shows an
+    edge. The detag must delete those edges atomically so graph and
+    property stay in sync."""
+    adapter = await _fresh_adapter()
+    node_id = uuid4()
+    nodeset_id = uuid4()
+    untouched_same_tag_id = uuid4()
+    other_nodeset_id = uuid4()
+
+    try:
+        await adapter.query(
+            "CREATE (:`__Node__`:NodeSet {id: $id, name: 'alfa'})",
+            {"id": str(nodeset_id)},
+        )
+        await adapter.query(
+            "CREATE (:`__Node__`:NodeSet {id: $id, name: 'beta'})",
+            {"id": str(other_nodeset_id)},
+        )
+
+        await adapter.add_nodes(
+            [
+                _TaggedPoint(
+                    id=node_id, text="shared", belongs_to_set=["alfa", "beta"]
+                ),
+                _TaggedPoint(
+                    id=untouched_same_tag_id,
+                    text="mock_only",
+                    belongs_to_set=["alfa"],
+                ),
+            ]
+        )
+        await adapter.query(
+            "MATCH (n {id: $nid}), (ns {id: $nsid}) CREATE (n)-[:belongs_to_set]->(ns)",
+            {"nid": str(node_id), "nsid": str(nodeset_id)},
+        )
+        await adapter.query(
+            "MATCH (n {id: $nid}), (ns {id: $nsid}) CREATE (n)-[:belongs_to_set]->(ns)",
+            {"nid": str(node_id), "nsid": str(other_nodeset_id)},
+        )
+        await adapter.query(
+            "MATCH (n {id: $nid}), (ns {id: $nsid}) CREATE (n)-[:belongs_to_set]->(ns)",
+            {"nid": str(untouched_same_tag_id), "nsid": str(nodeset_id)},
+        )
+
+        await adapter.remove_belongs_to_set_tags(["alfa"], node_ids=[str(node_id)])
+
+        assert await _read_tag_property(adapter, node_id) == ["beta"]
+        assert await _read_tag_property(adapter, untouched_same_tag_id) == ["alfa"]
+
+        targeted_edges = await adapter.query(
+            "MATCH (n {id: $nid})-[r:belongs_to_set]->(ns:NodeSet) RETURN ns.name AS name",
+            {"nid": str(node_id)},
+        )
+        assert [row["name"] for row in targeted_edges] == ["beta"], (
+            "Stale belongs_to_set edge to alfa NodeSet must be pruned on the targeted node"
+        )
+
+        untouched_edges = await adapter.query(
+            "MATCH (n {id: $nid})-[r:belongs_to_set]->(ns:NodeSet) RETURN ns.name AS name",
+            {"nid": str(untouched_same_tag_id)},
+        )
+        assert [row["name"] for row in untouched_edges] == ["alfa"], (
+            "Edge from an unscoped node to the same NodeSet must survive the scoped detag"
+        )
+
+        nodeset_rows = await adapter.query(
+            "MATCH (ns:NodeSet {id: $id}) RETURN ns.name AS name", {"id": str(nodeset_id)}
+        )
+        assert [row["name"] for row in nodeset_rows] == ["alfa"]
+    finally:
+        await adapter.delete_nodes(
+            [
+                str(node_id),
+                str(untouched_same_tag_id),
+                str(nodeset_id),
+                str(other_nodeset_id),
+            ]
+        )

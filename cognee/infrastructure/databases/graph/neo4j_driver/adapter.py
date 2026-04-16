@@ -297,10 +297,15 @@ class Neo4jAdapter(GraphDBInterface):
     ) -> None:
         """
         Strip the given tag names from every node's `belongs_to_set`
-        property array. Used to reconcile surviving shared nodes after a
-        dataset or its NodeSet is deleted — the NodeSet node itself and
-        its edges are already removed elsewhere; this brings the stored
-        property in line with the surviving edges.
+        property array AND delete the matching `belongs_to_set` edges
+        to surviving NodeSet nodes whose `name` is one of the tags.
+
+        Used to reconcile surviving shared nodes after a dataset or its
+        NodeSet is deleted. When the NodeSet node itself is hard-deleted
+        upstream, no edges survive — this call is a no-op on the edge
+        side. When the NodeSet survives (scoped detag for shared slugs),
+        the edge from the detagged node to that NodeSet is stale and
+        must be dropped so the graph and the property stay in sync.
 
         When `node_ids` is provided, the update is restricted to nodes
         whose `id` is in the list — used when a shared node must lose
@@ -314,16 +319,30 @@ class Neo4jAdapter(GraphDBInterface):
             return None
 
         id_filter = "AND n.id IN $node_ids" if node_ids is not None else ""
-        query = f"""
+        # Two passes under one params dict: property strip on matching
+        # nodes, then delete any lingering `belongs_to_set` edges from
+        # those same nodes to NodeSets whose name is being removed. The
+        # edge delete is independent of the property value post-strip,
+        # so it works whether the scoped path is detagging a shared
+        # node or the unscoped path is fanning out globally.
+        strip_property_query = f"""
         MATCH (n: `{BASE_LABEL}`)
         WHERE any(tag IN $tags WHERE tag IN coalesce(n.belongs_to_set, []))
         {id_filter}
         SET n.belongs_to_set = [x IN n.belongs_to_set WHERE NOT x IN $tags]
         """
+        node_scope_clause = "WHERE n.id IN $node_ids" if node_ids is not None else ""
+        prune_edges_query = f"""
+        MATCH (n: `{BASE_LABEL}`)-[r:belongs_to_set]->(ns:NodeSet)
+        {node_scope_clause}
+        {"AND" if node_ids is not None else "WHERE"} ns.name IN $tags
+        DELETE r
+        """
         params: Dict[str, Any] = {"tags": list(tags)}
         if node_ids is not None:
             params["node_ids"] = [str(nid) for nid in node_ids]
-        await self.query(query, params)
+        await self.query(strip_property_query, params)
+        await self.query(prune_edges_query, params)
         return None
 
     async def extract_node(self, node_id: str):
