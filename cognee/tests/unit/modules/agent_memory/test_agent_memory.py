@@ -731,3 +731,62 @@ async def test_llmgateway_injects_agent_memory(monkeypatch):
         llm_client.acreate_structured_output.await_args.kwargs["text_input"]
         == "Additional Memory Context:\nstored memory\n\nOriginal Input:\noriginal question"
     )
+
+
+@pytest.mark.asyncio
+async def test_session_memory_decorator_flow_injects_into_llmgateway(monkeypatch):
+    llm_gateway_module = importlib.import_module("cognee.infrastructure.llm.LLMGateway")
+    llm_client = SimpleNamespace(acreate_structured_output=AsyncMock(return_value="ok"))
+    monkeypatch.setattr(
+        llm_gateway_module,
+        "get_llm_config",
+        lambda: SimpleNamespace(structured_output_framework="litellm"),
+    )
+    monkeypatch.setattr(
+        "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client.get_llm_client",
+        lambda: llm_client,
+    )
+
+    user = _make_user()
+    session_manager = SimpleNamespace(
+        get_agent_trace_feedback=AsyncMock(return_value=["first step", "second step"]),
+        add_agent_trace_step=AsyncMock(),
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    monkeypatch.setattr(
+        "cognee.modules.agent_memory.decorator.resolve_agent_user",
+        AsyncMock(return_value=user),
+    )
+
+    @cognee.agent_memory(
+        with_memory=False,
+        with_session_memory=True,
+        save_traces=False,
+        session_memory_last_n=2,
+        session_id="session-1",
+    )
+    async def session_memory_llm_agent() -> str:
+        from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+        return await LLMGateway.acreate_structured_output(
+            text_input="original question",
+            system_prompt="Answer briefly.",
+            response_model=str,
+        )
+
+    result = await session_memory_llm_agent()
+
+    assert result == "ok"
+    session_manager.get_agent_trace_feedback.assert_awaited_once_with(
+        user_id=str(user.id),
+        session_id="session-1",
+    )
+    assert (
+        llm_client.acreate_structured_output.await_args.kwargs["text_input"]
+        == "Additional Memory Context:\n"
+        "Recent Session Memory:\n"
+        "first step\n"
+        "second step\n\n"
+        "Original Input:\n"
+        "original question"
+    )
