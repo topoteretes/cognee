@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func
+from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func, text
 from sqlalchemy import exc
 from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -266,11 +266,45 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     for column in inspect(obj).mapper.column_attrs
                 }
 
+            # Dedup by id within the batch — with ON CONFLICT DO UPDATE,
+            # Postgres raises "cannot affect row a second time" if the same
+            # id appears twice in one INSERT. The prior ON CONFLICT DO NOTHING
+            # path silently tolerated duplicates, so entity extraction may
+            # still emit same-UUID5 rows in one batch.
+            pgvector_data_points = list(
+                {data_point.id: data_point for data_point in pgvector_data_points}.values()
+            )
+
             # session.add_all(pgvector_data_points)
             insert_statement = insert(PGVectorDataPoint).values(
                 [to_dict(data_point) for data_point in pgvector_data_points]
             )
-            insert_statement = insert_statement.on_conflict_do_nothing(index_elements=["id"])
+            # On conflict, merge the `belongs_to_set` arrays so a DataPoint
+            # cognified into multiple datasets keeps every dataset tag. Take
+            # the incoming payload as the base (refreshing any other fields)
+            # and rewrite only `belongs_to_set` with the union of existing
+            # and incoming values. `collection_name` is cognee-controlled,
+            # not user input, so interpolation is safe.
+            quoted_table = f'"{collection_name}"'
+            merged_payload_expr = text(
+                f"""
+                jsonb_set(
+                    EXCLUDED.payload::jsonb,
+                    '{{belongs_to_set}}',
+                    (
+                        SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(
+                            COALESCE({quoted_table}.payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                            || COALESCE(EXCLUDED.payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                        ) AS val
+                    )
+                )::json
+                """
+            )
+            insert_statement = insert_statement.on_conflict_do_update(
+                index_elements=["id"],
+                set_={"payload": merged_payload_expr},
+            )
             await session.execute(insert_statement)
             await session.commit()
 

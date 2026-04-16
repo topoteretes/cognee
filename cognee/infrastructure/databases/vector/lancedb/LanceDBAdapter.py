@@ -173,6 +173,34 @@ class LanceDBAdapter(VectorDBInterface):
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
 
+        # Fetch existing `belongs_to_set` values for rows we are about to
+        # upsert so the same DataPoint cognified into multiple datasets
+        # accumulates every dataset tag. Without this, merge_insert's
+        # when_matched_update_all overwrites the prior dataset's tags.
+        existing_belongs_to_set: dict[str, list] = {}
+        incoming_ids = [str(dp.id) for dp in data_points]
+        if incoming_ids:
+            try:
+                if len(incoming_ids) == 1:
+                    where_clause = f"id = '{incoming_ids[0]}'"
+                else:
+                    where_clause = f"id IN {tuple(incoming_ids)}"
+                existing_rows = await collection.query().where(where_clause).to_list()
+                for row in existing_rows:
+                    row_payload = row.get("payload") or {}
+                    prior = row_payload.get("belongs_to_set") or []
+                    if prior:
+                        existing_belongs_to_set[row["id"]] = list(prior)
+            except Exception as e:
+                # Best-effort: if the lookup fails (e.g. empty table, schema
+                # mismatch that the migration path will handle), fall through
+                # to the standard upsert.
+                logger.debug(
+                    "belongs_to_set merge lookup failed for '%s': %s",
+                    collection_name,
+                    e,
+                )
+
         IdType = TypeVar("IdType")
         PayloadSchema = TypeVar("PayloadSchema")
         vector_size = self.embedding_engine.get_vector_size()
@@ -195,6 +223,11 @@ class LanceDBAdapter(VectorDBInterface):
             properties = payload_model.model_validate(
                 serialize_data(data_point.model_dump())
             ).model_dump()
+
+            prior = existing_belongs_to_set.get(str(data_point.id))
+            if prior:
+                incoming = properties.get("belongs_to_set") or []
+                properties["belongs_to_set"] = list(dict.fromkeys(list(prior) + list(incoming)))
 
             return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
                 id=str(data_point.id),
