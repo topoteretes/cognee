@@ -41,6 +41,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def is_empty(self) -> bool:
+        """Return True when the graph contains no nodes."""
         logger.warning("is_empty() is not implemented")
         return True
 

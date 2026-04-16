@@ -42,12 +42,15 @@ class _FakeEmbeddingEngine:
     """Deterministic no-API-call embedding engine for integration tests."""
 
     def get_vector_size(self) -> int:
+        """Return the fixed vector dimensionality used throughout these tests."""
         return 3
 
     def get_batch_size(self) -> int:
+        """Return the stub embedding batch size."""
         return 100
 
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
+        """Return a fixed 3-D vector per input text without making any API call."""
         return [[0.1, 0.2, 0.3] for _ in texts]
 
 
@@ -65,6 +68,16 @@ def _fresh_adapter() -> PGVectorAdapter:
         api_key=None,
         embedding_engine=_FakeEmbeddingEngine(),
     )
+
+
+async def _drop_collection(adapter: PGVectorAdapter, name: str) -> None:
+    """Drop the pgvector collection table so tests don't leak empty tables across CI runs."""
+    from sqlalchemy import text as sql_text
+
+    async with adapter.get_async_session() as session:
+        await session.execute(sql_text(f'DROP TABLE IF EXISTS "{name}"'))
+        await session.commit()
+    adapter.reset_metadata_cache()
 
 
 @pytest.fixture
@@ -95,6 +108,7 @@ async def test_create_data_points_merges_belongs_to_set(collection_name):
         assert sorted(results[0].payload["belongs_to_set"]) == ["DatasetA", "DatasetB"]
     finally:
         await adapter.delete_data_points(collection_name, [str(point_id)])
+        await _drop_collection(adapter, collection_name)
 
 
 @pytest.mark.asyncio
@@ -120,6 +134,7 @@ async def test_create_data_points_dedupes_duplicate_ids_in_batch(collection_name
         assert results[0].payload["belongs_to_set"] == ["DatasetA"]
     finally:
         await adapter.delete_data_points(collection_name, [str(point_id)])
+        await _drop_collection(adapter, collection_name)
 
 
 @pytest.mark.asyncio
@@ -145,6 +160,7 @@ async def test_create_data_points_merges_tags_across_in_batch_duplicates(collect
         assert sorted(results[0].payload["belongs_to_set"]) == ["DatasetA", "DatasetB"]
     finally:
         await adapter.delete_data_points(collection_name, [str(point_id)])
+        await _drop_collection(adapter, collection_name)
 
 
 @pytest.mark.asyncio
@@ -179,6 +195,7 @@ async def test_remove_belongs_to_set_tags_strips_and_deletes(collection_name):
         await adapter.delete_data_points(
             collection_name, [str(shared_id), str(untouched_id), str(orphaned_id)]
         )
+        await _drop_collection(adapter, collection_name)
 
 
 @pytest.mark.asyncio

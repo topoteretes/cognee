@@ -65,6 +65,7 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_allow_anonymous: bool = False,
         driver: Optional[Any] = None,
     ):
+        """Initialize the Neo4j driver from the given connection params and optional auth."""
         # Only use auth if both username and password are provided
         auth = None
 
@@ -881,6 +882,7 @@ class Neo4jAdapter(GraphDBInterface):
         return {str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None}
 
     async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """Return each node's `feedback_weight` property, defaulting to 0.5 when unset."""
         if not node_ids:
             return {}
         valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
@@ -901,6 +903,7 @@ class Neo4jAdapter(GraphDBInterface):
     async def set_node_feedback_weights(
         self, node_feedback_weights: Dict[str, float]
     ) -> Dict[str, bool]:
+        """Persist `feedback_weight` per node; returns a map of node_id → updated bool."""
         if not node_feedback_weights:
             return {}
         node_ids = list(node_feedback_weights.keys())
@@ -911,6 +914,7 @@ class Neo4jAdapter(GraphDBInterface):
         return {nid: (nid in updated_ids) for nid in node_ids}
 
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """Return each edge's `feedback_weight` property, defaulting to 0.5 when unset."""
         if not edge_object_ids:
             return {}
         valid_edge_ids = [eid for eid in edge_object_ids if isinstance(eid, str) and eid]
@@ -935,6 +939,7 @@ class Neo4jAdapter(GraphDBInterface):
     async def set_edge_feedback_weights(
         self, edge_feedback_weights: Dict[str, float]
     ) -> Dict[str, bool]:
+        """Persist `feedback_weight` per edge; returns a map of edge_object_id → updated bool."""
         if not edge_feedback_weights:
             return {}
         edge_ids = list(edge_feedback_weights.keys())

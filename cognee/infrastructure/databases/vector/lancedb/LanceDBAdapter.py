@@ -123,6 +123,7 @@ class LanceDBAdapter(VectorDBInterface):
         return collection_name in collection_names
 
     async def create_collection(self, collection_name: str, payload_schema: BaseModel):
+        """Create the LanceDB table for `collection_name` if it does not already exist."""
         vector_size = self.embedding_engine.get_vector_size()
 
         payload_schema = self.get_data_point_schema(payload_schema)
@@ -161,6 +162,7 @@ class LanceDBAdapter(VectorDBInterface):
         return await connection.open_table(collection_name)
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
+        """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
@@ -310,6 +312,8 @@ class LanceDBAdapter(VectorDBInterface):
         defaults = self._get_payload_defaults(payload_schema)
 
         class MigrationLanceDataPoint(LanceModel):
+            """LanceModel used to write rows with the updated payload schema during migration."""
+
             id: data_point_types["id"]
             vector: Vector(vector_size)
             payload: schema_model
@@ -387,6 +391,7 @@ class LanceDBAdapter(VectorDBInterface):
 
     @staticmethod
     def _all_datapoint_subclasses():
+        """Return every concrete DataPoint subclass currently registered in the process."""
         seen = set()
         stack = list(DataPoint.__subclasses__())
         subclasses = []
@@ -403,6 +408,7 @@ class LanceDBAdapter(VectorDBInterface):
 
     @staticmethod
     def _warm_up_common_datapoint_models():
+        """Best-effort import of DataPoint subclasses so `__subclasses__()` sees them."""
         # Import commonly indexed data points so they are present in __subclasses__.
         # Imports are best-effort to avoid hard dependency on optional modules.
 
@@ -423,6 +429,7 @@ class LanceDBAdapter(VectorDBInterface):
 
     @classmethod
     def _resolve_collection_payload_schema(cls, collection_name: str):
+        """Infer the DataPoint subclass whose `{Type}_{field}` naming produced this collection."""
         if "_" not in collection_name:
             return None
         # Important note: Depends on naming convention (e.g. DocumentChunk_text)
@@ -493,6 +500,8 @@ class LanceDBAdapter(VectorDBInterface):
         data_point_types = get_type_hints(schema_model)
 
         class SchemaProbeDataPoint(LanceModel):
+            """Throwaway LanceModel used only to extract the target Arrow schema."""
+
             id: data_point_types["id"]
             vector: Vector(vector_size)
             payload: schema_model
@@ -646,6 +655,7 @@ class LanceDBAdapter(VectorDBInterface):
         return coerced
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+        """Return rows from `collection_name` whose id is in `data_point_ids`."""
         try:
             collection = await self.get_collection(collection_name)
         except CollectionNotFoundError:
@@ -680,6 +690,7 @@ class LanceDBAdapter(VectorDBInterface):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
     ):
+        """Run a cosine-distance search, optionally filtered by NodeSet tag."""
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
             otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, collection_name)
@@ -767,6 +778,7 @@ class LanceDBAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
     ):
+        """Run `search` concurrently for each query text and return a list of result lists."""
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
         return await asyncio.gather(
@@ -784,6 +796,7 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        """Delete rows from `collection_name` whose id is in `data_point_ids`."""
         # Skip deletion if collection doesn't exist
         if not await self.has_collection(collection_name):
             return
@@ -887,8 +900,15 @@ class LanceDBAdapter(VectorDBInterface):
                     else:
                         rows_to_delete.append(row["id"])
 
-                for row_id in rows_to_delete:
-                    await collection.delete(f"id = '{row_id}'")
+                # Batch deletes into one predicate per bucket so each
+                # collection pays two round-trips at most instead of N.
+                # Ids are UUID strings produced by cognee so no escaping
+                # is needed (mirrors the assumption in `retrieve()`).
+                if rows_to_delete:
+                    orphan_predicate = (
+                        "id IN (" + ", ".join(f"'{row_id}'" for row_id in rows_to_delete) + ")"
+                    )
+                    await collection.delete(orphan_predicate)
 
                 # LanceDB merge_insert silently no-ops when given dicts whose
                 # nested payload shape doesn't match the struct schema, so
@@ -897,9 +917,12 @@ class LanceDBAdapter(VectorDBInterface):
                 # already deleted the originals — escalate to WARNING with
                 # the affected ids and re-raise so the caller sees it; a
                 # silent debug log would leave the collection short of rows.
-                for row in rows_to_update:
-                    await collection.delete(f"id = '{row['id']}'")
                 if rows_to_update:
+                    update_predicate = (
+                        "id IN (" + ", ".join(f"'{row['id']}'" for row in rows_to_update) + ")"
+                    )
+                    await collection.delete(update_predicate)
+
                     typed_rows = self._coerce_rows_to_typed_payload(
                         rows_to_update, resolved_payload_cls
                     )
@@ -920,6 +943,7 @@ class LanceDBAdapter(VectorDBInterface):
         return None
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
+        """Create the underlying index collection for the given name/property pair."""
         await self.create_collection(
             f"{index_name}_{index_property_name}", payload_schema=IndexSchema
         )
@@ -927,6 +951,7 @@ class LanceDBAdapter(VectorDBInterface):
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
+        """Write index rows derived from `data_points` into the `{index}_{property}` table."""
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
@@ -940,6 +965,7 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def prune(self):
+        """Drop every LanceDB table and remove the on-disk database directory."""
         connection = await self.get_connection()
         collection_names = await connection.table_names()
 
@@ -954,6 +980,7 @@ class LanceDBAdapter(VectorDBInterface):
             await get_file_storage(db_dir_path).remove_all(db_file_name)
 
     def get_data_point_schema(self, model_type: BaseModel):
+        """Build the reduced LanceDB payload schema for a DataPoint model."""
         related_models_fields = []
 
         for field_name, field_config in model_type.model_fields.items():

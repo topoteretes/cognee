@@ -58,6 +58,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
     ):
+        """Initialize the adapter and, when possible, reuse the relational engine."""
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
@@ -150,6 +151,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
     async def create_collection(self, collection_name: str, payload_schema=None):
+        """Create the pgvector table for `collection_name` if it does not already exist."""
         data_point_types = get_type_hints(DataPoint)
         vector_size = self.embedding_engine.get_vector_size()
 
@@ -180,6 +182,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         vector = Column(self.Vector(vector_size))
 
                         def __init__(self, id, payload, vector):
+                            """Initialize the pgvector row with id, JSON payload, and vector."""
                             self.id = id
                             self.payload = payload
                             self.vector = vector
@@ -200,6 +203,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     )
     @override_distributed(queued_add_data_points)
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
         data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
             await self.create_collection(
@@ -329,11 +333,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             await session.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
+        """Create the underlying index collection (table) for the given name/property pair."""
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
+        """Write index rows derived from `data_points` into the `{index}_{property}` table."""
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
@@ -370,6 +376,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
+        """Return rows from `collection_name` matching any of `data_point_ids`."""
         # Get PGVectorDataPoint Table from database
         try:
             PGVectorDataPoint = await self.get_table(collection_name)
@@ -399,6 +406,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
     ) -> List[ScoredResult]:
+        """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
 
@@ -503,6 +511,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
     ):
+        """Run `search` concurrently for each query text and return a list of result lists."""
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
         return await asyncio.gather(
@@ -520,6 +529,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        """Delete rows from `collection_name` whose id is in `data_point_ids`."""
         # Skip deletion if collection doesn't exist
         if not await self.has_collection(collection_name):
             return None
@@ -613,6 +623,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         return None
 
     async def prune(self):
+        """Drop all vector collection tables and reset cached reflection metadata."""
         self._metadata.clear()
         await self.delete_database()
 
