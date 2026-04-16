@@ -53,28 +53,25 @@ function statusDot(status: string): string {
 
 export default function OverviewPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
-  const { agents, datasets, selectedAgent, selectedDataset, loading: filterLoading } = useFilter();
+  const { agents, datasets, selectedAgent, selectedDataset, setSelectedDataset, refreshDatasets, loading: filterLoading } = useFilter();
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [traceCount, setTraceCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [showDatasetPicker, setShowDatasetPicker] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  async function handleDashboardUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!cogniInstance || !e.target.files?.length) return;
-    const files = Array.from(e.target.files);
-    e.target.value = "";
+  async function uploadToDataset(ds: { id: string; name: string }, files: File[]) {
+    if (!cogniInstance) return;
     setIsUploading(true);
     try {
-      let ds = datasets[0];
-      if (!ds) {
-        ds = await createDataset({ name: "default_dataset" }, cogniInstance);
-      }
-      await addData({ id: ds.id, name: ds.name }, files, cogniInstance);
-      notifications.show({ title: "Files uploaded — building knowledge graph...", message: `${files.length} file(s) added. Cognify running.`, color: "blue", autoClose: 5000 });
+      await addData({ id: ds.id }, files, cogniInstance);
+      notifications.show({ title: `Files uploaded to "${ds.name}"`, message: `${files.length} file(s) added. Cognify running.`, color: "blue", autoClose: 5000 });
       await cognifyDataset({ id: ds.id, name: ds.name, data: [], status: "" }, cogniInstance);
       notifications.show({ title: "Knowledge graph built", message: `"${ds.name}" is now searchable.`, color: "green" });
+      refreshDatasets();
     } catch (err) {
       console.error("Dashboard upload failed:", err);
       notifications.show({ title: "Upload failed", message: err instanceof Error ? err.message : String(err), color: "red" });
@@ -83,19 +80,64 @@ export default function OverviewPage() {
     }
   }
 
+  async function handleDashboardUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!cogniInstance || !e.target.files?.length) return;
+    const files = Array.from(e.target.files);
+    e.target.value = "";
+
+    // If a dataset is already selected in the breadcrumb, upload directly
+    if (selectedDataset) {
+      await uploadToDataset(selectedDataset, files);
+      return;
+    }
+
+    // If only one dataset exists, upload to it
+    if (datasets.length === 1) {
+      await uploadToDataset(datasets[0], files);
+      return;
+    }
+
+    // If no datasets exist, create default and upload
+    if (datasets.length === 0) {
+      const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
+      refreshDatasets();
+      await uploadToDataset(ds, files);
+      return;
+    }
+
+    // Multiple datasets, none selected — show picker
+    setPendingFiles(files);
+    setShowDatasetPicker(true);
+  }
+
+  async function handlePickDataset(ds: { id: string; name: string }) {
+    setShowDatasetPicker(false);
+    setSelectedDataset(ds);
+    await uploadToDataset(ds, pendingFiles);
+    setPendingFiles([]);
+  }
+
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
-    Promise.all([
-      cogniInstance.fetch("/v1/activity/pipeline-runs").then((r) => r.ok ? r.json() : []).catch(() => []),
-      cogniInstance.fetch("/v1/activity/spans").then((r) => r.ok ? r.json() : []).catch(() => []),
-    ]).then(([runData, spanData]) => {
-      setRuns(Array.isArray(runData) ? runData : []);
-      setTraceCount(Array.isArray(spanData) ? spanData.length : 0);
-      // Only redirect to onboarding if user has never dismissed it
+
+    function fetchTelemetry() {
+      return Promise.all([
+        cogniInstance!.fetch("/v1/activity/pipeline-runs").then((r) => r.ok ? r.json() : []).catch(() => []),
+        cogniInstance!.fetch("/v1/activity/spans").then((r) => r.ok ? r.json() : []).catch(() => []),
+      ]).then(([runData, spanData]) => {
+        setRuns(Array.isArray(runData) ? runData : []);
+        setTraceCount(Array.isArray(spanData) ? spanData.length : 0);
+      });
+    }
+
+    fetchTelemetry().then(() => {
       if (datasets.length === 0 && !filterLoading && !sessionStorage.getItem("cognee-onboarding-skipped")) {
         router.replace("/onboarding");
       }
     }).finally(() => setLoading(false));
+
+    const interval = setInterval(fetchTelemetry, 15000);
+    return () => clearInterval(interval);
   }, [cogniInstance, isInitializing, datasets, filterLoading, router]);
 
   if (loading || isInitializing || filterLoading) {
@@ -135,6 +177,34 @@ export default function OverviewPage() {
     <div style={{ padding: 32, display: "flex", flexDirection: "column", gap: 28, fontFamily: '"Inter", system-ui, sans-serif' }}>
       {/* Hidden file input for dashboard upload */}
       <input ref={uploadInputRef} type="file" multiple accept=".pdf,.csv,.txt,.md,.json,.docx" className="hidden" onChange={handleDashboardUpload} />
+
+      {/* Dataset picker modal */}
+      {showDatasetPicker && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { setShowDatasetPicker(false); setPendingFiles([]); }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Upload to which dataset?</h2>
+            <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>
+              {pendingFiles.length} file{pendingFiles.length !== 1 ? "s" : ""} selected. Choose a dataset to upload to.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 300, overflow: "auto" }}>
+              {datasets.map((ds) => (
+                <button
+                  key={ds.id}
+                  onClick={() => handlePickDataset(ds)}
+                  className="cursor-pointer hover:bg-cognee-hover"
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid #F4F4F5", background: "none", textAlign: "left", fontFamily: "inherit", width: "100%", transition: "background 150ms" }}
+                >
+                  <div style={{ width: 8, height: 8, borderRadius: 2, background: "#6510F4", flexShrink: 0 }} />
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{ds.name}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button onClick={() => { setShowDatasetPicker(false); setPendingFiles([]); }} className="cursor-pointer" style={{ background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#3F3F46", fontFamily: "inherit" }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Context indicator */}
       {(selectedAgent || selectedDataset) && (
@@ -185,7 +255,9 @@ export default function OverviewPage() {
               <>
                 <UploadIcon />
                 <span style={{ fontSize: 13, fontWeight: 500, color: "#333333" }}>Upload Data</span>
-                <span style={{ fontSize: 11, color: "#999999" }}>Click to select files</span>
+                <span style={{ fontSize: 11, color: selectedDataset ? "#6510F4" : "#999999" }}>
+                  {selectedDataset ? `to ${selectedDataset.name}` : datasets.length > 1 ? "Select a dataset first" : "Click to select files"}
+                </span>
               </>
             )}
           </button>

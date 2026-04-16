@@ -14,13 +14,17 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.agent_memory.models import AgentTrace
+from cognee.modules.agent_memory.sanitization import (
+    MAX_SERIALIZED_VALUE_LENGTH,
+    sanitize_value,
+    truncate_text,
+)
 
-from .models import AgentTrace
 from cognee.context_global_variables import set_database_global_context_variables
 
 logger = get_logger("agent_memory")
 
-MAX_SERIALIZED_VALUE_LENGTH = 1000
 MAX_MEMORY_CONTEXT_LENGTH = 4000
 MAX_TRACE_TEXT_LENGTH = 4000
 
@@ -383,35 +387,3 @@ def normalize_search_results(results: Any) -> str:
     if hasattr(results, "search_result"):
         return normalize_search_results(results.search_result)
     return str(results)
-
-
-def sanitize_value(value: Any) -> Any:
-    """Convert arbitrary runtime values into bounded, persistence-safe structures."""
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    if isinstance(value, UUID):
-        return str(value)
-    if isinstance(value, str):
-        return truncate_text(value, MAX_SERIALIZED_VALUE_LENGTH)
-    if isinstance(value, list):
-        return [sanitize_value(item) for item in value[:20]]
-    if isinstance(value, tuple):
-        return [sanitize_value(item) for item in value[:20]]
-    if isinstance(value, dict):
-        sanitized: dict[str, Any] = {}
-        for key, item in list(value.items())[:20]:
-            sanitized[str(key)] = sanitize_value(item)
-        return sanitized
-    if hasattr(value, "id") and hasattr(value, "__class__"):
-        return {
-            "type": value.__class__.__name__,
-            "id": str(getattr(value, "id", "")),
-        }
-    return truncate_text(str(value), MAX_SERIALIZED_VALUE_LENGTH)
-
-
-def truncate_text(value: str, limit: int) -> str:
-    """Truncate text to a fixed limit while preserving an ellipsis suffix."""
-    if len(value) <= limit:
-        return value
-    return value[: limit - 3] + "..."

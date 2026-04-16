@@ -153,6 +153,40 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
+    async def append_agent_trace_step(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> None:
+        """
+        Append one agent trace step to the session-scoped trace list.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_session(self, user_id: str, session_id: str) -> list[dict]:
+        """
+        Retrieve all agent trace steps for the given session.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_feedback(self, user_id: str, session_id: str) -> list[str]:
+        """
+        Retrieve only per-step feedback strings for the given trace session.
+        """
+        pass
+
+    @abstractmethod
     async def prune(self) -> None:
         """
         Delete the entire cache (flush Redis db or delete FS cache directory).

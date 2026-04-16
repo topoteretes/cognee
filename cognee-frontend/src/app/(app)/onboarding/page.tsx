@@ -65,10 +65,13 @@ function SourceRow({ icon, title, subtitle, onClick }: { icon: React.ReactNode; 
   );
 }
 
-function Step1({ onNext, files, setFiles }: {
+function Step1({ onNext, files, setFiles, cogniInstance, datasetId, setDatasetId }: {
   onNext: () => void;
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  cogniInstance: NonNullable<ReturnType<typeof useCogniInstance>["cogniInstance"]>;
+  datasetId: string | null;
+  setDatasetId: (id: string) => void;
 }) {
   const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
@@ -76,9 +79,34 @@ function Step1({ onNext, files, setFiles }: {
   const [pasteText, setPasteText] = useState("");
   const [connectionView, setConnectionView] = useState<"local" | "agent" | "database" | "cloud" | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const datasetIdRef = useRef(datasetId);
+  datasetIdRef.current = datasetId;
+
+  const uploadFiles = async (newFiles: File[]) => {
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      let dsId = datasetIdRef.current;
+      if (!dsId) {
+        const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
+        dsId = ds.id as string;
+        datasetIdRef.current = dsId;
+        setDatasetId(dsId);
+      }
+      await addData({ id: dsId, name: "default_dataset" }, newFiles, cogniInstance);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleFiles = (newFiles: FileList | File[]) => {
-    setFiles((prev) => [...prev, ...Array.from(newFiles)]);
+    const fileArray = Array.from(newFiles);
+    setFiles((prev) => [...prev, ...fileArray]);
+    uploadFiles(fileArray);
   };
 
   const removeFile = (index: number) => setFiles((prev) => prev.filter((_, i) => i !== index));
@@ -88,6 +116,7 @@ function Step1({ onNext, files, setFiles }: {
     const blob = new Blob([pasteText], { type: "text/plain" });
     const file = new File([blob], "pasted-text.txt", { type: "text/plain" });
     setFiles((prev) => [...prev, file]);
+    uploadFiles([file]);
     setPasteText("");
     setShowPaste(false);
   };
@@ -151,6 +180,22 @@ function Step1({ onNext, files, setFiles }: {
                   </div>
                 ))}
               </div>
+            )}
+
+            {/* Upload status */}
+            {isUploading && (
+              <div className="flex items-center gap-2" style={{ fontSize: 13, color: "#6510F4" }}>
+                <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #E4E4E7", borderTopColor: "#6510F4", animation: "spin 1s linear infinite" }} />
+                Uploading...
+              </div>
+            )}
+            {uploadError && (
+              <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 12px", fontSize: 13, color: "#991B1B" }}>
+                {uploadError}
+              </div>
+            )}
+            {!isUploading && !uploadError && files.length > 0 && (
+              <div style={{ fontSize: 13, color: "#22C55E" }}>Uploaded to default_dataset</div>
             )}
 
             {/* Paste text button / area */}
@@ -222,6 +267,7 @@ function Step1({ onNext, files, setFiles }: {
 
         <SkipLink />
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -259,8 +305,6 @@ function Step2({ files, datasetId, onNext, cogniInstance }: {
 
   async function runPipeline() {
     try {
-      // Step 1: Upload
-      updateStep(0, { status: "active", progress: 30 });
       let currentDsId = dsId;
 
       if (!currentDsId) {
@@ -269,8 +313,11 @@ function Step2({ files, datasetId, onNext, cogniInstance }: {
         setDsId(currentDsId);
       }
 
-      updateStep(0, { progress: 60 });
-      await addData({ name: "default_dataset" }, files, cogniInstance);
+      // Files already uploaded in Step 1 — animate quickly as confirmation
+      updateStep(0, { status: "active", progress: 30 });
+      await new Promise((r) => setTimeout(r, 400));
+      updateStep(0, { progress: 70 });
+      await new Promise((r) => setTimeout(r, 400));
       updateStep(0, { progress: 100, status: "done" });
 
       // Step 2: Cognify (extracting + building)
@@ -517,7 +564,7 @@ export default function OnboardingPage() {
 
   return (
     <div className="flex flex-col h-full overflow-auto" style={{ background: "#FAFAF9" }}>
-      {step === 1 && <Step1 files={files} setFiles={setFiles} onNext={() => setStep(2)} />}
+      {step === 1 && <Step1 files={files} setFiles={setFiles} onNext={() => setStep(2)} cogniInstance={cogniInstance} datasetId={datasetId} setDatasetId={setDatasetId} />}
       {step === 2 && <Step2 files={files} datasetId={datasetId} onNext={(id) => { setDatasetId(id); setStep(3); }} cogniInstance={cogniInstance} />}
       {step === 3 && datasetId && <Step3 datasetId={datasetId} onNext={() => setStep(4)} cogniInstance={cogniInstance} />}
       {step === 4 && <Step4 />}
