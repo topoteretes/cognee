@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Optional, get_type_hints
+from typing import Any, Dict, List, Optional, get_type_hints
 from uuid import UUID
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
@@ -543,11 +543,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             await session.commit()
             return results
 
-    async def remove_belongs_to_set_tags(self, tags: List[str]) -> None:
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
         """
         Strip the given tag names from `belongs_to_set` arrays in every
         vector collection and delete rows whose array is now empty. Used to
         reconcile surviving shared rows when a dataset/NodeSet is deleted.
+
+        When `node_ids` is provided, the detag only applies to rows whose
+        id is in the list — used to reconcile shared rows that lose a
+        dataset's anchor while that dataset still exists for other rows.
 
         Cognee vector collections follow the `{PascalCaseType}_{field}`
         naming convention (e.g. `Entity_name`, `DocumentChunk_text`) and
@@ -555,6 +563,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         to collections by requiring an uppercase first character.
         """
         if not tags:
+            return None
+
+        if node_ids is not None and not node_ids:
             return None
 
         # `get_table_names()` returns the raw SQLAlchemy reflection keys; for
@@ -575,6 +586,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             table_only = _table_only(name)
             if table_only and table_only[0].isupper():
                 candidate_tables.append(table_only)
+
+        id_scope_clause = "AND id = ANY(:node_ids)" if node_ids is not None else ""
+        bind_params: Dict[str, Any] = {"tags": list(tags)}
+        if node_ids is not None:
+            bind_params["node_ids"] = [str(nid) for nid in node_ids]
 
         for table_name in candidate_tables:
             quoted_table = f'"{table_name}"'
@@ -599,6 +615,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         )
                     )::json
                     WHERE payload::jsonb ? 'belongs_to_set'
+                      {id_scope_clause}
                       AND EXISTS (
                           SELECT 1
                           FROM jsonb_array_elements_text(
@@ -621,7 +638,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # committed for other tables.
             try:
                 async with self.get_async_session() as session:
-                    await session.execute(detag_sql, {"tags": list(tags)})
+                    await session.execute(detag_sql, bind_params)
                     await session.commit()
             except exc.SQLAlchemyError as e:
                 logger.debug(

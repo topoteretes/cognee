@@ -818,11 +818,19 @@ class LanceDBAdapter(VectorDBInterface):
         for data_point_id in data_point_ids:
             await collection.delete(f"id = '{data_point_id}'")
 
-    async def remove_belongs_to_set_tags(self, tags: List[str]) -> None:
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
         """
         Strip the given tag names from `belongs_to_set` arrays in every
         table and delete rows whose array becomes empty. Used to reconcile
         surviving shared rows after a dataset/NodeSet is deleted.
+
+        When `node_ids` is provided, the detag is scoped to rows whose id
+        is in the list — used to reconcile shared rows that lose a
+        dataset's anchor while that dataset still exists for other rows.
 
         LanceDB doesn't support in-place array mutation, so the update path
         reads rows that reference any target tag, rewrites the payload with
@@ -832,7 +840,13 @@ class LanceDBAdapter(VectorDBInterface):
         if not tags:
             return None
 
+        if node_ids is not None and not node_ids:
+            return None
+
         tag_set = set(tags)
+        id_set: Optional[set[str]] = (
+            {str(nid) for nid in node_ids} if node_ids is not None else None
+        )
         connection = await self.get_connection()
         collection_names = await connection.table_names()
 
@@ -885,6 +899,10 @@ class LanceDBAdapter(VectorDBInterface):
             escaped_tags = [tag.replace("'", "''") for tag in tag_set]
             literal_tags = "[" + ", ".join(f"'{tag}'" for tag in escaped_tags) + "]"
             where_clause = f"array_has_any(payload.belongs_to_set, {literal_tags})"
+            if id_set is not None:
+                escaped_ids = [str(nid).replace("'", "''") for nid in id_set]
+                literal_ids = "(" + ", ".join(f"'{nid}'" for nid in escaped_ids) + ")"
+                where_clause = f"({where_clause}) AND id IN {literal_ids}"
 
             async with self.VECTOR_DB_LOCK:
                 try:

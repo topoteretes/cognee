@@ -290,23 +290,40 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, dict(nodes=list(deduped.values())))
         return results
 
-    async def remove_belongs_to_set_tags(self, tags: List[str]) -> None:
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
         """
         Strip the given tag names from every node's `belongs_to_set`
         property array. Used to reconcile surviving shared nodes after a
         dataset or its NodeSet is deleted — the NodeSet node itself and
         its edges are already removed elsewhere; this brings the stored
         property in line with the surviving edges.
+
+        When `node_ids` is provided, the update is restricted to nodes
+        whose `id` is in the list — used when a shared node must lose
+        one dataset's tag while the dataset itself (and its other
+        members) remains.
         """
         if not tags:
             return None
 
+        if node_ids is not None and not node_ids:
+            return None
+
+        id_filter = "AND n.id IN $node_ids" if node_ids is not None else ""
         query = f"""
         MATCH (n: `{BASE_LABEL}`)
         WHERE any(tag IN $tags WHERE tag IN coalesce(n.belongs_to_set, []))
+        {id_filter}
         SET n.belongs_to_set = [x IN n.belongs_to_set WHERE NOT x IN $tags]
         """
-        await self.query(query, {"tags": list(tags)})
+        params: Dict[str, Any] = {"tags": list(tags)}
+        if node_ids is not None:
+            params["node_ids"] = [str(nid) for nid in node_ids]
+        await self.query(query, params)
         return None
 
     async def extract_node(self, node_id: str):

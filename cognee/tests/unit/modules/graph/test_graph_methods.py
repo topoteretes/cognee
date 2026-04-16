@@ -24,6 +24,7 @@ from cognee.modules.graph.methods import (
     delete_data_nodes_and_edges,
     get_data_related_nodes,
     get_global_data_related_nodes,
+    get_shared_slugs_losing_dataset_anchor,
 )
 from cognee.modules.graph.models import Node, Edge
 from cognee.modules.users.methods import get_default_user
@@ -447,9 +448,99 @@ async def test_get_global_data_related_nodes_scopes_by_dataset():
     logger.info("✅ test_get_global_data_related_nodes_scopes_by_dataset PASSED")
 
 
+@pytest.mark.asyncio
+async def test_get_shared_slugs_losing_dataset_anchor():
+    """
+    Regression test for the stale `belongs_to_set` label problem.
+
+    When the same data item is linked to multiple datasets and one of those
+    links is removed, slugs that are co-owned by another dataset survive in
+    the graph but silently keep the removed dataset's label in their
+    `belongs_to_set` array. The orchestrator needs to know which slugs
+    need a targeted detag — this helper returns them.
+
+    Ledger setup:
+      (alfa, maria)  owns slugs  [shared_slug, alfa_only_slug]
+      (beta,  maria) owns slugs  [shared_slug]
+      (alfa, mock)   owns slugs  [mock_only_slug]
+
+    Deleting (alfa, maria):
+      - `shared_slug`  → loses alfa's anchor (no other (alfa, _) row) AND
+        has another owner (beta, maria) → MUST detag "alfa"
+      - `alfa_only_slug` → loses alfa's anchor but has NO other owner
+        (will be hard-deleted upstream) → excluded
+      - `mock_only_slug` → has another (alfa, mock) row anchoring the
+        label → excluded
+
+    Expected: only `shared_slug` is returned.
+    """
+    data_directory_path = os.path.join(
+        pathlib.Path(__file__).parent.parent.parent.parent,
+        ".data_storage/test_shared_slugs_detag_anchor",
+    )
+    cognee.config.data_root_directory(data_directory_path)
+
+    cognee_directory_path = os.path.join(
+        pathlib.Path(__file__).parent.parent.parent.parent,
+        ".cognee_system/test_shared_slugs_detag_anchor",
+    )
+    cognee.config.system_root_directory(cognee_directory_path)
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await setup()
+
+    user = await get_default_user()
+
+    dataset = await create_dataset("test_shared_detag_anchor", user=user)
+    alfa_dataset_id = dataset.id
+    beta_dataset_id = uuid4()  # ledger-only: simulate second dataset's rows
+
+    await set_database_global_context_variables(alfa_dataset_id, user.id)
+
+    maria_data_id = uuid4()
+    mock_data_id = uuid4()
+    shared_slug = uuid5(NAMESPACE_OID, "shared")
+    alfa_only_slug = uuid5(NAMESPACE_OID, "alfa_only")
+    mock_only_slug = uuid5(NAMESPACE_OID, "mock_only")
+
+    def _make_node(slug, dataset_id, data_id):
+        return Node(
+            id=uuid4(),
+            slug=slug,
+            user_id=user.id,
+            data_id=data_id,
+            dataset_id=dataset_id,
+            type="Entity",
+            indexed_fields=["name"],
+        )
+
+    rows = [
+        _make_node(shared_slug, alfa_dataset_id, maria_data_id),
+        _make_node(alfa_only_slug, alfa_dataset_id, maria_data_id),
+        _make_node(shared_slug, beta_dataset_id, maria_data_id),
+        _make_node(mock_only_slug, alfa_dataset_id, mock_data_id),
+    ]
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add_all(rows)
+        await session.commit()
+
+    result = await get_shared_slugs_losing_dataset_anchor(alfa_dataset_id, maria_data_id)
+    result_slugs = {str(slug) for slug in result}
+
+    assert result_slugs == {str(shared_slug)}, (
+        f"Expected only the co-owned shared_slug to need detag, got {result_slugs}"
+    )
+
+    logger.info("✅ test_get_shared_slugs_losing_dataset_anchor PASSED")
+
+
 if __name__ == "__main__":
     import asyncio
 
     asyncio.run(test_get_data_related_nodes_excludes_shared())
     asyncio.run(test_delete_data_nodes_and_edges_removes_from_all_systems())
     asyncio.run(test_get_global_data_related_nodes_scopes_by_dataset())
+    asyncio.run(test_get_shared_slugs_losing_dataset_anchor())

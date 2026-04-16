@@ -187,3 +187,40 @@ async def test_remove_belongs_to_set_tags_noop_for_empty_input(tmp_path):
 
     result = (await adapter.retrieve(collection, [point_id]))[0]
     assert result.payload["belongs_to_set"] == ["Dev"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_remove_belongs_to_set_tags_scoped_by_node_ids(tmp_path):
+    """Scoped detag: stripping a tag only from specific rows must leave
+    rows outside the `node_ids` set untouched, even if they carry the
+    same tag. Covers the shared-data-across-datasets reconciliation path
+    where the dataset label must be removed from the shared row but kept
+    on rows in the same dataset that still legitimately own the tag."""
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"),
+        api_key=None,
+        embedding_engine=_FakeEmbeddingEngine(),
+    )
+    collection = "Tagged_text"
+
+    targeted_id = str(uuid4())
+    untouched_same_tag_id = str(uuid4())
+
+    targeted = _TaggedPoint(
+        id=targeted_id, text="shared", belongs_to_set=["alfa", "beta"]
+    )
+    untouched = _TaggedPoint(
+        id=untouched_same_tag_id, text="mock_only", belongs_to_set=["alfa"]
+    )
+
+    await adapter.create_collection(collection, type(targeted))
+    await adapter.create_data_points(collection, [targeted, untouched])
+
+    await adapter.remove_belongs_to_set_tags(["alfa"], node_ids=[targeted_id])
+
+    targeted_after = (await adapter.retrieve(collection, [targeted_id]))[0]
+    assert targeted_after.payload["belongs_to_set"] == ["beta"]
+
+    untouched_after = (await adapter.retrieve(collection, [untouched_same_tag_id]))[0]
+    assert untouched_after.payload["belongs_to_set"] == ["alfa"]
