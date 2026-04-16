@@ -224,6 +224,34 @@ async def test_agent_memory_with_session_memory_resolves_user_but_not_dataset_sc
 
 
 @pytest.mark.asyncio
+async def test_agent_memory_persists_error_trace_when_memory_retrieval_fails(monkeypatch):
+    resolved_user = _make_user()
+    resolved_scope = _make_scope(user=resolved_user)
+    persist_trace_mock = AsyncMock()
+    _patch_decorator_runtime(
+        monkeypatch,
+        user=resolved_user,
+        scope=resolved_scope,
+        retrieve_side_effect=RuntimeError("memory retrieval failed"),
+        persist_trace_mock=persist_trace_mock,
+    )
+
+    @cognee.agent_memory(with_memory=True, save_traces=True)
+    async def sample_agent() -> str:
+        pytest.fail("wrapped function should not run when memory retrieval fails")
+
+    with pytest.raises(RuntimeError, match="memory retrieval failed"):
+        await sample_agent()
+
+    assert get_current_agent_memory_context() is None
+    persisted_context = persist_trace_mock.await_args.args[0]
+    assert persisted_context.user == resolved_user
+    assert persisted_context.scope == resolved_scope
+    assert persisted_context.status == "error"
+    assert persisted_context.error_message == "memory retrieval failed"
+
+
+@pytest.mark.asyncio
 async def test_agent_memory_isolated_between_decorated_methods_with_different_users(monkeypatch):
     owner_scope = _make_scope(user=_make_user(), dataset_name="shared")
     other_scope = _make_scope(user=_make_user(), dataset_name="shared")
