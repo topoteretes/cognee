@@ -589,7 +589,9 @@ async def test_resolve_agent_dataset_scope_prefers_explicit_user_over_default_us
         ),
     ],
 )
-async def test_resolve_agent_dataset_scope_validates_permissions(monkeypatch, readable, writable, match):
+async def test_resolve_agent_dataset_scope_validates_permissions(
+    monkeypatch, readable, writable, match
+):
     user = _make_user()
     readable_datasets = readable(user)
 
