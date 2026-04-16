@@ -58,7 +58,7 @@ class TestExaConfig:
         assert config.start_published_date == "2024-01-01T00:00:00Z"
 
     def test_api_key_passed_explicitly(self):
-        """API key can be set directly (env var default is evaluated at class load time)."""
+        """API key can be set directly; explicit value overrides env var default."""
         config = ExaConfig(api_key="explicit-key")
         assert config.api_key == "explicit-key"
 

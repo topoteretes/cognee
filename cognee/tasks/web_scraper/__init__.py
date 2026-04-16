@@ -26,7 +26,6 @@ def __getattr__(name):
 
 
 __all__ = [
-    "BeautifulSoupCrawler",
     "fetch_page_content",
     "fetch_with_exa",
     "search_with_exa",

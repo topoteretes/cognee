@@ -5,6 +5,7 @@ BeautifulSoup for custom extraction rules, Tavily for API-based scraping, and Ex
 AI-powered web search and content retrieval.
 """
 
+import asyncio
 import os
 from typing import Dict, List, Optional, Union
 from cognee.shared.logging_utils import get_logger
@@ -125,7 +126,7 @@ async def fetch_with_exa(urls: Union[str, List[str]], exa_config: Optional[ExaCo
         contents_kwargs["summary"] = True
 
     logger.info(f"Sending get_contents request to Exa API for {len(url_list)} URL(s)")
-    response = client.get_contents(url_list, **contents_kwargs)
+    response = await asyncio.to_thread(client.get_contents, url_list, **contents_kwargs)
 
     return_results: Dict[str, str] = {}
     for result in response.results:
@@ -206,7 +207,7 @@ async def search_with_exa(
         f"Sending search request to Exa API (type={config.search_type}, "
         f"num_results={config.num_results})"
     )
-    response = client.search_and_contents(**search_kwargs)
+    response = await asyncio.to_thread(client.search_and_contents, **search_kwargs)
 
     return_results: Dict[str, str] = {}
     for result in response.results:

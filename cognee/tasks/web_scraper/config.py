@@ -11,7 +11,7 @@ class TavilyConfig(BaseModel):
 
 
 class ExaConfig(BaseModel):
-    api_key: Optional[str] = os.getenv("EXA_API_KEY")
+    api_key: Optional[str] = Field(default_factory=lambda: os.getenv("EXA_API_KEY"))
     num_results: int = Field(default=10, ge=1, le=100)
     search_type: Literal["neural", "fast", "auto"] = "auto"
     use_highlights: bool = True
