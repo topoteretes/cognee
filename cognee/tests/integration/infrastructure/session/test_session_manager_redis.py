@@ -158,6 +158,29 @@ async def test_add_agent_trace_step_and_get_trace_session(session_manager):
 
 
 @pytest.mark.asyncio
+async def test_add_agent_trace_step_can_disable_llm_feedback_generation(session_manager):
+    """Disabling LLM feedback generation stores deterministic fallback feedback."""
+    with patch(
+        "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+        new_callable=AsyncMock,
+    ) as mock_llm:
+        trace_id = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="plan_trip",
+            status="success",
+            method_return_value="Plan created",
+            generate_feedback_with_llm=False,
+        )
+
+    assert trace_id is not None
+    mock_llm.assert_not_awaited()
+    entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    assert len(entries) == 1
+    assert entries[0]["session_feedback"] == "plan_trip succeeded."
+
+
+@pytest.mark.asyncio
 async def test_agent_trace_session_isolated_by_user_and_session(session_manager):
     """Agent trace sessions remain isolated by user_id and session_id."""
     await session_manager.add_agent_trace_step(
@@ -290,15 +313,24 @@ async def test_delete_qa(session_manager):
 
 @pytest.mark.asyncio
 async def test_delete_session(session_manager):
-    """delete_session clears all entries."""
+    """delete_session clears both QA and trace session entries."""
     await session_manager.add_qa(
         user_id="u1", question="Q", context="C", answer="A", session_id="s1"
     )
+    trace_id = await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="plan_trip",
+        status="success",
+    )
+    assert trace_id is not None
     ok = await session_manager.delete_session(user_id="u1", session_id="s1")
     assert ok
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert entries == []
+    trace_entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    assert trace_entries == []
 
 
 @pytest.mark.asyncio

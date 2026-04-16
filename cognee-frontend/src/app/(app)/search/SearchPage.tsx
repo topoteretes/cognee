@@ -36,9 +36,12 @@ export default function SearchPage() {
   const [hasSearched, setHasSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [datasets, setDatasets] = useState<{ id: string; name: string }[]>([]);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null);
+  const [showDatasetDropdown, setShowDatasetDropdown] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
@@ -46,6 +49,19 @@ export default function SearchPage() {
       .then((data: { id: string; name: string }[]) => setDatasets(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [cogniInstance, isInitializing]);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDatasetDropdown(false);
+      }
+    }
+    if (showDatasetDropdown) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showDatasetDropdown]);
+
+  const selectedDataset = datasets.find((d) => d.id === selectedDatasetId);
+  const searchDatasetIds = selectedDatasetId ? [selectedDatasetId] : datasets.map((d) => d.id);
 
   const handleSearch = async (q: string) => {
     if (!q.trim() || !cogniInstance) return;
@@ -59,7 +75,7 @@ export default function SearchPage() {
       const data = await searchDataset(cogniInstance, {
         query: q,
         searchType: "GRAPH_COMPLETION",
-        datasetIds: datasets.map((d) => d.id),
+        datasetIds: searchDatasetIds,
       });
       const resultData = Array.isArray(data) ? data : [];
       setResults(resultData);
@@ -90,6 +106,51 @@ export default function SearchPage() {
         <h1 style={{ fontSize: 22, fontWeight: 600, color: "#18181B", margin: 0 }}>Query</h1>
         <span style={{ fontSize: 14, color: "#71717A" }}>Search your knowledge graph with natural language.</span>
       </div>
+
+      {/* Dataset selector */}
+      {datasets.length > 0 && (
+        <div ref={dropdownRef} style={{ position: "relative", alignSelf: "flex-start" }}>
+          <button
+            onClick={() => setShowDatasetDropdown((v) => !v)}
+            className="cursor-pointer"
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8,
+              padding: "7px 14px", fontSize: 13, fontWeight: 500,
+              color: selectedDataset ? "#18181B" : "#71717A", fontFamily: "inherit",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={selectedDataset ? "#6510F4" : "#A1A1AA"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+            </svg>
+            {selectedDataset ? selectedDataset.name : "All datasets"}
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}><path d="M3 4.5L6 7.5L9 4.5" stroke="#A1A1AA" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          {showDatasetDropdown && (
+            <div style={{ position: "absolute", top: 36, left: 0, width: 240, background: "#fff", borderRadius: 10, boxShadow: "0px 8px 30px #0000001F, 0px 0px 0px 1px #0000000F", padding: 6, zIndex: 50 }}>
+              <div
+                onClick={() => { setSelectedDatasetId(null); setShowDatasetDropdown(false); }}
+                className="cursor-pointer"
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6, background: !selectedDatasetId ? "#F0EDFF" : "transparent" }}
+              >
+                <span style={{ fontSize: 13, fontWeight: !selectedDatasetId ? 500 : 400, color: !selectedDatasetId ? "#6510F4" : "#3F3F46" }}>All datasets</span>
+                {!selectedDatasetId && <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ marginLeft: "auto", flexShrink: 0 }}><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#6510F4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              </div>
+              {datasets.map((d) => (
+                <div
+                  key={d.id}
+                  onClick={() => { setSelectedDatasetId(d.id); setShowDatasetDropdown(false); }}
+                  className="cursor-pointer"
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6, background: selectedDatasetId === d.id ? "#F0EDFF" : "transparent" }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: selectedDatasetId === d.id ? 500 : 400, color: selectedDatasetId === d.id ? "#6510F4" : "#3F3F46" }}>{d.name}</span>
+                  {selectedDatasetId === d.id && <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ marginLeft: "auto", flexShrink: 0 }}><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#6510F4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Search bar */}
       <div style={{ background: "#fff", border: `1px solid ${query ? "#6510F4" : "#E5E7EB"}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, boxShadow: "0 1px 3px #0000000A", transition: "border-color 0.2s" }}>

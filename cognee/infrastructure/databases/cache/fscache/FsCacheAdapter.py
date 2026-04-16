@@ -309,15 +309,19 @@ class FSCacheAdapter(CacheDBInterface):
 
     async def delete_session(self, user_id: str, session_id: str) -> bool:
         """
-        Delete the entire session and all its QA entries.
-        Returns True if deleted, False if session did not exist.
+        Delete the entire session and all its session-scoped artifacts.
+        Returns True if any session data existed, False otherwise.
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            existed = self.cache.get(session_key) is not None
-            if existed:
+            trace_key = self._agent_trace_key(user_id, session_id)
+            qa_existed = self.cache.get(session_key) is not None
+            trace_existed = self.cache.get(trace_key) is not None
+            if qa_existed:
                 self.cache.delete(session_key)
-            return existed
+            if trace_existed:
+                self.cache.delete(trace_key)
+            return qa_existed or trace_existed
 
         except Exception as e:
             error_msg = f"Unexpected error while deleting session from diskcache: {str(e)}"

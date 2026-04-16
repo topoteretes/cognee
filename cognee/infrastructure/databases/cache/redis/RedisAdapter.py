@@ -405,13 +405,15 @@ class RedisAdapter(CacheDBInterface):
 
     async def delete_session(self, user_id: str, session_id: str) -> bool:
         """
-        Delete the entire session and all its QA entries.
-        Returns True if deleted, False if session did not exist.
+        Delete the entire session and all its session-scoped artifacts.
+        Returns True if any session data existed, False otherwise.
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            deleted = await self.async_redis.delete(session_key)
-            return deleted > 0
+            trace_key = self._agent_trace_key(user_id, session_id)
+            deleted_sessions = await self.async_redis.delete(session_key)
+            deleted_traces = await self.async_redis.delete(trace_key)
+            return (deleted_sessions + deleted_traces) > 0
 
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting session: {str(e)}"

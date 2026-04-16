@@ -404,10 +404,20 @@ async def test_delete_entry_reapplies_session_ttl_after_rewrite(adapter, redis_s
 
 @pytest.mark.asyncio
 async def test_delete_session(adapter):
-    """Delete the entire session and all its entries."""
+    """Delete the entire session, including QA and trace entries."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        session_feedback="plan_trip succeeded.",
+    )
     ok = await adapter.delete_session("u1", "s1")
-    assert ok and await adapter.get_all_qa_entries("u1", "s1") == []
+    assert ok is True
+    assert await adapter.get_all_qa_entries("u1", "s1") == []
+    assert await adapter.get_agent_trace_session("u1", "s1") == []
 
 
 @pytest.mark.asyncio
