@@ -464,7 +464,7 @@ async def _remember_inner(
     client = get_remote_client()
     if client is not None:
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
-        return await client.remember(data, dataset_name, **kwargs)
+        return await client.remember(data, dataset_name, session_id=session_id, **kwargs)
 
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any

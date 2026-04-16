@@ -74,7 +74,6 @@ export default function ConnectionsPage() {
       const agentData = Array.isArray(a) ? a : [];
       setAgents(agentData);
       setDatasets(d);
-      // Auto-select first agent
       const firstAgent = agentData.find((x: Agent) => x.is_agent);
       if (firstAgent) setSelectedAgentId(firstAgent.id);
     }).finally(() => setLoading(false));

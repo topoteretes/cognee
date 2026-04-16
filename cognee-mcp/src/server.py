@@ -626,17 +626,41 @@ async def search(
             # text_vector contains raw floats (~92KB per result), useless for clients
             search_results = strip_vectors(search_results)
 
+            def _combine_completion_results(results):
+                """Combine results from all datasets instead of returning only the first.
+
+                Each result may be a dict (from _backwards_compatible_search_results)
+                or a SearchResult object. Results are labeled with their dataset name
+                so users can distinguish which dataset each answer came from.
+                """
+                if not isinstance(results, list) or len(results) == 0:
+                    return str(results)
+                combined = []
+                for sr in results:
+                    if isinstance(sr, dict):
+                        ds_name = sr.get("dataset_name", "unknown")
+                        sr_content = sr.get("search_result", str(sr))
+                    elif hasattr(sr, "dataset_name") and hasattr(sr, "search_result"):
+                        ds_name = sr.dataset_name or "unknown"
+                        sr_content = sr.search_result
+                    else:
+                        combined.append(str(sr))
+                        continue
+                    if isinstance(sr_content, list):
+                        for item in sr_content:
+                            combined.append(f"[{ds_name}] {item}")
+                    else:
+                        combined.append(f"[{ds_name}] {sr_content}")
+                return "\n\n".join(combined)
+
             # Handle different result formats based on API vs direct mode
             if cognee_client.use_api:
                 # API mode returns JSON-serialized results
                 if isinstance(search_results, str):
                     return search_results
                 elif isinstance(search_results, list):
-                    if (
-                        search_type.upper() in ["GRAPH_COMPLETION", "RAG_COMPLETION"]
-                        and len(search_results) > 0
-                    ):
-                        return str(search_results[0])
+                    if search_type.upper() in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+                        return _combine_completion_results(search_results)
                     return str(search_results)
                 else:
                     return json.dumps(search_results, cls=JSONEncoder)
@@ -644,11 +668,8 @@ async def search(
                 # Direct mode processing
                 if search_type.upper() == "CODE":
                     return json.dumps(search_results, cls=JSONEncoder)
-                elif (
-                    search_type.upper() == "GRAPH_COMPLETION"
-                    or search_type.upper() == "RAG_COMPLETION"
-                ):
-                    return str(search_results[0])
+                elif search_type.upper() in ("GRAPH_COMPLETION", "RAG_COMPLETION"):
+                    return _combine_completion_results(search_results)
                 elif search_type.upper() == "CHUNKS":
                     return str(search_results)
                 elif search_type.upper() == "INSIGHTS":

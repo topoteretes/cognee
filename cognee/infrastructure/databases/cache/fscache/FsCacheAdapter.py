@@ -7,7 +7,7 @@ import diskcache as dc
 from pydantic import ValidationError
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
-from cognee.infrastructure.databases.cache.models import SessionQAEntry
+from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions.exceptions import (
     CacheConnectionError,
     SessionQAEntryValidationError,
@@ -39,6 +39,10 @@ class FSCacheAdapter(CacheDBInterface):
         return f"agent_sessions:{user_id}:{session_id}"
 
     @staticmethod
+    def _agent_trace_key(user_id: str, session_id: str) -> str:
+        return f"agent_traces:{user_id}:{session_id}"
+
+    @staticmethod
     def _build_qa_entry_dump(
         question: str,
         context: str,
@@ -59,6 +63,31 @@ class FSCacheAdapter(CacheDBInterface):
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
+        )
+        return entry.model_dump()
+
+    @staticmethod
+    def _build_agent_trace_entry_dump(
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> dict:
+        entry = SessionAgentTraceEntry(
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            memory_query=memory_query,
+            memory_context=memory_context,
+            method_params=method_params or {},
+            method_return_value=method_return_value,
+            error_message=error_message,
+            session_feedback=session_feedback,
         )
         return entry.model_dump()
 
@@ -171,9 +200,10 @@ class FSCacheAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
             )
-            entries = self._load_entries(session_key)
-            entries.append(qa_entry)
-            self._save_entries(session_key, entries)
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                entries.append(qa_entry)
+                self._save_entries(session_key, entries)
         except Exception as e:
             error_msg = f"Unexpected error while adding Q&A to diskcache: {str(e)}"
             logger.error(error_msg)
@@ -210,23 +240,24 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            merged = self._merge_entry_update(
-                entries[idx],
-                question,
-                context,
-                answer,
-                feedback_text,
-                feedback_score,
-                used_graph_element_ids=used_graph_element_ids,
-                memify_metadata=memify_metadata,
-            )
-            entries[idx] = self._validate_entry_dict(merged)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                merged = self._merge_entry_update(
+                    entries[idx],
+                    question,
+                    context,
+                    answer,
+                    feedback_text,
+                    feedback_score,
+                    used_graph_element_ids=used_graph_element_ids,
+                    memify_metadata=memify_metadata,
+                )
+                entries[idx] = self._validate_entry_dict(merged)
+                self._save_entries(session_key, entries)
+                return True
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
@@ -240,14 +271,15 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            merged = self._merge_entry_clear_feedback(entries[idx])
-            entries[idx] = self._validate_entry_dict(merged)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                merged = self._merge_entry_clear_feedback(entries[idx])
+                entries[idx] = self._validate_entry_dict(merged)
+                self._save_entries(session_key, entries)
+                return True
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
@@ -262,13 +294,14 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            entries.pop(idx)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                entries.pop(idx)
+                self._save_entries(session_key, entries)
+                return True
         except Exception as e:
             error_msg = f"Unexpected error while deleting Q&A from diskcache: {str(e)}"
             logger.error(error_msg)
@@ -276,20 +309,71 @@ class FSCacheAdapter(CacheDBInterface):
 
     async def delete_session(self, user_id: str, session_id: str) -> bool:
         """
-        Delete the entire session and all its QA entries.
-        Returns True if deleted, False if session did not exist.
+        Delete the entire session and all its session-scoped artifacts.
+        Returns True if any session data existed, False otherwise.
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            existed = self.cache.get(session_key) is not None
-            if existed:
+            trace_key = self._agent_trace_key(user_id, session_id)
+            qa_existed = self.cache.get(session_key) is not None
+            trace_existed = self.cache.get(trace_key) is not None
+            if qa_existed:
                 self.cache.delete(session_key)
-            return existed
+            if trace_existed:
+                self.cache.delete(trace_key)
+            return qa_existed or trace_existed
 
         except Exception as e:
             error_msg = f"Unexpected error while deleting session from diskcache: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
+
+    async def append_agent_trace_step(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> None:
+        """Append one trace step to the stored trace list for this session."""
+        try:
+            trace_key = self._agent_trace_key(user_id, session_id)
+            trace_entry = self._build_agent_trace_entry_dump(
+                trace_id=trace_id,
+                origin_function=origin_function,
+                status=status,
+                memory_query=memory_query,
+                memory_context=memory_context,
+                method_params=method_params,
+                method_return_value=method_return_value,
+                error_message=error_message,
+                session_feedback=session_feedback,
+            )
+            with self.cache.transact():
+                entries = self._load_entries(trace_key)
+                entries.append(trace_entry)
+                self._save_entries(trace_key, entries)
+        except Exception as e:
+            error_msg = f"Unexpected error while appending agent trace step to diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def get_agent_trace_session(self, user_id: str, session_id: str) -> list[dict]:
+        """Retrieve all stored trace steps for the given session."""
+        trace_key = self._agent_trace_key(user_id, session_id)
+        return self._load_entries(trace_key)
+
+    async def get_agent_trace_feedback(self, user_id: str, session_id: str) -> list[str]:
+        """Retrieve ordered per-step feedback for the given trace session."""
+        entries = await self.get_agent_trace_session(user_id, session_id)
+        return [entry.get("session_feedback", "") for entry in entries]
 
     async def prune(self) -> None:
         """

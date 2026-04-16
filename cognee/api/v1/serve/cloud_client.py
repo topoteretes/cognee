@@ -53,6 +53,8 @@ class CloudClient:
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
 
+        if kwargs.get("session_id"):
+            form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
             form.add_field("run_in_background", "true")
         if kwargs.get("custom_prompt"):
@@ -132,6 +134,83 @@ class CloudClient:
             if resp.status >= 400:
                 body = await resp.text()
                 raise RuntimeError(f"Remote improve failed ({resp.status}): {body}")
+            return await resp.json()
+
+    # ----- V1 Operations (add / cognify / search) -----
+
+    async def add(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
+        """POST /api/v1/add — ingest data into a dataset."""
+        session = await self._get_session()
+
+        form = aiohttp.FormData()
+        form.add_field("datasetName", dataset_name)
+
+        if isinstance(data, str):
+            form.add_field(
+                "data",
+                io.BytesIO(data.encode("utf-8")),
+                filename="data.txt",
+                content_type="text/plain",
+            )
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, str):
+                    form.add_field(
+                        "data",
+                        io.BytesIO(item.encode("utf-8")),
+                        filename="data.txt",
+                        content_type="text/plain",
+                    )
+                elif hasattr(item, "read"):
+                    name = getattr(item, "name", "upload")
+                    form.add_field("data", item, filename=name)
+        elif hasattr(data, "read"):
+            name = getattr(data, "name", "upload")
+            form.add_field("data", data, filename=name)
+
+        async with session.post(f"{self.service_url}/api/v1/add", data=form) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote add failed ({resp.status}): {body}")
+            return await resp.json()
+
+    async def cognify(self, datasets: Any = None, **kwargs) -> dict:
+        """POST /api/v1/cognify — build the knowledge graph."""
+        session = await self._get_session()
+
+        payload: dict = {}
+        if datasets:
+            payload["datasets"] = (
+                [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
+            )
+
+        async with session.post(
+            f"{self.service_url}/api/v1/cognify",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote cognify failed ({resp.status}): {body}")
+            return await resp.json()
+
+    async def search(self, query: str, **kwargs) -> list:
+        """POST /api/v1/search — query the knowledge graph."""
+        session = await self._get_session()
+
+        payload: dict = {"query": query}
+        if kwargs.get("search_type"):
+            st = kwargs["search_type"]
+            payload["searchType"] = st if isinstance(st, str) else st.value
+        if kwargs.get("datasets"):
+            payload["datasets"] = kwargs["datasets"]
+
+        async with session.post(
+            f"{self.service_url}/api/v1/search",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote search failed ({resp.status}): {body}")
             return await resp.json()
 
     async def forget(self, **kwargs) -> dict:
