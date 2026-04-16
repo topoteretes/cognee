@@ -79,9 +79,4 @@ async def summarize_text(
         for (chunk_index, chunk) in enumerate(non_dlt_chunks)
     ]
 
-    import time
-
-    end = time.perf_counter()
-    print(f"END TIME OF EXTRACTION AND SUMMARIZATION: {end}")
-
     return summaries + dlt_chunks

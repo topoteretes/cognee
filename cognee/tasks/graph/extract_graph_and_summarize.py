@@ -1,4 +1,4 @@
-from typing import List, Type, Optional, Dict
+from typing import List, Type, Optional
 from pydantic import BaseModel
 import asyncio
 
@@ -17,10 +17,6 @@ async def extract_graph_and_summarize(
     summarization_model: Type[BaseModel] = None,
     **kwargs,
 ):
-    import time
-
-    start = time.perf_counter()
-    # print(f"START TIME OF EXTRACTION AND SUMMARIZATION: {start}")
     result_chunks = await asyncio.gather(
         extract_graph_from_data(
             data_chunks=data_chunks,
@@ -36,6 +32,5 @@ async def extract_graph_and_summarize(
         ),
     )
 
-    print(f"TOTAL TIME OF EXTRACTION AND SUMMARIZATION: {time.perf_counter() - start}")
     # Return only TextSummary objects, keeping the same logic as sequential execution of these tasks
     return result_chunks[1]

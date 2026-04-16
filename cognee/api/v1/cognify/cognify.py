@@ -312,20 +312,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             chunker=chunker,
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
-        # Task(
-        #     extract_graph_from_data,
-        #     graph_model=graph_model,
-        #     config=config,
-        #     custom_prompt=custom_prompt,
-        #     task_config={"batch_size": chunks_per_batch},
-        #     **kwargs,
-        # ),
-        # # COGNIFY: LLM-summarize each chunk for hierarchical retrieval
-        # Task(
-        #     summarize_text,
-        #     task_config={"batch_size": chunks_per_batch},
-        # ),
-        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
+        # COGNIFY: LLM-summarize each chunk for hierarchical retrieval
         Task(
             extract_graph_and_summarize,
             graph_model=graph_model,
@@ -333,6 +320,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
         ),
+        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
             add_data_points,
             embed_triplets=embed_triplets,
