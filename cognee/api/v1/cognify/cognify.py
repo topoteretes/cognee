@@ -1,6 +1,6 @@
 import asyncio
 from pydantic import BaseModel
-from typing import Union, Optional, List
+from typing import Union, Optional
 from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
@@ -23,10 +23,8 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.summarization import summarize_text
 from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
@@ -319,6 +317,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
+            **kwargs,
         ),
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(

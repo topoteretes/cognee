@@ -6,6 +6,7 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.ontology.ontology_config import Config
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.summarization import summarize_text
+from cognee.tasks.summarization.models import TextSummary
 
 
 async def extract_graph_and_summarize(
@@ -16,7 +17,7 @@ async def extract_graph_and_summarize(
     ctx=None,
     summarization_model: Type[BaseModel] = None,
     **kwargs,
-):
+) -> List[TextSummary]:
     result_chunks = await asyncio.gather(
         extract_graph_from_data(
             data_chunks=data_chunks,
