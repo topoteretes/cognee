@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.modules.storage.utils import JSONEncoder
 
 from .tables import _meta, _node_table, _edge_table
@@ -29,8 +30,16 @@ class PostgresAdapter(GraphDBInterface):
     def __init__(self, connection_string: str) -> None:
         """Create engine and sessionmaker from a Postgres connection string."""
         self.db_uri = connection_string
-        self.engine = create_async_engine(self.db_uri)
+
+        relational_config = get_relational_config()
+        pool_args: dict = dict(relational_config.pool_args) if relational_config.pool_args else {}  # type: ignore[arg-type]
+
+        self.engine = create_async_engine(self.db_uri, **pool_args)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+
+    async def close(self) -> None:
+        """Dispose the connection pool. Called by ``closing_lru_cache`` on eviction."""
+        await self.engine.dispose(close=True)
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""

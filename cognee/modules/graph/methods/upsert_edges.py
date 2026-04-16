@@ -9,6 +9,8 @@ from cognee.modules.graph.models.Edge import Edge
 from cognee.infrastructure.databases.relational.with_async_session import with_async_session
 
 
+# When `session` is passed by the caller the decorator does NOT commit —
+# the caller is responsible for committing the session.
 @with_async_session
 async def upsert_edges(
     edges: List[Tuple[UUID, UUID, str, Dict[str, Any]]],
@@ -60,5 +62,3 @@ async def upsert_edges(
     )
 
     await session.execute(upsert_statement)
-
-    await session.commit()
