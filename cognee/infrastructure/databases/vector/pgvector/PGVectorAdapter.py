@@ -48,6 +48,8 @@ class IndexSchema(DataPoint):
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
+    """Vector-database adapter backed by Postgres + pgvector; implements VectorDBInterface."""
+
     name = "PGVector"
 
     def __init__(
@@ -261,6 +263,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
 
             def to_dict(obj):
+                """Dump a mapped PGVectorDataPoint row to a plain column→value dict."""
                 return {
                     column.key: getattr(obj, column.key)
                     for column in inspect(obj).mapper.column_attrs
@@ -544,11 +547,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if not tags:
             return None
 
-        # `get_table_names()` on Postgres returns fully-qualified `schema.table`
-        # strings. Pull the trailing table name and keep only PascalCase ones —
-        # cognee's vector collections are named e.g. `Entity_name`, whereas
-        # relational tables (`users`, `nodes`, …) are snake_case.
+        # `get_table_names()` returns the raw SQLAlchemy reflection keys; for
+        # Postgres those may be schema-qualified (`schema.table`) when the
+        # reflected schema isn't the search-path default, while SQLite and
+        # same-schema Postgres return plain table names. Strip any leading
+        # `schema.` prefix first, then keep only PascalCase names — cognee's
+        # vector collections are `Entity_name` / `DocumentChunk_text` etc.,
+        # whereas relational tables (`users`, `nodes`, …) are snake_case.
         def _table_only(name: str) -> str:
+            """Strip any leading `schema.` prefix from a reflected table name."""
             return name.rpartition(".")[2] if "." in name else name
 
         candidate_tables = [

@@ -58,14 +58,13 @@ class _TaggedPoint(DataPoint):
     metadata: dict = {"index_fields": ["text"]}
 
 
-async def _fresh_adapter() -> PGVectorAdapter:
+def _fresh_adapter() -> PGVectorAdapter:
     """Build an adapter pointed at the live pgvector instance."""
-    adapter = PGVectorAdapter(
+    return PGVectorAdapter(
         connection_string=PG_URL,
         api_key=None,
         embedding_engine=_FakeEmbeddingEngine(),
     )
-    return adapter
 
 
 @pytest.fixture
@@ -78,7 +77,7 @@ def collection_name() -> str:
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
 async def test_create_data_points_merges_belongs_to_set(collection_name):
     """Re-upserting the same id with a new tag must union the tags in pgvector."""
-    adapter = await _fresh_adapter()
+    adapter = _fresh_adapter()
     point_id = uuid4()
 
     try:
@@ -104,7 +103,7 @@ async def test_create_data_points_dedupes_duplicate_ids_in_batch(collection_name
     """With ON CONFLICT DO UPDATE, repeating the same id in one INSERT batch
     would otherwise fail with "cannot affect row a second time". The adapter
     must dedup in Python before the insert."""
-    adapter = await _fresh_adapter()
+    adapter = _fresh_adapter()
     point_id = uuid4()
 
     try:
@@ -129,7 +128,7 @@ async def test_create_data_points_merges_tags_across_in_batch_duplicates(collect
     """When the same id appears in one batch with different `belongs_to_set`
     values, the Python-side dedup must union the tags instead of keeping
     only the last duplicate's — mirrors the fix in Neo4jAdapter.add_nodes."""
-    adapter = await _fresh_adapter()
+    adapter = _fresh_adapter()
     point_id = uuid4()
 
     try:
@@ -152,7 +151,7 @@ async def test_create_data_points_merges_tags_across_in_batch_duplicates(collect
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
 async def test_remove_belongs_to_set_tags_strips_and_deletes(collection_name):
     """Detag strips the target tag, removes rows that empty out, and leaves others alone."""
-    adapter = await _fresh_adapter()
+    adapter = _fresh_adapter()
 
     shared_id = uuid4()
     orphaned_id = uuid4()
@@ -185,9 +184,50 @@ async def test_remove_belongs_to_set_tags_strips_and_deletes(collection_name):
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
 async def test_remove_belongs_to_set_tags_ignores_non_vector_tables():
-    """The PascalCase filter must skip lowercase relational tables that share
-    the schema with vector collections (e.g. `users`, `nodes`). This test
-    just asserts the call completes without error; relational tables either
-    don't exist or don't have a jsonb `payload` column."""
-    adapter = await _fresh_adapter()
-    await adapter.remove_belongs_to_set_tags(["NonexistentTag"])
+    """Create a snake_case relational-style table and a PascalCase table with
+    no `payload` column, then run detag. Both must survive with their rows
+    and schema intact — the PascalCase filter and per-table error handling
+    together should keep non-vector tables out of the detag path."""
+    adapter = _fresh_adapter()
+
+    from sqlalchemy import text as sql_text
+
+    lowercase_name = f"integ_snake_{uuid4().hex[:10]}"
+    pascal_noise_name = f"IntegNoPayload_{uuid4().hex[:10]}_text"
+
+    try:
+        async with adapter.get_async_session() as session:
+            await session.execute(
+                sql_text(f'CREATE TABLE "{lowercase_name}" (id INTEGER PRIMARY KEY, name TEXT)')
+            )
+            await session.execute(
+                sql_text(f"INSERT INTO \"{lowercase_name}\" (id, name) VALUES (1, 'kept')")
+            )
+            await session.execute(
+                sql_text(f'CREATE TABLE "{pascal_noise_name}" (id INTEGER PRIMARY KEY, note TEXT)')
+            )
+            await session.execute(
+                sql_text(f"INSERT INTO \"{pascal_noise_name}\" (id, note) VALUES (1, 'kept')")
+            )
+            await session.commit()
+
+        await adapter.remove_belongs_to_set_tags(["Dev"])
+
+        async with adapter.get_async_session() as session:
+            lower_count = (
+                await session.execute(sql_text(f'SELECT COUNT(*) FROM "{lowercase_name}"'))
+            ).scalar_one()
+            pascal_count = (
+                await session.execute(sql_text(f'SELECT COUNT(*) FROM "{pascal_noise_name}"'))
+            ).scalar_one()
+
+        assert lower_count == 1, "Snake-case relational table should be skipped entirely"
+        assert pascal_count == 1, (
+            "PascalCase table without a jsonb payload column must survive the per-table "
+            "try/except in remove_belongs_to_set_tags"
+        )
+    finally:
+        async with adapter.get_async_session() as session:
+            await session.execute(sql_text(f'DROP TABLE IF EXISTS "{lowercase_name}"'))
+            await session.execute(sql_text(f'DROP TABLE IF EXISTS "{pascal_noise_name}"'))
+            await session.commit()

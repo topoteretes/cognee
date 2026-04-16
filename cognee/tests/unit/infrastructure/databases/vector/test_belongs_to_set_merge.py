@@ -92,6 +92,29 @@ async def test_belongs_to_set_dedupes_on_repeat_upsert(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_belongs_to_set_merges_tags_across_in_batch_duplicates(tmp_path):
+    """Same id appearing twice in one batch with different tags must union
+    the tags — a plain dict-collapse would drop the earlier duplicate's tag."""
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"),
+        api_key=None,
+        embedding_engine=_FakeEmbeddingEngine(),
+    )
+    collection = "Tagged_text"
+    point_id = str(uuid4())
+
+    first = _TaggedPoint(id=point_id, text="shared", belongs_to_set=["DatasetA"])
+    second = _TaggedPoint(id=point_id, text="shared", belongs_to_set=["DatasetB"])
+    await adapter.create_collection(collection, type(first))
+    await adapter.create_data_points(collection, [first, second])
+
+    results = await adapter.retrieve(collection, [point_id])
+    assert len(results) == 1
+    assert sorted(results[0].payload["belongs_to_set"]) == ["DatasetA", "DatasetB"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_belongs_to_set_first_insert_has_no_prior_tags(tmp_path):
     """A brand-new id must store exactly the tags passed in."""
     adapter = LanceDBAdapter(

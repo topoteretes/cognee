@@ -49,6 +49,8 @@ class IndexSchema(DataPoint):
 
 
 class LanceDBAdapter(VectorDBInterface):
+    """Vector-database adapter backed by LanceDB; implements the VectorDBInterface contract."""
+
     name = "LanceDB"
     url: str
     api_key: str
@@ -60,6 +62,7 @@ class LanceDBAdapter(VectorDBInterface):
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
     ):
+        """Store connection params; connection is lazily established in get_connection()."""
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
@@ -150,6 +153,7 @@ class LanceDBAdapter(VectorDBInterface):
                     )
 
     async def get_collection(self, collection_name: str):
+        """Return the LanceDB table for `collection_name` or raise CollectionNotFoundError."""
         if not await self.has_collection(collection_name):
             raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
@@ -180,11 +184,17 @@ class LanceDBAdapter(VectorDBInterface):
         existing_belongs_to_set: dict[str, list] = {}
         incoming_ids = [str(dp.id) for dp in data_points]
         if incoming_ids:
+            # Build the WHERE predicate explicitly with escaped string literals
+            # rather than relying on Python's tuple repr — mirrors how search()
+            # escapes `name` values to keep single-quotes from breaking the
+            # LanceDB SQL grammar.
+            escaped_ids = [id_.replace("'", "''") for id_ in incoming_ids]
+            if len(escaped_ids) == 1:
+                where_clause = f"id = '{escaped_ids[0]}'"
+            else:
+                id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+                where_clause = f"id IN ({id_list})"
             try:
-                if len(incoming_ids) == 1:
-                    where_clause = f"id = '{incoming_ids[0]}'"
-                else:
-                    where_clause = f"id IN {tuple(incoming_ids)}"
                 existing_rows = await collection.query().where(where_clause).to_list()
                 for row in existing_rows:
                     row_payload = row.get("payload") or {}
@@ -219,6 +229,7 @@ class LanceDBAdapter(VectorDBInterface):
             payload: PayloadSchema
 
         def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
+            """Build a typed LanceDataPoint from a DataPoint, merging any prior belongs_to_set tags."""
             payload_model = self.get_data_point_schema(type(data_point))
             properties = payload_model.model_validate(
                 serialize_data(data_point.model_dump())
@@ -240,7 +251,27 @@ class LanceDBAdapter(VectorDBInterface):
             for (data_point_index, data_point) in enumerate(data_points)
         ]
 
-        lance_data_points = list({dp.id: dp for dp in lance_data_points}.values())
+        # Dedup by id within the batch — on duplicates, union `belongs_to_set`
+        # instead of keeping only the last occurrence. A plain dict-collapse
+        # would drop tags that only appeared on earlier siblings (mirrors the
+        # batch-merge logic in PGVectorAdapter.create_data_points and
+        # Neo4jAdapter.add_nodes).
+        deduped_lance_points: dict = {}
+        for dp in lance_data_points:
+            existing = deduped_lance_points.get(dp.id)
+            if existing is None:
+                deduped_lance_points[dp.id] = dp
+                continue
+            existing_payload = existing.payload.model_dump()
+            incoming_payload = dp.payload.model_dump()
+            existing_tags = existing_payload.get("belongs_to_set") or []
+            incoming_tags = incoming_payload.get("belongs_to_set") or []
+            if existing_tags or incoming_tags:
+                merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                incoming_payload["belongs_to_set"] = merged_tags
+                dp.payload = type(dp.payload).model_validate(incoming_payload)
+            deduped_lance_points[dp.id] = dp
+        lance_data_points = list(deduped_lance_points.values())
 
         try:
             async with self.VECTOR_DB_LOCK:
@@ -580,6 +611,40 @@ class LanceDBAdapter(VectorDBInterface):
                 defaults[name] = field_info.default
         return defaults
 
+    def _coerce_rows_to_typed_payload(self, rows: list, payload_schema: Optional[type]) -> list:
+        """Validate raw LanceDB rows through the collection's declared
+        payload model so `collection.add()` writes values whose Arrow types
+        match the stored schema. Without this, LanceDB infers Arrow types
+        from Python values on add, and the inferred types can drift from
+        the stored schema — the same class of problem _migrate_collection_schema
+        guards against. Falls back to the original dicts if the schema
+        can't be resolved or validation fails.
+        """
+        if not rows or payload_schema is None:
+            return rows
+
+        schema_model = self.get_data_point_schema(payload_schema)
+        coerced: list = []
+        for row in rows:
+            raw_payload = row.get("payload") or {}
+            if not isinstance(raw_payload, dict):
+                coerced.append(row)
+                continue
+            try:
+                validated = schema_model.model_validate(raw_payload).model_dump()
+            except Exception as e:
+                logger.debug(
+                    "_coerce_rows_to_typed_payload: validation fell back for id=%s: %s",
+                    row.get("id"),
+                    e,
+                )
+                coerced.append(row)
+                continue
+            new_row = dict(row)
+            new_row["payload"] = validated
+            coerced.append(new_row)
+        return coerced
+
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         try:
             collection = await self.get_collection(collection_name)
@@ -780,6 +845,14 @@ class LanceDBAdapter(VectorDBInterface):
             if "belongs_to_set" not in payload_fields:
                 continue
 
+            # Resolve the DataPoint subclass that originally populated this
+            # collection so we can round-trip rows through its declared
+            # schema on re-add. Without this, `collection.add(dicts)` makes
+            # LanceDB infer Arrow types from Python values, which can drift
+            # from the stored schema (source of the Rust panics on later
+            # vector searches that _migrate_collection_schema warns about).
+            resolved_payload_cls = self._resolve_collection_payload_schema(collection_name)
+
             # Push the predicate into LanceDB so we only materialize the rows
             # that carry at least one of the target tags — mirrors the
             # `array_has_any(payload.belongs_to_set, [...])` filter used in
@@ -827,8 +900,11 @@ class LanceDBAdapter(VectorDBInterface):
                 for row in rows_to_update:
                     await collection.delete(f"id = '{row['id']}'")
                 if rows_to_update:
+                    typed_rows = self._coerce_rows_to_typed_payload(
+                        rows_to_update, resolved_payload_cls
+                    )
                     try:
-                        await collection.add(rows_to_update)
+                        await collection.add(typed_rows)
                     except Exception as e:
                         affected_ids = [row.get("id") for row in rows_to_update]
                         logger.warning(

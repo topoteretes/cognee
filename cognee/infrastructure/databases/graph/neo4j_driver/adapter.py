@@ -114,6 +114,7 @@ class Neo4jAdapter(GraphDBInterface):
             yield session
 
     async def is_empty(self) -> bool:
+        """Return True if the graph contains no nodes."""
         query = """
         RETURN EXISTS {
         MATCH (n)
