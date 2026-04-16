@@ -125,6 +125,31 @@ async def test_create_data_points_dedupes_duplicate_ids_in_batch(collection_name
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
+async def test_create_data_points_merges_tags_across_in_batch_duplicates(collection_name):
+    """When the same id appears in one batch with different `belongs_to_set`
+    values, the Python-side dedup must union the tags instead of keeping
+    only the last duplicate's — mirrors the fix in Neo4jAdapter.add_nodes."""
+    adapter = await _fresh_adapter()
+    point_id = uuid4()
+
+    try:
+        await adapter.create_data_points(
+            collection_name,
+            [
+                _TaggedPoint(id=point_id, text="shared", belongs_to_set=["DatasetA"]),
+                _TaggedPoint(id=point_id, text="shared", belongs_to_set=["DatasetB"]),
+            ],
+        )
+
+        results = await adapter.retrieve(collection_name, [str(point_id)])
+        assert len(results) == 1
+        assert sorted(results[0].payload["belongs_to_set"]) == ["DatasetA", "DatasetB"]
+    finally:
+        await adapter.delete_data_points(collection_name, [str(point_id)])
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
 async def test_remove_belongs_to_set_tags_strips_and_deletes(collection_name):
     """Detag strips the target tag, removes rows that empty out, and leaves others alone."""
     adapter = await _fresh_adapter()

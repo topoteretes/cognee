@@ -780,9 +780,18 @@ class LanceDBAdapter(VectorDBInterface):
             if "belongs_to_set" not in payload_fields:
                 continue
 
+            # Push the predicate into LanceDB so we only materialize the rows
+            # that carry at least one of the target tags — mirrors the
+            # `array_has_any(payload.belongs_to_set, [...])` filter used in
+            # `search()`. Tags are escaped the same way to keep the literal
+            # safe from `'` injection.
+            escaped_tags = [tag.replace("'", "''") for tag in tag_set]
+            literal_tags = "[" + ", ".join(f"'{tag}'" for tag in escaped_tags) + "]"
+            where_clause = f"array_has_any(payload.belongs_to_set, {literal_tags})"
+
             async with self.VECTOR_DB_LOCK:
                 try:
-                    rows = await collection.query().to_list()
+                    rows = await collection.query().where(where_clause).to_list()
                 except Exception as e:
                     logger.debug(
                         "remove_belongs_to_set_tags: row scan failed for '%s': %s",
@@ -811,18 +820,26 @@ class LanceDBAdapter(VectorDBInterface):
                 # LanceDB merge_insert silently no-ops when given dicts whose
                 # nested payload shape doesn't match the struct schema, so
                 # delete + re-add is the reliable path to persist the
-                # rewritten belongs_to_set.
+                # rewritten belongs_to_set. If the re-add fails we've
+                # already deleted the originals — escalate to WARNING with
+                # the affected ids and re-raise so the caller sees it; a
+                # silent debug log would leave the collection short of rows.
                 for row in rows_to_update:
                     await collection.delete(f"id = '{row['id']}'")
                 if rows_to_update:
                     try:
                         await collection.add(rows_to_update)
                     except Exception as e:
-                        logger.debug(
-                            "remove_belongs_to_set_tags: re-add failed for '%s': %s",
+                        affected_ids = [row.get("id") for row in rows_to_update]
+                        logger.warning(
+                            "remove_belongs_to_set_tags: re-add failed for '%s' "
+                            "after deleting %d row(s) (ids=%s): %s",
                             collection_name,
+                            len(rows_to_update),
+                            affected_ids,
                             e,
                         )
+                        raise
 
         return None
 

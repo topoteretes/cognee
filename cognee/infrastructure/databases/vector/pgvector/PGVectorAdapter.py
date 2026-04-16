@@ -270,10 +270,27 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # Postgres raises "cannot affect row a second time" if the same
             # id appears twice in one INSERT. The prior ON CONFLICT DO NOTHING
             # path silently tolerated duplicates, so entity extraction may
-            # still emit same-UUID5 rows in one batch.
-            pgvector_data_points = list(
-                {data_point.id: data_point for data_point in pgvector_data_points}.values()
-            )
+            # still emit same-UUID5 rows in one batch. Union the duplicates'
+            # belongs_to_set arrays before collapsing so a tag that only
+            # appears on one duplicate isn't dropped (mirrors the in-batch
+            # tag merge in Neo4jAdapter.add_nodes).
+            deduped_by_id: dict = {}
+            for dp in pgvector_data_points:
+                existing = deduped_by_id.get(dp.id)
+                if existing is None:
+                    deduped_by_id[dp.id] = dp
+                    continue
+                existing_payload = existing.payload or {}
+                incoming_payload = dp.payload or {}
+                existing_tags = existing_payload.get("belongs_to_set") or []
+                incoming_tags = incoming_payload.get("belongs_to_set") or []
+                if existing_tags or incoming_tags:
+                    merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                    # Keep the latest row as representative (refreshing any
+                    # non-tag payload fields) and overwrite only the tag list.
+                    dp.payload = {**incoming_payload, "belongs_to_set": merged_tags}
+                deduped_by_id[dp.id] = dp
+            pgvector_data_points = list(deduped_by_id.values())
 
             # session.add_all(pgvector_data_points)
             insert_statement = insert(PGVectorDataPoint).values(
