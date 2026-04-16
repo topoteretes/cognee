@@ -225,20 +225,7 @@ async def test_delete_qa(session_manager):
 
 @pytest.mark.asyncio
 async def test_delete_session(session_manager):
-    """delete_session clears all entries."""
-    await session_manager.add_qa(
-        user_id="u1", question="Q", context="C", answer="A", session_id="s1"
-    )
-    ok = await session_manager.delete_session(user_id="u1", session_id="s1")
-    assert ok
-
-    entries = await session_manager.get_session(user_id="u1", session_id="s1")
-    assert entries == []
-
-
-@pytest.mark.asyncio
-async def test_delete_session_leaves_agent_trace_session_intact(session_manager):
-    """delete_session remains QA-only and does not delete trace sessions."""
+    """delete_session clears both QA and trace session entries."""
     await session_manager.add_qa(
         user_id="u1", question="Q", context="C", answer="A", session_id="s1"
     )
@@ -248,14 +235,14 @@ async def test_delete_session_leaves_agent_trace_session_intact(session_manager)
         origin_function="plan_trip",
         status="success",
     )
-
+    assert trace_id is not None
     ok = await session_manager.delete_session(user_id="u1", session_id="s1")
+    assert ok
 
-    assert ok is True
-    assert await session_manager.get_session(user_id="u1", session_id="s1") == []
+    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    assert entries == []
     trace_entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
-    assert len(trace_entries) == 1
-    assert trace_entries[0]["trace_id"] == trace_id
+    assert trace_entries == []
 
 
 @pytest.mark.asyncio
