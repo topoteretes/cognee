@@ -65,6 +65,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/": "Overview", "/dashboard": "Overview",
   "/datasets": "Datasets", "/search": "Search",
   "/knowledge-graph": "Knowledge Graph",
+  "/connect-agent": "Connect Agent",
   "/connections": "Connections", "/api-keys": "API Keys",
   "/activity": "Activity", "/settings": "Settings",
   "/onboarding": "Onboarding",
@@ -180,9 +181,9 @@ export default function TopBar() {
                 </div>
               ))}
               <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-              <div onClick={() => router.push("/connections")} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
-                <PlusIcon />
-                <span style={{ fontSize: 13, color: "#A1A1AA" }}>Connect agent</span>
+              <div onClick={() => router.push("/connect-agent")} className="cursor-pointer hover:bg-cognee-hover" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6, transition: "background 150ms" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#6510F4" }}>Connect agent</span>
               </div>
             </Dropdown>
 
@@ -295,7 +296,7 @@ export default function TopBar() {
             )}
 
             <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-            <div onClick={() => router.push("/connections")} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
+            <div onClick={() => router.push("/connect-agent")} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6 }}>
               <PlusIcon />
               <span style={{ fontSize: 13, color: "#A1A1AA" }}>Connect agent</span>
             </div>
