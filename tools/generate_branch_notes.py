@@ -15,11 +15,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from tools.merge_branch_diff import (
-    get_branch_changed_files,
-    get_branch_commit_subjects,
-    get_branch_diff_stat,
-)
+try:
+    from tools.merge_branch_diff import (
+        get_branch_changed_files,
+        get_branch_commit_subjects,
+        get_branch_diff_stat,
+    )
+except ModuleNotFoundError:
+    from merge_branch_diff import (
+        get_branch_changed_files,
+        get_branch_commit_subjects,
+        get_branch_diff_stat,
+    )
 
 
 def collect_branch_payload(
