@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import { useFilter } from "@/ui/layout/FilterContext";
+import { useFilter } from "@/ui/Layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
 import searchDataset from "@/modules/datasets/searchDataset";
 import addData from "@/modules/ingestion/addData";

@@ -1,7 +1,7 @@
 import classNames from "classnames";
 import { useCallback, useEffect } from "react";
 
-import { CaretIcon, CloseIcon, CloudIcon, LocalCogneeIcon } from "@/ui/icons";
+import { CaretIcon, CloseIcon, CloudIcon, LocalCogneeIcon } from "@/ui/Icons";
 import { CTAButton, GhostButton, IconButton, Input, Modal } from "@/ui/elements";
 import DatasetsAccordion, { DatasetsAccordionProps } from "./DatasetsAccordion";
 
