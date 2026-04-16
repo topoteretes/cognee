@@ -11,46 +11,23 @@ import argparse
 import asyncio
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-
-def run_git_command(command: list[str]) -> str:
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        return result.stdout.strip()
-    except subprocess.CalledProcessError as exc:
-        print(f"Error running git command: {' '.join(command)}", file=sys.stderr)
-        print(exc.stderr, file=sys.stderr)
-        raise SystemExit(1) from exc
+from tools.merge_branch_diff import (
+    get_branch_changed_files,
+    get_branch_commit_subjects,
+    get_branch_diff_stat,
+)
 
 
 def collect_branch_payload(
     first_parent: str, second_parent: str, branch_name: str, merge_sha: str
 ) -> dict[str, Any]:
-    changed_files = [
-        line
-        for line in run_git_command(
-            ["git", "diff", "--name-only", first_parent, second_parent]
-        ).splitlines()
-        if line.strip()
-    ]
-    commit_subjects = [
-        line
-        for line in run_git_command(
-            [
-                "git",
-                "log",
-                "--no-merges",
-                "--pretty=format:- %s (%h)",
-                f"{first_parent}..{second_parent}",
-            ]
-        ).splitlines()
-        if line.strip()
-    ]
-    diff_stat = run_git_command(["git", "diff", "--stat", first_parent, second_parent])
+    changed_files = get_branch_changed_files(first_parent, second_parent)
+    commit_subjects = get_branch_commit_subjects(first_parent, second_parent)
+    diff_stat = get_branch_diff_stat(first_parent, second_parent)
     return {
         "branch_name": branch_name,
         "merge_sha": merge_sha,

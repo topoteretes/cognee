@@ -163,21 +163,15 @@ jobs:
         run: |
           python3 - <<'PY'
           import os
-          import subprocess
           from pathlib import Path
+
+          from tools.merge_branch_diff import get_branch_changed_files
 
           first_parent = "${{ matrix.first_parent }}"
           second_parent = "${{ matrix.second_parent }}"
           docs_root = Path("docs-repo")
 
-          changed_files = [
-              line.strip()
-              for line in subprocess.check_output(
-                  ["git", "diff", "--name-only", first_parent, second_parent],
-                  text=True,
-              ).splitlines()
-              if line.strip()
-          ]
+          changed_files = get_branch_changed_files(first_parent, second_parent)
 
           doc_files = sorted(
               path.relative_to(docs_root).as_posix()
@@ -270,7 +264,7 @@ jobs:
 
             ## Required approach
 
-            Start by reading the branch notes, then inspect the actual code diff for this branch. Use the branch parents above to identify what really changed. Prefer `git diff ${{ matrix.first_parent }} ${{ matrix.second_parent }}` and read the touched source files before editing docs.
+            Start by reading the branch notes, then inspect the actual code diff for this branch. Use the branch parents above to identify what really changed. Prefer the merge-base-aware diff `git diff ${{ matrix.first_parent }}...${{ matrix.second_parent }}` and read the touched source files before editing docs.
             Focus on the precomputed source files and likely documentation targets first. Only search outside those targets if they are clearly not sufficient.
 
             Before making any docs edits:
@@ -289,7 +283,7 @@ jobs:
             ## Instructions
 
             1. Read the branch notes and documentation assessment first.
-            2. Inspect the source diff for `${{ matrix.first_parent }}..${{ matrix.second_parent }}` and identify which changes are documentation-worthy.
+            2. Inspect the source diff for `${{ matrix.first_parent }}...${{ matrix.second_parent }}` and identify which changes are documentation-worthy.
             3. Review the touched source files themselves, not just the merge summary.
             4. Only document user-facing behavior, public API changes, examples, or developer-facing semantics that actually changed in this branch.
             5. Do not make unrelated cleanup edits, style edits, or generic improvements to nearby docs sections unless they are strictly required to explain the branch changes.
