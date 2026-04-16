@@ -11,7 +11,7 @@ import pytest_asyncio
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
 from cognee.modules.agent_memory.runtime import get_current_agent_memory_context
-from cognee.modules.data.methods import create_authorized_dataset, get_datasets_by_name
+from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
