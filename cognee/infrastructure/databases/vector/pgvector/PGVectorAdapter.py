@@ -513,6 +513,73 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             await session.commit()
             return results
 
+    async def remove_belongs_to_set_tags(self, tags: List[str]) -> None:
+        """
+        Strip the given tag names from `belongs_to_set` arrays in every
+        vector collection and delete rows whose array is now empty. Used to
+        reconcile surviving shared rows when a dataset/NodeSet is deleted.
+
+        Cognee vector collections follow the `{PascalCaseType}_{field}`
+        naming convention (e.g. `Entity_name`, `DocumentChunk_text`) and
+        coexist in the same schema as lowercase relational tables — filter
+        to collections by requiring an uppercase first character.
+        """
+        if not tags:
+            return None
+
+        candidate_tables = [
+            name for name in await self.get_table_names() if name and name[0].isupper()
+        ]
+
+        async with self.get_async_session() as session:
+            for table_name in candidate_tables:
+                quoted_table = f'"{table_name}"'
+                update_sql = text(
+                    f"""
+                    UPDATE {quoted_table}
+                    SET payload = jsonb_set(
+                        payload::jsonb,
+                        '{{belongs_to_set}}',
+                        (
+                            SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
+                            FROM jsonb_array_elements_text(
+                                COALESCE(payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                            ) AS val
+                            WHERE val <> ALL(:tags)
+                        )
+                    )::json
+                    WHERE payload::jsonb ? 'belongs_to_set'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM jsonb_array_elements_text(payload::jsonb->'belongs_to_set') v
+                          WHERE v = ANY(:tags)
+                      )
+                    """
+                )
+                delete_sql = text(
+                    f"""
+                    DELETE FROM {quoted_table}
+                    WHERE payload::jsonb->'belongs_to_set' = '[]'::jsonb
+                    """
+                )
+                try:
+                    await session.execute(update_sql, {"tags": list(tags)})
+                    await session.execute(delete_sql)
+                except exc.SQLAlchemyError as e:
+                    # Not every upper-case table is guaranteed to have a
+                    # jsonb `payload` column — skip any table that rejects
+                    # the payload-shaped statements rather than aborting
+                    # the whole detag pass.
+                    logger.debug(
+                        "remove_belongs_to_set_tags skipped '%s': %s",
+                        table_name,
+                        e,
+                    )
+                    await session.rollback()
+            await session.commit()
+
+        return None
+
     async def prune(self):
         self._metadata.clear()
         await self.delete_database()

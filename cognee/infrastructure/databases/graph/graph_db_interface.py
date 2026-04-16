@@ -109,6 +109,16 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def remove_belongs_to_set_tags(self, tags: List[str]) -> None:
+        """
+        Remove the given tag names from every node's `belongs_to_set` property
+        array. Keeps the property consistent with the additive
+        `belongs_to_set` edges after a NodeSet or its containing dataset is
+        deleted. Default no-op; adapters that store a list property (Neo4j,
+        Neptune) override this.
+        """
+        return None
+
     @abstractmethod
     async def get_node(self, node_id: str) -> Optional[NodeData]:
         """

@@ -155,6 +155,18 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
+    async def remove_belongs_to_set_tags(self, tags: List[str]) -> None:
+        """
+        Remove the given tag names from every `belongs_to_set` array in the
+        adapter's vector collections and delete rows whose `belongs_to_set`
+        becomes empty as a result. Keeps the stored tags consistent with
+        the graph after a dataset or NodeSet is removed.
+
+        Default no-op; adapters that need to clean up stale NodeSet tags
+        on dataset deletion override this.
+        """
+        return None
+
     @abstractmethod
     async def prune(self):
         """

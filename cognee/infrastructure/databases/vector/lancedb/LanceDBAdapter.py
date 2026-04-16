@@ -729,6 +729,103 @@ class LanceDBAdapter(VectorDBInterface):
         for data_point_id in data_point_ids:
             await collection.delete(f"id = '{data_point_id}'")
 
+    async def remove_belongs_to_set_tags(self, tags: List[str]) -> None:
+        """
+        Strip the given tag names from `belongs_to_set` arrays in every
+        table and delete rows whose array becomes empty. Used to reconcile
+        surviving shared rows after a dataset/NodeSet is deleted.
+
+        LanceDB doesn't support in-place array mutation, so the update path
+        reads rows that reference any target tag, rewrites the payload with
+        the tag removed, and either re-inserts them (merge_insert) or
+        deletes them when the array is empty.
+        """
+        if not tags:
+            return None
+
+        tag_set = set(tags)
+        connection = await self.get_connection()
+        collection_names = await connection.table_names()
+
+        for collection_name in collection_names:
+            try:
+                collection = await connection.open_table(collection_name)
+            except (ValueError, OSError, RuntimeError) as e:
+                logger.debug(
+                    "remove_belongs_to_set_tags: could not open '%s': %s",
+                    collection_name,
+                    e,
+                )
+                continue
+
+            try:
+                arrow_schema = (await collection.to_arrow()).schema
+            except Exception as e:
+                logger.debug(
+                    "remove_belongs_to_set_tags: schema read failed for '%s': %s",
+                    collection_name,
+                    e,
+                )
+                continue
+
+            payload_idx = arrow_schema.get_field_index("payload")
+            if payload_idx < 0:
+                continue
+
+            payload_type = arrow_schema.field(payload_idx).type
+            if not hasattr(payload_type, "num_fields"):
+                continue
+
+            payload_fields = {payload_type.field(i).name for i in range(payload_type.num_fields)}
+            if "belongs_to_set" not in payload_fields:
+                continue
+
+            async with self.VECTOR_DB_LOCK:
+                try:
+                    rows = await collection.query().to_list()
+                except Exception as e:
+                    logger.debug(
+                        "remove_belongs_to_set_tags: row scan failed for '%s': %s",
+                        collection_name,
+                        e,
+                    )
+                    continue
+
+                rows_to_delete: list[str] = []
+                rows_to_update = []
+                for row in rows:
+                    payload = row.get("payload") or {}
+                    current = payload.get("belongs_to_set") or []
+                    if not any(tag in tag_set for tag in current):
+                        continue
+                    remaining = [tag for tag in current if tag not in tag_set]
+                    if remaining:
+                        payload["belongs_to_set"] = remaining
+                        rows_to_update.append(row)
+                    else:
+                        rows_to_delete.append(row["id"])
+
+                for row_id in rows_to_delete:
+                    await collection.delete(f"id = '{row_id}'")
+
+                # LanceDB merge_insert silently no-ops when given dicts whose
+                # nested payload shape doesn't match the struct schema, so
+                # delete + re-add is the reliable path to persist the
+                # rewritten belongs_to_set.
+                for row in rows_to_update:
+                    await collection.delete(f"id = '{row['id']}'")
+                if rows_to_update:
+                    try:
+                        await collection.add(rows_to_update)
+                    except Exception as e:
+                        logger.debug(
+                            "remove_belongs_to_set_tags: re-add failed for '%s': %s",
+                            collection_name,
+                            e,
+                        )
+
+        return None
+
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
             f"{index_name}_{index_property_name}", payload_schema=IndexSchema

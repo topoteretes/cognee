@@ -259,17 +259,53 @@ class Neo4jAdapter(GraphDBInterface):
         RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
         """
 
-        nodes = [
-            {
-                "node_id": str(node.id),
-                "label": type(node).__name__,
-                "properties": self.serialize_properties(dict(node)),
-            }
-            for node in nodes
-        ]
+        # Dedup by node_id within the batch — UNWIND on a list with
+        # duplicates yields the same `n` twice, and each pass recomputes
+        # merged_belongs_to_set from the pre-SET state. The second SET then
+        # overwrites the first, losing any tag only seen on the first
+        # duplicate. Collapsing duplicates here (union of tags kept) avoids
+        # the race and matches the batch-dedup already done in PGVector.
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for node in nodes:
+            key = str(node.id)
+            props = self.serialize_properties(dict(node))
+            existing_entry = deduped.get(key)
+            if existing_entry:
+                existing_tags = existing_entry["properties"].get("belongs_to_set") or []
+                incoming_tags = props.get("belongs_to_set") or []
+                if existing_tags or incoming_tags:
+                    merged = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                    props["belongs_to_set"] = merged
+                existing_entry["properties"] = props
+                existing_entry["label"] = type(node).__name__
+            else:
+                deduped[key] = {
+                    "node_id": key,
+                    "label": type(node).__name__,
+                    "properties": props,
+                }
 
-        results = await self.query(query, dict(nodes=nodes))
+        results = await self.query(query, dict(nodes=list(deduped.values())))
         return results
+
+    async def remove_belongs_to_set_tags(self, tags: List[str]) -> None:
+        """
+        Strip the given tag names from every node's `belongs_to_set`
+        property array. Used to reconcile surviving shared nodes after a
+        dataset or its NodeSet is deleted — the NodeSet node itself and
+        its edges are already removed elsewhere; this brings the stored
+        property in line with the surviving edges.
+        """
+        if not tags:
+            return None
+
+        query = f"""
+        MATCH (n: `{BASE_LABEL}`)
+        WHERE any(tag IN $tags WHERE tag IN coalesce(n.belongs_to_set, []))
+        SET n.belongs_to_set = [x IN n.belongs_to_set WHERE NOT x IN $tags]
+        """
+        await self.query(query, {"tags": list(tags)})
+        return None
 
     async def extract_node(self, node_id: str):
         """

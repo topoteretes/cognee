@@ -100,3 +100,55 @@ async def test_belongs_to_set_first_insert_has_no_prior_tags(tmp_path):
 
     results = await adapter.retrieve(collection, [point_id])
     assert results[0].payload["belongs_to_set"] == ["OnlyDataset"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_remove_belongs_to_set_tags_strips_and_deletes(tmp_path):
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"),
+        api_key=None,
+        embedding_engine=_FakeEmbeddingEngine(),
+    )
+    collection = "Tagged_text"
+
+    shared_id = str(uuid4())
+    orphaned_id = str(uuid4())
+    untouched_id = str(uuid4())
+
+    shared = _TaggedPoint(id=shared_id, text="shared", belongs_to_set=["Dev", "DevMirror"])
+    orphaned = _TaggedPoint(id=orphaned_id, text="orphaned", belongs_to_set=["Dev"])
+    untouched = _TaggedPoint(id=untouched_id, text="untouched", belongs_to_set=["Production"])
+
+    await adapter.create_collection(collection, type(shared))
+    await adapter.create_data_points(collection, [shared, orphaned, untouched])
+
+    await adapter.remove_belongs_to_set_tags(["Dev"])
+
+    surviving = await adapter.retrieve(collection, [shared_id, untouched_id])
+    surviving_by_id = {str(r.id): r for r in surviving}
+
+    assert sorted(surviving_by_id[shared_id].payload["belongs_to_set"]) == ["DevMirror"]
+    assert surviving_by_id[untouched_id].payload["belongs_to_set"] == ["Production"]
+    assert await adapter.retrieve(collection, [orphaned_id]) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_remove_belongs_to_set_tags_noop_for_empty_input(tmp_path):
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"),
+        api_key=None,
+        embedding_engine=_FakeEmbeddingEngine(),
+    )
+    collection = "Tagged_text"
+    point_id = str(uuid4())
+
+    point = _TaggedPoint(id=point_id, text="shared", belongs_to_set=["Dev"])
+    await adapter.create_collection(collection, type(point))
+    await adapter.create_data_points(collection, [point])
+
+    await adapter.remove_belongs_to_set_tags([])
+
+    result = (await adapter.retrieve(collection, [point_id]))[0]
+    assert result.payload["belongs_to_set"] == ["Dev"]
