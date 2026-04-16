@@ -200,10 +200,18 @@ class Neo4jAdapter(GraphDBInterface):
         """
         serialized_properties = self.serialize_properties(node.model_dump())
 
+        # Capture the existing belongs_to_set before `+=` overwrites it, then
+        # write back the union so a DataPoint cognified into multiple datasets
+        # retains every dataset tag on its node property (edges are already
+        # additive; this keeps the property consistent with them).
         query = dedent(
             f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
-                ON CREATE SET node += $properties, node.updated_at = timestamp()
-                ON MATCH SET node += $properties, node.updated_at = timestamp()
+                WITH node, apoc.coll.toSet(
+                    coalesce(node.belongs_to_set, [])
+                    + coalesce($properties.belongs_to_set, [])
+                ) AS merged_belongs_to_set
+                SET node += $properties, node.updated_at = timestamp()
+                SET node.belongs_to_set = merged_belongs_to_set
                 WITH node, $node_label AS label
                 CALL apoc.create.addLabels(node, [label]) YIELD node AS labeledNode
                 RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId"""
@@ -233,11 +241,19 @@ class Neo4jAdapter(GraphDBInterface):
 
             - None: None
         """
+        # Capture the existing belongs_to_set before `+=` overwrites it, then
+        # write back the union so the property on a shared DataPoint reflects
+        # every dataset that cognified it (consistent with the additive
+        # belongs_to_set edges). See add_node for the single-node variant.
         query = f"""
         UNWIND $nodes AS node
         MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
-        ON CREATE SET n += node.properties, n.updated_at = timestamp()
-        ON MATCH SET n += node.properties, n.updated_at = timestamp()
+        WITH n, node, apoc.coll.toSet(
+            coalesce(n.belongs_to_set, [])
+            + coalesce(node.properties.belongs_to_set, [])
+        ) AS merged_belongs_to_set
+        SET n += node.properties, n.updated_at = timestamp()
+        SET n.belongs_to_set = merged_belongs_to_set
         WITH n, node.label AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
         RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
