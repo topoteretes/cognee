@@ -527,56 +527,64 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if not tags:
             return None
 
+        # `get_table_names()` on Postgres returns fully-qualified `schema.table`
+        # strings. Pull the trailing table name and keep only PascalCase ones —
+        # cognee's vector collections are named e.g. `Entity_name`, whereas
+        # relational tables (`users`, `nodes`, …) are snake_case.
+        def _table_only(name: str) -> str:
+            return name.rpartition(".")[2] if "." in name else name
+
         candidate_tables = [
-            name for name in await self.get_table_names() if name and name[0].isupper()
+            _table_only(name)
+            for name in await self.get_table_names()
+            if name and _table_only(name) and _table_only(name)[0].isupper()
         ]
 
-        async with self.get_async_session() as session:
-            for table_name in candidate_tables:
-                quoted_table = f'"{table_name}"'
-                update_sql = text(
-                    f"""
-                    UPDATE {quoted_table}
-                    SET payload = jsonb_set(
-                        payload::jsonb,
-                        '{{belongs_to_set}}',
-                        (
-                            SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
-                            FROM jsonb_array_elements_text(
-                                COALESCE(payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                            ) AS val
-                            WHERE val <> ALL(:tags)
-                        )
-                    )::json
-                    WHERE payload::jsonb ? 'belongs_to_set'
-                      AND EXISTS (
-                          SELECT 1
-                          FROM jsonb_array_elements_text(payload::jsonb->'belongs_to_set') v
-                          WHERE v = ANY(:tags)
-                      )
-                    """
-                )
-                delete_sql = text(
-                    f"""
-                    DELETE FROM {quoted_table}
-                    WHERE payload::jsonb->'belongs_to_set' = '[]'::jsonb
-                    """
-                )
-                try:
+        for table_name in candidate_tables:
+            quoted_table = f'"{table_name}"'
+            update_sql = text(
+                f"""
+                UPDATE {quoted_table}
+                SET payload = jsonb_set(
+                    payload::jsonb,
+                    '{{belongs_to_set}}',
+                    (
+                        SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(
+                            COALESCE(payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                        ) AS val
+                        WHERE val <> ALL(:tags)
+                    )
+                )::json
+                WHERE payload::jsonb ? 'belongs_to_set'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements_text(payload::jsonb->'belongs_to_set') v
+                      WHERE v = ANY(:tags)
+                  )
+                """
+            )
+            delete_sql = text(
+                f"""
+                DELETE FROM {quoted_table}
+                WHERE payload::jsonb->'belongs_to_set' = '[]'::jsonb
+                """
+            )
+            # Run each table in its own transaction — a failure on one table
+            # (e.g. a PascalCase name that isn't a vector collection and has
+            # no `payload::jsonb` column) must not roll back updates already
+            # committed for other tables.
+            try:
+                async with self.get_async_session() as session:
                     await session.execute(update_sql, {"tags": list(tags)})
                     await session.execute(delete_sql)
-                except exc.SQLAlchemyError as e:
-                    # Not every upper-case table is guaranteed to have a
-                    # jsonb `payload` column — skip any table that rejects
-                    # the payload-shaped statements rather than aborting
-                    # the whole detag pass.
-                    logger.debug(
-                        "remove_belongs_to_set_tags skipped '%s': %s",
-                        table_name,
-                        e,
-                    )
-                    await session.rollback()
-            await session.commit()
+                    await session.commit()
+            except exc.SQLAlchemyError as e:
+                logger.debug(
+                    "remove_belongs_to_set_tags skipped '%s': %s",
+                    table_name,
+                    e,
+                )
 
         return None
 
