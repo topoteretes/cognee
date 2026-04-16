@@ -64,11 +64,12 @@ def get_llm_client(raise_api_key_error: bool = True):
     )  # imported here to avoid circular imports
 
     model_max_completion_tokens = get_model_max_completion_tokens(llm_config.llm_model)
-    max_completion_tokens = (
-        model_max_completion_tokens
-        if model_max_completion_tokens
-        else llm_config.llm_max_completion_tokens
-    )
+    user_max = llm_config.llm_max_completion_tokens
+    if model_max_completion_tokens is not None:
+        # Use the lower of the model's hard limit and the user's configured ceiling
+        max_completion_tokens = min(model_max_completion_tokens, user_max)
+    else:
+        max_completion_tokens = user_max
 
     llm_args = llm_config.llm_args
 
