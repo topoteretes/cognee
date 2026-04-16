@@ -10,7 +10,7 @@ def _inject_agent_memory(text_input: str) -> str:
     if context is None or not context.memory_context:
         return text_input
 
-    return f"Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
+    return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
 
 
 class LLMGateway:

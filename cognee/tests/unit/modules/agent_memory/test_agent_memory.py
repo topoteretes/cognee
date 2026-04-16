@@ -637,7 +637,10 @@ def test_llmgateway_inject_agent_memory_includes_created_context_text():
     finally:
         reset_current_agent_memory_context(token)
 
-    assert injected_text == "Memory Context:\nstored memory\n\nOriginal Input:\noriginal question"
+    assert (
+        injected_text
+        == "Additional Memory Context:\nstored memory\n\nOriginal Input:\noriginal question"
+    )
 
 
 @pytest.mark.asyncio
@@ -671,5 +674,5 @@ async def test_llmgateway_injects_agent_memory(monkeypatch):
     assert result == "ok"
     assert (
         llm_client.acreate_structured_output.await_args.kwargs["text_input"]
-        == "Memory Context:\nstored memory\n\nOriginal Input:\noriginal question"
+        == "Additional Memory Context:\nstored memory\n\nOriginal Input:\noriginal question"
     )
