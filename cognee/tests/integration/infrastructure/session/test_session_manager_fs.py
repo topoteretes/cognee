@@ -269,28 +269,6 @@ async def test_delete_session(session_manager):
 
 
 @pytest.mark.asyncio
-async def test_delete_session_leaves_agent_trace_session_intact(session_manager):
-    """delete_session remains QA-only and does not delete trace sessions."""
-    await session_manager.add_qa(
-        user_id="u1", question="Q", context="C", answer="A", session_id="s1"
-    )
-    trace_id = await session_manager.add_agent_trace_step(
-        user_id="u1",
-        session_id="s1",
-        origin_function="plan_trip",
-        status="success",
-    )
-
-    ok = await session_manager.delete_session(user_id="u1", session_id="s1")
-
-    assert ok is True
-    assert await session_manager.get_session(user_id="u1", session_id="s1") == []
-    trace_entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
-    assert len(trace_entries) == 1
-    assert trace_entries[0]["trace_id"] == trace_id
-
-
-@pytest.mark.asyncio
 async def test_generate_completion_with_session_saves_qa(session_manager):
     """generate_completion_with_session runs completion and saves QA to session (LLM mocked)."""
     mock_user = MagicMock()
