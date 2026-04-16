@@ -1,9 +1,6 @@
 name: automation | Draft Docs PRs For Current Day Dev Merges
 
 on:
-  pull_request:
-    branches:
-      - dev
   workflow_dispatch:
     inputs:
       lookback_days:
