@@ -180,7 +180,9 @@ class CloudClient:
 
         payload: dict = {}
         if datasets:
-            payload["datasets"] = [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
+            payload["datasets"] = (
+                [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
+            )
 
         async with session.post(
             f"{self.service_url}/api/v1/cognify",
