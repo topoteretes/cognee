@@ -82,20 +82,15 @@ class SQLAlchemyAdapter:
             # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
             pool_args = pool_args or {}
 
-            if pool_args.get("pool_size") is None:
-                pool_args["pool_size"] = 20
-
-            if pool_args.get("max_overflow") is None:
-                pool_args["max_overflow"] = 20
-
-            if pool_args.get("pool_pre_ping") is None:
-                pool_args["pool_pre_ping"] = True
-
-            if pool_args.get("pool_recycle") is None:
-                pool_args["pool_recycle"] = 280
-
-            if pool_args.get("pool_timeout") is None:
-                pool_args["pool_timeout"] = 280
+            if pool_args.get("poolclass", "").lower() == "nullpool":
+                pool_args["poolclass"] = NullPool
+            else:
+                # Standard QueuePool settings
+                pool_args.setdefault("pool_size", 20)
+                pool_args.setdefault("max_overflow", 20)
+                pool_args.setdefault("pool_pre_ping", True)
+                pool_args.setdefault("pool_recycle", 280)
+                pool_args.setdefault("pool_timeout", 280)
 
             engine_kwargs = {**pool_args}
             if final_connect_args:
