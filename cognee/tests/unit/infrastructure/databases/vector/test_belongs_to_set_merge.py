@@ -23,17 +23,24 @@ except ModuleNotFoundError:
 
 
 class _FakeEmbeddingEngine:
+    """Deterministic stub embedding engine; avoids external API calls in tests."""
+
     def get_vector_size(self):
+        """Return the fixed vector dimensionality used throughout these tests."""
         return 3
 
     def get_batch_size(self):
+        """Return the stub embedding batch size."""
         return 100
 
     async def embed_text(self, texts):
+        """Return a fixed 3-D vector per input text."""
         return [[0.1, 0.2, 0.3] for _ in texts]
 
 
 class _TaggedPoint(DataPoint):
+    """Minimal DataPoint used to exercise `belongs_to_set` handling."""
+
     text: str
     metadata: dict = {"index_fields": ["text"]}
 
@@ -41,6 +48,7 @@ class _TaggedPoint(DataPoint):
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_belongs_to_set_merges_across_upserts(tmp_path):
+    """Same id re-upserted with a new tag must keep both tags."""
     adapter = LanceDBAdapter(
         url=str(tmp_path / "db"),
         api_key=None,
@@ -64,6 +72,7 @@ async def test_belongs_to_set_merges_across_upserts(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_belongs_to_set_dedupes_on_repeat_upsert(tmp_path):
+    """Upserting the same payload twice should not duplicate tag entries."""
     adapter = LanceDBAdapter(
         url=str(tmp_path / "db"),
         api_key=None,
@@ -84,6 +93,7 @@ async def test_belongs_to_set_dedupes_on_repeat_upsert(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_belongs_to_set_first_insert_has_no_prior_tags(tmp_path):
+    """A brand-new id must store exactly the tags passed in."""
     adapter = LanceDBAdapter(
         url=str(tmp_path / "db"),
         api_key=None,
@@ -105,6 +115,7 @@ async def test_belongs_to_set_first_insert_has_no_prior_tags(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_remove_belongs_to_set_tags_strips_and_deletes(tmp_path):
+    """Detag removes the tag from mixed rows, drops orphaned rows, leaves others alone."""
     adapter = LanceDBAdapter(
         url=str(tmp_path / "db"),
         api_key=None,
@@ -136,6 +147,7 @@ async def test_remove_belongs_to_set_tags_strips_and_deletes(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_remove_belongs_to_set_tags_noop_for_empty_input(tmp_path):
+    """Calling detag with no tags must be a no-op."""
     adapter = LanceDBAdapter(
         url=str(tmp_path / "db"),
         api_key=None,

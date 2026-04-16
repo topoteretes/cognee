@@ -18,6 +18,7 @@ from cognee.modules.graph.methods.delete_from_graph_and_vector import (
 
 
 def _node(node_type: str, label: str | None = None):
+    """Build a minimal Node-ledger stand-in with the attributes the orchestrator reads."""
     return SimpleNamespace(
         slug=uuid4(),
         type=node_type,
@@ -28,6 +29,7 @@ def _node(node_type: str, label: str | None = None):
 
 @pytest.mark.asyncio
 async def test_detag_called_with_removed_nodeset_names():
+    """A NodeSet entry in `unique_nodes` must trigger detag on both engines."""
     nodeset_node = _node("NodeSet", label="Dev")
     entity_node = _node("Entity", label="Alice")
     nodes = [nodeset_node, entity_node]
@@ -66,6 +68,7 @@ async def test_detag_called_with_removed_nodeset_names():
 
 @pytest.mark.asyncio
 async def test_detag_skipped_when_no_nodeset_in_batch():
+    """No NodeSet in `unique_nodes` means detag must not be called."""
     entity_node = _node("Entity", label="Alice")
     nodes = [entity_node]
 

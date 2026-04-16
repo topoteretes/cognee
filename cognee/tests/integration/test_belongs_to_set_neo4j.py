@@ -38,11 +38,14 @@ except ModuleNotFoundError:
 
 
 class _TaggedPoint(DataPoint):
+    """Minimal DataPoint used to exercise live Neo4j `belongs_to_set` semantics."""
+
     text: str
     metadata: dict = {"index_fields": ["text"]}
 
 
 async def _fresh_adapter() -> "Neo4jAdapter":
+    """Build and initialize a Neo4jAdapter against the live test instance."""
     adapter = Neo4jAdapter(
         graph_database_url=NEO4J_URL,
         graph_database_username=NEO4J_USER,
@@ -54,6 +57,7 @@ async def _fresh_adapter() -> "Neo4jAdapter":
 
 
 async def _read_tag_property(adapter: "Neo4jAdapter", node_id: UUID) -> Optional[List[str]]:
+    """Read a node's stored `belongs_to_set` property, returning `None` if the node is gone."""
     rows = await adapter.query(
         "MATCH (n {id: $id}) RETURN n.belongs_to_set AS tags",
         {"id": str(node_id)},
@@ -66,6 +70,7 @@ async def _read_tag_property(adapter: "Neo4jAdapter", node_id: UUID) -> Optional
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_NEO4J, reason="neo4j extra not installed")
 async def test_add_nodes_merges_belongs_to_set_across_calls():
+    """Same id re-upserted with a new tag must union the tags on the Neo4j node property."""
     adapter = await _fresh_adapter()
     node_id = uuid4()
 
@@ -112,6 +117,7 @@ async def test_add_nodes_merges_duplicate_ids_within_single_batch():
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_NEO4J, reason="neo4j extra not installed")
 async def test_remove_belongs_to_set_tags_strips_property():
+    """Detag must remove the target tag from every matching node's property array."""
     adapter = await _fresh_adapter()
     shared_id = uuid4()
     untouched_id = uuid4()
@@ -135,6 +141,7 @@ async def test_remove_belongs_to_set_tags_strips_property():
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_NEO4J, reason="neo4j extra not installed")
 async def test_remove_belongs_to_set_tags_noop_for_empty_input():
+    """Detag with no tags must leave stored properties unchanged."""
     adapter = await _fresh_adapter()
     node_id = uuid4()
 

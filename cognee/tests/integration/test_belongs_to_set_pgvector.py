@@ -52,6 +52,8 @@ class _FakeEmbeddingEngine:
 
 
 class _TaggedPoint(DataPoint):
+    """Minimal DataPoint used to exercise live pgvector `belongs_to_set` semantics."""
+
     text: str
     metadata: dict = {"index_fields": ["text"]}
 
@@ -68,14 +70,14 @@ async def _fresh_adapter() -> PGVectorAdapter:
 
 @pytest.fixture
 def collection_name() -> str:
-    # Ensure each test gets a unique PascalCase collection table so parallel
-    # runs against the same database don't clobber each other.
+    """Return a unique PascalCase collection name per test to isolate runs."""
     return f"IntegTaggedPoint_{uuid4().hex[:10]}_text"
 
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
 async def test_create_data_points_merges_belongs_to_set(collection_name):
+    """Re-upserting the same id with a new tag must union the tags in pgvector."""
     adapter = await _fresh_adapter()
     point_id = uuid4()
 
@@ -124,6 +126,7 @@ async def test_create_data_points_dedupes_duplicate_ids_in_batch(collection_name
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
 async def test_remove_belongs_to_set_tags_strips_and_deletes(collection_name):
+    """Detag strips the target tag, removes rows that empty out, and leaves others alone."""
     adapter = await _fresh_adapter()
 
     shared_id = uuid4()
