@@ -137,6 +137,10 @@ async def extract_graph_from_data(
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
+    import time
+
+    start = time.perf_counter()
+    print(f"START TIME OF EXTRACTION AND SUMMARIZATION: {start}")
     pipeline_name = ctx.pipeline_name if ctx else None
 
     if not isinstance(data_chunks, list) or not data_chunks:
