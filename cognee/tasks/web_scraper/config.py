@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 import os
 
 
@@ -8,6 +8,26 @@ class TavilyConfig(BaseModel):
     extract_depth: Literal["basic", "advanced"] = "basic"
     proxies: Optional[Dict[str, str]] = None
     timeout: Optional[int] = Field(default=10, ge=1, le=60)
+
+
+class ExaConfig(BaseModel):
+    api_key: Optional[str] = os.getenv("EXA_API_KEY")
+    num_results: int = Field(default=10, ge=1, le=100)
+    search_type: Literal["neural", "fast", "auto"] = "auto"
+    use_highlights: bool = True
+    highlights_max_characters: int = Field(default=500, ge=1)
+    use_text: bool = True
+    text_max_characters: int = Field(default=1000, ge=1)
+    use_summary: bool = False
+    include_domains: Optional[List[str]] = None
+    exclude_domains: Optional[List[str]] = None
+    include_text: Optional[List[str]] = None
+    exclude_text: Optional[List[str]] = None
+    category: Optional[
+        Literal["company", "research paper", "news", "personal site", "financial report", "people"]
+    ] = None
+    start_published_date: Optional[str] = None
+    end_published_date: Optional[str] = None
 
 
 class DefaultCrawlerConfig(BaseModel):

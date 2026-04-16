@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine != 's390x'",
@@ -1239,6 +1239,7 @@ redis = [
 scraping = [
     { name = "apscheduler" },
     { name = "beautifulsoup4" },
+    { name = "exa-py" },
     { name = "lxml", version = "4.9.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "lxml", version = "5.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "playwright" },
@@ -1276,6 +1277,7 @@ requires-dist = [
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'dlt'", specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.54" },
+    { name = "exa-py", marker = "extra == 'scraping'", specifier = ">=2.0.0" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.32.0" },
     { name = "fastapi", specifier = ">=0.116.2,<1.0.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=15.0.2" },
@@ -2252,6 +2254,24 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fb/a3/cafafb4558fd638aadfe4121dc6cefb8d743368c085acb2f521df0f3d9d7/eval_type_backport-0.3.1.tar.gz", hash = "sha256:57e993f7b5b69d271e37482e62f74e76a0276c82490cf8e4f0dffeb6b332d5ed", size = 9445, upload-time = "2025-12-02T11:51:42.987Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cf/22/fdc2e30d43ff853720042fa15baa3e6122722be1a7950a98233ebb55cd71/eval_type_backport-0.3.1-py3-none-any.whl", hash = "sha256:279ab641905e9f11129f56a8a78f493518515b83402b860f6f06dd7c011fdfa8", size = 6063, upload-time = "2025-12-02T11:51:41.665Z" },
+]
+
+[[package]]
+name = "exa-py"
+version = "2.12.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpcore" },
+    { name = "httpx" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ab/d2/22f8e5b83fb7ff1a5b19528b21bb908504c8b6a716309b169801881e64ff/exa_py-2.12.0.tar.gz", hash = "sha256:2cd5fe2d47d8e0221f87dcb2be0f007cc0a1f0a643b16dfc586ab1421998f4fc", size = 58731, upload-time = "2026-04-15T12:55:17.616Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ea/87/e5c458741a34c945d6b612ec54f00088a6869ffc4f3f8a7b06ae080ec6af/exa_py-2.12.0-py3-none-any.whl", hash = "sha256:78b954ca99151228e4b853bd25e58829048a9a601d6187001befa512e0143f8f", size = 73896, upload-time = "2026-04-15T12:55:16.03Z" },
 ]
 
 [[package]]

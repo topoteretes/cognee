@@ -1,15 +1,16 @@
-"""Utilities for fetching web content using BeautifulSoup or Tavily.
+"""Utilities for fetching web content using BeautifulSoup, Tavily, or Exa.
 
 This module provides functions to fetch and extract content from web pages, supporting
-both BeautifulSoup for custom extraction rules and Tavily for API-based scraping.
+BeautifulSoup for custom extraction rules, Tavily for API-based scraping, and Exa for
+AI-powered web search and content retrieval.
 """
 
 import os
-from typing import List, Union
+from typing import Dict, List, Optional, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
 from .default_url_crawler import DefaultUrlCrawler
-from .config import DefaultCrawlerConfig, TavilyConfig
+from .config import DefaultCrawlerConfig, ExaConfig, TavilyConfig
 
 logger = get_logger(__name__)
 
@@ -84,6 +85,182 @@ async def fetch_page_content(urls: Union[str, List[str]]) -> UrlsToHtmls:
         finally:
             logger.info("Closing BeautifulSoup crawler")
             await crawler.close()
+
+
+async def fetch_with_exa(urls: Union[str, List[str]], exa_config: Optional[ExaConfig] = None) -> UrlsToHtmls:
+    """Fetch content from URLs using the Exa API's get_contents endpoint.
+
+    Args:
+        urls: A single URL (str) or a list of URLs (List[str]) to fetch content from.
+        exa_config: Configuration for Exa API. If None, defaults are used.
+
+    Returns:
+        Dict[str, str]: A dictionary mapping each URL to its extracted content.
+
+    Raises:
+        ImportError: If exa-py is not installed.
+        Exception: If the Exa API request fails.
+    """
+    try:
+        from exa_py import Exa
+    except ImportError:
+        logger.error(
+            "Failed to import exa_py, make sure to install using pip install exa-py>=2.0.0"
+        )
+        raise
+
+    config = exa_config or ExaConfig()
+    url_list = [urls] if isinstance(urls, str) else urls
+
+    logger.info(f"Initializing Exa client for content fetching of {len(url_list)} URL(s)")
+    client = Exa(api_key=config.api_key)
+    client.headers["x-exa-integration"] = "cognee"
+
+    contents_kwargs: Dict = {}
+    if config.use_text:
+        contents_kwargs["text"] = {"max_characters": config.text_max_characters}
+    if config.use_highlights:
+        contents_kwargs["highlights"] = {"max_characters": config.highlights_max_characters}
+    if config.use_summary:
+        contents_kwargs["summary"] = True
+
+    logger.info(f"Sending get_contents request to Exa API for {len(url_list)} URL(s)")
+    response = client.get_contents(url_list, **contents_kwargs)
+
+    return_results: Dict[str, str] = {}
+    for result in response.results:
+        url = getattr(result, "url", "") or ""
+        content = _extract_exa_content(result)
+        if url:
+            return_results[url] = content
+
+    logger.info(f"Successfully fetched content from {len(return_results)} URL(s) via Exa")
+    return return_results
+
+
+async def search_with_exa(
+    query: str, exa_config: Optional[ExaConfig] = None
+) -> UrlsToHtmls:
+    """Search the web using Exa and return a dictionary of URLs to content.
+
+    This function performs a web search via Exa's AI-powered search engine and returns
+    the results in the same format as fetch_page_content, making it easy to feed
+    search results into the cognee pipeline.
+
+    Args:
+        query: The search query string.
+        exa_config: Configuration for Exa API. If None, defaults are used.
+
+    Returns:
+        Dict[str, str]: A dictionary mapping each result URL to its content.
+
+    Raises:
+        ImportError: If exa-py is not installed.
+        Exception: If the Exa API request fails.
+    """
+    try:
+        from exa_py import Exa
+    except ImportError:
+        logger.error(
+            "Failed to import exa_py, make sure to install using pip install exa-py>=2.0.0"
+        )
+        raise
+
+    config = exa_config or ExaConfig()
+
+    logger.info(f"Initializing Exa client for web search: '{query}'")
+    client = Exa(api_key=config.api_key)
+    client.headers["x-exa-integration"] = "cognee"
+
+    search_kwargs: Dict = {
+        "query": query,
+        "num_results": config.num_results,
+        "type": config.search_type,
+    }
+
+    # Content retrieval options
+    if config.use_text:
+        search_kwargs["text"] = {"max_characters": config.text_max_characters}
+    if config.use_highlights:
+        search_kwargs["highlights"] = {"max_characters": config.highlights_max_characters}
+    if config.use_summary:
+        search_kwargs["summary"] = True
+
+    # Filtering options
+    if config.include_domains:
+        search_kwargs["include_domains"] = config.include_domains
+    if config.exclude_domains:
+        search_kwargs["exclude_domains"] = config.exclude_domains
+    if config.include_text:
+        search_kwargs["include_text"] = config.include_text
+    if config.exclude_text:
+        search_kwargs["exclude_text"] = config.exclude_text
+    if config.category:
+        search_kwargs["category"] = config.category
+    if config.start_published_date:
+        search_kwargs["start_published_date"] = config.start_published_date
+    if config.end_published_date:
+        search_kwargs["end_published_date"] = config.end_published_date
+
+    logger.info(
+        f"Sending search request to Exa API (type={config.search_type}, "
+        f"num_results={config.num_results})"
+    )
+    response = client.search_and_contents(**search_kwargs)
+
+    return_results: Dict[str, str] = {}
+    for result in response.results:
+        url = getattr(result, "url", "") or ""
+        content = _extract_exa_content(result)
+        if url:
+            return_results[url] = content
+
+    logger.info(
+        f"Exa search returned {len(return_results)} result(s) for query: '{query}'"
+    )
+    return return_results
+
+
+def _extract_exa_content(result) -> str:
+    """Extract content from an Exa search result, cascading through available fields.
+
+    Tries text first, then highlights, then summary. Combines title and URL metadata
+    with the best available content.
+
+    Args:
+        result: An Exa search result object.
+
+    Returns:
+        str: The extracted content string.
+    """
+    parts = []
+
+    title = getattr(result, "title", None)
+    if title:
+        parts.append(f"Title: {title}")
+
+    url = getattr(result, "url", None)
+    if url:
+        parts.append(f"URL: {url}")
+
+    published_date = getattr(result, "published_date", None)
+    if published_date:
+        parts.append(f"Published: {published_date}")
+
+    # Cascade through content types: text > highlights > summary
+    text = getattr(result, "text", None)
+    highlights = getattr(result, "highlights", None)
+    summary = getattr(result, "summary", None)
+
+    if text:
+        parts.append(f"\n{text}")
+    elif highlights:
+        highlight_text = " ... ".join(highlights) if isinstance(highlights, list) else highlights
+        parts.append(f"\n{highlight_text}")
+    elif summary:
+        parts.append(f"\n{summary}")
+
+    return "\n".join(parts) if parts else ""
 
 
 async def fetch_with_tavily(urls: Union[str, List[str]]) -> UrlsToHtmls:

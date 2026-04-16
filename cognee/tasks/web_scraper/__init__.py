@@ -2,10 +2,10 @@
 
 This module provides tools for scraping web content, managing scraping jobs, and storing
 data in a graph database. It includes classes and functions for crawling web pages using
-BeautifulSoup or Tavily, defining data models, and handling scraping configurations.
+BeautifulSoup, Tavily, or Exa, defining data models, and handling scraping configurations.
 """
 
-from .utils import fetch_page_content
+from .utils import fetch_page_content, fetch_with_exa, search_with_exa
 from .default_url_crawler import DefaultUrlCrawler
 
 # Lazy import for web_scraper_task to avoid requiring apscheduler
@@ -28,6 +28,8 @@ def __getattr__(name):
 __all__ = [
     "BeautifulSoupCrawler",
     "fetch_page_content",
+    "fetch_with_exa",
+    "search_with_exa",
     "cron_web_scraper_task",
     "web_scraper_task",
     "DefaultUrlCrawler",
