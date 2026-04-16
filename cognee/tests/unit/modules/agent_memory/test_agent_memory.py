@@ -30,7 +30,6 @@ def _make_scope(*, user=None, dataset_name="demo"):
         user=user,
         dataset_name=dataset_name,
         dataset_id=uuid4(),
-        owner_id=user.id,
     )
 
 
@@ -442,6 +441,34 @@ async def test_retrieve_memory_context_session_memory_only_skips_search(monkeypa
     context.scope = None
 
     assert await retrieve_memory_context(context) == "Recent Session Memory:\nsecond\nthird"
+    search_mock.assert_not_awaited()
+    session_manager.get_agent_trace_feedback.assert_awaited_once_with(
+        user_id=str(user.id),
+        session_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_retrieve_memory_context_session_memory_returns_empty_on_session_manager_error(
+    monkeypatch,
+):
+    search_mock = AsyncMock()
+    session_manager = SimpleNamespace(
+        get_agent_trace_feedback=AsyncMock(side_effect=RuntimeError("session unavailable"))
+    )
+    monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
+    _patch_session_manager(monkeypatch, session_manager)
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        with_session_memory=True,
+        scope=None,
+    )
+    context.scope = None
+
+    assert await retrieve_memory_context(context) == ""
     search_mock.assert_not_awaited()
     session_manager.get_agent_trace_feedback.assert_awaited_once_with(
         user_id=str(user.id),
