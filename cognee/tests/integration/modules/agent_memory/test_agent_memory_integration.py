@@ -235,7 +235,9 @@ async def test_agent_memory_retrieves_session_memory_without_dataset_permissions
 
 
 @pytest.mark.asyncio
-async def test_agent_memory_persists_trace_to_session_store_integration(agent_memory_integration_env):
+async def test_agent_memory_persists_trace_to_session_store_integration(
+    agent_memory_integration_env,
+):
     """Successful decorated calls should append a success trace step to the session store."""
     session_manager = agent_memory_integration_env["session_manager"]
     owner = await create_user(f"owner_{uuid4().hex[:8]}@example.com", "example")
@@ -309,9 +311,9 @@ async def test_agent_memory_persists_full_trace_payload_with_cognee_memory_integ
     async def traced_agent(question: str) -> dict:
         return {"answer": "done"}
 
-    assert await traced_agent("What is the codename for the trace payload verification project?") == {
-        "answer": "done"
-    }
+    assert await traced_agent(
+        "What is the codename for the trace payload verification project?"
+    ) == {"answer": "done"}
 
     trace_entries = await session_manager.get_agent_trace_session(
         user_id=str(member.id),
@@ -419,9 +421,7 @@ async def test_agent_memory_retrieves_recent_session_memory_integration(
 
     memory_context = await session_memory_agent()
 
-    assert memory_context == (
-        "Recent Session Memory:\nwrite_intro succeeded.\nfinalize succeeded."
-    )
+    assert memory_context == ("Recent Session Memory:\nwrite_intro succeeded.\nfinalize succeeded.")
 
 
 @pytest.mark.asyncio
