@@ -202,6 +202,51 @@ async def test_remove_belongs_to_set_tags_strips_and_deletes(collection_name):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
+async def test_remove_belongs_to_set_tags_scoped_by_node_ids(collection_name):
+    """Scoped detag wire-level primitive for shared-data reconciliation:
+    when a shared row loses one dataset's anchor while another row in
+    the same dataset still legitimately owns the tag, the detag must
+    only touch the targeted id, not the whole collection."""
+    adapter = _fresh_adapter()
+
+    targeted_id = uuid4()
+    untouched_same_tag_id = uuid4()
+
+    try:
+        await adapter.create_data_points(
+            collection_name,
+            [
+                _TaggedPoint(
+                    id=targeted_id,
+                    text="shared",
+                    belongs_to_set=["alfa", "beta"],
+                ),
+                _TaggedPoint(
+                    id=untouched_same_tag_id,
+                    text="mock_only",
+                    belongs_to_set=["alfa"],
+                ),
+            ],
+        )
+
+        await adapter.remove_belongs_to_set_tags(["alfa"], node_ids=[str(targeted_id)])
+
+        surviving = await adapter.retrieve(
+            collection_name, [str(targeted_id), str(untouched_same_tag_id)]
+        )
+        by_id = {str(r.id): r for r in surviving}
+
+        assert by_id[str(targeted_id)].payload["belongs_to_set"] == ["beta"]
+        assert by_id[str(untouched_same_tag_id)].payload["belongs_to_set"] == ["alfa"]
+    finally:
+        await adapter.delete_data_points(
+            collection_name, [str(targeted_id), str(untouched_same_tag_id)]
+        )
+        await _drop_collection(adapter, collection_name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
 async def test_remove_belongs_to_set_tags_ignores_non_vector_tables():
     """Create a snake_case relational-style table and a PascalCase table with
     no `payload` column, then run detag. Both must survive with their rows

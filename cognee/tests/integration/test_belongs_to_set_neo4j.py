@@ -152,3 +152,36 @@ async def test_remove_belongs_to_set_tags_noop_for_empty_input():
         assert await _read_tag_property(adapter, node_id) == ["Dev"]
     finally:
         await adapter.delete_nodes([str(node_id)])
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_NEO4J, reason="neo4j extra not installed")
+async def test_remove_belongs_to_set_tags_scoped_by_node_ids():
+    """Scoped detag is the wire-level primitive behind the shared-data
+    reconciliation: when a shared node loses one dataset's anchor while
+    another node in the same dataset legitimately still owns the tag,
+    we must only strip the tag from the targeted id, not globally."""
+    adapter = await _fresh_adapter()
+    targeted_id = uuid4()
+    untouched_same_tag_id = uuid4()
+
+    try:
+        await adapter.add_nodes(
+            [
+                _TaggedPoint(
+                    id=targeted_id, text="shared", belongs_to_set=["alfa", "beta"]
+                ),
+                _TaggedPoint(
+                    id=untouched_same_tag_id,
+                    text="mock_only",
+                    belongs_to_set=["alfa"],
+                ),
+            ]
+        )
+
+        await adapter.remove_belongs_to_set_tags(["alfa"], node_ids=[str(targeted_id)])
+
+        assert await _read_tag_property(adapter, targeted_id) == ["beta"]
+        assert await _read_tag_property(adapter, untouched_same_tag_id) == ["alfa"]
+    finally:
+        await adapter.delete_nodes([str(targeted_id), str(untouched_same_tag_id)])

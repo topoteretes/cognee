@@ -594,42 +594,50 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         for table_name in candidate_tables:
             quoted_table = f'"{table_name}"'
-            # Single CTE so the DELETE only touches rows the UPDATE actually
-            # rewrote. A separate unscoped DELETE would also drop any rows
-            # that already had `belongs_to_set = []` before this detag —
-            # those are pre-existing, unrelated to the current call and
-            # must not be removed.
-            detag_sql = text(
+            # Can't use a data-modifying CTE (UPDATE … RETURNING then DELETE
+            # against the CTE): Postgres runs both statements under the
+            # same snapshot, so the outer DELETE doesn't observe the
+            # updated row versions and silently no-ops. Instead, capture
+            # the id set up front, run the UPDATE scoped to those ids,
+            # then DELETE only the ones that ended up empty. The captured
+            # set ensures the DELETE can't drop rows that were already
+            # empty before the call.
+            select_targets_sql = text(
                 f"""
-                WITH updated AS (
-                    UPDATE {quoted_table}
-                    SET payload = jsonb_set(
-                        payload::jsonb,
-                        '{{belongs_to_set}}',
-                        (
-                            SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
-                            FROM jsonb_array_elements_text(
-                                COALESCE(payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                            ) AS val
-                            WHERE val <> ALL(:tags)
-                        )
-                    )::json
-                    WHERE payload::jsonb ? 'belongs_to_set'
-                      {id_scope_clause}
-                      AND EXISTS (
-                          SELECT 1
-                          FROM jsonb_array_elements_text(
-                              payload::jsonb->'belongs_to_set'
-                          ) v
-                          WHERE v = ANY(:tags)
-                      )
-                    RETURNING id, payload
-                )
+                SELECT id FROM {quoted_table}
+                WHERE payload::jsonb ? 'belongs_to_set'
+                  {id_scope_clause}
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements_text(
+                          payload::jsonb->'belongs_to_set'
+                      ) v
+                      WHERE v = ANY(:tags)
+                  )
+                """
+            )
+            update_sql = text(
+                f"""
+                UPDATE {quoted_table}
+                SET payload = jsonb_set(
+                    payload::jsonb,
+                    '{{belongs_to_set}}',
+                    (
+                        SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(
+                            COALESCE(payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                        ) AS val
+                        WHERE val <> ALL(:tags)
+                    )
+                )::json
+                WHERE id = ANY(:target_ids)
+                """
+            )
+            delete_empties_sql = text(
+                f"""
                 DELETE FROM {quoted_table}
-                WHERE id IN (
-                    SELECT id FROM updated
-                    WHERE payload::jsonb->'belongs_to_set' = '[]'::jsonb
-                )
+                WHERE id = ANY(:target_ids)
+                  AND payload::jsonb->'belongs_to_set' = '[]'::jsonb
                 """
             )
             # Run each table in its own transaction — a failure on one table
@@ -638,7 +646,18 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # committed for other tables.
             try:
                 async with self.get_async_session() as session:
-                    await session.execute(detag_sql, bind_params)
+                    target_rows = await session.execute(select_targets_sql, bind_params)
+                    target_ids = [row[0] for row in target_rows.all()]
+                    if not target_ids:
+                        await session.commit()
+                        continue
+
+                    scoped_params: Dict[str, Any] = {
+                        "tags": list(tags),
+                        "target_ids": target_ids,
+                    }
+                    await session.execute(update_sql, scoped_params)
+                    await session.execute(delete_empties_sql, {"target_ids": target_ids})
                     await session.commit()
             except exc.SQLAlchemyError as e:
                 logger.debug(
