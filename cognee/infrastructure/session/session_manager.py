@@ -210,6 +210,7 @@ class SessionManager:
         user_id: str,
         origin_function: str,
         status: str,
+        generate_feedback_with_llm: bool = True,
         session_id: Optional[str] = None,
         memory_query: str = "",
         memory_context: str = "",
@@ -229,12 +230,19 @@ class SessionManager:
             return None
 
         trace_id = str(uuid.uuid4())
-        session_feedback = await self._generate_agent_trace_feedback(
-            origin_function=origin_function,
-            status=status,
-            method_return_value=method_return_value,
-            error_message=error_message,
-        )
+        if generate_feedback_with_llm:
+            session_feedback = await self._generate_agent_trace_feedback(
+                origin_function=origin_function,
+                status=status,
+                method_return_value=method_return_value,
+                error_message=error_message,
+            )
+        else:
+            session_feedback = self._fallback_agent_trace_feedback(
+                origin_function=origin_function,
+                status=status,
+                error_message=error_message,
+            )
         await self._cache.append_agent_trace_step(
             user_id=user_id,
             session_id=session_id,
