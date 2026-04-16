@@ -71,7 +71,7 @@ function HelpIcon() {
 const menuItems = [
   { label: "Settings", href: "/settings", external: false, icon: <SettingsIcon />, track: null },
   { label: "Access Management", href: "/access-management", external: false, icon: <AccessManagementIcon />, track: null },
-  { label: "Billing", href: "/billing", external: false, icon: <BillingIcon />, track: null },
+  { label: "Billing", href: "/plan", external: false, icon: <BillingIcon />, track: null },
   { label: "Discord Community", href: "https://discord.gg/m63hxKsp4p", external: true, icon: <DiscordIcon />, track: "https://discord.gg/m63hxKsp4p" },
   { label: "Help", href: "mailto:social@cognee.ai", external: true, icon: <HelpIcon />, track: "mailto:social@cognee.ai" },
 ];
