@@ -320,7 +320,7 @@ async def retrieve_cognee_memory_context(context: AgentMemoryContext) -> str:
         logger.info("Skipping agent memory retrieval because no usable query could be derived.")
         return ""
 
-    with new_span("cognee.agent_memory.retrieve.cognee") as span:
+    with new_span("cognee.agent_memory.retrieve") as span:
         span.set_attribute("cognee.agent_memory.query_length", len(query_text))
         try:
             from cognee.api.v1.search import SearchType, search
