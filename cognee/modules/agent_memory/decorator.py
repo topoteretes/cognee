@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.users.models import User
 
-from .runtime import (
+from cognee.modules.agent_memory.runtime import (
     AgentMemoryContext,
     build_method_params,
     persist_trace,
