@@ -30,7 +30,7 @@ def get_remember_router() -> APIRouter:
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
-        session_id: Optional[str] = Form(default=None),
+        session_id: Optional[str] = Form(default=None, examples=[""]),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         run_in_background: Optional[bool] = Form(default=False),
         custom_prompt: Optional[str] = Form(default=""),
