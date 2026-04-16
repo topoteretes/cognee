@@ -328,9 +328,7 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "plan_trip succeeded."
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_can_disable_llm_feedback_generation(
-        self, sm, mock_cache
-    ):
+    async def test_add_agent_trace_step_can_disable_llm_feedback_generation(self, sm, mock_cache):
         """When disabled explicitly, trace feedback uses fallback without touching the LLM."""
         with patch(
             "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
