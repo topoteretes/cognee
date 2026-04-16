@@ -32,6 +32,12 @@ class AnthropicAdapter(GenericAPIAdapter):
 
     default_instructor_mode = "anthropic_tools"
 
+    # Parameters that the Anthropic messages API actually accepts
+    _ANTHROPIC_VALID_KWARGS = {
+        "temperature", "top_p", "top_k", "stop_sequences",
+        "stream", "metadata", "system",
+    }
+
     def __init__(
         self,
         api_key: str,
@@ -51,7 +57,10 @@ class AnthropicAdapter(GenericAPIAdapter):
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.patch(
-            create=anthropic.AsyncAnthropic(api_key=self.api_key).messages.create,
+            create=anthropic.AsyncAnthropic(
+                api_key=self.api_key,
+                timeout=600.0,
+            ).messages.create,
             mode=instructor.Mode(self.instructor_mode),
         )
 
@@ -84,10 +93,16 @@ class AnthropicAdapter(GenericAPIAdapter):
 
             - BaseModel: An instance of BaseModel containing the structured response.
         """
-        merged_kwargs = {**self.llm_args, **kwargs}
+        # Filter out non-API kwargs that leak from cognee internals
+        # (e.g. dataset_name) to avoid Anthropic API 400 errors
+        merged_kwargs = {
+            k: v for k, v in {**self.llm_args, **kwargs}.items()
+            if k in self._ANTHROPIC_VALID_KWARGS
+        }
         async with llm_rate_limiter_context_manager():
             return await self.aclient(
                 model=self.model,
+                max_tokens=self.max_completion_tokens,
                 max_retries=2,
                 messages=[
                     {
