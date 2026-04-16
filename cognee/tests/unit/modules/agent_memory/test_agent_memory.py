@@ -14,7 +14,7 @@ from cognee.modules.agent_memory.runtime import (
     persist_trace,
     reset_current_agent_memory_context,
     resolve_agent_dataset_scope,
-    resolve_agent_scope,
+    resolve_agent_user,
     retrieve_memory_context,
     set_current_agent_memory_context,
 )
@@ -527,7 +527,7 @@ async def test_retrieve_memory_context_returns_empty_when_no_source_has_data(mon
 
 
 @pytest.mark.asyncio
-async def test_resolve_agent_scope_defaults_to_main_dataset(monkeypatch):
+async def test_resolve_agent_dataset_scope_defaults_to_main_dataset(monkeypatch):
     user = _make_user()
     dataset = SimpleNamespace(id=uuid4(), name="main_dataset", owner_id=user.id)
     permissions = AsyncMock(side_effect=[[dataset], [dataset]])
@@ -541,7 +541,9 @@ async def test_resolve_agent_scope_defaults_to_main_dataset(monkeypatch):
         permissions,
     )
 
-    scope = await resolve_agent_scope(_make_config(save_traces=True))
+    config = _make_config(save_traces=True)
+    resolved_user = await resolve_agent_user(config)
+    scope = await resolve_agent_dataset_scope(config, resolved_user)
 
     assert permissions.await_args_list[0].args == (user, "read")
     assert permissions.await_args_list[1].args == (user, "write")
@@ -587,7 +589,7 @@ async def test_resolve_agent_dataset_scope_prefers_explicit_user_over_default_us
         ),
     ],
 )
-async def test_resolve_agent_scope_validates_permissions(monkeypatch, readable, writable, match):
+async def test_resolve_agent_dataset_scope_validates_permissions(monkeypatch, readable, writable, match):
     user = _make_user()
     readable_datasets = readable(user)
 
@@ -600,8 +602,11 @@ async def test_resolve_agent_scope_validates_permissions(monkeypatch, readable, 
         AsyncMock(side_effect=[readable_datasets, writable(readable_datasets)]),
     )
 
+    config = _make_config(dataset_name="shared")
+    resolved_user = await resolve_agent_user(config)
+
     with pytest.raises(CogneeValidationError, match=match):
-        await resolve_agent_scope(_make_config(dataset_name="shared"))
+        await resolve_agent_dataset_scope(config, resolved_user)
 
 
 @pytest.mark.asyncio

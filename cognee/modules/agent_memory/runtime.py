@@ -222,12 +222,6 @@ async def resolve_agent_dataset_scope(config: AgentMemoryConfig, resolved_user: 
     )
 
 
-async def resolve_agent_scope(config: AgentMemoryConfig) -> AgentScope:
-    """Backward-compatible helper that resolves user and dataset scope for search."""
-    resolved_user = await resolve_agent_user(config)
-    return await resolve_agent_dataset_scope(config, resolved_user)
-
-
 def build_method_params(func, args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
     """Bind wrapped call arguments to parameter names and sanitize them for storage."""
     bound_args = inspect.signature(func).bind_partial(*args, **kwargs)
