@@ -21,8 +21,16 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
         affected_nodes = await get_data_related_nodes(dataset_id, data_id)
         affected_edges = await get_data_related_edges(dataset_id, data_id) if affected_nodes else []
     else:
-        affected_nodes = await get_global_data_related_nodes(data_id)
-        affected_edges = await get_global_data_related_edges(data_id) if affected_nodes else []
+        # Pass dataset_id so shared data (same data_id linked to multiple
+        # datasets in a single global DB) isn't hard-deleted when only one
+        # of its dataset links is removed. Slugs co-owned by another
+        # (dataset_id, data_id) pair are excluded from the delete set.
+        affected_nodes = await get_global_data_related_nodes(data_id, dataset_id=dataset_id)
+        affected_edges = (
+            await get_global_data_related_edges(data_id, dataset_id=dataset_id)
+            if affected_nodes
+            else []
+        )
 
     if affected_nodes:
         is_legacy_node = await has_nodes_in_legacy_ledger(affected_nodes)
