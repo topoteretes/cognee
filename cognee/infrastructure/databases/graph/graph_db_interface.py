@@ -115,8 +115,8 @@ class GraphDBInterface(ABC):
         Remove the given tag names from every node's `belongs_to_set` property
         array. Keeps the property consistent with the additive
         `belongs_to_set` edges after a NodeSet or its containing dataset is
-        deleted. Default no-op; adapters that store a list property (Neo4j,
-        Neptune) override this.
+        deleted. Default no-op; only Neo4j overrides this today. Other
+        list-property-storing adapters are free to implement it later.
         """
         return None
 

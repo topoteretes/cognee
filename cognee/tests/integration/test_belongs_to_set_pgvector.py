@@ -113,10 +113,12 @@ async def test_create_data_points_merges_belongs_to_set(collection_name):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_PGVECTOR, reason="pgvector extra not installed")
-async def test_create_data_points_dedupes_duplicate_ids_in_batch(collection_name):
+async def test_create_data_points_tolerates_exact_duplicates_in_batch(collection_name):
     """With ON CONFLICT DO UPDATE, repeating the same id in one INSERT batch
-    would otherwise fail with "cannot affect row a second time". The adapter
-    must dedup in Python before the insert."""
+    would otherwise fail with "cannot affect row a second time". This test
+    only verifies the Python-side dedup prevents that error when the
+    duplicates are identical — the distinct-tag merge case is exercised
+    by `test_create_data_points_merges_tags_across_in_batch_duplicates`."""
     adapter = _fresh_adapter()
     point_id = uuid4()
 

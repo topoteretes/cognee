@@ -179,40 +179,6 @@ class LanceDBAdapter(VectorDBInterface):
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
 
-        # Fetch existing `belongs_to_set` values for rows we are about to
-        # upsert so the same DataPoint cognified into multiple datasets
-        # accumulates every dataset tag. Without this, merge_insert's
-        # when_matched_update_all overwrites the prior dataset's tags.
-        existing_belongs_to_set: dict[str, list] = {}
-        incoming_ids = [str(dp.id) for dp in data_points]
-        if incoming_ids:
-            # Build the WHERE predicate explicitly with escaped string literals
-            # rather than relying on Python's tuple repr — mirrors how search()
-            # escapes `name` values to keep single-quotes from breaking the
-            # LanceDB SQL grammar.
-            escaped_ids = [id_.replace("'", "''") for id_ in incoming_ids]
-            if len(escaped_ids) == 1:
-                where_clause = f"id = '{escaped_ids[0]}'"
-            else:
-                id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
-                where_clause = f"id IN ({id_list})"
-            try:
-                existing_rows = await collection.query().where(where_clause).to_list()
-                for row in existing_rows:
-                    row_payload = row.get("payload") or {}
-                    prior = row_payload.get("belongs_to_set") or []
-                    if prior:
-                        existing_belongs_to_set[row["id"]] = list(prior)
-            except Exception as e:
-                # Best-effort: if the lookup fails (e.g. empty table, schema
-                # mismatch that the migration path will handle), fall through
-                # to the standard upsert.
-                logger.debug(
-                    "belongs_to_set merge lookup failed for '%s': %s",
-                    collection_name,
-                    e,
-                )
-
         IdType = TypeVar("IdType")
         PayloadSchema = TypeVar("PayloadSchema")
         vector_size = self.embedding_engine.get_vector_size()
@@ -230,53 +196,95 @@ class LanceDBAdapter(VectorDBInterface):
             vector: Vector(vector_size)
             payload: PayloadSchema
 
-        def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
-            """Build a typed LanceDataPoint from a DataPoint, merging any prior belongs_to_set tags."""
-            payload_model = self.get_data_point_schema(type(data_point))
-            properties = payload_model.model_validate(
-                serialize_data(data_point.model_dump())
-            ).model_dump()
-
-            prior = existing_belongs_to_set.get(str(data_point.id))
-            if prior:
-                incoming = properties.get("belongs_to_set") or []
-                properties["belongs_to_set"] = list(dict.fromkeys(list(prior) + list(incoming)))
-
-            return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
-                id=str(data_point.id),
-                vector=vector,
-                payload=properties,
-            )
-
-        lance_data_points = [
-            create_lance_data_point(data_point, data_vectors[data_point_index])
-            for (data_point_index, data_point) in enumerate(data_points)
-        ]
-
-        # Dedup by id within the batch — on duplicates, union `belongs_to_set`
-        # instead of keeping only the last occurrence. A plain dict-collapse
-        # would drop tags that only appeared on earlier siblings (mirrors the
-        # batch-merge logic in PGVectorAdapter.create_data_points and
-        # Neo4jAdapter.add_nodes).
-        deduped_lance_points: dict = {}
-        for dp in lance_data_points:
-            existing = deduped_lance_points.get(dp.id)
-            if existing is None:
-                deduped_lance_points[dp.id] = dp
-                continue
-            existing_payload = existing.payload.model_dump()
-            incoming_payload = dp.payload.model_dump()
-            existing_tags = existing_payload.get("belongs_to_set") or []
-            incoming_tags = incoming_payload.get("belongs_to_set") or []
-            if existing_tags or incoming_tags:
-                merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
-                incoming_payload["belongs_to_set"] = merged_tags
-                dp.payload = type(dp.payload).model_validate(incoming_payload)
-            deduped_lance_points[dp.id] = dp
-        lance_data_points = list(deduped_lance_points.values())
-
+        # The prefetch of existing `belongs_to_set` values and the subsequent
+        # merge_insert must run inside the same lock section. If a second
+        # upsert ran between our read and our write, merge_insert's
+        # when_matched_update_all would overwrite tags we never saw and we'd
+        # lose them silently. Holding VECTOR_DB_LOCK across read→build→write
+        # serializes upserts but is the only way to keep tag unions honest.
+        lance_data_points: list = []
         try:
             async with self.VECTOR_DB_LOCK:
+                existing_belongs_to_set: dict[str, list] = {}
+                incoming_ids = [str(dp.id) for dp in data_points]
+                if incoming_ids:
+                    # Build the WHERE predicate explicitly with escaped string
+                    # literals rather than relying on Python's tuple repr —
+                    # mirrors how search() escapes `name` values to keep
+                    # single-quotes from breaking the LanceDB SQL grammar.
+                    escaped_ids = [id_.replace("'", "''") for id_ in incoming_ids]
+                    if len(escaped_ids) == 1:
+                        where_clause = f"id = '{escaped_ids[0]}'"
+                    else:
+                        id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+                        where_clause = f"id IN ({id_list})"
+                    try:
+                        existing_rows = await collection.query().where(where_clause).to_list()
+                        for row in existing_rows:
+                            row_payload = row.get("payload") or {}
+                            prior = row_payload.get("belongs_to_set") or []
+                            if prior:
+                                existing_belongs_to_set[row["id"]] = list(prior)
+                    except Exception as e:
+                        # Best-effort: if the lookup fails (e.g. empty table,
+                        # schema mismatch the migration path will handle),
+                        # fall through to the standard upsert.
+                        logger.debug(
+                            "belongs_to_set merge lookup failed for '%s': %s",
+                            collection_name,
+                            e,
+                        )
+
+                def create_lance_data_point(
+                    data_point: DataPoint, vector: list[float]
+                ) -> LanceDataPoint:
+                    """Build a typed LanceDataPoint from a DataPoint, merging any prior belongs_to_set tags."""
+                    payload_model = self.get_data_point_schema(type(data_point))
+                    properties = payload_model.model_validate(
+                        serialize_data(data_point.model_dump())
+                    ).model_dump()
+
+                    prior = existing_belongs_to_set.get(str(data_point.id))
+                    if prior:
+                        incoming = properties.get("belongs_to_set") or []
+                        properties["belongs_to_set"] = list(
+                            dict.fromkeys(list(prior) + list(incoming))
+                        )
+
+                    return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
+                        id=str(data_point.id),
+                        vector=vector,
+                        payload=properties,
+                    )
+
+                lance_data_points = [
+                    create_lance_data_point(data_point, data_vectors[data_point_index])
+                    for (data_point_index, data_point) in enumerate(data_points)
+                ]
+
+                # Dedup by id within the batch — on duplicates, union
+                # `belongs_to_set` instead of keeping only the last
+                # occurrence. A plain dict-collapse would drop tags that
+                # only appeared on earlier siblings (mirrors the
+                # batch-merge logic in PGVectorAdapter.create_data_points
+                # and Neo4jAdapter.add_nodes).
+                deduped_lance_points: dict = {}
+                for dp in lance_data_points:
+                    existing = deduped_lance_points.get(dp.id)
+                    if existing is None:
+                        deduped_lance_points[dp.id] = dp
+                        continue
+                    existing_payload = existing.payload.model_dump()
+                    incoming_payload = dp.payload.model_dump()
+                    existing_tags = existing_payload.get("belongs_to_set") or []
+                    incoming_tags = incoming_payload.get("belongs_to_set") or []
+                    if existing_tags or incoming_tags:
+                        merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                        incoming_payload["belongs_to_set"] = merged_tags
+                        dp.payload = type(dp.payload).model_validate(incoming_payload)
+                    deduped_lance_points[dp.id] = dp
+                lance_data_points = list(deduped_lance_points.values())
+
                 await (
                     collection.merge_insert("id")
                     .when_matched_update_all()
@@ -291,6 +299,9 @@ class LanceDBAdapter(VectorDBInterface):
                 collection_name,
                 e,
             )
+            # `_migrate_collection_schema` acquires VECTOR_DB_LOCK itself;
+            # we've already released it by dropping out of the `async with`
+            # via the raised exception, so no deadlock risk here.
             await self._migrate_collection_schema(
                 collection_name, collection, payload_schema, lance_data_points
             )

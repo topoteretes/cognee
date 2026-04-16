@@ -568,40 +568,51 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             """Strip any leading `schema.` prefix from a reflected table name."""
             return name.rpartition(".")[2] if "." in name else name
 
-        candidate_tables = [
-            _table_only(name)
-            for name in await self.get_table_names()
-            if name and _table_only(name) and _table_only(name)[0].isupper()
-        ]
+        candidate_tables: list[str] = []
+        for name in await self.get_table_names():
+            if not name:
+                continue
+            table_only = _table_only(name)
+            if table_only and table_only[0].isupper():
+                candidate_tables.append(table_only)
 
         for table_name in candidate_tables:
             quoted_table = f'"{table_name}"'
-            update_sql = text(
+            # Single CTE so the DELETE only touches rows the UPDATE actually
+            # rewrote. A separate unscoped DELETE would also drop any rows
+            # that already had `belongs_to_set = []` before this detag —
+            # those are pre-existing, unrelated to the current call and
+            # must not be removed.
+            detag_sql = text(
                 f"""
-                UPDATE {quoted_table}
-                SET payload = jsonb_set(
-                    payload::jsonb,
-                    '{{belongs_to_set}}',
-                    (
-                        SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
-                        FROM jsonb_array_elements_text(
-                            COALESCE(payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                        ) AS val
-                        WHERE val <> ALL(:tags)
-                    )
-                )::json
-                WHERE payload::jsonb ? 'belongs_to_set'
-                  AND EXISTS (
-                      SELECT 1
-                      FROM jsonb_array_elements_text(payload::jsonb->'belongs_to_set') v
-                      WHERE v = ANY(:tags)
-                  )
-                """
-            )
-            delete_sql = text(
-                f"""
+                WITH updated AS (
+                    UPDATE {quoted_table}
+                    SET payload = jsonb_set(
+                        payload::jsonb,
+                        '{{belongs_to_set}}',
+                        (
+                            SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
+                            FROM jsonb_array_elements_text(
+                                COALESCE(payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                            ) AS val
+                            WHERE val <> ALL(:tags)
+                        )
+                    )::json
+                    WHERE payload::jsonb ? 'belongs_to_set'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM jsonb_array_elements_text(
+                              payload::jsonb->'belongs_to_set'
+                          ) v
+                          WHERE v = ANY(:tags)
+                      )
+                    RETURNING id, payload
+                )
                 DELETE FROM {quoted_table}
-                WHERE payload::jsonb->'belongs_to_set' = '[]'::jsonb
+                WHERE id IN (
+                    SELECT id FROM updated
+                    WHERE payload::jsonb->'belongs_to_set' = '[]'::jsonb
+                )
                 """
             )
             # Run each table in its own transaction — a failure on one table
@@ -610,8 +621,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # committed for other tables.
             try:
                 async with self.get_async_session() as session:
-                    await session.execute(update_sql, {"tags": list(tags)})
-                    await session.execute(delete_sql)
+                    await session.execute(detag_sql, {"tags": list(tags)})
                     await session.commit()
             except exc.SQLAlchemyError as e:
                 logger.debug(
