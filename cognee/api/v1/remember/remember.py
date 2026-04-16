@@ -545,7 +545,7 @@ async def _remember_inner(
         return result
 
     # Build the result object — starts as "running"
-    if not dataset_id:
+    if not dataset_id and dataset_name:
         # Create dataset if it doesn't exist
         user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
         dataset_id = dataset_id[0].id if dataset_id else None
