@@ -109,15 +109,15 @@ def _count_document_chunks(nodes) -> int:
 @pytest_asyncio.fixture(scope="module")
 async def session_persistence_env(event_loop):
     """Clean cognee env with one dataset (add + cognify); shared by all tests in this module."""
-    with patch.dict(
-        os.environ,
-        {"CACHE_BACKEND": "fs", "COGNEE_SKIP_CONNECTION_TEST": "true"},
-        clear=False,
-    ), tempfile.TemporaryDirectory(
-        prefix="cognee_session_persistence_system_"
-    ) as system_path, tempfile.TemporaryDirectory(
-        prefix="cognee_session_persistence_data_"
-    ) as data_path:
+    with (
+        patch.dict(
+            os.environ,
+            {"CACHE_BACKEND": "fs", "COGNEE_SKIP_CONNECTION_TEST": "true"},
+            clear=False,
+        ),
+        tempfile.TemporaryDirectory(prefix="cognee_session_persistence_system_") as system_path,
+        tempfile.TemporaryDirectory(prefix="cognee_session_persistence_data_") as data_path,
+    ):
         pytest.importorskip("kuzu")
         _reset_cache_backend_caches()
 
