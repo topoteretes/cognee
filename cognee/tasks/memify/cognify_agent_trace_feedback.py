@@ -1,3 +1,6 @@
+from typing import Optional
+from uuid import UUID
+
 import cognee
 
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
@@ -7,10 +10,10 @@ logger = get_logger("cognify_agent_trace_feedback")
 
 
 async def cognify_agent_trace_feedback(
-    data,
-    dataset_id=None,
+    data: str,
+    dataset_id: Optional[UUID | str] = None,
     node_set_name: str = "agent_trace_feedbacks",
-):
+) -> None:
     """
     Process and cognify agent trace session text into the knowledge graph.
 
