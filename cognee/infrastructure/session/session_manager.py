@@ -501,17 +501,18 @@ class SessionManager:
         *,
         user_id: str,
         session_id: Optional[str] = None,
+        last_n: Optional[int] = None,
     ) -> list[dict]:
         """
-        Get the full agent trace session for the given user/session pair.
+        Get the agent trace session for the given user/session pair.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
             return []
 
-        entries = await self._cache.get_agent_trace_session(user_id, session_id)
+        entries = await self._cache.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return list(entries) if entries else []
 
     async def get_agent_trace_feedback(
@@ -519,17 +520,20 @@ class SessionManager:
         *,
         user_id: str,
         session_id: Optional[str] = None,
+        last_n: Optional[int] = None,
     ) -> list[str]:
         """
         Get only per-step feedback strings for the trace session.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace feedback")
             return []
 
-        feedback_list = await self._cache.get_agent_trace_feedback(user_id, session_id)
+        feedback_list = await self._cache.get_agent_trace_feedback(
+            user_id, session_id, last_n=last_n
+        )
         return list(feedback_list) if feedback_list else []
 
     async def update_qa(

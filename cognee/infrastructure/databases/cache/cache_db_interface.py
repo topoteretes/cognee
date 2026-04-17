@@ -173,16 +173,20 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_agent_trace_session(self, user_id: str, session_id: str) -> list[dict]:
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[dict]:
         """
-        Retrieve all agent trace steps for the given session.
+        Retrieve agent trace steps for the given session.
         """
         pass
 
     @abstractmethod
-    async def get_agent_trace_feedback(self, user_id: str, session_id: str) -> list[str]:
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
         """
-        Retrieve only per-step feedback strings for the given trace session.
+        Retrieve per-step feedback strings for the given trace session.
         """
         pass
 

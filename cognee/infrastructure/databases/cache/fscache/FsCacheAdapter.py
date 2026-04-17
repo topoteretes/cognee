@@ -365,14 +365,21 @@ class FSCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def get_agent_trace_session(self, user_id: str, session_id: str) -> list[dict]:
-        """Retrieve all stored trace steps for the given session."""
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[dict]:
+        """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
-        return self._load_entries(trace_key)
+        entries = self._load_entries(trace_key)
+        if last_n is not None:
+            return entries[-last_n:]
+        return entries
 
-    async def get_agent_trace_feedback(self, user_id: str, session_id: str) -> list[str]:
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
         """Retrieve ordered per-step feedback for the given trace session."""
-        entries = await self.get_agent_trace_session(user_id, session_id)
+        entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return [entry.get("session_feedback", "") for entry in entries]
 
     async def prune(self) -> None:

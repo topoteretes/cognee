@@ -139,8 +139,10 @@ class RedisAdapter(CacheDBInterface):
         )
         return entry.model_dump()
 
-    async def _load_entries(self, session_key: str) -> list:
-        raw = await self.async_redis.lrange(session_key, 0, -1)
+    async def _load_entries(
+        self, session_key: str, start: int = 0, end: int = -1
+    ) -> list:
+        raw = await self.async_redis.lrange(session_key, start, end)
         return [json.loads(e) for e in raw] if raw else []
 
     async def _write_entry_at(self, session_key: str, index: int, entry_dump: dict) -> None:
@@ -463,14 +465,20 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def get_agent_trace_session(self, user_id: str, session_id: str) -> list[dict]:
-        """Retrieve all stored trace steps for the given session."""
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[dict]:
+        """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
+        if last_n is not None:
+            return await self._load_entries(trace_key, -last_n, -1)
         return await self._load_entries(trace_key)
 
-    async def get_agent_trace_feedback(self, user_id: str, session_id: str) -> list[str]:
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
         """Retrieve ordered per-step feedback for the given trace session."""
-        entries = await self.get_agent_trace_session(user_id, session_id)
+        entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return [entry.get("session_feedback", "") for entry in entries]
 
     async def prune(self) -> None:
