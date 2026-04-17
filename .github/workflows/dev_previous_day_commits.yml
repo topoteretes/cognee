@@ -61,6 +61,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install workflow dependencies
+        run: uv sync --locked
+
       - name: Fetch latest dev branch
         run: git fetch origin dev:refs/remotes/origin/dev --no-tags
 
@@ -82,7 +93,7 @@ jobs:
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
           NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
         run: |
-          python3 tools/generate_branch_notes.py \
+          uv run python tools/generate_branch_notes.py \
             --branch-name "${{ matrix.branch_name }}" \
             --merge-sha "${{ matrix.merge_sha }}" \
             --first-parent "${{ matrix.first_parent }}" \
@@ -104,7 +115,7 @@ jobs:
           SHORT_SHA: ${{ matrix.short_sha }}
           MERGE_SHA: ${{ matrix.merge_sha }}
         run: |
-          python3 tools/assess_branch_notes.py \
+          uv run python tools/assess_branch_notes.py \
             --notes-json "${NOTES_JSON}" \
             --notes-markdown "${NOTES_MARKDOWN}" \
             --json-output "${ASSESSMENT_JSON}" \
