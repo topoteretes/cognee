@@ -470,10 +470,7 @@ async def persist_trace(context: AgentMemoryContext) -> None:
             user_id=user_id,
             session_id=resolved_session_id,
         )
-        if (
-            trace_count == 0
-            or trace_count % context.config.persist_session_trace_after != 0
-        ):
+        if trace_count == 0 or trace_count % context.config.persist_session_trace_after != 0:
             return
 
         from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
