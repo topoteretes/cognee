@@ -190,6 +190,7 @@ jobs:
   notify-discord:
     needs: release-github
     name: Send Release to Discord
+    if: ${{ github.ref_name == 'main' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Send Discord notification
