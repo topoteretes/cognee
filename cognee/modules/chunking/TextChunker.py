@@ -37,6 +37,7 @@ class TextChunker(Chunker):
                         )
                         paragraph_chunks = []
                         self.chunk_size = 0
+                        self.chunk_index += 1
                     else:
                         chunk_text = " ".join(chunk["text"] for chunk in paragraph_chunks)
                         try:
