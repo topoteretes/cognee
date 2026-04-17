@@ -35,7 +35,7 @@ class CompanyType(DataPoint):
 
 class Company(DataPoint):
     name: str
-    departments: list[Department]
+    departments: list[Department] = []
     is_type: CompanyType
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 

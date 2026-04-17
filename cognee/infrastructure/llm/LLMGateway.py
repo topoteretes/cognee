@@ -1,20 +1,16 @@
 from typing import Type, Optional, Coroutine
 from pydantic import BaseModel
 from cognee.infrastructure.llm import get_llm_config
-from cognee.modules.agent_memory import get_current_agent_memory_context
 
 
 def _inject_agent_memory(text_input: str) -> str:
+    from cognee.modules.agent_memory import get_current_agent_memory_context
+
     context = get_current_agent_memory_context()
-    if context is None or not context.config.with_memory or not context.memory_context:
+    if context is None or not context.memory_context:
         return text_input
 
-    return (
-        "Additional Cognee Memory Context:\n"
-        f"{context.memory_context}\n\n"
-        "Original Input:\n"
-        f"{text_input}"
-    )
+    return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
 
 
 class LLMGateway:

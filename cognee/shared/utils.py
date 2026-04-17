@@ -35,31 +35,70 @@ def create_secure_ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
-def get_anonymous_id():
-    """Creates or reads a anonymous user id"""
-    tracking_id = os.getenv("TRACKING_ID", None)
+_PERSISTENT_ID_DIR = pathlib.Path.home() / ".cognee"
+_PERSISTENT_ID_FILE = _PERSISTENT_ID_DIR / ".persistent_id"
 
+# Original anonymous ID location (project root) — kept for backward compat
+_ANON_ID_DIR = pathlib.Path(__file__).parent.parent.parent.resolve()
+_ANON_ID_FILE = _ANON_ID_DIR / ".anon_id"
+
+
+def get_anonymous_id():
+    """Get or create the original anonymous ID (project-root based).
+
+    Stored in the project root as .anon_id. This is the original ID
+    that existing telemetry events reference. Kept unchanged for
+    backward compatibility with historical analytics data.
+
+    Can be overridden with TRACKING_ID env var.
+    """
+    tracking_id = os.getenv("TRACKING_ID", None)
     if tracking_id:
         return tracking_id
 
-    home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
-
     try:
-        if not os.path.isdir(home_dir):
-            os.makedirs(home_dir, exist_ok=True)
-        anonymous_id_file = os.path.join(home_dir, ".anon_id")
-        if not os.path.isfile(anonymous_id_file):
+        if not os.path.isdir(str(_ANON_ID_DIR)):
+            os.makedirs(str(_ANON_ID_DIR), exist_ok=True)
+        if not _ANON_ID_FILE.is_file():
             anonymous_id = str(uuid4())
-            with open(anonymous_id_file, "w", encoding="utf-8") as f:
-                f.write(anonymous_id)
+            _ANON_ID_FILE.write_text(anonymous_id, encoding="utf-8")
         else:
-            with open(anonymous_id_file, "r", encoding="utf-8") as f:
-                anonymous_id = f.read()
+            anonymous_id = _ANON_ID_FILE.read_text(encoding="utf-8").strip()
     except Exception as e:
-        # In case of read-only filesystem or other issues
         logger.warning("Could not create or read anonymous id file: %s", e)
         return "unknown-anonymous-id"
     return anonymous_id
+
+
+def get_persistent_id():
+    """Get or create a persistent machine-level ID.
+
+    Stored in ~/.cognee/.persistent_id — a user-level directory that
+    survives:
+    - cognee.forget(everything=True) (data/DB deletion)
+    - pip reinstalls / virtualenv recreation
+    - git re-clones
+    - Cognee User recreation (new user_id after delete)
+
+    This is the stable identity for correlating telemetry across
+    user_id changes. The anonymous_id (project-root) may change on
+    reinstall; the persistent_id does not.
+    """
+    try:
+        if _PERSISTENT_ID_FILE.is_file():
+            return _PERSISTENT_ID_FILE.read_text(encoding="utf-8").strip()
+
+        # Seed from anonymous_id if it exists (ties the two together)
+        persistent_id = get_anonymous_id()
+        if persistent_id == "unknown-anonymous-id":
+            persistent_id = str(uuid4())
+
+        _PERSISTENT_ID_DIR.mkdir(parents=True, exist_ok=True)
+        _PERSISTENT_ID_FILE.write_text(persistent_id, encoding="utf-8")
+        return persistent_id
+    except Exception as e:
+        logger.warning("Could not create or read persistent id file: %s", e)
+        return get_anonymous_id()
 
 
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
@@ -94,7 +133,37 @@ async def _send_telemetry_request(payload: dict) -> None:
         logger.debug("Telemetry request failed: %s", e)
 
 
+def _get_api_key_fingerprint() -> str:
+    """Hash the last 5 chars of the LLM API key into a fingerprint.
+
+    The last 5 characters carry the real entropy — provider prefixes
+    (sk-proj-, sk-ant-, AIzaSy-) are shared across all users. Hashing
+    the tail gives a stable identity signal that works across machines
+    and reinstalls without exposing the key.
+
+    Returns empty string if no key is configured or too short.
+    """
+    import hashlib
+
+    key = os.getenv("LLM_API_KEY", "")
+    if not key or len(key) < 5:
+        return ""
+    return hashlib.sha256(key[-5:].encode()).hexdigest()[:8]
+
+
 def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = None):
+    """Send a product telemetry event.
+
+    Three identity layers are sent with every event:
+
+    - **anonymous_id**: Original project-root ID (.anon_id). May change
+      on reinstall. Kept for backward compatibility with historical data.
+    - **persistent_id**: Stable machine-level ID (~/.cognee/.persistent_id).
+      Survives data deletion, reinstalls, user recreation. Use this to
+      correlate a single machine across all user_id changes.
+    - **user_id**: Transient Cognee User UUID from the database. Changes
+      when the user is deleted and recreated via forget(everything=True).
+    """
     if additional_properties is None:
         additional_properties = {}
     if os.getenv("TELEMETRY_DISABLED"):
@@ -106,16 +175,24 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=["url"]
     )
+    anonymous_id = str(get_anonymous_id())
+    persistent_id = str(get_persistent_id())
+    api_key_hash = _get_api_key_fingerprint()
     current_time = datetime.now(timezone.utc)
     payload = {
-        "anonymous_id": str(get_anonymous_id()),
+        "anonymous_id": anonymous_id,
         "event_name": event_name,
         "user_properties": {
             "user_id": str(user_id),
+            "persistent_id": persistent_id,
+            "api_key_hash": api_key_hash,
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
             "user_id": str(user_id),
+            "anonymous_id": anonymous_id,
+            "persistent_id": persistent_id,
+            "api_key_hash": api_key_hash,
             **additional_properties,
         },
     }

@@ -4,6 +4,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 logger = get_logger("NaturalLanguageRetriever")
@@ -105,6 +106,18 @@ class NaturalLanguageRetriever(BaseRetriever):
 
     async def get_retrieved_objects(self, query: str) -> Any:
         graph_engine = await get_graph_engine()
+
+        # Postgres backends do not support Cypher generation/execution
+        from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+        from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
+
+        if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
+            raise SearchTypeNotSupported(
+                "Natural language search is not supported with the Postgres graph backend. "
+                "This retriever generates and executes Cypher queries, which require a "
+                "graph-native backend (Neo4j, Kuzu)."
+            )
+
         is_empty = await graph_engine.is_empty()
 
         if is_empty:

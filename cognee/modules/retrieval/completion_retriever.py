@@ -142,6 +142,7 @@ class CompletionRetriever(BaseRetriever):
                 response_model=self.response_model,
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
+                max_context_chars=getattr(self, "max_context_chars", None),
             )
             return [completion]
         return await self._generate_completion_without_session(query, context)

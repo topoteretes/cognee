@@ -180,6 +180,13 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     # Optional methods that may be implemented by adapters
+    async def run_migrations(self):
+        """
+        Run adapter-specific vector storage migrations.
+        Default implementation is a no-op.
+        """
+        return None
+
     async def get_connection(self):
         """
         Get a connection to the vector database.

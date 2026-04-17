@@ -1,14 +1,26 @@
+import json
 import uuid
 from typing import Any, Optional, Type, Union
 
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.session.feedback_models import AgentTraceFeedbackSummary
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_session_completion_with_optional_summary,
 )
+from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_SESSION_ID,
+    COGNEE_SESSION_ENTRY_COUNT,
+    COGNEE_DATA_SIZE_BYTES,
+)
 
 logger = get_logger("SessionManager")
 
@@ -96,19 +108,155 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
 
-        qa_id = str(uuid.uuid4())
-        await self._cache.create_qa_entry(
+        data_size = len(answer.encode("utf-8", errors="replace")) if answer else 0
+        data_size += len(question.encode("utf-8", errors="replace")) if question else 0
+        data_size += len(context.encode("utf-8", errors="replace")) if context else 0
+
+        with new_span("cognee.session.add_qa") as span:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+            span.set_attribute(COGNEE_DATA_SIZE_BYTES, data_size)
+
+            send_telemetry(
+                "cognee.session.add_qa",
+                user_id,
+                additional_properties={
+                    "session_id": session_id,
+                    "data_size_bytes": data_size,
+                    "has_feedback": feedback_score is not None,
+                    "has_graph_elements": used_graph_element_ids is not None,
+                },
+            )
+
+            qa_id = str(uuid.uuid4())
+            await self._cache.create_qa_entry(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=qa_id,
+                question=question,
+                context=context,
+                answer=answer,
+                feedback_text=feedback_text,
+                feedback_score=feedback_score,
+                used_graph_element_ids=used_graph_element_ids,
+            )
+            return qa_id
+
+    @staticmethod
+    def _fallback_agent_trace_feedback(
+        origin_function: str,
+        status: str,
+        error_message: str = "",
+    ) -> str:
+        """Generate deterministic fallback feedback for a trace step."""
+        normalized_origin = origin_function.strip()
+        normalized_status = status.strip().lower()
+        normalized_error = error_message.strip()
+
+        if normalized_status == "error":
+            if normalized_error:
+                return f"{normalized_origin} failed. Reason: {normalized_error}."
+            return f"{normalized_origin} failed."
+        return f"{normalized_origin} succeeded."
+
+    async def _generate_agent_trace_feedback(
+        self,
+        *,
+        origin_function: str,
+        status: str,
+        method_return_value: Any,
+        error_message: str = "",
+    ) -> str:
+        """Generate per-step feedback from method_return_value, or fall back deterministically."""
+        fallback_feedback = self._fallback_agent_trace_feedback(
+            origin_function=origin_function,
+            status=status,
+            error_message=error_message,
+        )
+
+        if method_return_value is None:
+            return fallback_feedback
+
+        try:
+            system_prompt = read_query_prompt("agent_trace_feedback_summary_system.txt")
+            if not system_prompt:
+                logger.warning("Agent trace feedback: system prompt not found, using fallback")
+                return fallback_feedback
+
+            sanitized_return_value = sanitize_value(method_return_value)
+            serialized_return_value = json.dumps(sanitized_return_value, ensure_ascii=False)
+
+            result = await LLMGateway.acreate_structured_output(
+                text_input=serialized_return_value,
+                system_prompt=system_prompt,
+                response_model=AgentTraceFeedbackSummary,
+            )
+            session_feedback = (
+                result.session_feedback.strip()
+                if isinstance(result, AgentTraceFeedbackSummary)
+                else ""
+            )
+            return session_feedback if session_feedback else fallback_feedback
+        except Exception as e:
+            logger.warning(
+                "Agent trace feedback generation failed, using fallback: %s",
+                e,
+                exc_info=False,
+            )
+            return fallback_feedback
+
+    async def add_agent_trace_step(
+        self,
+        *,
+        user_id: str,
+        origin_function: str,
+        status: str,
+        generate_feedback_with_llm: bool = True,
+        session_id: Optional[str] = None,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: Optional[dict] = None,
+        method_return_value: Any = None,
+        error_message: str = "",
+    ) -> Optional[str]:
+        """
+        Append one agent trace step to the session trace payload.
+
+        Returns trace_id, or None if cache unavailable.
+        """
+        session_id = self._resolve_session_id(session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping add_agent_trace_step")
+            return None
+
+        trace_id = str(uuid.uuid4())
+        if generate_feedback_with_llm:
+            session_feedback = await self._generate_agent_trace_feedback(
+                origin_function=origin_function,
+                status=status,
+                method_return_value=method_return_value,
+                error_message=error_message,
+            )
+        else:
+            session_feedback = self._fallback_agent_trace_feedback(
+                origin_function=origin_function,
+                status=status,
+                error_message=error_message,
+            )
+        await self._cache.append_agent_trace_step(
             user_id=user_id,
             session_id=session_id,
-            qa_id=qa_id,
-            question=question,
-            context=context,
-            answer=answer,
-            feedback_text=feedback_text,
-            feedback_score=feedback_score,
-            used_graph_element_ids=used_graph_element_ids,
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            memory_query=memory_query,
+            memory_context=memory_context,
+            method_params=method_params,
+            method_return_value=method_return_value,
+            error_message=error_message,
+            session_feedback=session_feedback,
         )
-        return qa_id
+        return trace_id
 
     def is_session_available_for_completion(self, user_id: Optional[str]) -> bool:
         """Return True if session (history + save) is available for completion."""
@@ -140,6 +288,7 @@ class SessionManager:
         response_model: Type = str,
         summarize_context: bool = False,
         used_graph_element_ids: Optional[dict] = None,
+        max_context_chars: Optional[int] = None,
     ) -> Any:
         """
         Run single-query completion with session: read history, generate, save QA.
@@ -178,6 +327,24 @@ class SessionManager:
 
         resolved_session_id = self._resolve_session_id(session_id)
         conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
+
+        # Prepend graph knowledge snapshot (from improve() sync) if available
+        graph_context = await self.get_graph_context(
+            user_id=str(user_id), session_id=resolved_session_id
+        )
+        if graph_context:
+            # Apply context char limit: explicit param > config > unlimited
+            char_limit = max_context_chars
+            if char_limit is None:
+                char_limit = CacheConfig().max_session_context_chars
+            if char_limit is not None:
+                graph_context = graph_context[:char_limit]
+            conversation_history = (
+                "Background knowledge from the knowledge graph:\n"
+                + graph_context
+                + "\n\n"
+                + conversation_history
+            )
 
         cache_config = CacheConfig()
         run_auto_feedback = cache_config.caching and cache_config.auto_feedback
@@ -307,10 +474,18 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []
 
-        if last_n is not None:
-            entries = await self._cache.get_latest_qa_entries(user_id, session_id, last_n=last_n)
-        else:
-            entries = await self._cache.get_all_qa_entries(user_id, session_id)
+        with new_span("cognee.session.get_session") as span:
+            span.set_attribute(COGNEE_SESSION_ID, session_id)
+
+            if last_n is not None:
+                entries = await self._cache.get_latest_qa_entries(
+                    user_id, session_id, last_n=last_n
+                )
+            else:
+                entries = await self._cache.get_all_qa_entries(user_id, session_id)
+
+            entry_count = len(entries) if entries else 0
+            span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, entry_count)
 
         if entries is None:
             return "" if formatted else []
@@ -320,6 +495,42 @@ class SessionManager:
             if formatted
             else entries_list
         )
+
+    async def get_agent_trace_session(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        Get the full agent trace session for the given user/session pair.
+        """
+        session_id = self._resolve_session_id(session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
+            return []
+
+        entries = await self._cache.get_agent_trace_session(user_id, session_id)
+        return list(entries) if entries else []
+
+    async def get_agent_trace_feedback(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str] = None,
+    ) -> list[str]:
+        """
+        Get only per-step feedback strings for the trace session.
+        """
+        session_id = self._resolve_session_id(session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty agent trace feedback")
+            return []
+
+        feedback_list = await self._cache.get_agent_trace_feedback(user_id, session_id)
+        return list(feedback_list) if feedback_list else []
 
     async def update_qa(
         self,
@@ -436,6 +647,52 @@ class SessionManager:
             qa_id=qa_id,
         )
 
+    # -- Graph knowledge context (separate from QA history) -----------------
+
+    @staticmethod
+    def _graph_context_key(user_id: str, session_id: str) -> str:
+        return f"graph_knowledge:{user_id}:{session_id}"
+
+    async def get_graph_context(self, *, user_id: str, session_id: Optional[str] = None) -> str:
+        """Return the graph knowledge snapshot for this session, or empty string."""
+        if not self.is_available:
+            return ""
+        session_id = self._resolve_session_id(session_id)
+        key = self._graph_context_key(user_id, session_id)
+        try:
+            raw = await self._cache.async_redis.get(key)
+            if raw:
+                return raw.decode() if isinstance(raw, bytes) else raw
+        except AttributeError:
+            # FsCacheAdapter
+            try:
+                raw = self._cache._cache.get(key)
+                if raw:
+                    return raw
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return ""
+
+    async def set_graph_context(
+        self, *, user_id: str, session_id: Optional[str] = None, context: str
+    ) -> None:
+        """Store (or overwrite) the graph knowledge snapshot for this session."""
+        if not self.is_available:
+            return
+        session_id = self._resolve_session_id(session_id)
+        key = self._graph_context_key(user_id, session_id)
+        try:
+            await self._cache.async_redis.set(key, context)
+            if self._cache.session_ttl_seconds:
+                await self._cache.async_redis.expire(key, self._cache.session_ttl_seconds)
+        except AttributeError:
+            try:
+                self._cache._cache.set(key, context)
+            except Exception:
+                pass
+
     async def delete_session(self, *, user_id: str, session_id: Optional[str] = None) -> bool:
         """
         Delete the entire session and all its QA entries.
@@ -447,6 +704,18 @@ class SessionManager:
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session")
             return False
+
+        # Also clean up the graph knowledge context key
+        graph_key = self._graph_context_key(user_id, session_id)
+        try:
+            await self._cache.async_redis.delete(graph_key)
+        except AttributeError:
+            try:
+                del self._cache._cache[graph_key]
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         return await self._cache.delete_session(
             user_id=user_id,

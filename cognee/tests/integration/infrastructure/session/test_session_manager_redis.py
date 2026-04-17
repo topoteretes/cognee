@@ -3,7 +3,10 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+from cognee.infrastructure.session.feedback_models import (
+    AgentTraceFeedbackSummary,
+    FeedbackDetectionResult,
+)
 from cognee.infrastructure.session.session_manager import SessionManager
 
 
@@ -110,6 +113,109 @@ async def test_get_session_does_not_refresh_session_ttl(session_manager, redis_a
 
 
 @pytest.mark.asyncio
+async def test_add_agent_trace_step_and_get_trace_session(session_manager):
+    """Trace steps appended via SessionManager are returned in append order."""
+    with (
+        patch(
+            "cognee.infrastructure.session.session_manager.read_query_prompt",
+            return_value="summarize this",
+        ),
+        patch(
+            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=AgentTraceFeedbackSummary(session_feedback="Plan created successfully."),
+        ),
+    ):
+        trace_id_1 = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="plan_trip",
+            status="success",
+            memory_query="trip preferences",
+            memory_context="User likes quiet places",
+            method_params={"city": "Tokyo"},
+            method_return_value="Plan created",
+        )
+        trace_id_2 = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="book_hotel",
+            status="error",
+            method_params={"area": "Shibuya"},
+            error_message="No availability",
+        )
+
+    entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    feedback = await session_manager.get_agent_trace_feedback(user_id="u1", session_id="s1")
+
+    assert [entry["trace_id"] for entry in entries] == [trace_id_1, trace_id_2]
+    assert entries[0]["origin_function"] == "plan_trip"
+    assert entries[1]["origin_function"] == "book_hotel"
+    assert feedback == [
+        "Plan created successfully.",
+        "book_hotel failed. Reason: No availability.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_add_agent_trace_step_can_disable_llm_feedback_generation(session_manager):
+    """Disabling LLM feedback generation stores deterministic fallback feedback."""
+    with patch(
+        "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+        new_callable=AsyncMock,
+    ) as mock_llm:
+        trace_id = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="plan_trip",
+            status="success",
+            method_return_value="Plan created",
+            generate_feedback_with_llm=False,
+        )
+
+    assert trace_id is not None
+    mock_llm.assert_not_awaited()
+    entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    assert len(entries) == 1
+    assert entries[0]["session_feedback"] == "plan_trip succeeded."
+
+
+@pytest.mark.asyncio
+async def test_agent_trace_session_isolated_by_user_and_session(session_manager):
+    """Agent trace sessions remain isolated by user_id and session_id."""
+    await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="plan_trip",
+        status="success",
+    )
+    await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s2",
+        origin_function="book_hotel",
+        status="error",
+        error_message="No availability",
+    )
+    await session_manager.add_agent_trace_step(
+        user_id="u2",
+        session_id="s1",
+        origin_function="book_flight",
+        status="success",
+    )
+
+    u1s1 = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    u1s2 = await session_manager.get_agent_trace_session(user_id="u1", session_id="s2")
+    u2s1 = await session_manager.get_agent_trace_session(user_id="u2", session_id="s1")
+
+    assert len(u1s1) == 1
+    assert u1s1[0]["origin_function"] == "plan_trip"
+    assert len(u1s2) == 1
+    assert u1s2[0]["origin_function"] == "book_hotel"
+    assert len(u2s1) == 1
+    assert u2s1[0]["origin_function"] == "book_flight"
+
+
+@pytest.mark.asyncio
 async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
     """add_qa with used_graph_element_ids stores and returns it via get_session."""
     used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
@@ -207,15 +313,24 @@ async def test_delete_qa(session_manager):
 
 @pytest.mark.asyncio
 async def test_delete_session(session_manager):
-    """delete_session clears all entries."""
+    """delete_session clears both QA and trace session entries."""
     await session_manager.add_qa(
         user_id="u1", question="Q", context="C", answer="A", session_id="s1"
     )
+    trace_id = await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="plan_trip",
+        status="success",
+    )
+    assert trace_id is not None
     ok = await session_manager.delete_session(user_id="u1", session_id="s1")
     assert ok
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert entries == []
+    trace_entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    assert trace_entries == []
 
 
 @pytest.mark.asyncio

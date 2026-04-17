@@ -26,7 +26,7 @@ def test_cache_config_defaults(monkeypatch):
     config = CacheConfig(_env_file=None)
 
     assert config.cache_backend == "fs"
-    assert config.caching is False
+    assert config.caching is True
     assert config.shared_kuzu_lock is False
     assert config.cache_host == "localhost"
     assert config.cache_port == 6379
@@ -85,6 +85,7 @@ def test_cache_config_to_dict():
         "agentic_lock_expire": 100,
         "agentic_lock_timeout": 200,
         "session_ttl_seconds": 0,
+        "max_session_context_chars": None,
         "usage_logging": False,
         "usage_logging_ttl": 604800,
     }

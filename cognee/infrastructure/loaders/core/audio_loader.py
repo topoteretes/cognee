@@ -90,6 +90,9 @@ class AudioLoader(LoaderInterface):
 
         result = await LLMGateway.create_transcript(file_path)
 
+        if not kwargs.get("persist", True):
+            return result.text
+
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)

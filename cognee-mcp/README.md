@@ -38,7 +38,9 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 ## ✨ Features
 
 - Multiple transports – choose Streamable HTTP --transport http (recommended for web deployments), SSE --transport sse (real‑time streaming), or stdio (classic pipe, default)
-- **API Mode** – connect to an already running Cognee FastAPI server instead of using cognee directly (see [API Mode](#-api-mode) below)
+- **Cloud Mode** – connect to [Cognee Cloud](https://www.cognee.ai) via `--serve-url` or `COGNEE_SERVICE_URL` env var (see [Connection Modes](#-connection-modes))
+- **API Mode** – connect to an already running Cognee FastAPI server (see [Connection Modes](#-connection-modes))
+- **V2 Memory API** – session-aware `remember`/`recall`/`forget`/`improve` tools alongside classic V1 tools
 - Integrated logging – all actions written to a rotating file (see get_log_file_location()) and mirrored to console in dev
 - Local file ingestion – feed .md, source files, Cursor rule‑sets, etc. straight from disk
 - Background pipelines – long‑running cognify & codify jobs spawn off‑thread; check progress with status tools
@@ -366,12 +368,43 @@ You can configure both transports simultaneously for testing:
 
 **Note:** Only enable the server you're actually running to avoid connection errors.
 
-## 🌐 API Mode
+## 🌐 Connection Modes
 
-The MCP server can operate in two modes:
+The MCP server supports three connection modes:
 
 ### **Direct Mode** (Default)
-The MCP server directly imports and uses the cognee library. This is the default mode with full feature support.
+The MCP server directly imports and uses the cognee library with local databases (SQLite, LanceDB, Kuzu). This is the default mode with full feature support.
+
+### **Cloud Mode**
+Connect to [Cognee Cloud](https://www.cognee.ai) or a remote Cognee instance. The server calls `cognee.serve()` at startup, and all SDK operations transparently route to the cloud. No local databases needed.
+
+**Via CLI flags:**
+```bash
+python src/server.py --serve-url https://your-instance.cognee.ai --serve-api-key ck_...
+```
+
+**Via environment variables (zero-config):**
+```bash
+export COGNEE_SERVICE_URL="https://your-instance.cognee.ai"
+export COGNEE_API_KEY="ck_..."
+python src/server.py
+```
+
+**Cloud Mode with Docker:**
+```bash
+docker run \
+  -e TRANSPORT_MODE=sse \
+  -e COGNEE_SERVICE_URL=https://your-instance.cognee.ai \
+  -e COGNEE_API_KEY=ck_... \
+  -p 8000:8000 \
+  --rm -it cognee/cognee-mcp:main
+```
+
+**Cloud Mode arguments / environment variables:**
+- `--serve-url` / `COGNEE_SERVICE_URL`: Cognee Cloud or remote instance URL
+- `--serve-api-key` / `COGNEE_API_KEY`: API key for the instance
+
+Database migrations are automatically skipped in Cloud mode.
 
 ### **API Mode**
 The MCP server connects to an already running Cognee FastAPI server via HTTP requests. This is useful when:
@@ -443,25 +476,24 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
+**V2 Memory API** (recommended):
+
+- **remember**: Store data in memory. With `session_id`: fast session cache. Without: full add + cognify pipeline (permanent)
+- **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, falls through to permanent graph
+- **forget_memory**: Delete data — target a specific dataset or everything
+- **improve**: Enrich the knowledge graph and bridge session data to permanent graph via feedback weights
+
+**V1 Tools** (still available):
+
 - **cognify**: Turns your data into a structured knowledge graph and stores it in memory
-
-- **cognee_add_developer_rules**: Ingest core developer rule files into memory
-
-- **codify**: Analyse a code repository, build a code graph, stores it in memory
-
-- **delete**: Delete specific data from a dataset (supports soft/hard deletion modes)
-
-- **get_developer_rules**: Retrieve all developer rules that were generated based on previous interactions
-
-- **list_data**: List all datasets and their data items with IDs for deletion operations
-
+- **search**: Query memory — supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, SUMMARIES, CYPHER, and FEELING_LUCKY
 - **save_interaction**: Logs user-agent interactions and query-answer pairs
-
+- **delete**: Delete specific data from a dataset (supports soft/hard deletion modes)
+- **list_data**: List all datasets and their data items with IDs for deletion operations
 - **prune**: Reset cognee for a fresh start (removes all data)
-
-- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, SUMMARIES, CYPHER, and FEELING_LUCKY
-
 - **cognify_status / codify_status**: Track pipeline progress
+- **cognee_add_developer_rules**: Ingest core developer rule files into memory
+- **get_developer_rules**: Retrieve all developer rules that were generated based on previous interactions
 
 **Data Management Examples:**
 ```bash

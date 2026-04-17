@@ -21,7 +21,7 @@ class CacheConfig(BaseSettings):
     """
 
     cache_backend: Literal["redis", "fs"] = "fs"
-    caching: bool = False
+    caching: bool = True
     auto_feedback: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
@@ -31,6 +31,7 @@ class CacheConfig(BaseSettings):
     agentic_lock_expire: int = 240
     agentic_lock_timeout: int = 300
     session_ttl_seconds: Optional[int] = 604800
+    max_session_context_chars: Optional[int] = None
     usage_logging: bool = False
     usage_logging_ttl: int = 604800
 
@@ -49,6 +50,7 @@ class CacheConfig(BaseSettings):
             "agentic_lock_expire": self.agentic_lock_expire,
             "agentic_lock_timeout": self.agentic_lock_timeout,
             "session_ttl_seconds": self.session_ttl_seconds,
+            "max_session_context_chars": self.max_session_context_chars,
             "usage_logging": self.usage_logging,
             "usage_logging_ttl": self.usage_logging_ttl,
         }
