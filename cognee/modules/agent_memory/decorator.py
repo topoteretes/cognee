@@ -98,8 +98,8 @@ def agent_memory(
                 context.error_message = str(error)
                 raise
             finally:
-                await persist_trace(context)
                 reset_current_agent_memory_context(token)
+                await persist_trace(context)
 
         return wrapper
 
