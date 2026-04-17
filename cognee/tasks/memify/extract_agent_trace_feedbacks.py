@@ -28,6 +28,7 @@ async def extract_agent_trace_feedbacks(
     data,
     session_ids: Optional[list[str]] = None,
     raw_trace_content: bool = False,
+    last_n_steps: Optional[int] = None,
 ):
     """
     Extract step-level agent trace content for the current user.
@@ -41,6 +42,8 @@ async def extract_agent_trace_feedbacks(
         session_ids: Optional list of specific session IDs to extract.
         raw_trace_content: When True, persist raw ``method_return_value`` values instead
             of ``session_feedback`` summaries.
+        last_n_steps: Optional number of most recent trace steps to extract per
+            session. When None, all stored steps are used.
 
     Yields:
         String containing the session ID and all non-empty extracted entries.
@@ -84,11 +87,13 @@ async def extract_agent_trace_feedbacks(
                         trace_values = await session_manager.get_agent_trace_feedback(
                             user_id=user_id,
                             session_id=session_id,
+                            last_n=last_n_steps,
                         )
                     else:
                         trace_session = await session_manager.get_agent_trace_session(
                             user_id=user_id,
                             session_id=session_id,
+                            last_n=last_n_steps,
                         )
                         trace_values = [entry.get("method_return_value") for entry in trace_session]
 

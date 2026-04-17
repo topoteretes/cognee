@@ -365,6 +365,7 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
         feedback_values = await session_manager.get_agent_trace_feedback(
             user_id=str(context.user.id),
             session_id=context.config.session_id,
+            last_n=context.config.session_memory_last_n,
         )
     except Exception as error:
         logger.warning(
@@ -375,10 +376,9 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
         )
         return ""
 
-    recent_feedback = feedback_values[-context.config.session_memory_last_n :]
     normalized_feedback = [
         normalized
-        for value in recent_feedback
+        for value in feedback_values
         if (normalized := normalize_optional_text(value)) is not None
     ]
     if not normalized_feedback:

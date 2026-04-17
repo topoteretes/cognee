@@ -24,6 +24,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
     dataset: str = "main_dataset",
     node_set_name: str = "agent_trace_feedbacks",
     raw_trace_content: bool = False,
+    last_n_steps: Optional[int] = None,
     run_in_background: bool = False,
 ):
     """
@@ -41,6 +42,8 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
         node_set_name: Node-set name used when adding the persisted feedback.
         raw_trace_content: When True, persist raw ``method_return_value`` values instead
             of ``session_feedback`` summaries.
+        last_n_steps: Optional number of most recent trace steps to persist per
+            session. When None, all stored steps are persisted.
         run_in_background: If True, runs memify asynchronously and returns immediately.
     """
     await set_session_user_context_variable(user)
@@ -63,6 +66,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             extract_agent_trace_feedbacks,
             session_ids=session_ids,
             raw_trace_content=raw_trace_content,
+            last_n_steps=last_n_steps,
         )
     ]
     enrichment_tasks = [
@@ -88,6 +92,7 @@ async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             "session_count": len(session_ids) if session_ids else 0,
             "node_set_name": node_set_name,
             "raw_trace_content": raw_trace_content,
+            "last_n_steps": last_n_steps,
         },
     )
     return result
