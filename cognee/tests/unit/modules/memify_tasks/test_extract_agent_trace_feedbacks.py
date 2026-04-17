@@ -295,7 +295,7 @@ async def test_extract_agent_trace_feedbacks_limits_to_last_n_steps(mock_user):
             [{}],
             session_ids=["trace_session"],
             last_n_steps=2,
-    ):
+        ):
             feedback_sessions.append(feedback)
 
     assert feedback_sessions == ["Session ID: trace_session\n\nthird step\nfourth step"]

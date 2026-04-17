@@ -139,9 +139,7 @@ class RedisAdapter(CacheDBInterface):
         )
         return entry.model_dump()
 
-    async def _load_entries(
-        self, session_key: str, start: int = 0, end: int = -1
-    ) -> list:
+    async def _load_entries(self, session_key: str, start: int = 0, end: int = -1) -> list:
         raw = await self.async_redis.lrange(session_key, start, end)
         return [json.loads(e) for e in raw] if raw else []
 
