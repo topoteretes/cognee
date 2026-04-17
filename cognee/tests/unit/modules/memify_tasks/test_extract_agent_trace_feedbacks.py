@@ -22,7 +22,14 @@ def mock_user():
 def _make_mock_session_manager(feedback_entries, is_available: bool = True):
     mock_session_manager = MagicMock()
     mock_session_manager.is_available = is_available
-    mock_session_manager.get_agent_trace_feedback = AsyncMock(return_value=feedback_entries)
+
+    async def _get_agent_trace_feedback(*, user_id, session_id, last_n=None):
+        del user_id, session_id
+        if last_n is None:
+            return feedback_entries
+        return feedback_entries[-last_n:]
+
+    mock_session_manager.get_agent_trace_feedback = AsyncMock(side_effect=_get_agent_trace_feedback)
     mock_session_manager.get_agent_trace_session = AsyncMock(return_value=[])
     return mock_session_manager
 
@@ -309,11 +316,19 @@ async def test_extract_agent_trace_feedbacks_limits_to_last_n_steps(mock_user):
 @pytest.mark.asyncio
 async def test_extract_agent_trace_feedbacks_limits_raw_return_values_to_last_n_steps(mock_user):
     mock_session_manager = _make_mock_session_manager([])
-    mock_session_manager.get_agent_trace_session.return_value = [
+    trace_entries = [
         {"method_return_value": "first return"},
         {"method_return_value": "second return"},
         {"method_return_value": "third return"},
     ]
+
+    async def _get_agent_trace_session(*, user_id, session_id, last_n=None):
+        del user_id, session_id
+        if last_n is None:
+            return trace_entries
+        return trace_entries[-last_n:]
+
+    mock_session_manager.get_agent_trace_session = AsyncMock(side_effect=_get_agent_trace_session)
 
     with (
         patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
@@ -337,10 +352,10 @@ async def test_extract_agent_trace_feedbacks_limits_raw_return_values_to_last_n_
     assert extracted_values == ["Session ID: trace_session\n\nsecond return\nthird return"]
 
 
+@pytest.mark.asyncio
 async def test_extract_agent_trace_feedbacks_passes_last_n_to_raw_trace_lookup(mock_user):
     mock_session_manager = _make_mock_session_manager([])
     mock_session_manager.get_agent_trace_session.return_value = [
-        {"method_return_value": "first return"},
         {"method_return_value": "second return"},
         {"method_return_value": "third return"},
     ]
