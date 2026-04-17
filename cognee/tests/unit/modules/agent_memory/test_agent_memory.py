@@ -447,8 +447,14 @@ async def test_retrieve_memory_context_query_resolution(
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_session_memory_only_skips_search(monkeypatch):
     search_mock = AsyncMock()
+
+    async def get_agent_trace_feedback(*, user_id, session_id, last_n=None):
+        del user_id, session_id
+        values = ["first", " ", "second", "third"]
+        return values if last_n is None else values[-last_n:]
+
     session_manager = SimpleNamespace(
-        get_agent_trace_feedback=AsyncMock(return_value=["first", " ", "second", "third"])
+        get_agent_trace_feedback=AsyncMock(side_effect=get_agent_trace_feedback)
     )
     monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
     _patch_session_manager(monkeypatch, session_manager)
@@ -497,7 +503,7 @@ async def test_retrieve_memory_context_session_memory_returns_empty_on_session_m
     session_manager.get_agent_trace_feedback.assert_awaited_once_with(
         user_id=str(user.id),
         session_id=None,
-        last_n=10,
+        last_n=5,
     )
 
 
@@ -517,8 +523,14 @@ async def test_retrieve_memory_context_search_only_skips_session_manager(monkeyp
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_combines_session_and_cognee_memory(monkeypatch):
     search_mock = AsyncMock(return_value=["Relevant memory"])
+
+    async def get_agent_trace_feedback(*, user_id, session_id, last_n=None):
+        del user_id, session_id
+        values = ["Earlier step", "Most recent step"]
+        return values if last_n is None else values[-last_n:]
+
     session_manager = SimpleNamespace(
-        get_agent_trace_feedback=AsyncMock(return_value=["Earlier step", "Most recent step"])
+        get_agent_trace_feedback=AsyncMock(side_effect=get_agent_trace_feedback)
     )
     monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
     _patch_session_manager(monkeypatch, session_manager)
