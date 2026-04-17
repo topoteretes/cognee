@@ -19,6 +19,7 @@ from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph im
 from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
     persist_sessions_in_knowledge_graph_pipeline,
 )
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.users.methods import get_default_user
 
 
@@ -385,6 +386,97 @@ async def test_persist_agent_trace_return_values_in_knowledge_graph_uses_session
         "Expected raw return value persistence to create at least one additional "
         f"DocumentChunk. Before={before_chunk_count}, after={after_chunk_count}."
     )
+
+
+@pytest.mark.asyncio
+async def test_persist_agent_trace_return_values_skips_empty_return_values(
+    session_persistence_env,
+    session_manager_with_qa,
+):
+    """Sessions with only empty raw return values should not add new graph content."""
+    dataset_name = session_persistence_env
+    session_manager, adapter = session_manager_with_qa
+    backend_label = type(adapter).__name__.lower()
+    session_id = f"integration_empty_trace_returns_{backend_label}"
+
+    user = await get_default_user()
+    user_id = str(user.id)
+    graph_engine = await get_graph_engine()
+    before_nodes, _before_edges = await graph_engine.get_graph_data()
+    before_chunk_count = _count_document_chunks(before_nodes)
+
+    await session_manager.add_agent_trace_step(
+        user_id=user_id,
+        origin_function=f"draft_plan_empty_returns_{backend_label}",
+        status="success",
+        generate_feedback_with_llm=False,
+        session_id=session_id,
+        method_return_value="   ",
+    )
+    await session_manager.add_agent_trace_step(
+        user_id=user_id,
+        origin_function=f"write_summary_empty_returns_{backend_label}",
+        status="error",
+        generate_feedback_with_llm=False,
+        session_id=session_id,
+        error_message=f"missing data {backend_label}",
+    )
+
+    extract_module = sys.modules["cognee.tasks.memify.extract_agent_trace_feedbacks"]
+    with patch.object(extract_module, "get_session_manager", return_value=session_manager):
+        await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
+            user=user,
+            session_ids=[session_id],
+            dataset=dataset_name,
+            raw_trace_content=True,
+            run_in_background=False,
+        )
+
+    after_nodes, _after_edges = await graph_engine.get_graph_data()
+    after_chunk_count = _count_document_chunks(after_nodes)
+
+    assert after_chunk_count == before_chunk_count
+
+
+@pytest.mark.asyncio
+async def test_persist_agent_trace_feedbacks_attaches_content_to_requested_node_set(
+    session_persistence_env,
+    session_manager_with_qa,
+):
+    """Persisted trace content should be reachable through the configured node set."""
+    dataset_name = session_persistence_env
+    session_manager, adapter = session_manager_with_qa
+    backend_label = type(adapter).__name__.lower()
+    session_id = f"integration_trace_nodeset_{backend_label}"
+    node_set_name = f"custom_agent_trace_feedbacks_{backend_label}"
+
+    user = await get_default_user()
+    user_id = str(user.id)
+
+    await session_manager.add_agent_trace_step(
+        user_id=user_id,
+        origin_function=f"draft_plan_nodeset_{backend_label}",
+        status="success",
+        generate_feedback_with_llm=False,
+        session_id=session_id,
+        method_return_value=f"draft ready for {backend_label}",
+    )
+
+    extract_module = sys.modules["cognee.tasks.memify.extract_agent_trace_feedbacks"]
+    with patch.object(extract_module, "get_session_manager", return_value=session_manager):
+        await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
+            user=user,
+            session_ids=[session_id],
+            dataset=dataset_name,
+            node_set_name=node_set_name,
+            run_in_background=False,
+        )
+
+    graph_engine = await get_graph_engine()
+    nodes, _edges = await graph_engine.get_nodeset_subgraph(NodeSet, [node_set_name])
+
+    assert any(node[1].get("name") == node_set_name for node in nodes)
+    assert _count_document_chunks(nodes) >= 1
 
 
 @pytest.mark.asyncio

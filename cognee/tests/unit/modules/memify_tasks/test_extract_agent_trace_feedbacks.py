@@ -215,6 +215,40 @@ async def test_extract_agent_trace_feedbacks_can_extract_raw_return_values(mock_
 
 
 @pytest.mark.asyncio
+async def test_extract_agent_trace_feedbacks_skips_empty_raw_return_values(mock_user):
+    mock_session_manager = _make_mock_session_manager([])
+    mock_session_manager.get_agent_trace_session.return_value = [
+        {"method_return_value": "   "},
+        {"method_return_value": None},
+    ]
+
+    with (
+        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_agent_trace_feedbacks_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        extracted_values = []
+        async for value in extract_agent_trace_feedbacks(
+            [{}],
+            session_ids=["trace_session"],
+            raw_trace_content=True,
+        ):
+            extracted_values.append(value)
+
+    assert extracted_values == []
+    mock_session_manager.get_agent_trace_session.assert_awaited_once_with(
+        user_id="test-user-123",
+        session_id="trace_session",
+    )
+    mock_session_manager.get_agent_trace_feedback.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_extract_agent_trace_feedbacks_rejects_non_boolean_raw_trace_content(mock_user):
     mock_session_manager = _make_mock_session_manager(["draft plan succeeded."])
 
