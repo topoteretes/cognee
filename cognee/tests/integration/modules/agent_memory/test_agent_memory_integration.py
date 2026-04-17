@@ -10,10 +10,12 @@ import pytest_asyncio
 
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.agent_memory.runtime import get_current_agent_memory_context
 from cognee.modules.data.methods import get_datasets_by_name
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.engine.operations.setup import setup as engine_setup
-from cognee.modules.users.methods import create_user
+from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 from cognee.infrastructure.session.session_manager import SessionManager
 
@@ -70,6 +72,17 @@ def _patch_session_manager(monkeypatch, session_manager):
         "cognee.infrastructure.session.get_session_manager"
     )
     monkeypatch.setattr(session_manager_module, "get_session_manager", lambda: session_manager)
+
+
+def _count_document_chunks(nodes) -> int:
+    document_chunk_count = 0
+    for _node_id, props in nodes:
+        node_type = props.get("type")
+        if isinstance(node_type, dict) and node_type.get("DocumentChunk"):
+            document_chunk_count += 1
+        elif node_type == "DocumentChunk":
+            document_chunk_count += 1
+    return document_chunk_count
 
 
 @pytest_asyncio.fixture
@@ -319,6 +332,45 @@ async def test_agent_memory_periodically_memifies_recent_trace_steps_integration
         last_n_steps=2,
         run_in_background=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_agent_memory_periodic_memify_reaches_graph_integration(
+    agent_memory_integration_env,
+):
+    """Periodic trace memify should write agent trace content into the graph on the threshold step."""
+    owner = await get_default_user()
+    dataset_name = f"agent_trace_periodic_{uuid4().hex[:8]}"
+    session_id = "trace-periodic-memify-real-pipeline"
+
+    await cognee.add(
+        ["Periodic memify integration dataset bootstrap content."],
+        dataset_name=dataset_name,
+        user=owner,
+    )
+    await cognee.cognify([dataset_name], user=owner)
+
+    @cognee.agent_memory(
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=2,
+        session_trace_summary=False,
+        user=owner,
+        session_id=session_id,
+        dataset_name=dataset_name,
+    )
+    async def traced_agent(step: str) -> str:
+        return step
+
+    assert await traced_agent("first real step") == "first real step"
+    assert await traced_agent("second real step") == "second real step"
+
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_nodeset_subgraph(NodeSet, ["agent_trace_feedbacks"])
+
+    assert any(node[1].get("name") == "agent_trace_feedbacks" for node in nodes)
+    assert _count_document_chunks(nodes) >= 1
+    assert nodes or edges
 
 
 @pytest.mark.asyncio

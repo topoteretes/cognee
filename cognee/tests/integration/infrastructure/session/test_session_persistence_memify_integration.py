@@ -482,15 +482,36 @@ async def test_persist_agent_trace_feedbacks_skips_empty_feedbacks(
     dataset_name = session_persistence_env
     session_manager, adapter = session_manager_with_qa
     backend_label = type(adapter).__name__.lower()
+    session_id = f"integration_empty_trace_feedbacks_{backend_label}"
     node_set_name = f"empty_trace_feedbacks_{backend_label}"
 
     user = await get_default_user()
+    user_id = str(user.id)
+
+    await adapter.append_agent_trace_step(
+        user_id=user_id,
+        session_id=session_id,
+        trace_id=f"{session_id}_step_1",
+        origin_function=f"draft_plan_empty_feedbacks_{backend_label}",
+        status="success",
+        method_return_value="draft ready",
+        session_feedback="   ",
+    )
+    await adapter.append_agent_trace_step(
+        user_id=user_id,
+        session_id=session_id,
+        trace_id=f"{session_id}_step_2",
+        origin_function=f"write_summary_empty_feedbacks_{backend_label}",
+        status="error",
+        error_message=f"missing data {backend_label}",
+        session_feedback="",
+    )
 
     extract_module = sys.modules["cognee.tasks.memify.extract_agent_trace_feedbacks"]
     with patch.object(extract_module, "get_session_manager", return_value=session_manager):
         await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
             user=user,
-            session_ids=["empty_trace_session"],
+            session_ids=[session_id],
             dataset=dataset_name,
             node_set_name=node_set_name,
             run_in_background=False,
