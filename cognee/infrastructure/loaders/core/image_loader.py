@@ -105,6 +105,9 @@ class ImageLoader(LoaderInterface):
 
         result = await LLMGateway.transcribe_image(file_path)
 
+        if not kwargs.get("persist", True):
+            return result.choices[0].message.content
+
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
