@@ -11,7 +11,6 @@ import argparse
 import asyncio
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -52,14 +51,12 @@ async def generate_notes_with_llm(payload: dict[str, Any]) -> Any:
         import litellm
         from pydantic import BaseModel, Field
     except ImportError as exc:
-        print(f"Error: Required dependencies not available: {exc}", file=sys.stderr)
-        return None
+        raise RuntimeError(f"Required dependencies not available: {exc}") from exc
 
     api_key = os.environ.get("LLM_API_KEY")
     model = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
     if not api_key:
-        print("Warning: LLM_API_KEY not set, skipping LLM generation.", file=sys.stderr)
-        return None
+        raise RuntimeError("LLM_API_KEY not set")
 
     class BranchNotes(BaseModel):
         title: str = Field(description="Title for the branch notes")
@@ -94,19 +91,7 @@ Keep the output concise and concrete.
             max_retries=2,
         )
     except Exception as exc:
-        print(f"Warning: LLM generation failed: {exc}", file=sys.stderr)
-        return None
-
-
-def fallback_notes(payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "title": f"Branch notes for {payload['branch_name']}",
-        "summary": f"Merged branch `{payload['branch_name']}` at commit `{payload['merge_sha']}`.",
-        "highlights": payload["commit_subjects"][:5],
-        "user_impact": "Needs review based on merged branch changes.",
-        "notable_files": payload["changed_files"][:10],
-        "documentation_signals": ["Review user-facing, API, CLI, integration, and setup changes."],
-    }
+        raise RuntimeError(f"LLM generation failed: {exc}") from exc
 
 
 def format_markdown(notes: Any, payload: dict[str, Any]) -> str:
@@ -176,8 +161,6 @@ async def main():
         args.first_parent, args.second_parent, args.branch_name, args.merge_sha
     )
     notes = await generate_notes_with_llm(payload)
-    if notes is None:
-        notes = fallback_notes(payload)
 
     args.json_output.parent.mkdir(parents=True, exist_ok=True)
     args.markdown_output.parent.mkdir(parents=True, exist_ok=True)

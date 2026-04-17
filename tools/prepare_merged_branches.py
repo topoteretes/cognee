@@ -164,7 +164,9 @@ def get_branch_name(subject: str, body: str, merge_sha: str, repo: str | None) -
         if head_ref:
             return head_ref
 
-    return f"merge-{merge_sha[:7]}"
+    raise RuntimeError(
+        f"Could not resolve branch name for merge commit {merge_sha} from subject/body metadata."
+    )
 
 
 def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[str, Any]:
@@ -197,9 +199,11 @@ def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[st
             continue
 
         branch_name = get_branch_name(subject, body, merge_sha, repo)
-        safe_branch = (
-            re.sub(r"[^a-z0-9]+", "-", branch_name.lower()).strip("-") or f"merge-{merge_sha[:7]}"
-        )
+        safe_branch = re.sub(r"[^a-z0-9]+", "-", branch_name.lower()).strip("-")
+        if not safe_branch:
+            raise RuntimeError(
+                f"Could not derive a safe branch slug from branch name {branch_name!r} for merge {merge_sha}."
+            )
         merges.append(
             {
                 "merge_sha": merge_sha,
@@ -215,6 +219,10 @@ def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[st
     merge_lines = [
         f"- {item['branch_name']} ({item['short_sha']}): {item['subject']}" for item in merges
     ]
+    if not merges:
+        raise RuntimeError(
+            f"No branches were merged into {branch} during the {window_label}; failing the workflow."
+        )
     return {
         "branch": branch,
         "lookback_days": effective_lookback,

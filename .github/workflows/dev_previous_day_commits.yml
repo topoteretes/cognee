@@ -227,7 +227,6 @@ jobs:
       - name: Generate docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: claude
-        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -327,56 +326,6 @@ jobs:
             When done, print a short summary of what you changed and which existing documentation pages you updated.
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 20"
 
-      - name: Record Claude generation failure
-        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.claude.outcome == 'failure' }}
-        env:
-          BRANCH_NAME: ${{ matrix.branch_name }}
-          SHORT_SHA: ${{ matrix.short_sha }}
-          MERGE_SHA: ${{ matrix.merge_sha }}
-          FIRST_PARENT: ${{ matrix.first_parent }}
-          SECOND_PARENT: ${{ matrix.second_parent }}
-          CHANGED_SOURCE_FILES: ${{ steps.docs_scope.outputs.changed_source_files }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          note_path = Path("docs-repo/review-notes") / f"docs-generation-failure-{os.environ['SHORT_SHA']}.md"
-          note_path.parent.mkdir(parents=True, exist_ok=True)
-
-          lines = [
-              f"# Documentation generation failed for {os.environ['BRANCH_NAME']}",
-              "",
-              f"- Merge SHA: `{os.environ['MERGE_SHA']}`",
-              f"- Short SHA: `{os.environ['SHORT_SHA']}`",
-              f"- First parent: `{os.environ['FIRST_PARENT']}`",
-              f"- Second parent: `{os.environ['SECOND_PARENT']}`",
-              "",
-              "Claude Code failed before it could produce documentation updates for this merged branch.",
-              "",
-              "## Changed source files",
-              "",
-          ]
-
-          changed_files = [line for line in os.environ.get("CHANGED_SOURCE_FILES", "").splitlines() if line.strip()]
-          if changed_files:
-              lines.extend([f"- `{line}`" for line in changed_files])
-          else:
-              lines.append("- No changed source files were captured.")
-
-          lines.extend(
-              [
-                  "",
-                  "## Next action",
-                  "",
-                  "Re-run the workflow or update the prompt/turn budget, then replace this note with real documentation changes.",
-                  "",
-              ]
-          )
-
-          note_path.write_text("\n".join(lines), encoding="utf-8")
-          print(note_path)
-          PY
       - name: Prepare docs PR content
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: pr_content
@@ -385,8 +334,6 @@ jobs:
           SHORT_SHA: ${{ matrix.short_sha }}
           ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
           DEFAULT_PR_TITLE: ${{ steps.assessment.outputs.pr_title }}
-          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
-          CHANGED_SOURCE_FILES: ${{ steps.docs_scope.outputs.changed_source_files }}
         run: |
           python3 - <<'PY'
           import json
@@ -398,7 +345,6 @@ jobs:
           reason = assessment.get("reason", "")
           candidate_areas = assessment.get("candidate_areas", [])
           recommended = assessment.get("recommended_next_steps", [])
-          claude_outcome = os.environ.get("CLAUDE_OUTCOME", "")
 
           changed_files = [
               line.rstrip()
@@ -410,45 +356,23 @@ jobs:
           ]
           normalized_files = [entry[3:] if len(entry) > 3 else entry for entry in changed_files]
 
-          if claude_outcome == "failure":
-              pr_title = f"docs: generation failed for {os.environ['BRANCH_NAME']}"
-              pr_body_lines = [
-                  f"Automated documentation generation failed for merged branch `{os.environ['BRANCH_NAME']}` (`{os.environ['SHORT_SHA']}`).",
-                  "",
-                  "A fallback PR was created so the failure is visible and can be retried from a stable branch.",
-                  "",
-                  "Status: `claude-code-action` failed before producing documentation edits.",
-              ]
-              source_files = [
-                  line for line in os.environ.get("CHANGED_SOURCE_FILES", "").splitlines() if line.strip()
-              ]
-              if source_files:
-                  pr_body_lines.extend(["", "Changed source files from the merged branch:"])
-                  pr_body_lines.extend([f"- `{item}`" for item in source_files])
-              if normalized_files:
-                  pr_body_lines.extend(["", "Files added to this fallback PR:"])
-                  pr_body_lines.extend([f"- `{item}`" for item in normalized_files])
-              if recommended:
-                  pr_body_lines.extend(["", "Recommended next steps:"])
-                  pr_body_lines.extend([f"- {item}" for item in recommended])
-          else:
-              pr_title = os.environ["DEFAULT_PR_TITLE"]
-              pr_body_lines = [
-                  f"Automated documentation draft for merged branch `{os.environ['BRANCH_NAME']}` (`{os.environ['SHORT_SHA']}`).",
-                  "",
-                  "This PR includes Claude-generated updates grounded in the current documentation pages and verified against the source repository.",
-                  "",
-                  f"Reason: {reason}",
-              ]
-              if candidate_areas:
-                  pr_body_lines.extend(["", "Candidate areas:"])
-                  pr_body_lines.extend([f"- {item}" for item in candidate_areas])
-              if normalized_files:
-                  pr_body_lines.extend(["", "Documentation files updated:"])
-                  pr_body_lines.extend([f"- `{item}`" for item in normalized_files])
-              if recommended:
-                  pr_body_lines.extend(["", "Recommended next steps:"])
-                  pr_body_lines.extend([f"- {item}" for item in recommended])
+          pr_title = os.environ["DEFAULT_PR_TITLE"]
+          pr_body_lines = [
+              f"Automated documentation draft for merged branch `{os.environ['BRANCH_NAME']}` (`{os.environ['SHORT_SHA']}`).",
+              "",
+              "This PR includes Claude-generated updates grounded in the current documentation pages and verified against the source repository.",
+              "",
+              f"Reason: {reason}",
+          ]
+          if candidate_areas:
+              pr_body_lines.extend(["", "Candidate areas:"])
+              pr_body_lines.extend([f"- {item}" for item in candidate_areas])
+          if normalized_files:
+              pr_body_lines.extend(["", "Documentation files updated:"])
+              pr_body_lines.extend([f"- `{item}`" for item in normalized_files])
+          if recommended:
+              pr_body_lines.extend(["", "Recommended next steps:"])
+              pr_body_lines.extend([f"- {item}" for item in recommended])
 
           output_path = Path(os.environ["GITHUB_OUTPUT"])
           with output_path.open("a", encoding="utf-8") as fh:
@@ -521,10 +445,8 @@ jobs:
               --json number \
               --jq '.[0].number')"
           else
-            echo "No docs changes were committed and no open PR exists; skipping PR creation."
-            echo "pr_number=" >> "$GITHUB_OUTPUT"
-            echo "pr_url=" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "Expected documentation changes for ${HEAD_BRANCH}, but no docs changes were committed and no open PR exists." >&2
+            exit 1
           fi
 
           PR_URL="$(gh pr view "${PR_NUMBER}" --repo "${TARGET_REPO}" --json url --jq '.url')"
@@ -534,7 +456,6 @@ jobs:
       - name: Summarize docs PR result
         env:
           CHANGED_FILES: ${{ steps.pr_content.outputs.changed_files }}
-          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
         run: |
           {
             echo "## Branch docs review: ${{ matrix.branch_name }}"
@@ -543,7 +464,6 @@ jobs:
             echo "- Needs documentation update: \`${{ steps.assessment.outputs.needs_update }}\`"
             if [ "${{ steps.assessment.outputs.needs_update }}" = "true" ]; then
               echo "- Docs branch: \`${{ steps.assessment.outputs.docs_branch }}\`"
-              echo "- Claude generation outcome: \`${CLAUDE_OUTCOME}\`"
               if [ -n "${CHANGED_FILES}" ]; then
                 echo "- Updated docs files:"
                 printf '%s\n' "${CHANGED_FILES}" | while IFS= read -r changed_file; do
@@ -566,11 +486,3 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
 
-
-  skip-when-no-merges:
-    needs: prepare-merged-branches
-    if: ${{ needs.prepare-merged-branches.outputs.has_merges != 'true' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - name: No merged branches to review
-        run: echo "No current-day merge commits found on origin/dev; skipping docs review."

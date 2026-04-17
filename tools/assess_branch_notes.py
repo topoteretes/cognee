@@ -5,7 +5,7 @@ Assess whether generated dev notes imply a documentation update is needed.
 Matches the LLM integration style used by tools/generate_release_notes.py:
 - uses litellm + instructor directly
 - reads LLM_API_KEY / LLM_MODEL from the environment
-- falls back to deterministic heuristics when LLM is unavailable
+- raises on missing dependencies, missing credentials, or LLM failures
 """
 
 from __future__ import annotations
@@ -14,8 +14,6 @@ import argparse
 import asyncio
 import json
 import os
-import re
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -54,9 +52,9 @@ def format_markdown(assessment: Any) -> str:
         "",
         "## Candidate areas",
     ]
-    lines.extend(candidate_areas or ["None identified"])
+    lines.extend(candidate_areas or [])
     lines.extend(["", "## Recommended next steps"])
-    lines.extend(next_steps or ["None recorded"])
+    lines.extend(next_steps or [])
     lines.extend(["", "## Confidence", confidence, ""])
     return "\n".join(lines)
 
@@ -67,15 +65,13 @@ async def assess_with_llm(notes_json: str, notes_markdown: str) -> Any:
         import litellm
         from pydantic import BaseModel, Field
     except ImportError as exc:
-        print(f"Error: Required dependencies not available: {exc}", file=sys.stderr)
-        return None
+        raise RuntimeError(f"Required dependencies not available: {exc}") from exc
 
     api_key = os.environ.get("LLM_API_KEY")
     model = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
 
     if not api_key:
-        print("Warning: LLM_API_KEY not set, skipping LLM assessment.", file=sys.stderr)
-        return None
+        raise RuntimeError("LLM_API_KEY not set")
 
     class DocsAssessment(BaseModel):
         needs_documentation_update: bool = Field(
@@ -115,42 +111,7 @@ Guidelines:
             max_retries=2,
         )
     except Exception as exc:
-        print(f"Warning: LLM assessment failed: {exc}", file=sys.stderr)
-        return None
-
-
-def fallback_assessment(notes_json: str, notes_markdown: str) -> dict[str, Any]:
-    text = f"{notes_json}\n{notes_markdown}".lower()
-    keywords = [
-        "api",
-        "endpoint",
-        "cli",
-        "config",
-        "integration",
-        "setup",
-        "authentication",
-        "docker",
-        "mcp",
-        "search",
-        "dataset",
-    ]
-    matched = [keyword for keyword in keywords if re.search(rf"\b{re.escape(keyword)}\b", text)]
-    needs_update = bool(matched)
-    return {
-        "needs_documentation_update": needs_update,
-        "reason": (
-            "The dev notes mention likely documentation-relevant areas: " + ", ".join(matched)
-            if matched
-            else "No strong documentation-relevant signals were found in the generated dev notes."
-        ),
-        "candidate_areas": matched or [],
-        "recommended_next_steps": (
-            [f"Review documentation for {keyword}-related changes." for keyword in matched[:5]]
-            if matched
-            else ["No immediate documentation follow-up identified from fallback heuristics."]
-        ),
-        "confidence": "medium (heuristic fallback)",
-    }
+        raise RuntimeError(f"LLM assessment failed: {exc}") from exc
 
 
 def parse_args():
@@ -168,8 +129,6 @@ async def main():
     notes_markdown = args.notes_markdown.read_text()
 
     assessment = await assess_with_llm(notes_json, notes_markdown)
-    if assessment is None:
-        assessment = fallback_assessment(notes_json, notes_markdown)
 
     args.json_output.parent.mkdir(parents=True, exist_ok=True)
     args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
