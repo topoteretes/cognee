@@ -463,6 +463,62 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         return len(query_result) == 0
 
     @staticmethod
+
+    async def add_nodes_with_vectors(self, data_points: "List[DataPoint]") -> None:
+        """Insert nodes into graph and their embeddings into vector store.
+
+        Neptune Analytics does not support true hybrid writes in one call,
+        so we write to graph first, then create embeddings and index them.
+        This is a best-effort approximation of the hybrid write contract.
+        """
+        if not data_points:
+            return
+        await self._graph.initialize()
+        await self._graph.add_nodes(data_points)
+        texts = []
+        dp_map = {}
+        for dp in data_points:
+            for field_name in getattr(dp, 'index_fields', []):
+                text = getattr(dp, field_name, None)
+                if text:
+                    texts.append(text)
+                    dp_map[len(texts) - 1] = dp
+        if texts:
+            embeddings = await self._vector.embed_data(texts)
+            for i, emb in enumerate(embeddings):
+                dp = dp_map[i]
+                await self._vector.create_data_points(
+                    f"node_{dp.id}",
+                    [dp],
+                    [emb]
+                )
+
+    async def add_edges_with_vectors(self, edges: "List[Edge]") -> None:
+        """Insert edges into graph and their embeddings into vector store.
+
+        Same approach as add_nodes_with_vectors - graph write first,
+        then vector indexing.
+        """
+        if not edges:
+            return
+        await self._graph.initialize()
+        await self._graph.add_edges(edges)
+        texts = []
+        edge_map = {}
+        for edge in edges:
+            text = f"{getattr(edge, 'source_id', '')} {getattr(edge, 'name', '')} {getattr(edge, 'target_id', '')}"
+            texts.append(text)
+            edge_map[len(texts) - 1] = edge
+        if texts:
+            embeddings = await self._vector.embed_data(texts)
+            for i, emb in enumerate(embeddings):
+                e = edge_map[i]
+                await self._vector.create_data_points(
+                    f"edge_{e.id}",
+                    [e],
+                    [emb]
+                )
+
     def _get_scored_result(
         item: dict, with_vector: bool = False, with_score: bool = False
     ) -> ScoredResult:
