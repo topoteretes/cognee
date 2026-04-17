@@ -38,7 +38,14 @@ def agent_memory(
     persist_session_trace_after: Optional[int] = None,
     persist_session_trace_raw_content: bool = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorate an async agent entrypoint with optional Cognee memory and trace persistence."""
+    """
+    Decorate an async agent entrypoint with optional Cognee memory and trace persistence.
+
+    We strongly recommend using a dedicated session per decorated method. Reusing the same
+    ``session_id`` across different decorated entrypoints can mix unrelated trace history and
+    make session-memory retrieval or periodic trace memify harder to reason about, especially
+    when those decorators do not share the same trace-persistence settings.
+    """
     config = validate_agent_memory_config(
         with_memory=with_memory,
         with_session_memory=with_session_memory,
