@@ -35,7 +35,7 @@ jobs:
           fetch-depth: 0
 
       - name: Fetch latest dev branch
-        run: git fetch origin dev --no-tags
+        run: git fetch origin dev:refs/remotes/origin/dev --no-tags
 
       - name: Prepare current day merged branches
         id: prepare
@@ -62,7 +62,7 @@ jobs:
           fetch-depth: 0
 
       - name: Fetch latest dev branch
-        run: git fetch origin dev --no-tags
+        run: git fetch origin dev:refs/remotes/origin/dev --no-tags
 
       - name: Prepare branch note paths
         id: branch_paths
@@ -485,4 +485,3 @@ jobs:
             echo
             cat "${{ steps.branch_paths.outputs.assessment_markdown }}"
           } >> "${GITHUB_STEP_SUMMARY}"
-

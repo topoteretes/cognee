@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Collect merged branches from a target branch within a configurable UTC lookback window.
+Collect PR-integrated branches from a target branch within a configurable UTC lookback window.
 
 When GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are present, this script writes the same
 workflow outputs and summary content expected by dev_previous_day_commits.yml.
@@ -114,7 +114,23 @@ def try_github_api_head_ref(pr_number: str, repo: str | None) -> str | None:
     return None
 
 
+def extract_subject_pr_number(subject: str) -> str | None:
+    merge_subject_match = re.search(r"^Merge pull request #(\d+)\b", subject)
+    if merge_subject_match:
+        return merge_subject_match.group(1)
+
+    squash_subject_match = re.search(r"\(#(\d+)\)$", subject.strip())
+    if squash_subject_match:
+        return squash_subject_match.group(1)
+
+    return None
+
+
 def extract_pr_number(subject: str, body: str) -> str | None:
+    subject_pr_number = extract_subject_pr_number(subject)
+    if subject_pr_number:
+        return subject_pr_number
+
     for text in (subject, body):
         pr_match = re.search(r"#(\d+)", text)
         if pr_match:
@@ -165,7 +181,7 @@ def get_branch_name(subject: str, body: str, merge_sha: str, repo: str | None) -
             return head_ref
 
     raise RuntimeError(
-        f"Could not resolve branch name for merge commit {merge_sha} from subject/body metadata."
+        f"Could not resolve branch name for commit {merge_sha} from subject/body metadata."
     )
 
 
@@ -182,7 +198,6 @@ def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[st
     raw_log = git(
         "log",
         branch,
-        "--merges",
         "--first-parent",
         f"--since={start.strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"--until={end.strftime('%Y-%m-%dT%H:%M:%SZ')}",
@@ -195,7 +210,13 @@ def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[st
             continue
         merge_sha, parents, subject, body = record.strip().split("\x1f", 3)
         parent_parts = parents.split()
-        if len(parent_parts) < 2:
+        if not parent_parts:
+            continue
+
+        pr_number = extract_subject_pr_number(subject)
+        is_merge_commit = len(parent_parts) >= 2
+        is_squash_merged_pr = len(parent_parts) == 1 and pr_number is not None
+        if not is_merge_commit and not is_squash_merged_pr:
             continue
 
         branch_name = get_branch_name(subject, body, merge_sha, repo)
@@ -204,12 +225,16 @@ def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[st
             raise RuntimeError(
                 f"Could not derive a safe branch slug from branch name {branch_name!r} for merge {merge_sha}."
             )
+
+        first_parent = parent_parts[0]
+        # For squash-merged PRs, diff the integrating commit against its direct parent.
+        second_parent = parent_parts[1] if is_merge_commit else merge_sha
         merges.append(
             {
                 "merge_sha": merge_sha,
                 "short_sha": merge_sha[:7],
-                "first_parent": parent_parts[0],
-                "second_parent": parent_parts[1],
+                "first_parent": first_parent,
+                "second_parent": second_parent,
                 "branch_name": branch_name,
                 "safe_branch": safe_branch,
                 "subject": subject,
