@@ -83,7 +83,7 @@ async def run_vector_migrations():
 
     migration_summaries = []
 
-    if not dataset_databases and not backend_access_control_enabled():
+    if not backend_access_control_enabled():
         vector_engine = get_vector_engine()
         vector_config = get_vectordb_config()
         migrate_method = getattr(vector_engine, "run_migrations", None)
