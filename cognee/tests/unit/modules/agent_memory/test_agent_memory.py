@@ -42,10 +42,12 @@ def _make_config(**overrides):
         "memory_query_from_method": None,
         "memory_system_prompt": None,
         "memory_top_k": 5,
+        "memory_only_context": False,
         "session_memory_last_n": 5,
         "session_id": None,
         "user": None,
         "dataset_name": None,
+        "traces_summary_generation": True,
     }
     defaults.update(overrides)
     return AgentMemoryConfig(**defaults)
@@ -138,8 +140,10 @@ def test_agent_memory_rejects_sync_functions():
         {"memory_query_from_method": "   "},
         {"memory_system_prompt": "   "},
         {"memory_system_prompt": 123},
+        {"memory_only_context": "yes"},
         {"session_id": "   "},
         {"session_memory_last_n": 0},
+        {"traces_summary_generation": "no"},
         {"memory_query_fixed": "Fixed query", "memory_query_from_method": "question"},
     ],
 )
@@ -345,6 +349,7 @@ async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
     assert search_mock.await_args.kwargs["query_type"] == cognee.SearchType.GRAPH_SUMMARY_COMPLETION
     assert search_mock.await_args.kwargs["system_prompt"] is None
     assert search_mock.await_args.kwargs["top_k"] == 7
+    assert search_mock.await_args.kwargs["only_context"] is False
 
 
 @pytest.mark.asyncio
@@ -359,6 +364,24 @@ async def test_retrieve_memory_context_passes_custom_memory_system_prompt(monkey
     )
 
     assert await retrieve_memory_context(context) == "Relevant Cognee Memory:\nRelevant memory"
+    assert search_mock.await_args.kwargs["system_prompt"] == "Return only product codenames."
+    assert search_mock.await_args.kwargs["only_context"] is False
+
+
+@pytest.mark.asyncio
+async def test_retrieve_memory_context_can_request_context_only_search(monkeypatch):
+    search_mock = AsyncMock(return_value=["Relevant memory"])
+    monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
+
+    context = _make_context(
+        method_params={"question": "ignored"},
+        memory_query_fixed="Find memory",
+        memory_system_prompt="Return only product codenames.",
+        memory_only_context=True,
+    )
+
+    assert await retrieve_memory_context(context) == "Relevant Cognee Memory:\nRelevant memory"
+    assert search_mock.await_args.kwargs["only_context"] is True
     assert search_mock.await_args.kwargs["system_prompt"] == "Return only product codenames."
 
 
@@ -637,6 +660,7 @@ async def test_persist_trace_uses_session_manager_with_structured_payload(monkey
         session_id="trace-session",
         origin_function="test_agent",
         status="success",
+        generate_feedback_with_llm=True,
         memory_query="What does Cognee do?",
         memory_context="memory context",
         method_params={"question": "What does Cognee do?"},
@@ -657,6 +681,29 @@ async def test_persist_trace_passes_none_session_id_for_default_resolution(monke
     await persist_trace(context)
 
     assert session_manager.add_agent_trace_step.await_args.kwargs["session_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_can_disable_trace_summary_generation(monkeypatch):
+    session_manager = SimpleNamespace(add_agent_trace_step=AsyncMock())
+    _patch_session_manager(monkeypatch, session_manager)
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_traces=True,
+        session_id="trace-session",
+        traces_summary_generation=False,
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    assert (
+        session_manager.add_agent_trace_step.await_args.kwargs["generate_feedback_with_llm"]
+        is False
+    )
 
 
 @pytest.mark.asyncio

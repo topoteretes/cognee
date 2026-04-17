@@ -43,6 +43,14 @@ async def _reset_engines_and_prune() -> None:
     await cognee.prune.prune_system(metadata=True)
 
 
+def _reset_cache_backend_caches() -> None:
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+    from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
+
+    get_cache_config.cache_clear()
+    create_cache_engine.cache_clear()
+
+
 async def _fake_trace_feedback(
     *,
     origin_function: str,
@@ -70,6 +78,9 @@ async def agent_memory_integration_env(tmp_path, monkeypatch):
     pytest.importorskip("kuzu")
 
     root = Path(tmp_path)
+    monkeypatch.setenv("CACHE_BACKEND", "fs")
+    monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
+    _reset_cache_backend_caches()
     vector_db_config.set(None)
     graph_db_config.set(None)
     cognee.config.set_graph_database_provider("kuzu")
@@ -111,6 +122,7 @@ async def agent_memory_integration_env(tmp_path, monkeypatch):
 
         cache_adapter.cache.close()
         await _reset_engines_and_prune()
+        _reset_cache_backend_caches()
 
 
 @pytest.mark.asyncio
@@ -267,6 +279,41 @@ async def test_agent_memory_persists_trace_to_session_store_integration(
     assert trace_entries[0]["session_feedback"] == (
         "test_agent_memory_persists_trace_to_session_store_integration.<locals>.traced_agent "
         "returned: agent-memory integration trace"
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_memory_can_disable_trace_summary_generation_integration(
+    agent_memory_integration_env,
+):
+    """Decorator trace persistence can fall back to deterministic feedback generation."""
+    session_manager = agent_memory_integration_env["session_manager"]
+    owner = await create_user(f"owner_{uuid4().hex[:8]}@example.com", "example")
+
+    @cognee.agent_memory(
+        with_memory=False,
+        save_traces=True,
+        traces_summary_generation=False,
+        user=owner,
+        session_id="trace-fallback-feedback",
+    )
+    async def traced_agent() -> str:
+        return "agent-memory integration trace"
+
+    result = await traced_agent()
+
+    assert result == "agent-memory integration trace"
+    session_manager._generate_agent_trace_feedback.assert_not_awaited()
+
+    trace_entries = await session_manager.get_agent_trace_session(
+        user_id=str(owner.id),
+        session_id="trace-fallback-feedback",
+    )
+
+    assert len(trace_entries) == 1
+    assert trace_entries[0]["session_feedback"] == (
+        "test_agent_memory_can_disable_trace_summary_generation_integration"
+        ".<locals>.traced_agent succeeded."
     )
 
 
