@@ -155,10 +155,13 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
         )
 
     payload = statement.values_arg[0]
-    assert payload["relationship_name"] == "relationship_name: contains; entity_description: bad text"
+    expected_relationship_name = (
+        "relationship_name: contains; entity_description: bad text"
+    )
+    assert payload["relationship_name"] == expected_relationship_name
     assert payload["label"] == "contains"
     assert payload["attributes"] == {
-        "edge_text": "relationship_name: contains; entity_description: bad text",
+        "edge_text": expected_relationship_name,
         "note": "nul byte",
     }
     session.execute.assert_awaited_once_with(statement)
