@@ -479,6 +479,11 @@ class RedisAdapter(CacheDBInterface):
         entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return [entry.get("session_feedback", "") for entry in entries]
 
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """Return the number of stored trace steps for the given session."""
+        trace_key = self._agent_trace_key(user_id, session_id)
+        return await self.async_redis.llen(trace_key)
+
     async def prune(self) -> None:
         """
         Flush the Redis database. In Cognee, prune means deleting the whole cache.

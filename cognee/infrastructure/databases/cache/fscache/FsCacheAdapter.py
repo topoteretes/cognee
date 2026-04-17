@@ -382,6 +382,11 @@ class FSCacheAdapter(CacheDBInterface):
         entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return [entry.get("session_feedback", "") for entry in entries]
 
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """Return the number of stored trace steps for the given session."""
+        trace_key = self._agent_trace_key(user_id, session_id)
+        return len(self._load_entries(trace_key))
+
     async def prune(self) -> None:
         """
         Remove all items from the cache. In Cognee, prune means emptying the cache.

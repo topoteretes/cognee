@@ -536,6 +536,23 @@ class SessionManager:
         )
         return list(feedback_list) if feedback_list else []
 
+    async def get_agent_trace_count(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str] = None,
+    ) -> int:
+        """
+        Get the number of trace steps stored for the given user/session pair.
+        """
+        session_id = self._resolve_session_id(session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty agent trace count")
+            return 0
+
+        return await self._cache.get_agent_trace_count(user_id, session_id)
+
     async def update_qa(
         self,
         *,

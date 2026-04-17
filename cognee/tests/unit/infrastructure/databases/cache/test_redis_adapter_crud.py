@@ -31,6 +31,9 @@ class _InMemoryRedisList:
         e = (end + 1) if end >= 0 else len(lst) + end + 1
         return lst[s:e]
 
+    async def llen(self, key: str):
+        return len(self.data.get(key, []))
+
     async def lindex(self, key: str, idx: int):
         lst = self.data.get(key, [])
         return lst[idx] if -len(lst) <= idx < len(lst) else None
@@ -238,6 +241,29 @@ async def test_get_agent_trace_feedback_returns_only_last_n(adapter):
 
     feedback = await adapter.get_agent_trace_feedback("u1", "s1", last_n=1)
     assert feedback == ["book_hotel failed."]
+
+
+@pytest.mark.asyncio
+async def test_get_agent_trace_count_returns_number_of_steps(adapter):
+    """Trace count helper returns the number of stored steps."""
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        session_feedback="plan_trip succeeded.",
+    )
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t2",
+        origin_function="book_hotel",
+        status="error",
+        session_feedback="book_hotel failed.",
+    )
+
+    assert await adapter.get_agent_trace_count("u1", "s1") == 2
 
 
 @pytest.mark.asyncio

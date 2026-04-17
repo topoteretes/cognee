@@ -154,6 +154,29 @@ async def test_get_agent_trace_feedback_returns_only_last_n(adapter):
 
 
 @pytest.mark.asyncio
+async def test_get_agent_trace_count_returns_number_of_steps(adapter):
+    """Trace count helper returns the number of stored steps."""
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        session_feedback="plan_trip succeeded.",
+    )
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t2",
+        origin_function="book_hotel",
+        status="error",
+        session_feedback="book_hotel failed.",
+    )
+
+    assert await adapter.get_agent_trace_count("u1", "s1") == 2
+
+
+@pytest.mark.asyncio
 async def test_get_agent_trace_session_missing_returns_empty(adapter):
     """Missing trace sessions return an empty list."""
     assert await adapter.get_agent_trace_session("u1", "missing") == []

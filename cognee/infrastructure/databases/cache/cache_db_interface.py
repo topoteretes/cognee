@@ -191,6 +191,13 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """
+        Retrieve the number of trace steps stored for the given trace session.
+        """
+        pass
+
+    @abstractmethod
     async def prune(self) -> None:
         """
         Delete the entire cache (flush Redis db or delete FS cache directory).
