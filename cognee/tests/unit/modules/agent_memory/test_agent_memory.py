@@ -167,6 +167,24 @@ def test_agent_memory_rejects_missing_task_query_from_method_param():
             return prompt
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"with_session_memory": True},
+        {"save_session_traces": True},
+        {"save_session_traces": True, "persist_session_trace_after": 2},
+    ],
+)
+def test_agent_memory_requires_caching_for_session_backed_features(monkeypatch, kwargs):
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.cache.config.get_cache_config",
+        lambda: SimpleNamespace(caching=False),
+    )
+
+    with pytest.raises(CogneeValidationError, match="Caching must be enabled"):
+        cognee.agent_memory(**kwargs)
+
+
 @pytest.mark.asyncio
 async def test_agent_memory_sets_and_clears_context(monkeypatch):
     resolved_user = _make_user()

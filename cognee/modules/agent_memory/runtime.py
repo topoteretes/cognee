@@ -113,6 +113,8 @@ def validate_agent_memory_config(
     persist_session_trace_raw_content: bool,
 ) -> AgentMemoryConfig:
     """Validate and normalize the public decorator configuration."""
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+
     if not isinstance(with_memory, bool):
         raise CogneeValidationError("with_memory must be a boolean.", log=False)
     if not isinstance(with_session_memory, bool):
@@ -175,6 +177,17 @@ def validate_agent_memory_config(
     if persist_session_trace_after is not None and not save_session_traces:
         raise CogneeValidationError(
             "persist_session_trace_after requires save_session_traces=True.",
+            log=False,
+        )
+    cache_config = get_cache_config()
+    if not cache_config.caching and (
+        with_session_memory or save_session_traces or persist_session_trace_after is not None
+    ):
+        raise CogneeValidationError(
+            (
+                "Caching must be enabled to use with_session_memory, save_session_traces, "
+                "or persist_session_trace_after with cognee.agent_memory."
+            ),
             log=False,
         )
     if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
