@@ -1,6 +1,7 @@
 name: automation | Draft Docs PRs For Current Day Dev Merges
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       lookback_days:
@@ -484,5 +485,4 @@ jobs:
             echo
             cat "${{ steps.branch_paths.outputs.assessment_markdown }}"
           } >> "${GITHUB_STEP_SUMMARY}"
-
 
