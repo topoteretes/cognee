@@ -109,6 +109,7 @@ async def main() -> None:
     trace_result = await trace_test()
 
     pretty_print_section("Memory enabled", with_memory)
+    pretty_print_section("Session memory", with_session_memory)
     pretty_print_section("Memory disabled", without_memory)
     pretty_print_section("Dynamic memory query", with_dynamic_memory)
     pretty_print_section("Trace test", trace_result)
