@@ -44,6 +44,20 @@ def test_sanitize_relational_payload_strips_null_bytes_recursively():
     }
 
 
+def test_sanitize_relational_payload_decodes_bytes_and_bytearray():
+    payload = {
+        "bytes": b"hel\x00lo",
+        "bytearray": bytearray(b"wo\x00rld"),
+        "invalid": b"\xff\x00",
+    }
+
+    assert sanitize_relational_payload(payload) == {
+        "bytes": "hello",
+        "bytearray": "world",
+        "invalid": "\ufffd",
+    }
+
+
 @pytest.mark.asyncio
 async def test_upsert_nodes_sanitizes_strings_before_insert():
     point = RelationalPoint(
@@ -65,6 +79,8 @@ async def test_upsert_nodes_sanitizes_strings_before_insert():
         )
 
     payload = statement.values_arg[0]
+    assert payload["type"] == "RelationalPoint"
+    assert payload["indexed_fields"] == ["text"]
     assert payload["label"] == "Document"
     assert payload["attributes"]["name"] == "Document"
     assert payload["attributes"]["text"] == "Bad text"
