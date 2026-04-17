@@ -293,7 +293,7 @@ async def test_agent_memory_can_disable_trace_summary_generation_integration(
     @cognee.agent_memory(
         with_memory=False,
         save_traces=True,
-        traces_summary_generation=False,
+        session_trace_summary=False,
         user=owner,
         session_id="trace-fallback-feedback",
     )

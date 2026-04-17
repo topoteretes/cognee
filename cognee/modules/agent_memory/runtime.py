@@ -38,7 +38,7 @@ class AgentMemoryConfig:
     session_id: Optional[str]
     user: Optional[User]
     dataset_name: Optional[str]
-    traces_summary_generation: bool
+    session_trace_summary: bool
 
 
 @dataclass(slots=True)
@@ -100,7 +100,7 @@ def validate_agent_memory_config(
     session_id: Optional[str],
     user: Optional[User],
     dataset_name: Optional[str],
-    traces_summary_generation: bool,
+    session_trace_summary: bool,
 ) -> AgentMemoryConfig:
     """Validate and normalize the public decorator configuration."""
     if not isinstance(with_memory, bool):
@@ -111,8 +111,8 @@ def validate_agent_memory_config(
         raise CogneeValidationError("save_traces must be a boolean.", log=False)
     if not isinstance(memory_only_context, bool):
         raise CogneeValidationError("memory_only_context must be a boolean.", log=False)
-    if not isinstance(traces_summary_generation, bool):
-        raise CogneeValidationError("traces_summary_generation must be a boolean.", log=False)
+    if not isinstance(session_trace_summary, bool):
+        raise CogneeValidationError("session_trace_summary must be a boolean.", log=False)
     if memory_query_fixed is not None and not isinstance(memory_query_fixed, str):
         raise CogneeValidationError("memory_query_fixed must be a string when provided.", log=False)
     if memory_query_from_method is not None and not isinstance(memory_query_from_method, str):
@@ -182,7 +182,7 @@ def validate_agent_memory_config(
         session_id=session_id.strip() if isinstance(session_id, str) else None,
         user=user,
         dataset_name=dataset_name.strip() if isinstance(dataset_name, str) else None,
-        traces_summary_generation=traces_summary_generation,
+        session_trace_summary=session_trace_summary,
     )
 
 
@@ -401,7 +401,7 @@ async def persist_trace(context: AgentMemoryContext) -> None:
             session_id=context.config.session_id,
             origin_function=context.origin_function,
             status=context.status,
-            generate_feedback_with_llm=context.config.traces_summary_generation,
+            generate_feedback_with_llm=context.config.session_trace_summary,
             memory_query=context.memory_query,
             memory_context=context.memory_context,
             method_params=context.method_params,

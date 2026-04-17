@@ -47,7 +47,7 @@ def _make_config(**overrides):
         "session_id": None,
         "user": None,
         "dataset_name": None,
-        "traces_summary_generation": True,
+        "session_trace_summary": True,
     }
     defaults.update(overrides)
     return AgentMemoryConfig(**defaults)
@@ -143,7 +143,7 @@ def test_agent_memory_rejects_sync_functions():
         {"memory_only_context": "yes"},
         {"session_id": "   "},
         {"session_memory_last_n": 0},
-        {"traces_summary_generation": "no"},
+        {"session_trace_summary": "no"},
         {"memory_query_fixed": "Fixed query", "memory_query_from_method": "question"},
     ],
 )
@@ -694,7 +694,7 @@ async def test_persist_trace_can_disable_trace_summary_generation(monkeypatch):
         with_memory=False,
         save_traces=True,
         session_id="trace-session",
-        traces_summary_generation=False,
+        session_trace_summary=False,
     )
     context.scope = None
 
