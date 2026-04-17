@@ -26,7 +26,7 @@ async def setup_memory() -> None:
         (
             "Internal product note for the Cognee agentic memory feature: "
             "the private internal codename for the first supported `cognee.agent_memory` release "
-            "is Maple Panda"
+            "is Panda"
         ),
     )
     await cognee.cognify()
@@ -64,7 +64,7 @@ async def with_dynamic_memory_agent(question: str) -> str:
     return await ask_llm(question)
 
 
-@cognee.agent_memory(with_memory=False, save_traces=True)
+@cognee.agent_memory(with_memory=False, save_traces=False)
 async def without_memory_agent() -> str:
     # Same downstream LLM call shape, but memory retrieval is disabled.
     return await ask_llm("What animal does cognee internal name refer to?")
@@ -102,7 +102,7 @@ async def main() -> None:
     without_memory = await without_memory_agent()
     trace_result = await trace_test()
 
-    print("The in-memory knowledge is that the feature is called Maple Panda")
+    print("The in-memory knowledge is that the feature is called Panda")
 
     print("AGENT ANSWERS:")
     print("WITH MEMORY:")
