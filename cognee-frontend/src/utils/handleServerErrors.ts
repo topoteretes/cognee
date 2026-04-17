@@ -14,17 +14,19 @@ export default function handleServerErrors(
       return reject(new Error("Session expired"));
     }
     if ((response.status === 401 || response.status === 403) && useCloud) {
+      // 403 = authenticated but not authorized for this resource.
+      // Only redirect for email-verification; otherwise reject so callers
+      // can handle the error gracefully (avoids redirect loops).
       if (response.status === 403) {
         return response.clone().text().then((text) => {
           if (text.toLowerCase().includes("verify your email")) {
             return redirect("/verify-email");
           }
-          if (retry) {
-            return retry(response).catch(() => redirect("/sign-in"));
-          }
-          return redirect("/sign-in");
+          const error: Record<string, unknown> = { message: text || "Forbidden", status: 403, statusText: "Forbidden" };
+          reject(error);
         });
       }
+      // 401 = not authenticated — redirect to sign-in
       if (retry) {
         return retry(response)
           .catch(() => {

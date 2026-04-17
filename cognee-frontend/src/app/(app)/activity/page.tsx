@@ -170,13 +170,29 @@ export default function ActivityPage() {
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     Promise.all([
-      cogniInstance.fetch("/v1/activity/pipeline-runs").then((r) => r.ok ? r.json() : []).catch(() => []),
-      cogniInstance.fetch("/v1/activity/spans").then((r) => r.ok ? r.json() : []).catch(() => []),
+      cogniInstance.fetch("/v1/activity/pipeline-runs", { signal: controller.signal })
+        .then((r) => r.ok ? r.json() : [])
+        .catch(() => []),
+      cogniInstance.fetch("/v1/activity/spans", { signal: controller.signal })
+        .then((r) => r.ok ? r.json() : [])
+        .catch(() => []),
     ]).then(([runData, spanData]) => {
       setRuns(Array.isArray(runData) ? runData : []);
       setTraces(Array.isArray(spanData) ? spanData : []);
-    }).finally(() => setLoading(false));
+    }).catch(() => {}).finally(() => {
+      clearTimeout(timeout);
+      setLoading(false);
+    });
+
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
   }, [cogniInstance, isInitializing]);
 
   // Reset page when filter changes

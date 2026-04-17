@@ -1,6 +1,6 @@
 import asyncio
 from pydantic import BaseModel
-from typing import Union, Optional, List
+from typing import Union, Optional
 from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
@@ -23,9 +23,8 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.graph import extract_graph_from_data
+from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.summarization import summarize_text
 from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
@@ -197,6 +196,13 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    # Route to remote instance if connected via serve()
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.cognify(datasets)
+
     with new_span("cognee.api.cognify") as span:
         span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")
         if datasets is not None:
@@ -311,18 +317,14 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             chunker=chunker,
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
+        # COGNIFY: LLM-summarize each chunk for hierarchical retrieval
         Task(
-            extract_graph_from_data,
+            extract_graph_and_summarize,
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
-        ),
-        # COGNIFY: LLM-summarize each chunk for hierarchical retrieval
-        Task(
-            summarize_text,
-            task_config={"batch_size": chunks_per_batch},
         ),
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(

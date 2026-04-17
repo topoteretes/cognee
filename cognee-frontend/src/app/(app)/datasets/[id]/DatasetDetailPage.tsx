@@ -7,6 +7,7 @@ import getDatasetData from "@/modules/datasets/getDatasetData";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import addData from "@/modules/ingestion/addData";
+import cognifyDataset from "@/modules/datasets/cognifyDataset";
 
 interface FileEntry {
   id: string;
@@ -129,6 +130,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     setUploading(true);
     try {
       await addData({ id: datasetId }, Array.from(newFiles), cogniInstance);
+      await cognifyDataset({ id: datasetId, name: datasetName, data: [], status: "processing" }, cogniInstance);
       await loadFiles();
     } catch (err) {
       console.error("Upload failed:", err);
