@@ -29,10 +29,12 @@ def agent_memory(
     memory_query_from_method: Optional[str] = None,
     memory_system_prompt: Optional[str] = None,
     memory_top_k: int = 5,
+    memory_only_context: bool = False,
     session_memory_last_n: int = 5,
     session_id: Optional[str] = None,
     user: Optional[User] = None,
     dataset_name: Optional[str] = None,
+    traces_summary_generation: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorate an async agent entrypoint with optional Cognee memory and trace persistence."""
     config = validate_agent_memory_config(
@@ -43,10 +45,12 @@ def agent_memory(
         memory_query_from_method=memory_query_from_method,
         memory_system_prompt=memory_system_prompt,
         memory_top_k=memory_top_k,
+        memory_only_context=memory_only_context,
         session_memory_last_n=session_memory_last_n,
         session_id=session_id,
         user=user,
         dataset_name=dataset_name,
+        traces_summary_generation=traces_summary_generation,
     )
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
