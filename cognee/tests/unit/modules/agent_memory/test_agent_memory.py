@@ -923,6 +923,40 @@ async def test_persist_trace_triggers_memify_when_trace_count_is_divisible(
 
 
 @pytest.mark.asyncio
+async def test_persist_trace_skips_memify_when_trace_count_is_zero(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        get_agent_trace_count=AsyncMock(return_value=0),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=5,
+        session_id="trace-session",
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    session_manager.add_agent_trace_step.assert_awaited_once()
+    session_manager.get_agent_trace_count.assert_awaited_once_with(
+        user_id=str(user.id),
+        session_id="trace-session",
+    )
+    persist_memify_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_persist_trace_uses_default_session_and_main_dataset_for_periodic_memify(monkeypatch):
     session_manager = SimpleNamespace(
         add_agent_trace_step=AsyncMock(),
