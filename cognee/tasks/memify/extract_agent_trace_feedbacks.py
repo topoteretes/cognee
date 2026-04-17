@@ -77,7 +77,9 @@ async def extract_agent_trace_feedbacks(
         if session_ids:
             for session_id in session_ids:
                 try:
-                    content_label = "method_return_value" if raw_trace_content else "session_feedback"
+                    content_label = (
+                        "method_return_value" if raw_trace_content else "session_feedback"
+                    )
                     if not raw_trace_content:
                         trace_values = await session_manager.get_agent_trace_feedback(
                             user_id=user_id,
@@ -88,9 +90,7 @@ async def extract_agent_trace_feedbacks(
                             user_id=user_id,
                             session_id=session_id,
                         )
-                        trace_values = [
-                            entry.get("method_return_value") for entry in trace_session
-                        ]
+                        trace_values = [entry.get("method_return_value") for entry in trace_session]
 
                     normalized_trace_values = [
                         normalized
