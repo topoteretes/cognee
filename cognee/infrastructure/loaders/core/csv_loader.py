@@ -84,6 +84,9 @@ class CsvLoader(LoaderInterface):
 
         content = "\n".join(row_texts)
 
+        if not kwargs.get("persist", True):
+            return content
+
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)

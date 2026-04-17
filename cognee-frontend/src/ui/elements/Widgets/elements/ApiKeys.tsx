@@ -29,7 +29,7 @@ export default async function ApiKeys({
               key={apiKey.id}
               className="flex flex-row gap-4 items-center justify-between"
             >
-              <Box>{apiKey.label.slice(0, 15)}</Box>
+              <Box>{apiKey.name || apiKey.label.slice(0, 15)}</Box>
               <Flex gap="0.25rem">
                 <CopyApiKeyButton apiKey={apiKey} />
                 <DeleteApiKeyButton apiKey={apiKey} />

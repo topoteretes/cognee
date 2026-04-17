@@ -4,6 +4,7 @@ Minimal quickstart for `cognee.agent_memory`.
 What this script demonstrates:
 - fixed memory query retrieval
 - dynamic memory query retrieval from a wrapped method parameter
+- session-backed memory retrieval from recent trace feedback
 - the same downstream LLM path with memory disabled
 - trace persistence enabled on decorated calls
 
@@ -30,7 +31,7 @@ async def setup_memory() -> None:
         (
             "Internal product note for the Cognee agentic memory feature: "
             "the private internal codename for the first supported `cognee.agent_memory` release "
-            "is Maple Panda"
+            "is Panda"
         ),
         self_improvement=False,
     )
@@ -68,7 +69,7 @@ async def with_dynamic_memory_agent(question: str) -> str:
     return await ask_llm(question)
 
 
-@cognee.agent_memory(with_memory=False, save_traces=True)
+@cognee.agent_memory(with_memory=False, save_traces=False)
 async def without_memory_agent() -> str:
     # Same downstream LLM call shape, but memory retrieval is disabled.
     return await ask_llm("What animal does cognee internal name refer to?")
@@ -78,6 +79,17 @@ async def without_memory_agent() -> str:
 async def trace_test() -> str:
     # Simple call that is mostly useful for checking trace persistence.
     return await ask_llm("Just write out: results")
+
+
+@cognee.agent_memory(
+    with_memory=False,
+    with_session_memory=True,
+    save_traces=True,
+    session_memory_last_n=5,
+)
+async def with_session_memory_agent() -> str:
+    # Uses recent session-backed trace feedback without dataset search retrieval.
+    return await ask_llm("What animal does cognee internal name refer to?")
 
 
 async def main() -> None:
@@ -92,6 +104,7 @@ async def main() -> None:
     with_dynamic_memory = await with_dynamic_memory_agent(
         question="What animal does cognee internal name refer to?"
     )
+    with_session_memory = await with_session_memory_agent()
     without_memory = await without_memory_agent()
     trace_result = await trace_test()
 

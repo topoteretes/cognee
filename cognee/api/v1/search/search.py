@@ -202,6 +202,13 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+    # Route to remote instance if connected via serve()
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.search(query_text, search_type=query_type, datasets=datasets)
+
     with new_span("cognee.api.search") as span:
         span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
         span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))

@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from "react";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import getDatasets from "@/modules/datasets/getDatasets";
+import createDataset from "@/modules/datasets/createDataset";
 
 export interface Agent {
   id: string;
@@ -50,7 +51,7 @@ interface FilterContextValue {
 
 const DEFAULT_WORKSPACES: Workspace[] = [
   { id: "personal", name: "Personal", initial: "P", color: "#6510F4", type: "personal" },
-  { id: "acme", name: "Acme Co", initial: "A", color: "#6510F4", type: "organization" },
+  { id: "default", name: "Default", initial: "D", color: "#6510F4", type: "organization" },
 ];
 
 const FilterContext = createContext<FilterContextValue>({
@@ -86,13 +87,37 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     Promise.all([
-      cogniInstance.fetch("/v1/activity/agents").then((r) => r.ok ? r.json() : []).catch(() => []),
-      getDatasets(cogniInstance).then((d: Dataset[]) => (Array.isArray(d) ? d : [])).catch(() => []),
-    ]).then(([agentData, datasetData]) => {
+      cogniInstance.fetch("/v1/activity/agents", { signal: controller.signal })
+        .then((r) => r.ok ? r.json() : [])
+        .catch(() => []),
+      getDatasets(cogniInstance)
+        .then((d: Dataset[]) => (Array.isArray(d) ? d : []))
+        .catch(() => []),
+    ]).then(async ([agentData, datasetData]) => {
       setAgents(Array.isArray(agentData) ? agentData : []);
+      // Auto-create a default dataset if none exist
+      if (datasetData.length === 0 && cogniInstance) {
+        try {
+          const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
+          datasetData = [ds];
+        } catch (e) {
+          console.warn("[FilterContext] Failed to auto-create default dataset:", e);
+        }
+      }
       setDatasets(datasetData);
-    }).finally(() => setLoading(false));
+    }).catch(() => {}).finally(() => {
+      clearTimeout(timeout);
+      setLoading(false);
+    });
+
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
   }, [cogniInstance, isInitializing]);
 
   const handleAgentChange = useCallback((agent: Agent | null) => {

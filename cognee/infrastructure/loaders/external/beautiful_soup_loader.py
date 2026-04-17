@@ -218,6 +218,9 @@ class BeautifulSoupLoader(LoaderInterface):
         if not full_content:
             logger.warning(f"No content extracted from HTML file: {file_path}")
 
+        if not kwargs.get("persist", True):
+            return full_content
+
         # Store the extracted content
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
