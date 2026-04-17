@@ -12,6 +12,9 @@ from typing_extensions import TypedDict
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
 from cognee.modules.observability import (
     new_span,
     COGNEE_DATASET_NAME,
@@ -542,6 +545,10 @@ async def _remember_inner(
         return result
 
     # Build the result object — starts as "running"
+    if not dataset_id and dataset_name:
+        # Create dataset if it doesn't exist
+        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
+        dataset_id = dataset_id[0].id if dataset_id else None
     result = RememberResult(
         status="running",
         dataset_name=dataset_name,

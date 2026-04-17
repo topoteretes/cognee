@@ -459,6 +459,11 @@ async def test_remember_passes_session_ids_to_improve():
             "cognee.modules.users.methods.get_default_user",
             AsyncMock(return_value=mock_user),
         ),
+        patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(mock_user, "")),
+        ),
     ):
         from cognee.api.v1.remember.remember import remember
 
@@ -492,6 +497,11 @@ async def test_remember_no_session_ids_skips_in_improve():
         patch(
             "cognee.modules.users.methods.get_default_user",
             AsyncMock(return_value=mock_user),
+        ),
+        patch.object(
+            _get_remember_module(),
+            "resolve_authorized_user_datasets",
+            AsyncMock(return_value=(mock_user, "")),
         ),
     ):
         from cognee.api.v1.remember.remember import remember
@@ -677,6 +687,11 @@ class TestRememberResult:
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
             ),
+            patch.object(
+                _get_remember_module(),
+                "resolve_authorized_user_datasets",
+                AsyncMock(return_value=(mock_user, "")),
+            ),
         ):
             from cognee.api.v1.remember.remember import remember
 
@@ -773,6 +788,11 @@ class TestRememberResultSessions:
             patch(
                 "cognee.modules.users.methods.get_default_user",
                 AsyncMock(return_value=mock_user),
+            ),
+            patch.object(
+                _get_remember_module(),
+                "resolve_authorized_user_datasets",
+                AsyncMock(return_value=(mock_user, "")),
             ),
         ):
             from cognee.api.v1.remember.remember import remember
