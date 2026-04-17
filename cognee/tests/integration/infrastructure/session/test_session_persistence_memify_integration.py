@@ -12,7 +12,7 @@ import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.session.session_manager import SessionManager
-from cognee.low_level import setup
+from cognee.low_level import setup as cognee_setup
 from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
     persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
 )
@@ -113,13 +113,13 @@ async def session_persistence_env(event_loop):
         os.environ,
         {"CACHE_BACKEND": "fs", "COGNEE_SKIP_CONNECTION_TEST": "true"},
         clear=False,
-    ):
+    ), tempfile.TemporaryDirectory(
+        prefix="cognee_session_persistence_system_"
+    ) as system_path, tempfile.TemporaryDirectory(
+        prefix="cognee_session_persistence_data_"
+    ) as data_path:
         pytest.importorskip("kuzu")
         _reset_cache_backend_caches()
-
-        base_dir = pathlib.Path(__file__).parent.parent.parent.parent
-        system_path = str(base_dir / ".cognee_system/test_session_persistence_memify")
-        data_path = str(base_dir / ".data_storage/test_session_persistence_memify")
 
         vector_db_config.set(None)
         graph_db_config.set(None)
@@ -139,7 +139,7 @@ async def session_persistence_env(event_loop):
         )
 
         await _reset_engines_and_prune()
-        await setup()
+        await cognee_setup()
 
         dataset_name = "session_persist_integration"
         await cognee.add("Cognee builds knowledge graphs from text.", dataset_name=dataset_name)
@@ -293,12 +293,10 @@ async def test_persist_agent_trace_feedbacks_in_knowledge_graph_uses_session_man
     session_manager, adapter = session_manager_with_qa
     backend_label = type(adapter).__name__.lower()
     session_id = f"integration_trace_session_{backend_label}"
+    node_set_name = f"agent_trace_feedbacks_{backend_label}"
 
     user = await get_default_user()
     user_id = str(user.id)
-    graph_engine = await get_graph_engine()
-    before_nodes, _before_edges = await graph_engine.get_graph_data()
-    before_chunk_count = _count_document_chunks(before_nodes)
 
     await session_manager.add_agent_trace_step(
         user_id=user_id,
@@ -323,16 +321,15 @@ async def test_persist_agent_trace_feedbacks_in_knowledge_graph_uses_session_man
             user=user,
             session_ids=[session_id],
             dataset=dataset_name,
+            node_set_name=node_set_name,
             run_in_background=False,
         )
 
-    after_nodes, _after_edges = await graph_engine.get_graph_data()
-    after_chunk_count = _count_document_chunks(after_nodes)
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_nodeset_subgraph(NodeSet, [node_set_name])
 
-    assert after_chunk_count >= before_chunk_count + 1, (
-        "Expected agent trace feedback persistence to create at least one additional "
-        f"DocumentChunk. Before={before_chunk_count}, after={after_chunk_count}."
-    )
+    assert any(node[1].get("name") == node_set_name for node in nodes)
+    assert nodes or edges
 
 
 @pytest.mark.asyncio
@@ -345,12 +342,10 @@ async def test_persist_agent_trace_return_values_in_knowledge_graph_uses_session
     session_manager, adapter = session_manager_with_qa
     backend_label = type(adapter).__name__.lower()
     session_id = f"integration_trace_returns_{backend_label}"
+    node_set_name = f"agent_trace_returns_{backend_label}"
 
     user = await get_default_user()
     user_id = str(user.id)
-    graph_engine = await get_graph_engine()
-    before_nodes, _before_edges = await graph_engine.get_graph_data()
-    before_chunk_count = _count_document_chunks(before_nodes)
 
     await session_manager.add_agent_trace_step(
         user_id=user_id,
@@ -375,17 +370,16 @@ async def test_persist_agent_trace_return_values_in_knowledge_graph_uses_session
             user=user,
             session_ids=[session_id],
             dataset=dataset_name,
+            node_set_name=node_set_name,
             raw_trace_content=True,
             run_in_background=False,
         )
 
-    after_nodes, _after_edges = await graph_engine.get_graph_data()
-    after_chunk_count = _count_document_chunks(after_nodes)
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_nodeset_subgraph(NodeSet, [node_set_name])
 
-    assert after_chunk_count >= before_chunk_count + 1, (
-        "Expected raw return value persistence to create at least one additional "
-        f"DocumentChunk. Before={before_chunk_count}, after={after_chunk_count}."
-    )
+    assert any(node[1].get("name") == node_set_name for node in nodes)
+    assert nodes or edges
 
 
 @pytest.mark.asyncio
@@ -398,12 +392,10 @@ async def test_persist_agent_trace_return_values_skips_empty_return_values(
     session_manager, adapter = session_manager_with_qa
     backend_label = type(adapter).__name__.lower()
     session_id = f"integration_empty_trace_returns_{backend_label}"
+    node_set_name = f"empty_trace_returns_{backend_label}"
 
     user = await get_default_user()
     user_id = str(user.id)
-    graph_engine = await get_graph_engine()
-    before_nodes, _before_edges = await graph_engine.get_graph_data()
-    before_chunk_count = _count_document_chunks(before_nodes)
 
     await session_manager.add_agent_trace_step(
         user_id=user_id,
@@ -428,14 +420,16 @@ async def test_persist_agent_trace_return_values_skips_empty_return_values(
             user=user,
             session_ids=[session_id],
             dataset=dataset_name,
+            node_set_name=node_set_name,
             raw_trace_content=True,
             run_in_background=False,
         )
 
-    after_nodes, _after_edges = await graph_engine.get_graph_data()
-    after_chunk_count = _count_document_chunks(after_nodes)
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_nodeset_subgraph(NodeSet, [node_set_name])
 
-    assert after_chunk_count == before_chunk_count
+    assert nodes == []
+    assert edges == []
 
 
 @pytest.mark.asyncio
@@ -486,12 +480,11 @@ async def test_persist_agent_trace_feedbacks_skips_empty_feedbacks(
 ):
     """Sessions with empty feedback summaries should not add new graph content."""
     dataset_name = session_persistence_env
-    session_manager, _adapter = session_manager_with_qa
+    session_manager, adapter = session_manager_with_qa
+    backend_label = type(adapter).__name__.lower()
+    node_set_name = f"empty_trace_feedbacks_{backend_label}"
 
     user = await get_default_user()
-    graph_engine = await get_graph_engine()
-    before_nodes, _before_edges = await graph_engine.get_graph_data()
-    before_chunk_count = _count_document_chunks(before_nodes)
 
     extract_module = sys.modules["cognee.tasks.memify.extract_agent_trace_feedbacks"]
     with patch.object(extract_module, "get_session_manager", return_value=session_manager):
@@ -499,10 +492,12 @@ async def test_persist_agent_trace_feedbacks_skips_empty_feedbacks(
             user=user,
             session_ids=["empty_trace_session"],
             dataset=dataset_name,
+            node_set_name=node_set_name,
             run_in_background=False,
         )
 
-    after_nodes, _after_edges = await graph_engine.get_graph_data()
-    after_chunk_count = _count_document_chunks(after_nodes)
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_nodeset_subgraph(NodeSet, [node_set_name])
 
-    assert after_chunk_count == before_chunk_count
+    assert nodes == []
+    assert edges == []
