@@ -126,7 +126,7 @@ async def agent_memory_integration_env(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_agent_memory_save_traces_does_not_require_dataset_permissions_integration(
+async def test_agent_memory_save_session_traces_does_not_require_dataset_permissions_integration(
     agent_memory_integration_env,
 ):
     """Trace persistence should work without dataset scope resolution when search is disabled."""
@@ -135,7 +135,7 @@ async def test_agent_memory_save_traces_does_not_require_dataset_permissions_int
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         session_id="permissionless-trace",
         user=member,
         dataset_name="shared_without_permissions",
@@ -189,7 +189,7 @@ async def test_agent_memory_retrieves_memory_from_shared_dataset_with_read_and_w
 
     @cognee.agent_memory(
         with_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=member,
         dataset_name=dataset_name,
         memory_query_fixed="What is the private codename for cognee agent_memory?",
@@ -232,7 +232,7 @@ async def test_agent_memory_retrieves_session_memory_without_dataset_permissions
     @cognee.agent_memory(
         with_memory=False,
         with_session_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=member,
         session_id=session_id,
         dataset_name="shared_without_permissions",
@@ -256,7 +256,7 @@ async def test_agent_memory_persists_trace_to_session_store_integration(
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         user=owner,
         session_id="trace-success",
     )
@@ -283,6 +283,45 @@ async def test_agent_memory_persists_trace_to_session_store_integration(
 
 
 @pytest.mark.asyncio
+async def test_agent_memory_periodically_memifies_recent_trace_steps_integration(
+    agent_memory_integration_env,
+    monkeypatch,
+):
+    """Periodic trace memify should trigger only when the step count hits the configured interval."""
+    owner = await create_user(f"owner_{uuid4().hex[:8]}@example.com", "example")
+    session_id = "trace-periodic-memify"
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    @cognee.agent_memory(
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=2,
+        user=owner,
+        session_id=session_id,
+        dataset_name="integration_dataset",
+    )
+    async def traced_agent(step: str) -> str:
+        return step
+
+    assert await traced_agent("first") == "first"
+    persist_memify_mock.assert_not_awaited()
+
+    assert await traced_agent("second") == "second"
+    persist_memify_mock.assert_awaited_once_with(
+        user=owner,
+        session_ids=[session_id],
+        dataset="integration_dataset",
+        raw_trace_content=False,
+        last_n_steps=2,
+        run_in_background=False,
+    )
+
+
+@pytest.mark.asyncio
 async def test_agent_memory_can_disable_trace_summary_generation_integration(
     agent_memory_integration_env,
 ):
@@ -292,7 +331,7 @@ async def test_agent_memory_can_disable_trace_summary_generation_integration(
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         session_trace_summary=False,
         user=owner,
         session_id="trace-fallback-feedback",
@@ -349,7 +388,7 @@ async def test_agent_memory_persists_full_trace_payload_with_cognee_memory_integ
 
     @cognee.agent_memory(
         with_memory=True,
-        save_traces=True,
+        save_session_traces=True,
         user=member,
         dataset_name=dataset_name,
         session_id=session_id,
@@ -398,7 +437,7 @@ async def test_agent_memory_persists_error_trace_and_reraises_integration(
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         user=owner,
         session_id="trace-error",
     )
@@ -456,7 +495,7 @@ async def test_agent_memory_retrieves_recent_session_memory_integration(
     @cognee.agent_memory(
         with_memory=False,
         with_session_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=user,
         session_id=session_id,
         session_memory_last_n=2,
@@ -512,7 +551,7 @@ async def test_agent_memory_combines_session_and_cognee_memory_integration(
     @cognee.agent_memory(
         with_memory=True,
         with_session_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=member,
         dataset_name=dataset_name,
         session_id=session_id,

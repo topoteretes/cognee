@@ -28,7 +28,7 @@ MAX_MEMORY_CONTEXT_LENGTH = 4000
 class AgentMemoryConfig:
     with_memory: bool
     with_session_memory: bool
-    save_traces: bool
+    save_session_traces: bool
     memory_query_fixed: Optional[str]
     memory_query_from_method: Optional[str]
     memory_system_prompt: Optional[str]
@@ -39,6 +39,8 @@ class AgentMemoryConfig:
     user: Optional[User]
     dataset_name: Optional[str]
     session_trace_summary: bool
+    persist_session_trace_after: Optional[int]
+    persist_session_trace_raw_content: bool
 
 
 @dataclass(slots=True)
@@ -90,7 +92,7 @@ def validate_agent_memory_config(
     *,
     with_memory: bool,
     with_session_memory: bool,
-    save_traces: bool,
+    save_session_traces: bool,
     memory_query_fixed: Optional[str],
     memory_query_from_method: Optional[str],
     memory_system_prompt: Optional[str],
@@ -101,18 +103,25 @@ def validate_agent_memory_config(
     user: Optional[User],
     dataset_name: Optional[str],
     session_trace_summary: bool,
+    persist_session_trace_after: Optional[int],
+    persist_session_trace_raw_content: bool,
 ) -> AgentMemoryConfig:
     """Validate and normalize the public decorator configuration."""
     if not isinstance(with_memory, bool):
         raise CogneeValidationError("with_memory must be a boolean.", log=False)
     if not isinstance(with_session_memory, bool):
         raise CogneeValidationError("with_session_memory must be a boolean.", log=False)
-    if not isinstance(save_traces, bool):
-        raise CogneeValidationError("save_traces must be a boolean.", log=False)
+    if not isinstance(save_session_traces, bool):
+        raise CogneeValidationError("save_session_traces must be a boolean.", log=False)
     if not isinstance(memory_only_context, bool):
         raise CogneeValidationError("memory_only_context must be a boolean.", log=False)
     if not isinstance(session_trace_summary, bool):
         raise CogneeValidationError("session_trace_summary must be a boolean.", log=False)
+    if not isinstance(persist_session_trace_raw_content, bool):
+        raise CogneeValidationError(
+            "persist_session_trace_raw_content must be a boolean.",
+            log=False,
+        )
     if memory_query_fixed is not None and not isinstance(memory_query_fixed, str):
         raise CogneeValidationError("memory_query_fixed must be a string when provided.", log=False)
     if memory_query_from_method is not None and not isinstance(memory_query_from_method, str):
@@ -150,6 +159,18 @@ def validate_agent_memory_config(
             "session_memory_last_n must be a positive integer.",
             log=False,
         )
+    if persist_session_trace_after is not None and (
+        not isinstance(persist_session_trace_after, int) or persist_session_trace_after < 1
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_after must be a positive integer when provided.",
+            log=False,
+        )
+    if persist_session_trace_after is not None and not save_session_traces:
+        raise CogneeValidationError(
+            "persist_session_trace_after requires save_session_traces=True.",
+            log=False,
+        )
     if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
         raise CogneeValidationError(
             "session_id must be a non-empty string when provided.",
@@ -166,7 +187,7 @@ def validate_agent_memory_config(
     return AgentMemoryConfig(
         with_memory=with_memory,
         with_session_memory=with_session_memory,
-        save_traces=save_traces,
+        save_session_traces=save_session_traces,
         memory_query_fixed=(
             memory_query_fixed.strip() if isinstance(memory_query_fixed, str) else None
         ),
@@ -183,6 +204,8 @@ def validate_agent_memory_config(
         user=user,
         dataset_name=dataset_name.strip() if isinstance(dataset_name, str) else None,
         session_trace_summary=session_trace_summary,
+        persist_session_trace_after=persist_session_trace_after,
+        persist_session_trace_raw_content=persist_session_trace_raw_content,
     )
 
 
@@ -389,15 +412,16 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
 
 async def persist_trace(context: AgentMemoryContext) -> None:
     """Persist one agent trace step into session-backed storage."""
-    if not context.config.save_traces or context.user is None:
+    if not context.config.save_session_traces or context.user is None:
         return
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
     session_manager = get_session_manager()
+    user_id = str(context.user.id)
     try:
         await session_manager.add_agent_trace_step(
-            user_id=str(context.user.id),
+            user_id=user_id,
             session_id=context.config.session_id,
             origin_function=context.origin_function,
             status=context.status,
@@ -411,6 +435,40 @@ async def persist_trace(context: AgentMemoryContext) -> None:
     except Exception as error:
         logger.warning(
             "Agent trace persistence failed for %s: %s",
+            context.origin_function,
+            error,
+            exc_info=False,
+        )
+        return
+
+    if context.config.persist_session_trace_after is None:
+        return
+
+    resolved_session_id = context.config.session_id or session_manager.default_session_id
+
+    try:
+        trace_count = await session_manager.get_agent_trace_count(
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
+        if trace_count % context.config.persist_session_trace_after != 0:
+            return
+
+        from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
+            persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
+        )
+
+        await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
+            user=context.user,
+            session_ids=[resolved_session_id],
+            dataset=context.config.dataset_name or "main_dataset",
+            raw_trace_content=context.config.persist_session_trace_raw_content,
+            last_n_steps=context.config.persist_session_trace_after,
+            run_in_background=False,
+        )
+    except Exception as error:
+        logger.warning(
+            "Agent trace memify persistence failed for %s: %s",
             context.origin_function,
             error,
             exc_info=False,

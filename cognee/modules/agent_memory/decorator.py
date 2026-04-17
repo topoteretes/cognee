@@ -24,7 +24,7 @@ def agent_memory(
     *,
     with_memory: bool = True,
     with_session_memory: bool = False,
-    save_traces: bool = False,
+    save_session_traces: bool = False,
     memory_query_fixed: Optional[str] = None,
     memory_query_from_method: Optional[str] = None,
     memory_system_prompt: Optional[str] = None,
@@ -35,12 +35,14 @@ def agent_memory(
     user: Optional[User] = None,
     dataset_name: Optional[str] = None,
     session_trace_summary: bool = True,
+    persist_session_trace_after: Optional[int] = None,
+    persist_session_trace_raw_content: bool = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorate an async agent entrypoint with optional Cognee memory and trace persistence."""
     config = validate_agent_memory_config(
         with_memory=with_memory,
         with_session_memory=with_session_memory,
-        save_traces=save_traces,
+        save_session_traces=save_session_traces,
         memory_query_fixed=memory_query_fixed,
         memory_query_from_method=memory_query_from_method,
         memory_system_prompt=memory_system_prompt,
@@ -51,6 +53,8 @@ def agent_memory(
         user=user,
         dataset_name=dataset_name,
         session_trace_summary=session_trace_summary,
+        persist_session_trace_after=persist_session_trace_after,
+        persist_session_trace_raw_content=persist_session_trace_raw_content,
     )
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -74,7 +78,7 @@ def agent_memory(
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             resolved_user = None
             scope = None
-            if config.with_memory or config.with_session_memory or config.save_traces:
+            if config.with_memory or config.with_session_memory or config.save_session_traces:
                 resolved_user = await resolve_agent_user(config)
                 if config.with_memory:
                     scope = await resolve_agent_dataset_scope(config, resolved_user)
