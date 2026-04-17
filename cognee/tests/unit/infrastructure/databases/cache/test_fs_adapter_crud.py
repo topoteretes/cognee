@@ -130,6 +130,30 @@ async def test_get_agent_trace_feedback_returns_feedback_only(adapter):
 
 
 @pytest.mark.asyncio
+async def test_get_agent_trace_feedback_returns_only_last_n(adapter):
+    """Trace feedback helper can return only the most recent feedback strings."""
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t1",
+        origin_function="plan_trip",
+        status="success",
+        session_feedback="plan_trip succeeded.",
+    )
+    await adapter.append_agent_trace_step(
+        "u1",
+        "s1",
+        trace_id="t2",
+        origin_function="book_hotel",
+        status="error",
+        session_feedback="book_hotel failed.",
+    )
+
+    feedback = await adapter.get_agent_trace_feedback("u1", "s1", last_n=1)
+    assert feedback == ["book_hotel failed."]
+
+
+@pytest.mark.asyncio
 async def test_get_agent_trace_session_missing_returns_empty(adapter):
     """Missing trace sessions return an empty list."""
     assert await adapter.get_agent_trace_session("u1", "missing") == []

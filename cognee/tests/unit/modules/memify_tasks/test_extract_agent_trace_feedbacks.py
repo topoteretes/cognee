@@ -53,6 +53,7 @@ async def test_extract_agent_trace_feedbacks_success(mock_user):
     mock_session_manager.get_agent_trace_feedback.assert_called_once_with(
         user_id="test-user-123",
         session_id="trace_session",
+        last_n=None,
     )
 
 
@@ -210,6 +211,7 @@ async def test_extract_agent_trace_feedbacks_can_extract_raw_return_values(mock_
     mock_session_manager.get_agent_trace_session.assert_awaited_once_with(
         user_id="test-user-123",
         session_id="trace_session",
+        last_n=None,
     )
     mock_session_manager.get_agent_trace_feedback.assert_not_called()
 
@@ -244,6 +246,7 @@ async def test_extract_agent_trace_feedbacks_skips_empty_raw_return_values(mock_
     mock_session_manager.get_agent_trace_session.assert_awaited_once_with(
         user_id="test-user-123",
         session_id="trace_session",
+        last_n=None,
     )
     mock_session_manager.get_agent_trace_feedback.assert_not_called()
 
@@ -269,3 +272,101 @@ async def test_extract_agent_trace_feedbacks_rejects_non_boolean_raw_trace_conte
                 raw_trace_content="yes",
             ):
                 pass
+
+
+@pytest.mark.asyncio
+async def test_extract_agent_trace_feedbacks_limits_to_last_n_steps(mock_user):
+    mock_session_manager = _make_mock_session_manager(
+        ["first step", "second step", "third step", "fourth step"]
+    )
+
+    with (
+        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_agent_trace_feedbacks_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        feedback_sessions = []
+        async for feedback in extract_agent_trace_feedbacks(
+            [{}],
+            session_ids=["trace_session"],
+            last_n_steps=2,
+    ):
+            feedback_sessions.append(feedback)
+
+    assert feedback_sessions == ["Session ID: trace_session\n\nthird step\nfourth step"]
+    mock_session_manager.get_agent_trace_feedback.assert_called_once_with(
+        user_id="test-user-123",
+        session_id="trace_session",
+        last_n=2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extract_agent_trace_feedbacks_limits_raw_return_values_to_last_n_steps(mock_user):
+    mock_session_manager = _make_mock_session_manager([])
+    mock_session_manager.get_agent_trace_session.return_value = [
+        {"method_return_value": "first return"},
+        {"method_return_value": "second return"},
+        {"method_return_value": "third return"},
+    ]
+
+    with (
+        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_agent_trace_feedbacks_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        extracted_values = []
+        async for value in extract_agent_trace_feedbacks(
+            [{}],
+            session_ids=["trace_session"],
+            raw_trace_content=True,
+            last_n_steps=2,
+        ):
+            extracted_values.append(value)
+
+    assert extracted_values == ["Session ID: trace_session\n\nsecond return\nthird return"]
+
+
+async def test_extract_agent_trace_feedbacks_passes_last_n_to_raw_trace_lookup(mock_user):
+    mock_session_manager = _make_mock_session_manager([])
+    mock_session_manager.get_agent_trace_session.return_value = [
+        {"method_return_value": "first return"},
+        {"method_return_value": "second return"},
+        {"method_return_value": "third return"},
+    ]
+
+    with (
+        patch.object(extract_agent_trace_feedbacks_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_agent_trace_feedbacks_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        extracted_values = []
+        async for value in extract_agent_trace_feedbacks(
+            [{}],
+            session_ids=["trace_session"],
+            raw_trace_content=True,
+            last_n_steps=2,
+        ):
+            extracted_values.append(value)
+
+    assert extracted_values == ["Session ID: trace_session\n\nsecond return\nthird return"]
+    mock_session_manager.get_agent_trace_session.assert_awaited_once_with(
+        user_id="test-user-123",
+        session_id="trace_session",
+        last_n=2,
+    )

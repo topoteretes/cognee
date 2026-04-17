@@ -38,6 +38,7 @@ async def test_persist_agent_trace_feedbacks_pipeline_wires_memify_tasks():
             dataset="main_dataset",
             node_set_name="custom_feedbacks",
             raw_trace_content=True,
+            last_n_steps=3,
         )
 
     assert result == {"status": "ok"}
@@ -55,5 +56,6 @@ async def test_persist_agent_trace_feedbacks_pipeline_wires_memify_tasks():
     enrichment_task = memify_kwargs["enrichment_tasks"][0]
     assert extraction_task.default_params["kwargs"]["session_ids"] == ["s1", "s2"]
     assert extraction_task.default_params["kwargs"]["raw_trace_content"] is True
+    assert extraction_task.default_params["kwargs"]["last_n_steps"] == 3
     assert enrichment_task.default_params["kwargs"]["dataset_id"] == "dataset-1"
     assert enrichment_task.default_params["kwargs"]["node_set_name"] == "custom_feedbacks"

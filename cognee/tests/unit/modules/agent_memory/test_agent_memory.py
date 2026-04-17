@@ -468,6 +468,7 @@ async def test_retrieve_memory_context_session_memory_only_skips_search(monkeypa
     session_manager.get_agent_trace_feedback.assert_awaited_once_with(
         user_id=str(user.id),
         session_id=None,
+        last_n=2,
     )
 
 
@@ -496,6 +497,7 @@ async def test_retrieve_memory_context_session_memory_returns_empty_on_session_m
     session_manager.get_agent_trace_feedback.assert_awaited_once_with(
         user_id=str(user.id),
         session_id=None,
+        last_n=10,
     )
 
 
@@ -834,6 +836,7 @@ async def test_session_memory_decorator_flow_injects_into_llmgateway(monkeypatch
     session_manager.get_agent_trace_feedback.assert_awaited_once_with(
         user_id=str(user.id),
         session_id="session-1",
+        last_n=2,
     )
     assert (
         llm_client.acreate_structured_output.await_args.kwargs["text_input"]
