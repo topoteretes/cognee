@@ -31,7 +31,7 @@ async def setup_memory() -> None:
         (
             "Internal product note for the Cognee agentic memory feature: "
             "the private internal codename for the first supported `cognee.agent_memory` release "
-            "is Panda"
+            "is Maple Panda"
         ),
         self_improvement=False,
     )
