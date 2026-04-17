@@ -12,6 +12,7 @@ class CacheDBInterface(ABC):
     def __init__(
         self, host: str, port: int, lock_key: str = "default_lock", log_key: str = "usage_logs"
     ):
+        """Store shared cache/lock configuration for concrete adapter implementations."""
         self.host = host
         self.port = port
         self.lock_key = lock_key

@@ -672,6 +672,7 @@ class SessionManager:
 
     @staticmethod
     def _graph_context_key(user_id: str, session_id: str) -> str:
+        """Build the cache key used for session-scoped graph knowledge snapshots."""
         return f"graph_knowledge:{user_id}:{session_id}"
 
     async def get_graph_context(self, *, user_id: str, session_id: Optional[str] = None) -> str:

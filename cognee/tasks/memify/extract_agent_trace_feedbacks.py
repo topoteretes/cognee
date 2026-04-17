@@ -11,6 +11,7 @@ logger = get_logger("extract_agent_trace_feedbacks")
 
 
 def _normalize_trace_content(value) -> Optional[str]:
+    """Convert raw trace content into a non-empty string suitable for memify payloads."""
     if value is None:
         return None
     if isinstance(value, str):

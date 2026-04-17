@@ -26,6 +26,8 @@ MAX_MEMORY_CONTEXT_LENGTH = 4000
 
 @dataclass(slots=True)
 class AgentMemoryConfig:
+    """Validated decorator configuration used for one wrapped agent invocation."""
+
     with_memory: bool
     with_session_memory: bool
     save_session_traces: bool
@@ -45,6 +47,8 @@ class AgentMemoryConfig:
 
 @dataclass(slots=True)
 class AgentScope:
+    """Authorized dataset scope resolved for Cognee-backed memory retrieval."""
+
     user: User
     dataset_name: str
     dataset_id: UUID
@@ -52,6 +56,8 @@ class AgentScope:
 
 @dataclass(slots=True)
 class AgentMemoryContext:
+    """Per-call execution state shared across retrieval, wrapped call, and trace persistence."""
+
     origin_function: str
     config: AgentMemoryConfig
     method_params: dict[str, Any]
