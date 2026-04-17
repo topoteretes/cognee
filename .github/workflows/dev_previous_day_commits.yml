@@ -88,8 +88,8 @@ jobs:
 
       - name: Generate branch notes
         env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
           NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
         run: |
@@ -104,8 +104,8 @@ jobs:
       - name: Assess documentation impact for branch
         id: assessment
         env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
           NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
           ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
