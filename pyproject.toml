@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.0.0"
+version = "1.0.1"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -103,7 +103,7 @@ langchain = [
     "langchain_text_splitters>=0.3.2,<1.0.0",
     "langchain-core>=1.2.5"
 ]
-llama-index = ["llama-index-core>=0.13.0,<0.14"]
+llama-index = ["llama-index-core>=0.14.20,<0.15"]
 huggingface = ["transformers>=4.46.3,<5"]
 ollama = ["transformers>=4.46.3,<5"]
 mistral = ["mistral-common>=1.5.2,<2", "mistralai>=1.9.10,<2"]
@@ -121,6 +121,7 @@ docs = [
     "lxml>=4.9.3,<5 ; python_version < '3.13'",
     "lxml>=5,<6 ; python_version >= '3.13'",
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
+    "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
@@ -218,6 +219,7 @@ constraint-dependencies = [
     "protobuf>=5.29.6, !=6.30.*, !=6.31.*, !=6.32.*, !=6.33.1, !=6.33.2, !=6.33.3, !=6.33.4", # protobuf 6.33.5 and higher versions + version 5.29.6
     "pyasn1>=0.6.2",
     "wheel>=0.46.2",
+    "nltk>=3.9.3",
 ]
 
 [tool.ruff]
