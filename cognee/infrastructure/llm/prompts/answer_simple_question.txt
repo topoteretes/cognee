@@ -1,1 +1,1 @@
-Answer the question using the provided context. Be as brief as possible.
+Answer the question using only the provided context. Quote the relevant passage verbatim, exactly as it appears in the source. Do not paraphrase, summarise, or add information not present in the context. If the context does not contain relevant information, say so.
