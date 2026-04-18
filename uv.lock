@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine != 's390x'",
@@ -16,6 +16,7 @@ resolution-markers = [
 
 [manifest]
 constraints = [
+    { name = "nltk", specifier = ">=3.9.3" },
     { name = "protobuf", specifier = ">=5.29.6,!=6.30.*,!=6.31.*,!=6.32.*,!=6.33.1,!=6.33.2,!=6.33.3,!=6.33.4" },
     { name = "pyasn1", specifier = ">=0.6.2" },
     { name = "wheel", specifier = ">=0.46.2" },
