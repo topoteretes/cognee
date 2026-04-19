@@ -54,9 +54,7 @@ async def _record_session_activity(
         await ensure_session(session_id=session_id, user_id=user_uuid)
         await touch_session(session_id=session_id, user_id=user_uuid)
         if errored:
-            await accumulate_usage(
-                session_id=session_id, user_id=user_uuid, errored=True
-            )
+            await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
     except Exception as exc:
         logger.debug("SessionManager: session_records write failed (%s)", exc)
 

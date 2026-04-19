@@ -99,8 +99,7 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
     unknown = [s for s in scopes if s not in _VALID_SCOPES]
     if unknown:
         raise ValueError(
-            f"Unknown recall scope(s): {unknown}. "
-            f"Valid values: {sorted(_VALID_SCOPES)}"
+            f"Unknown recall scope(s): {unknown}. Valid values: {sorted(_VALID_SCOPES)}"
         )
 
     if "all" in scopes:

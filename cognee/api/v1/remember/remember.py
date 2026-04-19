@@ -223,9 +223,7 @@ async def _dispatch_session_entry(
 
     sm = get_session_manager()
     if not sm.is_available:
-        raise RuntimeError(
-            "Session cache unavailable — set CACHING=true to enable session memory"
-        )
+        raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
     result = RememberResult(
         status="session_stored",
@@ -282,9 +280,7 @@ async def _dispatch_session_entry(
         result.entry_id = entry.qa_id
         if not ok:
             result.status = "errored"
-            result.error = (
-                f"add_feedback: QA {entry.qa_id} not found in session {session_id}"
-            )
+            result.error = f"add_feedback: QA {entry.qa_id} not found in session {session_id}"
         return result
 
     raise TypeError(f"Unsupported memory entry type: {type(entry).__name__}")

@@ -125,9 +125,11 @@ def get_sessions_router() -> APIRouter:
             avg_seconds = (total_seconds / session_count) if session_count else 0.0
 
             # Status buckets (using effective status)
-            status_stmt = select(eff.label("s"), func.count().label("c")).where(
-                and_(*base_filter)
-            ).group_by("s")
+            status_stmt = (
+                select(eff.label("s"), func.count().label("c"))
+                .where(and_(*base_filter))
+                .group_by("s")
+            )
             status_rows = (await session.execute(status_stmt)).all()
             buckets = {s: c for s, c in status_rows}
             completed = buckets.get(SessionStatus.COMPLETED.value, 0)

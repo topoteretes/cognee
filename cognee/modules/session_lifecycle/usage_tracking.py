@@ -96,8 +96,12 @@ async def record_llm_call(
         return
     session_id, user_id = target
 
-    tokens_in = tokens_in_override if tokens_in_override is not None else _estimate_tokens(input_text)
-    tokens_out = tokens_out_override if tokens_out_override is not None else _estimate_tokens(output_text)
+    tokens_in = (
+        tokens_in_override if tokens_in_override is not None else _estimate_tokens(input_text)
+    )
+    tokens_out = (
+        tokens_out_override if tokens_out_override is not None else _estimate_tokens(output_text)
+    )
     cost = _estimate_cost_usd(model, tokens_in, tokens_out)
 
     try:

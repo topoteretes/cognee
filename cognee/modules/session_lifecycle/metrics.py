@@ -200,9 +200,7 @@ async def mark_ended(
 ) -> None:
     """Transition to a terminal status (completed / failed)."""
     if status == SessionStatus.RUNNING or status == SessionStatus.ABANDONED:
-        raise ValueError(
-            f"mark_ended requires a terminal status (completed/failed), got {status}"
-        )
+        raise ValueError(f"mark_ended requires a terminal status (completed/failed), got {status}")
 
     now = datetime.now(timezone.utc)
     engine = get_relational_engine()
