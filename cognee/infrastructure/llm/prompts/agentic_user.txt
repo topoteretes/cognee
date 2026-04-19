@@ -1,0 +1,6 @@
+Question: `{{ question }}`
+
+Current context (memory, skills, tools, and any prior tool results):
+{{ context }}
+
+Emit one AgentStep. Set tool_call to run a tool, or set final_answer when done.
