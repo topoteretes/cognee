@@ -64,7 +64,7 @@ export default function ApiKeysPage() {
   async function loadKeys() {
     try {
       const data = await getApiKeys();
-      setKeys(Array.isArray(data) ? data.map((k) => ({ ...k, name: k.label || "", isNew: false })) : []);
+      setKeys(Array.isArray(data) ? data.map((k) => ({ ...k, name: k.name || k.label || "", isNew: false })) : []);
     } catch {
       setKeys([]);
     } finally {
