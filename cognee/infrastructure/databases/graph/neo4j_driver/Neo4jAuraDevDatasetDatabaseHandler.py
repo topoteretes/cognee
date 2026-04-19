@@ -28,13 +28,21 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs
+    ) -> dict:
         """
         Create a new Neo4j Aura instance for the dataset. Return connection info that will be mapped to the dataset.
 
         Args:
             dataset_id: Dataset UUID
             user: User object who owns the dataset and is making the request
+            **kwargs: Optional overrides for the Aura instance payload fields:
+                version (str): Neo4j version, default "5"
+                region (str): Cloud region, default "europe-west1"
+                memory (str): Instance memory, default "1GB"
+                type (str): Instance type, default "professional-db"
+                cloud_provider (str): Cloud provider, default "gcp"
 
         Returns:
             dict: Connection details for the created Neo4j instance
@@ -47,7 +55,9 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 "Neo4jAuraDevDatasetDatabaseHandler can only be used with Neo4j graph database provider."
             )
 
-        graph_db_name = f"{dataset_id}"
+        # Use SHA-256 hash of the dataset ID for a compact, collision-resistant name
+        # that fits within Neo4j Aura's 30-character limit without hyphens
+        graph_db_name = hashlib.sha256(str(dataset_id).encode()).hexdigest()[:29]
 
         # Client credentials and encryption
         # Note: Should not be used as class variables so that they are not persisted in memory longer than needed
@@ -75,18 +85,14 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "Content-Type": "application/json",
         }
 
-        # TODO: Maybe we can allow **kwargs parameter forwarding for cases like these
-        #       Too allow different configurations between datasets
         payload = {
-            "version": "5",
-            "region": "europe-west1",
-            "memory": "1GB",
-            "name": graph_db_name[
-                0:29
-            ],  # TODO: Find better name to name Neo4j instance within 30 character limit
-            "type": "professional-db",
+            "version": kwargs.get("version", "5"),
+            "region": kwargs.get("region", "europe-west1"),
+            "memory": kwargs.get("memory", "1GB"),
+            "name": graph_db_name,
+            "type": kwargs.get("type", "professional-db"),
             "tenant_id": tenant_id,
-            "cloud_provider": "gcp",
+            "cloud_provider": kwargs.get("cloud_provider", "gcp"),
         }
 
         async def _create_database_instance_request():
