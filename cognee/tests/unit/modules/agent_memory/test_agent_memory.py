@@ -37,15 +37,19 @@ def _make_config(**overrides):
     defaults = {
         "with_memory": True,
         "with_session_memory": False,
-        "save_traces": False,
+        "save_session_traces": False,
         "memory_query_fixed": None,
         "memory_query_from_method": None,
         "memory_system_prompt": None,
         "memory_top_k": 5,
+        "memory_only_context": False,
         "session_memory_last_n": 5,
         "session_id": None,
         "user": None,
         "dataset_name": None,
+        "session_trace_summary": True,
+        "persist_session_trace_after": None,
+        "persist_session_trace_raw_content": False,
     }
     defaults.update(overrides)
     return AgentMemoryConfig(**defaults)
@@ -138,8 +142,15 @@ def test_agent_memory_rejects_sync_functions():
         {"memory_query_from_method": "   "},
         {"memory_system_prompt": "   "},
         {"memory_system_prompt": 123},
+        {"memory_only_context": "yes"},
         {"session_id": "   "},
         {"session_memory_last_n": 0},
+        {"save_session_traces": "yes"},
+        {"session_trace_summary": "no"},
+        {"persist_session_trace_after": 0},
+        {"persist_session_trace_after": "5"},
+        {"persist_session_trace_after": 5, "save_session_traces": False},
+        {"persist_session_trace_raw_content": "yes"},
         {"memory_query_fixed": "Fixed query", "memory_query_from_method": "question"},
     ],
 )
@@ -156,6 +167,24 @@ def test_agent_memory_rejects_missing_task_query_from_method_param():
             return prompt
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"with_session_memory": True},
+        {"save_session_traces": True},
+        {"save_session_traces": True, "persist_session_trace_after": 2},
+    ],
+)
+def test_agent_memory_requires_caching_for_session_backed_features(monkeypatch, kwargs):
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.cache.config.get_cache_config",
+        lambda: SimpleNamespace(caching=False),
+    )
+
+    with pytest.raises(CogneeValidationError, match="Caching must be enabled"):
+        cognee.agent_memory(**kwargs)
+
+
 @pytest.mark.asyncio
 async def test_agent_memory_sets_and_clears_context(monkeypatch):
     resolved_user = _make_user()
@@ -167,7 +196,7 @@ async def test_agent_memory_sets_and_clears_context(monkeypatch):
         memory_context="memory",
     )[3]
 
-    @cognee.agent_memory(with_memory=True, save_traces=True)
+    @cognee.agent_memory(with_memory=True, save_session_traces=True)
     async def sample_agent(question: str) -> str:
         context = get_current_agent_memory_context()
         assert context is not None
@@ -188,7 +217,11 @@ async def test_agent_memory_noop_mode_does_not_resolve_user_or_scope(monkeypatch
         monkeypatch
     )
 
-    @cognee.agent_memory(with_memory=False, with_session_memory=False, save_traces=False)
+    @cognee.agent_memory(
+        with_memory=False,
+        with_session_memory=False,
+        save_session_traces=False,
+    )
     async def sample_agent() -> str:
         return "answer"
 
@@ -208,7 +241,7 @@ async def test_agent_memory_with_session_memory_resolves_user_but_not_dataset_sc
         memory_context="Recent Session Memory:\nprevious plan",
     )
 
-    @cognee.agent_memory(with_memory=False, with_session_memory=True, save_traces=False)
+    @cognee.agent_memory(with_memory=False, with_session_memory=True, save_session_traces=False)
     async def sample_agent() -> str:
         context = get_current_agent_memory_context()
         assert context is not None
@@ -235,7 +268,7 @@ async def test_agent_memory_persists_error_trace_when_memory_retrieval_fails(mon
         persist_trace_mock=persist_trace_mock,
     )
 
-    @cognee.agent_memory(with_memory=True, save_traces=True)
+    @cognee.agent_memory(with_memory=True, save_session_traces=True)
     async def sample_agent() -> str:
         pytest.fail("wrapped function should not run when memory retrieval fails")
 
@@ -268,7 +301,7 @@ async def test_agent_memory_isolated_between_decorated_methods_with_different_us
 
     @cognee.agent_memory(
         with_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=owner_scope.user,
         dataset_name="shared",
         memory_query_fixed="owner secret",
@@ -278,7 +311,7 @@ async def test_agent_memory_isolated_between_decorated_methods_with_different_us
 
     @cognee.agent_memory(
         with_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=other_scope.user,
         dataset_name="shared",
         memory_query_fixed="owner secret",
@@ -309,14 +342,22 @@ async def test_agent_memory_restores_outer_context_after_nested_decorated_call(m
         retrieve_side_effect=fake_retrieve_memory,
     )
 
-    @cognee.agent_memory(with_memory=True, save_traces=False, memory_query_fixed="outer")
+    @cognee.agent_memory(
+        with_memory=True,
+        save_session_traces=False,
+        memory_query_fixed="outer",
+    )
     async def outer_agent() -> tuple[str, str, str]:
         outer_before = get_current_agent_memory_context().memory_context
         inner_result = await inner_agent()
         outer_after = get_current_agent_memory_context().memory_context
         return outer_before, inner_result, outer_after
 
-    @cognee.agent_memory(with_memory=True, save_traces=False, memory_query_fixed="inner")
+    @cognee.agent_memory(
+        with_memory=True,
+        save_session_traces=False,
+        memory_query_fixed="inner",
+    )
     async def inner_agent() -> str:
         return get_current_agent_memory_context().memory_context
 
@@ -345,6 +386,7 @@ async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
     assert search_mock.await_args.kwargs["query_type"] == cognee.SearchType.GRAPH_SUMMARY_COMPLETION
     assert search_mock.await_args.kwargs["system_prompt"] is None
     assert search_mock.await_args.kwargs["top_k"] == 7
+    assert search_mock.await_args.kwargs["only_context"] is False
 
 
 @pytest.mark.asyncio
@@ -359,6 +401,24 @@ async def test_retrieve_memory_context_passes_custom_memory_system_prompt(monkey
     )
 
     assert await retrieve_memory_context(context) == "Relevant Cognee Memory:\nRelevant memory"
+    assert search_mock.await_args.kwargs["system_prompt"] == "Return only product codenames."
+    assert search_mock.await_args.kwargs["only_context"] is False
+
+
+@pytest.mark.asyncio
+async def test_retrieve_memory_context_can_request_context_only_search(monkeypatch):
+    search_mock = AsyncMock(return_value=["Relevant memory"])
+    monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
+
+    context = _make_context(
+        method_params={"question": "ignored"},
+        memory_query_fixed="Find memory",
+        memory_system_prompt="Return only product codenames.",
+        memory_only_context=True,
+    )
+
+    assert await retrieve_memory_context(context) == "Relevant Cognee Memory:\nRelevant memory"
+    assert search_mock.await_args.kwargs["only_context"] is True
     assert search_mock.await_args.kwargs["system_prompt"] == "Return only product codenames."
 
 
@@ -424,8 +484,14 @@ async def test_retrieve_memory_context_query_resolution(
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_session_memory_only_skips_search(monkeypatch):
     search_mock = AsyncMock()
+
+    async def get_agent_trace_feedback(*, user_id, session_id, last_n=None):
+        del user_id, session_id
+        values = ["first", " ", "second", "third"]
+        return values if last_n is None else values[-last_n:]
+
     session_manager = SimpleNamespace(
-        get_agent_trace_feedback=AsyncMock(return_value=["first", " ", "second", "third"])
+        get_agent_trace_feedback=AsyncMock(side_effect=get_agent_trace_feedback)
     )
     monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
     _patch_session_manager(monkeypatch, session_manager)
@@ -445,6 +511,7 @@ async def test_retrieve_memory_context_session_memory_only_skips_search(monkeypa
     session_manager.get_agent_trace_feedback.assert_awaited_once_with(
         user_id=str(user.id),
         session_id=None,
+        last_n=2,
     )
 
 
@@ -473,6 +540,7 @@ async def test_retrieve_memory_context_session_memory_returns_empty_on_session_m
     session_manager.get_agent_trace_feedback.assert_awaited_once_with(
         user_id=str(user.id),
         session_id=None,
+        last_n=5,
     )
 
 
@@ -492,8 +560,14 @@ async def test_retrieve_memory_context_search_only_skips_session_manager(monkeyp
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_combines_session_and_cognee_memory(monkeypatch):
     search_mock = AsyncMock(return_value=["Relevant memory"])
+
+    async def get_agent_trace_feedback(*, user_id, session_id, last_n=None):
+        del user_id, session_id
+        values = ["Earlier step", "Most recent step"]
+        return values if last_n is None else values[-last_n:]
+
     session_manager = SimpleNamespace(
-        get_agent_trace_feedback=AsyncMock(return_value=["Earlier step", "Most recent step"])
+        get_agent_trace_feedback=AsyncMock(side_effect=get_agent_trace_feedback)
     )
     monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
     _patch_session_manager(monkeypatch, session_manager)
@@ -541,7 +615,7 @@ async def test_resolve_agent_dataset_scope_defaults_to_main_dataset(monkeypatch)
         permissions,
     )
 
-    config = _make_config(save_traces=True)
+    config = _make_config(save_session_traces=True)
     resolved_user = await resolve_agent_user(config)
     scope = await resolve_agent_dataset_scope(config, resolved_user)
 
@@ -613,14 +687,17 @@ async def test_resolve_agent_dataset_scope_validates_permissions(
 
 @pytest.mark.asyncio
 async def test_persist_trace_uses_session_manager_with_structured_payload(monkeypatch):
-    session_manager = SimpleNamespace(add_agent_trace_step=AsyncMock())
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        default_session_id="default_session",
+    )
     _patch_session_manager(monkeypatch, session_manager)
 
     user = _make_user()
     context = _make_context(
         user=user,
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         session_id="trace-session",
         method_params={"question": "What does Cognee do?"},
     )
@@ -637,6 +714,7 @@ async def test_persist_trace_uses_session_manager_with_structured_payload(monkey
         session_id="trace-session",
         origin_function="test_agent",
         status="success",
+        generate_feedback_with_llm=True,
         memory_query="What does Cognee do?",
         memory_context="memory context",
         method_params={"question": "What does Cognee do?"},
@@ -647,11 +725,19 @@ async def test_persist_trace_uses_session_manager_with_structured_payload(monkey
 
 @pytest.mark.asyncio
 async def test_persist_trace_passes_none_session_id_for_default_resolution(monkeypatch):
-    session_manager = SimpleNamespace(add_agent_trace_step=AsyncMock())
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        default_session_id="default_session",
+    )
     _patch_session_manager(monkeypatch, session_manager)
 
     user = _make_user()
-    context = _make_context(user=user, with_memory=False, save_traces=True, session_id=None)
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        session_id=None,
+    )
     context.scope = None
 
     await persist_trace(context)
@@ -660,9 +746,294 @@ async def test_persist_trace_passes_none_session_id_for_default_resolution(monke
 
 
 @pytest.mark.asyncio
+async def test_persist_trace_can_disable_trace_summary_generation(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        session_id="trace-session",
+        session_trace_summary=False,
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    assert (
+        session_manager.add_agent_trace_step.await_args.kwargs["generate_feedback_with_llm"]
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_skips_all_work_when_session_trace_persistence_disabled(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        get_agent_trace_count=AsyncMock(),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    context = _make_context(with_memory=False, save_session_traces=False, user=_make_user())
+    context.scope = None
+
+    await persist_trace(context)
+
+    session_manager.add_agent_trace_step.assert_not_awaited()
+    session_manager.get_agent_trace_count.assert_not_awaited()
+    persist_memify_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_only_persists_session_trace_when_periodic_memify_disabled(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        get_agent_trace_count=AsyncMock(),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=None,
+        session_id="trace-session",
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    session_manager.add_agent_trace_step.assert_awaited_once()
+    session_manager.get_agent_trace_count.assert_not_awaited()
+    persist_memify_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_does_not_trigger_memify_before_trace_count_threshold(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        get_agent_trace_count=AsyncMock(return_value=4),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=5,
+        session_id="trace-session",
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    session_manager.add_agent_trace_step.assert_awaited_once()
+    session_manager.get_agent_trace_count.assert_awaited_once_with(
+        user_id=str(user.id),
+        session_id="trace-session",
+    )
+    persist_memify_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trace_count", [5, 10, 15])
+async def test_persist_trace_triggers_memify_when_trace_count_is_divisible(
+    monkeypatch, trace_count
+):
+    events = []
+
+    async def add_agent_trace_step(**kwargs):
+        del kwargs
+        events.append("add")
+
+    async def get_agent_trace_count(**kwargs):
+        del kwargs
+        events.append("count")
+        return trace_count
+
+    async def persist_memify(**kwargs):
+        del kwargs
+        events.append("memify")
+
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(side_effect=add_agent_trace_step),
+        get_agent_trace_count=AsyncMock(side_effect=get_agent_trace_count),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock(side_effect=persist_memify)
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=5,
+        session_id="trace-session",
+        dataset_name="agent_dataset",
+        persist_session_trace_raw_content=True,
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    session_manager.add_agent_trace_step.assert_awaited_once()
+    session_manager.get_agent_trace_count.assert_awaited_once_with(
+        user_id=str(user.id),
+        session_id="trace-session",
+    )
+    persist_memify_mock.assert_awaited_once_with(
+        user=user,
+        session_ids=["trace-session"],
+        dataset="agent_dataset",
+        raw_trace_content=True,
+        last_n_steps=5,
+        run_in_background=False,
+    )
+    assert events == ["add", "count", "memify"]
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_skips_memify_when_trace_count_is_zero(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        get_agent_trace_count=AsyncMock(return_value=0),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=5,
+        session_id="trace-session",
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    session_manager.add_agent_trace_step.assert_awaited_once()
+    session_manager.get_agent_trace_count.assert_awaited_once_with(
+        user_id=str(user.id),
+        session_id="trace-session",
+    )
+    persist_memify_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_uses_default_session_and_main_dataset_for_periodic_memify(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        get_agent_trace_count=AsyncMock(return_value=3),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=3,
+        session_id=None,
+        dataset_name=None,
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    session_manager.get_agent_trace_count.assert_awaited_once_with(
+        user_id=str(user.id),
+        session_id="default_session",
+    )
+    persist_memify_mock.assert_awaited_once_with(
+        user=user,
+        session_ids=["default_session"],
+        dataset="main_dataset",
+        raw_trace_content=False,
+        last_n_steps=3,
+        run_in_background=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_swallows_periodic_memify_errors(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        get_agent_trace_count=AsyncMock(return_value=2),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock(side_effect=RuntimeError("memify failed"))
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    context = _make_context(
+        user=_make_user(),
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=2,
+        session_id="trace-session",
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    session_manager.add_agent_trace_step.assert_awaited_once()
+    session_manager.get_agent_trace_count.assert_awaited_once()
+    persist_memify_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_agent_memory_persists_error_trace_and_reraises(monkeypatch):
     resolved_user = _make_user()
-    session_manager = SimpleNamespace(add_agent_trace_step=AsyncMock())
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        default_session_id="default_session",
+    )
 
     monkeypatch.setattr(
         "cognee.modules.agent_memory.decorator.resolve_agent_user",
@@ -674,7 +1045,7 @@ async def test_agent_memory_persists_error_trace_and_reraises(monkeypatch):
     )
     _patch_session_manager(monkeypatch, session_manager)
 
-    @cognee.agent_memory(with_memory=False, save_traces=True)
+    @cognee.agent_memory(with_memory=False, save_session_traces=True)
     async def failing_agent() -> str:
         raise RuntimeError("Intentional failure")
 
@@ -758,6 +1129,7 @@ async def test_session_memory_decorator_flow_injects_into_llmgateway(monkeypatch
     session_manager = SimpleNamespace(
         get_agent_trace_feedback=AsyncMock(return_value=["first step", "second step"]),
         add_agent_trace_step=AsyncMock(),
+        default_session_id="default_session",
     )
     _patch_session_manager(monkeypatch, session_manager)
     monkeypatch.setattr(
@@ -768,7 +1140,7 @@ async def test_session_memory_decorator_flow_injects_into_llmgateway(monkeypatch
     @cognee.agent_memory(
         with_memory=False,
         with_session_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         session_memory_last_n=2,
         session_id="session-1",
     )
@@ -787,6 +1159,7 @@ async def test_session_memory_decorator_flow_injects_into_llmgateway(monkeypatch
     session_manager.get_agent_trace_feedback.assert_awaited_once_with(
         user_id=str(user.id),
         session_id="session-1",
+        last_n=2,
     )
     assert (
         llm_client.acreate_structured_output.await_args.kwargs["text_input"]
