@@ -32,6 +32,7 @@ from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
 from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_RESULT_SUMMARY
+from cognee.events import emit as emit_event, INGEST_AFTER, INGEST_BEFORE
 
 
 logger = get_logger("cognify")
@@ -208,6 +209,14 @@ async def cognify(
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
 
+        await emit_event(
+            INGEST_BEFORE,
+            stage="cognify",
+            datasets=str(datasets) if datasets is not None else None,
+            temporal_cognify=temporal_cognify,
+            run_in_background=run_in_background,
+        )
+
         if config is None:
             ontology_config = get_ontology_env_config()
             if (
@@ -267,6 +276,14 @@ async def cognify(
         span.set_attribute(
             COGNEE_RESULT_SUMMARY,
             f"Cognify completed for {dataset_desc}",
+        )
+
+        await emit_event(
+            INGEST_AFTER,
+            stage="cognify",
+            datasets=str(datasets) if datasets is not None else None,
+            temporal_cognify=temporal_cognify,
+            run_in_background=run_in_background,
         )
 
         return result

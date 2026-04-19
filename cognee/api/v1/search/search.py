@@ -20,6 +20,7 @@ from cognee.modules.observability import (
     COGNEE_RESULT_SUMMARY,
     COGNEE_RESULT_COUNT,
 )
+from cognee.events import emit as emit_event, QUERY_AFTER, QUERY_BEFORE
 
 logger = get_logger()
 
@@ -214,6 +215,14 @@ async def search(
         span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))
         span.set_attribute("cognee.search.top_k", top_k)
 
+        await emit_event(
+            QUERY_BEFORE,
+            query_text=query_text,
+            query_type=str(query_type.value),
+            top_k=top_k,
+            session_id=session_id,
+        )
+
         # We use lists from now on for datasets
         if isinstance(datasets, UUID) or isinstance(datasets, str):
             datasets = [datasets]
@@ -276,6 +285,15 @@ async def search(
         span.set_attribute(
             COGNEE_RESULT_SUMMARY,
             f"Found {n} result(s) via {query_type.value}",
+        )
+
+        await emit_event(
+            QUERY_AFTER,
+            query_text=query_text,
+            query_type=str(query_type.value),
+            top_k=top_k,
+            session_id=session_id,
+            result_count=n,
         )
 
         return filtered_search_results
