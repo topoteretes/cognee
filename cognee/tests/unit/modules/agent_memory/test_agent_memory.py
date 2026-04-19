@@ -50,6 +50,7 @@ def _make_config(**overrides):
         "session_trace_summary": True,
         "persist_session_trace_after": None,
         "persist_session_trace_raw_content": False,
+        "persist_session_trace_node_set_name": None,
     }
     defaults.update(overrides)
     return AgentMemoryConfig(**defaults)
@@ -151,6 +152,8 @@ def test_agent_memory_rejects_sync_functions():
         {"persist_session_trace_after": "5"},
         {"persist_session_trace_after": 5, "save_session_traces": False},
         {"persist_session_trace_raw_content": "yes"},
+        {"persist_session_trace_node_set_name": 123},
+        {"persist_session_trace_node_set_name": "   "},
         {"memory_query_fixed": "Fixed query", "memory_query_from_method": "question"},
     ],
 )
@@ -920,6 +923,44 @@ async def test_persist_trace_triggers_memify_when_trace_count_is_divisible(
         run_in_background=False,
     )
     assert events == ["add", "count", "memify"]
+
+
+@pytest.mark.asyncio
+async def test_persist_trace_passes_custom_node_set_name_to_periodic_memify(monkeypatch):
+    session_manager = SimpleNamespace(
+        add_agent_trace_step=AsyncMock(),
+        get_agent_trace_count=AsyncMock(return_value=2),
+        default_session_id="default_session",
+    )
+    _patch_session_manager(monkeypatch, session_manager)
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    user = _make_user()
+    context = _make_context(
+        user=user,
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=2,
+        session_id="trace-session",
+        persist_session_trace_node_set_name="custom_agent_traces",
+    )
+    context.scope = None
+
+    await persist_trace(context)
+
+    persist_memify_mock.assert_awaited_once_with(
+        user=user,
+        session_ids=["trace-session"],
+        dataset="demo",
+        node_set_name="custom_agent_traces",
+        raw_trace_content=False,
+        last_n_steps=2,
+        run_in_background=False,
+    )
 
 
 @pytest.mark.asyncio
