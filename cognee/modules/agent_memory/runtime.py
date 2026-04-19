@@ -207,6 +207,29 @@ def validate_agent_memory_config(
             ),
             log=False,
         )
+    if persist_session_trace_after is not None and (
+        not isinstance(persist_session_trace_after, int) or persist_session_trace_after < 1
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_after must be a positive integer when provided.",
+            log=False,
+        )
+    if persist_session_trace_after is not None and not save_session_traces:
+        raise CogneeValidationError(
+            "persist_session_trace_after requires save_session_traces=True.",
+            log=False,
+        )
+    cache_config = get_cache_config()
+    if not cache_config.caching and (
+        with_session_memory or save_session_traces or persist_session_trace_after is not None
+    ):
+        raise CogneeValidationError(
+            (
+                "Caching must be enabled to use with_session_memory, save_session_traces, "
+                "or persist_session_trace_after with cognee.agent_memory."
+            ),
+            log=False,
+        )
     if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
         raise CogneeValidationError(
             "session_id must be a non-empty string when provided.",

@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useActionState } from "react";
-import { LoadingIndicator } from "@/ui/app";
+import { LoadingIndicator } from "@/ui/App";
 import createApiKey from "@/modules/apiKeys/createAPIKey";
 import { Box, Button } from "@mantine/core";
 import { trackEvent } from "@/modules/analytics";
