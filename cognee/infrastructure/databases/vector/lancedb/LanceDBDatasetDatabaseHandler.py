@@ -19,6 +19,19 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     async def create_dataset(
         cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
     ) -> dict:
+        """
+        Create a new LanceDB instance for the dataset. Return connection info that will be mapped to the dataset.
+
+        Args:
+            dataset_id: Dataset UUID
+            user: User object who owns the dataset and is making the request
+            **kwargs: Reserved for future overrides; the LanceDB handler currently
+                accepts no implementation-specific options and raises
+                ``ValueError`` if any are supplied.
+
+        Returns:
+            dict: Connection details for the created LanceDB instance
+        """
         if kwargs:
             raise ValueError(
                 "LanceDBDatasetDatabaseHandler.create_dataset does not accept overrides; "

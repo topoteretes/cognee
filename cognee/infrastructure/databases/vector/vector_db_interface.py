@@ -259,6 +259,7 @@ class VectorDBInterface(Protocol):
             **kwargs: Implementation-specific overrides for the database creation
                 request. Concrete handlers should document and validate the keys
                 they accept and raise ``ValueError`` for unknown keys.
+
         Returns:
             dict: Connection info for the created vector database instance.
         """
