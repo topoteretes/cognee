@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Optional
+from typing import Any, Optional
 from sqlalchemy import MetaData
 
 from cognee.infrastructure.databases.vector.pgvector.create_db_and_tables import delete_pg_database
@@ -18,7 +18,15 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
+        if kwargs:
+            raise ValueError(
+                "PGVectorDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
+
         vector_config = get_vectordb_config()
 
         if vector_config.vector_db_provider != "pgvector":

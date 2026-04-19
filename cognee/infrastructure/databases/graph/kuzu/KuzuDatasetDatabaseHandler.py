@@ -1,6 +1,6 @@
 import os
 from uuid import UUID
-from typing import Optional
+from typing import Any, Optional
 
 from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
 from cognee.base_config import get_base_config
@@ -15,18 +15,29 @@ class KuzuDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
         """
         Create a new Kuzu instance for the dataset. Return connection info that will be mapped to the dataset.
 
         Args:
             dataset_id: Dataset UUID
             user: User object who owns the dataset and is making the request
+            **kwargs: Reserved for future overrides; the Kuzu handler currently
+                accepts no implementation-specific options and raises
+                ``ValueError`` if any are supplied.
 
         Returns:
             dict: Connection details for the created Kuzu instance
 
         """
+        if kwargs:
+            raise ValueError(
+                "KuzuDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
+
         from cognee.infrastructure.databases.graph.config import get_graph_config
 
         graph_config = get_graph_config()
