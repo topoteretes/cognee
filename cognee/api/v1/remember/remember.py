@@ -12,6 +12,13 @@ from typing_extensions import TypedDict
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.memory import (
+    MemoryEntry,
+    QAEntry,
+    TraceEntry,
+    FeedbackEntry,
+)
+from cognee.memory.entries import MEMORY_ENTRY_TYPES
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -139,6 +146,150 @@ async def _add_to_session(session_id: str, data, user):
     logger.info("remember: added entry to session '%s'", session_id)
 
 
+async def _remember_entry(
+    entry,
+    *,
+    dataset_name: str,
+    session_id: Optional[str],
+    user,
+) -> "RememberResult":
+    """Top-level dispatcher for typed MemoryEntry payloads.
+
+    Routes to the remote HTTP client when ``cognee.serve(url=...)`` is
+    active, otherwise runs the SessionManager call in-process.
+    """
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        payload = await client.remember_entry(
+            entry,
+            dataset_name=dataset_name,
+            session_id=session_id,
+        )
+        # Reconstruct a RememberResult from the server's response
+        result = RememberResult(
+            status=payload.get("status", "session_stored"),
+            dataset_name=payload.get("dataset_name", dataset_name),
+            session_ids=payload.get("session_ids"),
+        )
+        result.entry_type = payload.get("entry_type")
+        result.entry_id = payload.get("entry_id")
+        result.elapsed_seconds = payload.get("elapsed_seconds")
+        if payload.get("error"):
+            result.error = payload["error"]
+        return result
+
+    return await _dispatch_session_entry(
+        entry,
+        dataset_name=dataset_name,
+        session_id=session_id,
+        user=user,
+    )
+
+
+async def _dispatch_session_entry(
+    entry: "MemoryEntry",
+    *,
+    dataset_name: str,
+    session_id: Optional[str],
+    user,
+) -> "RememberResult":
+    """Route a typed memory entry to the right SessionManager method.
+
+    All typed entries require a session_id — session cache is the
+    storage target. Returns a RememberResult with entry_id/entry_type
+    fields populated so callers can chain (e.g., attach feedback to a
+    QA they just stored).
+    """
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.modules.engine.operations.setup import setup
+
+    if not session_id:
+        raise ValueError(
+            f"session_id is required for typed memory entries (got {type(entry).__name__})"
+        )
+
+    await setup()
+
+    if user is None:
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+
+    user_id = str(user.id) if user and hasattr(user, "id") else None
+    if not user_id:
+        raise ValueError("Could not resolve user for session entry")
+
+    sm = get_session_manager()
+    if not sm.is_available:
+        raise RuntimeError(
+            "Session cache unavailable — set CACHING=true to enable session memory"
+        )
+
+    result = RememberResult(
+        status="session_stored",
+        dataset_name=dataset_name,
+        session_ids=[session_id],
+    )
+    result.elapsed_seconds = time.monotonic() - result._started_at
+    result.entry_type = entry.type
+
+    if isinstance(entry, QAEntry):
+        qa_id = await sm.add_qa(
+            user_id=user_id,
+            session_id=session_id,
+            question=entry.question,
+            context=entry.context,
+            answer=entry.answer,
+            feedback_text=entry.feedback_text,
+            feedback_score=entry.feedback_score,
+            used_graph_element_ids=entry.used_graph_element_ids,
+        )
+        result.entry_id = qa_id
+        if qa_id is None:
+            result.status = "errored"
+            result.error = "SessionManager.add_qa returned None"
+        return result
+
+    if isinstance(entry, TraceEntry):
+        trace_id = await sm.add_agent_trace_step(
+            user_id=user_id,
+            session_id=session_id,
+            origin_function=entry.origin_function,
+            status=entry.status,
+            generate_feedback_with_llm=entry.generate_feedback_with_llm,
+            memory_query=entry.memory_query,
+            memory_context=entry.memory_context,
+            method_params=entry.method_params,
+            method_return_value=entry.method_return_value,
+            error_message=entry.error_message,
+        )
+        result.entry_id = trace_id
+        if trace_id is None:
+            result.status = "errored"
+            result.error = "SessionManager.add_agent_trace_step returned None"
+        return result
+
+    if isinstance(entry, FeedbackEntry):
+        ok = await sm.add_feedback(
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=entry.qa_id,
+            feedback_text=entry.feedback_text,
+            feedback_score=entry.feedback_score,
+        )
+        result.entry_id = entry.qa_id
+        if not ok:
+            result.status = "errored"
+            result.error = (
+                f"add_feedback: QA {entry.qa_id} not found in session {session_id}"
+            )
+        return result
+
+    raise TypeError(f"Unsupported memory entry type: {type(entry).__name__}")
+
+
 class RememberResult:
     """Promise-like result from ``remember()``.
 
@@ -198,6 +349,12 @@ class RememberResult:
         self.content_hash: Optional[str] = None
         self.items_processed: int = 0
         self.items: List[dict] = []
+        # Populated when the call dispatched a typed MemoryEntry.
+        # entry_type is one of "qa", "trace", "feedback"; entry_id is
+        # the qa_id / trace_id returned by SessionManager (or the
+        # qa_id a feedback was attached to).
+        self.entry_type: Optional[str] = None
+        self.entry_id: Optional[str] = None
         self._task: Optional[asyncio.Task] = None
         self._started_at: float = time.monotonic()
 
@@ -248,6 +405,10 @@ class RememberResult:
             d["content_hash"] = self.content_hash
         if self.items:
             d["items"] = self.items
+        if self.entry_type:
+            d["entry_type"] = self.entry_type
+        if self.entry_id:
+            d["entry_id"] = self.entry_id
         if self.error:
             d["error"] = self.error
         return d
@@ -340,7 +501,15 @@ class RememberResult:
 
 
 async def remember(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
+    data: Union[
+        BinaryIO,
+        list[BinaryIO],
+        str,
+        list[str],
+        DataItem,
+        list[DataItem],
+        "MemoryEntry",
+    ],
     dataset_name: str = "main_dataset",
     *,
     session_id: Optional[str] = None,
@@ -405,6 +574,17 @@ async def remember(
     """
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+
+    # Typed MemoryEntry dispatch: trace steps, rich QA, feedback.
+    # These short-circuit the add+cognify path entirely and write
+    # directly into the session cache via SessionManager.
+    if isinstance(data, MEMORY_ENTRY_TYPES):
+        return await _remember_entry(
+            data,
+            dataset_name=dataset_name,
+            session_id=session_id,
+            user=kwargs.get("user"),
+        )
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1

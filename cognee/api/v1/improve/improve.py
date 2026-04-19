@@ -119,16 +119,45 @@ async def improve(
 
         feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
 
+        # Mutex: single-session improves serialize on the session's
+        # lock so auto-improve + idle-watcher + SessionEnd don't
+        # duplicate work. Multi-session improves skip the lock — the
+        # pattern is rare and locking N sessions at once is messy.
+        acquired_lock_for: Optional[str] = None
+        if session_ids and len(session_ids) == 1:
+            from cognee.infrastructure.locks import (
+                release_improve_lock,
+                try_acquire_improve_lock,
+            )
+
+            sole_session = session_ids[0]
+            if not await try_acquire_improve_lock(sole_session):
+                logger.info(
+                    "improve: session '%s' already being improved, skipping",
+                    sole_session,
+                )
+                return {}
+            acquired_lock_for = sole_session
+        else:
+            release_improve_lock = None  # type: ignore[assignment]
+
         # Stage 1 & 2: bridge sessions into the permanent graph
         if session_ids:
-            await _bridge_sessions(
-                dataset=dataset,
-                session_ids=session_ids,
-                user=user,
-                feedback_alpha=feedback_alpha,
-                run_in_background=run_in_background,
-            )
-            stages_run.extend(["feedback_weights", "persist_sessions"])
+            try:
+                await _bridge_sessions(
+                    dataset=dataset,
+                    session_ids=session_ids,
+                    user=user,
+                    feedback_alpha=feedback_alpha,
+                    run_in_background=run_in_background,
+                )
+                stages_run.extend(["feedback_weights", "persist_sessions"])
+            except Exception:
+                if acquired_lock_for:
+                    from cognee.infrastructure.locks import release_improve_lock
+
+                    await release_improve_lock(acquired_lock_for)
+                raise
 
         # Stage 3: default enrichment (triplet embeddings)
         from cognee.modules.memify import memify
@@ -158,6 +187,12 @@ async def improve(
             stages_run.append("sync_graph_to_sessions")
 
         span.set_attribute(COGNEE_IMPROVE_STAGES, ",".join(stages_run))
+
+        if acquired_lock_for:
+            from cognee.infrastructure.locks import release_improve_lock
+
+            await release_improve_lock(acquired_lock_for)
+
         return result
 
 
