@@ -27,7 +27,7 @@ class TapesCacheAdapter(FSCacheAdapter):
         self,
         session_ttl_seconds: int | None = 604800,
         *,
-        tapes_ingest_url: str = "http://localhost:8081",
+        tapes_ingest_url: str = "http://localhost:8082",
         tapes_provider: str = "openai",
         tapes_agent_name: str = "cognee",
         tapes_model: str = "cognee-session",

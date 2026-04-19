@@ -34,7 +34,7 @@ class CacheConfig(BaseSettings):
     max_session_context_chars: Optional[int] = None
     usage_logging: bool = False
     usage_logging_ttl: int = 604800
-    tapes_ingest_url: str = "http://localhost:8081"
+    tapes_ingest_url: str = "http://localhost:8082"
     tapes_provider: Literal["openai", "anthropic", "ollama"] = "openai"
     tapes_agent_name: str = "cognee"
     tapes_model: str = "cognee-session"

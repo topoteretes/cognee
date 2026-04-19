@@ -18,7 +18,7 @@ def create_cache_engine(
     agentic_lock_expire: int = 240,
     agentic_lock_timeout: int = 300,
     session_ttl_seconds: int | None = 604800,
-    tapes_ingest_url: str = "http://localhost:8081",
+    tapes_ingest_url: str = "http://localhost:8082",
     tapes_provider: str = "openai",
     tapes_agent_name: str = "cognee",
     tapes_model: str = "cognee-session",
