@@ -397,7 +397,9 @@ async def list_session_rows(
 
         filters = []
         if visibility_terms:
-            filters.append(or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0])
+            filters.append(
+                or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0]
+            )
         if since is not None:
             filters.append(SessionRecord.last_activity_at >= since)
         if status_filter:
