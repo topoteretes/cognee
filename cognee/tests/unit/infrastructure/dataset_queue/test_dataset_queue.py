@@ -5,7 +5,7 @@ the number of parallel dataset operations (search, run_pipeline_per_dataset).
 
 Configuration via environment variables:
 - DATASET_QUEUE_ENABLED: Enable/disable the queue (default: False)
-- DATABASE_MAX_LRU_CACHE_SIZE: Maximum concurrent dataset operations (default: 10)
+- DATABASE_MAX_LRU_CACHE_SIZE: Maximum concurrent dataset operations (default: 128, sourced from cognee.shared.lru_cache)
 """
 
 import asyncio
@@ -16,112 +16,8 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 # Module paths for mocking - these will need to be updated once implementation exists
 DATASET_QUEUE_MODULE = "cognee.infrastructure.databases.dataset_queue"
-GET_DATASET_QUEUE_CONFIG = f"{DATASET_QUEUE_MODULE}.config.get_dataset_queue_config"
+GET_DATASET_QUEUE_SETTINGS = f"{DATASET_QUEUE_MODULE}.queue.get_dataset_queue_settings"
 DATASET_QUEUE_SINGLETON = f"{DATASET_QUEUE_MODULE}.dataset_queue"
-
-
-class TestDatasetQueueConfig:
-    """Tests for DatasetQueueConfig configuration class."""
-
-    def test_config_defaults(self):
-        """Test that config has sensible defaults when env vars not set."""
-        from cognee.infrastructure.databases.dataset_queue.config import DatasetQueueConfig
-
-        config = DatasetQueueConfig()
-
-        assert config.dataset_queue_enabled is False
-        assert config.database_max_lru_cache_size == 10
-
-    def test_config_from_env_enabled(self):
-        """Test config reads DATASET_QUEUE_ENABLED from environment."""
-        with patch.dict(
-            "os.environ",
-            {"DATASET_QUEUE_ENABLED": "true"},
-            clear=False,
-        ):
-            from cognee.infrastructure.databases.dataset_queue.config import DatasetQueueConfig
-
-            # Force re-evaluation by creating new instance
-            config = DatasetQueueConfig()
-            assert config.dataset_queue_enabled is True
-
-    def test_config_from_env_disabled_explicit(self):
-        """Test config respects explicit False value."""
-        with patch.dict(
-            "os.environ",
-            {"DATASET_QUEUE_ENABLED": "false"},
-            clear=False,
-        ):
-            from cognee.infrastructure.databases.dataset_queue.config import DatasetQueueConfig
-
-            config = DatasetQueueConfig()
-            assert config.dataset_queue_enabled is False
-
-    def test_config_max_lru_cache_size_from_env(self):
-        """Test config reads DATABASE_MAX_LRU_CACHE_SIZE from environment."""
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_MAX_LRU_CACHE_SIZE": "25"},
-            clear=False,
-        ):
-            from cognee.infrastructure.databases.dataset_queue.config import DatasetQueueConfig
-
-            config = DatasetQueueConfig()
-            assert config.database_max_lru_cache_size == 25
-
-    def test_config_invalid_max_size_falls_back_to_default(self):
-        """Test that invalid max size value falls back to default."""
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_MAX_LRU_CACHE_SIZE": "invalid"},
-            clear=False,
-        ):
-            from cognee.infrastructure.databases.dataset_queue.config import DatasetQueueConfig
-
-            # Should use default or raise validation error
-            # depending on implementation choice
-            try:
-                config = DatasetQueueConfig()
-                # If it doesn't raise, it should use default
-                assert config.database_max_lru_cache_size == 10
-            except (ValueError, TypeError):
-                # Acceptable to raise validation error
-                pass
-
-    def test_config_zero_max_size(self):
-        """Test behavior when max size is set to zero."""
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_MAX_LRU_CACHE_SIZE": "0"},
-            clear=False,
-        ):
-            from cognee.infrastructure.databases.dataset_queue.config import DatasetQueueConfig
-
-            # Zero should either raise or be normalized to minimum of 1
-            try:
-                config = DatasetQueueConfig()
-                # If allowed, should be at least 1
-                assert config.database_max_lru_cache_size >= 1
-            except (ValueError, TypeError):
-                # Acceptable to raise validation error for zero
-                pass
-
-    def test_config_negative_max_size(self):
-        """Test behavior when max size is set to negative value."""
-        with patch.dict(
-            "os.environ",
-            {"DATABASE_MAX_LRU_CACHE_SIZE": "-5"},
-            clear=False,
-        ):
-            from cognee.infrastructure.databases.dataset_queue.config import DatasetQueueConfig
-
-            # Negative should either raise or be normalized to minimum of 1
-            try:
-                config = DatasetQueueConfig()
-                assert config.database_max_lru_cache_size >= 1
-            except (ValueError, TypeError):
-                # Acceptable to raise validation error for negative
-                pass
 
 
 class TestDatasetQueueInitialization:
@@ -140,9 +36,9 @@ class TestDatasetQueueInitialization:
 
     def test_queue_initialization_when_enabled(self):
         """Test that queue initializes properly when enabled."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -153,9 +49,9 @@ class TestDatasetQueueInitialization:
 
     def test_queue_initialization_when_disabled(self):
         """Test that queue initializes in disabled state correctly."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = False
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = False
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -165,9 +61,9 @@ class TestDatasetQueueInitialization:
 
     def test_queue_is_singleton(self):
         """Test that the queue maintains singleton pattern."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 10
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 10
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -178,9 +74,9 @@ class TestDatasetQueueInitialization:
 
     def test_queue_creates_semaphore_with_correct_size(self):
         """Test that internal semaphore has correct limit."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 3
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 3
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -207,9 +103,9 @@ class TestDatasetQueueConcurrencyLimiting:
     @pytest.mark.asyncio
     async def test_single_request_executes_immediately(self):
         """Test that a single request executes without waiting."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -230,9 +126,9 @@ class TestDatasetQueueConcurrencyLimiting:
     @pytest.mark.asyncio
     async def test_requests_within_limit_execute_concurrently(self):
         """Test that requests within the limit execute in parallel."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 3
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 3
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -265,9 +161,9 @@ class TestDatasetQueueConcurrencyLimiting:
     @pytest.mark.asyncio
     async def test_requests_exceeding_limit_wait(self):
         """Test that requests exceeding the limit wait for available slots."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -304,9 +200,9 @@ class TestDatasetQueueConcurrencyLimiting:
     @pytest.mark.asyncio
     async def test_queue_releases_slot_after_completion(self):
         """Test that completed operations release their slots."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -333,9 +229,9 @@ class TestDatasetQueueConcurrencyLimiting:
     @pytest.mark.asyncio
     async def test_queue_releases_slot_on_exception(self):
         """Test that slots are released even when operations fail."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -374,9 +270,9 @@ class TestDatasetQueueDisabledBehavior:
     @pytest.mark.asyncio
     async def test_disabled_queue_allows_unlimited_concurrency(self):
         """Test that disabled queue doesn't limit concurrency."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = False
-            mock_config.return_value.database_max_lru_cache_size = 1  # Would limit if enabled
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = False
+            mock_settings.return_value.max_concurrent = 1  # Would limit if enabled
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -405,9 +301,9 @@ class TestDatasetQueueDisabledBehavior:
     @pytest.mark.asyncio
     async def test_disabled_queue_executes_operation_directly(self):
         """Test that disabled queue executes operations without queuing."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = False
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = False
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -437,9 +333,9 @@ class TestDatasetQueueDecorator:
     @pytest.mark.asyncio
     async def test_decorator_wraps_async_function(self):
         """Test that decorator works with async functions."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -453,9 +349,9 @@ class TestDatasetQueueDecorator:
     @pytest.mark.asyncio
     async def test_decorator_respects_queue_limit(self):
         """Test that decorated functions respect concurrency limit."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -479,9 +375,9 @@ class TestDatasetQueueDecorator:
     @pytest.mark.asyncio
     async def test_decorator_preserves_function_metadata(self):
         """Test that decorator preserves function name and docstring."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -496,9 +392,9 @@ class TestDatasetQueueDecorator:
     @pytest.mark.asyncio
     async def test_decorator_propagates_exceptions(self):
         """Test that decorator properly propagates exceptions."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -527,9 +423,9 @@ class TestDatasetQueueContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_acquires_and_releases(self):
         """Test that context manager properly acquires and releases slot."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -550,9 +446,9 @@ class TestDatasetQueueContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_releases_on_exception(self):
         """Test that context manager releases slot on exception."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -587,9 +483,9 @@ class TestDatasetQueueStatus:
     @pytest.mark.asyncio
     async def test_available_slots_reporting(self):
         """Test that queue reports available slots correctly."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 3
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 3
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -617,9 +513,9 @@ class TestDatasetQueueStatus:
 
     def test_queue_max_concurrent_property(self):
         """Test that max_concurrent property returns configured value."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 7
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 7
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -629,9 +525,9 @@ class TestDatasetQueueStatus:
 
     def test_queue_enabled_property(self):
         """Test that enabled property returns current state."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -657,9 +553,9 @@ class TestDatasetQueueIntegrationPatterns:
     @pytest.mark.asyncio
     async def test_search_pattern_with_queue(self):
         """Test pattern for using queue with search operations."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -684,9 +580,9 @@ class TestDatasetQueueIntegrationPatterns:
     @pytest.mark.asyncio
     async def test_pipeline_pattern_with_queue(self):
         """Test pattern for using queue with pipeline operations."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -721,9 +617,9 @@ class TestDatasetQueueIntegrationPatterns:
     @pytest.mark.asyncio
     async def test_mixed_operations_with_shared_queue(self):
         """Test that search and pipeline operations share the same queue."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -780,10 +676,10 @@ class TestDatasetQueueTimeout:
     @pytest.mark.asyncio
     async def test_execute_with_timeout_succeeds_within_limit(self):
         """Test that operations completing within timeout succeed."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
-            mock_config.return_value.dataset_queue_timeout = 5.0
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
+            mock_settings.return_value.dataset_queue_timeout = 5.0
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -799,9 +695,9 @@ class TestDatasetQueueTimeout:
     @pytest.mark.asyncio
     async def test_acquire_with_timeout_raises_on_timeout(self):
         """Test that timeout raises appropriate exception when exceeded."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import (
                 dataset_queue,
@@ -846,9 +742,9 @@ class TestDatasetQueueEdgeCases:
     @pytest.mark.asyncio
     async def test_cancelled_task_releases_slot(self):
         """Test that cancelled tasks release their slots."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -878,9 +774,9 @@ class TestDatasetQueueEdgeCases:
     @pytest.mark.asyncio
     async def test_high_concurrency_stress(self):
         """Stress test with many concurrent operations."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -910,9 +806,9 @@ class TestDatasetQueueEdgeCases:
     @pytest.mark.asyncio
     async def test_reentrant_acquire_behavior(self):
         """Test behavior when same coroutine tries to acquire multiple times."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -929,9 +825,9 @@ class TestDatasetQueueEdgeCases:
     @pytest.mark.asyncio
     async def test_queue_works_with_sync_callbacks(self):
         """Test that queue works with sync callback wrapped operations."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 

@@ -12,7 +12,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 # Module paths for mocking
 DATASET_QUEUE_MODULE = "cognee.infrastructure.databases.dataset_queue"
-GET_DATASET_QUEUE_CONFIG = f"{DATASET_QUEUE_MODULE}.config.get_dataset_queue_config"
+GET_DATASET_QUEUE_SETTINGS = f"{DATASET_QUEUE_MODULE}.queue.get_dataset_queue_settings"
 SEARCH_MODULE = "cognee.api.v1.search.search"
 PIPELINE_MODULE = "cognee.modules.pipelines.operations.pipeline"
 
@@ -34,9 +34,9 @@ class TestSearchIntegration:
     @pytest.mark.asyncio
     async def test_search_respects_queue_limit(self):
         """Test that search operations respect the queue concurrency limit."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -64,9 +64,9 @@ class TestSearchIntegration:
     @pytest.mark.asyncio
     async def test_search_with_different_datasets_shares_queue(self):
         """Test that searches on different datasets share the same queue."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -96,9 +96,9 @@ class TestSearchIntegration:
     @pytest.mark.asyncio
     async def test_search_returns_results_correctly_through_queue(self):
         """Test that search results are returned correctly when going through queue."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -115,9 +115,9 @@ class TestSearchIntegration:
     @pytest.mark.asyncio
     async def test_search_error_handling_through_queue(self):
         """Test that search errors propagate correctly through queue."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -146,9 +146,9 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_pipeline_per_dataset_respects_queue_limit(self):
         """Test that pipeline operations respect queue concurrency limit."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 2
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 2
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -190,9 +190,9 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_pipeline_yields_correctly_through_queue(self):
         """Test that pipeline yields all results correctly through queue."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -214,9 +214,9 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_pipeline_error_releases_queue_slot(self):
         """Test that pipeline errors properly release queue slots."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -271,9 +271,9 @@ class TestMixedOperations:
     @pytest.mark.asyncio
     async def test_search_and_pipeline_share_queue(self):
         """Test that search and pipeline operations share concurrency limit."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 3
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 3
 
             from cognee.infrastructure.databases.dataset_queue import (
                 dataset_queue,
@@ -320,9 +320,9 @@ class TestMixedOperations:
     @pytest.mark.asyncio
     async def test_fair_scheduling_between_search_and_pipeline(self):
         """Test that queue provides fair scheduling between operation types."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import (
                 dataset_queue,
@@ -375,9 +375,9 @@ class TestConfigurationIntegration:
     @pytest.mark.asyncio
     async def test_queue_respects_runtime_disabled_state(self):
         """Test operations work normally when queue is disabled at runtime."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = False
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = False
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue_limit
 
@@ -402,9 +402,9 @@ class TestConfigurationIntegration:
     @pytest.mark.asyncio
     async def test_queue_with_custom_lru_cache_size(self):
         """Test queue correctly uses custom DATABASE_MAX_LRU_CACHE_SIZE."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 7
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 7
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -431,9 +431,9 @@ class TestQueueMonitoring:
     @pytest.mark.asyncio
     async def test_queue_stats_tracking(self):
         """Test that queue tracks usage statistics."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 5
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 5
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
@@ -454,9 +454,9 @@ class TestQueueMonitoring:
     @pytest.mark.asyncio
     async def test_queue_reports_waiting_count(self):
         """Test that queue can report number of waiting operations."""
-        with patch(GET_DATASET_QUEUE_CONFIG) as mock_config:
-            mock_config.return_value.dataset_queue_enabled = True
-            mock_config.return_value.database_max_lru_cache_size = 1
+        with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+            mock_settings.return_value.enabled = True
+            mock_settings.return_value.max_concurrent = 1
 
             from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
