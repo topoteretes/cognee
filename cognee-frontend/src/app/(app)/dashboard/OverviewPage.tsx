@@ -552,7 +552,13 @@ function ActivityTable({ rows, agents }: { rows: ActivityRow[]; agents: { id: st
           const agentName = agentEntry ? agentEntry.agent_type : s.user_id.slice(0, 8);
           const agentInitial = agentName.split(/[\s-]+/).filter(Boolean).map((p) => p[0]?.toUpperCase()).join("").slice(0, 2) || "?";
           return (
-            <div key={`session-${s.session_id}`} style={{ display: "flex", alignItems: "center", gap: 16, paddingBlock: 14, paddingInline: 20, borderBottom: "1px solid #F4F4F5", background: idx % 2 === 1 ? "#FAFAFA" : "transparent" }}>
+            <Link
+              key={`session-${s.session_id}`}
+              href={`/activity?session=${encodeURIComponent(s.session_id)}`}
+              className="cursor-pointer hover:bg-cognee-hover"
+              style={{ display: "flex", alignItems: "center", gap: 16, paddingBlock: 14, paddingInline: 20, borderBottom: "1px solid #F4F4F5", background: idx % 2 === 1 ? "#FAFAFA" : "transparent", textDecoration: "none", color: "inherit", transition: "background 150ms" }}
+              title="Open in Activity"
+            >
               <div style={{ width: 80, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
                 <span style={{ color: failed ? "#DC2626" : "#52525B", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: "14px" }}>Session</span>
@@ -572,7 +578,7 @@ function ActivityTable({ rows, agents }: { rows: ActivityRow[]; agents: { id: st
               <span style={{ width: 100, flexShrink: 0, textAlign: "right", color: "#18181B", fontSize: 13, lineHeight: "16px", fontVariantNumeric: "tabular-nums" }}>{durationString(s.started_at, s.ended_at)}</span>
               <span style={{ width: 80, flexShrink: 0, textAlign: "right", color: s.cost_usd > 0 ? "#18181B" : "#A1A1AA", fontSize: 13, lineHeight: "16px", fontVariantNumeric: "tabular-nums" }}>{s.cost_usd > 0 ? `$${s.cost_usd.toFixed(2)}` : "—"}</span>
               <span style={{ width: 80, flexShrink: 0, textAlign: "right", color: "#A1A1AA", fontSize: 12, lineHeight: "16px" }}>{s.last_activity_at ? timeAgo(s.last_activity_at) : "—"}</span>
-            </div>
+            </Link>
           );
         }
         const d = row.dataset;

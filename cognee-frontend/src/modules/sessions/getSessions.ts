@@ -75,3 +75,34 @@ export function getSessionStats(
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
 }
+
+export interface TraceEntry {
+  trace_id?: string;
+  origin_function?: string;
+  status?: "success" | "error" | string;
+  memory_query?: string;
+  memory_context?: string;
+  method_params?: Record<string, unknown> | null;
+  method_return_value?: unknown;
+  error_message?: string;
+  session_feedback?: string;
+  time?: string;
+}
+
+export interface SessionDetail extends SessionRow {
+  label: string | null;
+  msg_count: number;
+  tool_calls: number;
+  qas: Record<string, unknown>[];
+  traces: TraceEntry[];
+}
+
+export function getSessionDetail(
+  instance: CogneeInstance,
+  sessionId: string,
+): Promise<SessionDetail | null> {
+  return instance
+    .fetch(`/v1/sessions/${encodeURIComponent(sessionId)}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+}
