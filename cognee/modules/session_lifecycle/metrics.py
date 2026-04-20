@@ -24,7 +24,7 @@ from enum import Enum
 from typing import Optional, Sequence
 from uuid import UUID as UUIDType
 
-from sqlalchemy import and_, case, func, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -296,18 +296,41 @@ async def get_session_row(
     *,
     session_id: str,
     user_id: UUIDType,
+    permitted_dataset_ids: Optional[list[UUIDType]] = None,
+    prefer_other_owner: bool = False,
 ) -> Optional[SessionRecord]:
+    """Fetch a session row visible to the caller.
+
+    Returns the row if the caller owns the session OR if the session's
+    dataset is in ``permitted_dataset_ids``. Returns None otherwise.
+
+    The same ``session_id`` can exist under multiple owners (it's only
+    unique per user in the composite PK). When the query matches
+    multiple rows and ``prefer_other_owner`` is True, returns one
+    whose owner is NOT the caller (useful for cache-reads via dataset
+    grants). Otherwise returns the first match.
+    """
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
+        visibility_terms = [SessionRecord.user_id == user_id]
+        if permitted_dataset_ids:
+            visibility_terms.append(SessionRecord.dataset_id.in_(permitted_dataset_ids))
         result = await session.execute(
             select(SessionRecord).where(
                 and_(
                     SessionRecord.session_id == session_id,
-                    SessionRecord.user_id == user_id,
+                    or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0],
                 )
             )
         )
-        return result.scalar_one_or_none()
+        rows = list(result.scalars().all())
+        if not rows:
+            return None
+        if prefer_other_owner:
+            non_owner = [r for r in rows if r.user_id != user_id]
+            if non_owner:
+                return non_owner[0]
+        return rows[0]
 
 
 @dataclass(slots=True)
@@ -342,6 +365,7 @@ class SessionListPage:
 async def list_session_rows(
     *,
     user_id: Optional[UUIDType] = None,
+    permitted_dataset_ids: Optional[list[UUIDType]] = None,
     since: Optional[datetime] = None,
     status_filter: Optional[str] = None,
     limit: int = 50,
@@ -351,6 +375,11 @@ async def list_session_rows(
 ) -> SessionListPage:
     """List sessions with pagination metadata.
 
+    Visibility: returns sessions the caller owns OR sessions whose
+    ``dataset_id`` is in ``permitted_dataset_ids`` (read permission
+    granted at the dataset level). This mirrors the activity feed,
+    which scopes by dataset permissions rather than strict ownership.
+
     status_filter accepts the effective status (including
     ``abandoned``) — the SQL predicate handles the abandoned-by-time
     inference.
@@ -359,9 +388,16 @@ async def list_session_rows(
     async with engine.get_async_session() as session:
         eff = get_effective_status_sql()
 
-        filters = []
+        # Ownership / permission predicate.
+        visibility_terms = []
         if user_id is not None:
-            filters.append(SessionRecord.user_id == user_id)
+            visibility_terms.append(SessionRecord.user_id == user_id)
+        if permitted_dataset_ids:
+            visibility_terms.append(SessionRecord.dataset_id.in_(permitted_dataset_ids))
+
+        filters = []
+        if visibility_terms:
+            filters.append(or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0])
         if since is not None:
             filters.append(SessionRecord.last_activity_at >= since)
         if status_filter:

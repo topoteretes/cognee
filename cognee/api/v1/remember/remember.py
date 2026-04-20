@@ -121,8 +121,17 @@ def _data_to_text(data) -> str:
     return f"[{type(data).__name__}]"
 
 
+_SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
+
+
 async def _add_to_session(session_id: str, data, user):
-    """Add a Q&A entry to the session cache."""
+    """Add a Q&A entry to the session cache.
+
+    Sessions store chat-shaped content (prompts, assistant answers,
+    Q&A turns). File-upload data coerces to placeholder strings like
+    ``[UploadFile]`` / ``[file: name]`` — those are useless in the
+    session cache and pollute recall results, so they're skipped.
+    """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
     sm = get_session_manager()
@@ -135,6 +144,15 @@ async def _add_to_session(session_id: str, data, user):
         return
 
     text = _data_to_text(data)
+    stripped = text.strip()
+    if not stripped:
+        return
+    if any(stripped.startswith(prefix) for prefix in _SESSION_PLACEHOLDER_PREFIXES):
+        logger.debug(
+            "remember: skipping session write for placeholder-only payload (%.40s…)",
+            stripped,
+        )
+        return
 
     await sm.add_qa(
         user_id=user_id,
@@ -224,6 +242,34 @@ async def _dispatch_session_entry(
     sm = get_session_manager()
     if not sm.is_available:
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
+
+    # Resolve the dataset UUID for this session so the session_records
+    # row carries dataset_id — otherwise downstream permission filtering
+    # (e.g. the dashboard listing) can't match the session via granted
+    # dataset reads. We backfill via ensure_and_touch_session, which
+    # upserts the row and only sets dataset_id when currently null.
+    try:
+        from uuid import UUID as _UUID
+
+        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+        from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
+
+        resolved_dataset = None
+        try:
+            ds = await get_authorized_dataset(user, dataset_name, "write")
+            if ds is not None:
+                resolved_dataset = ds.id
+        except Exception:
+            # Fall through with None — we still create the session row.
+            resolved_dataset = None
+
+        await ensure_and_touch_session(
+            session_id=session_id,
+            user_id=_UUID(user_id),
+            dataset_id=resolved_dataset,
+        )
+    except Exception as exc:
+        logger.debug("remember: pre-upsert session_record failed (%s)", exc)
 
     result = RememberResult(
         status="session_stored",

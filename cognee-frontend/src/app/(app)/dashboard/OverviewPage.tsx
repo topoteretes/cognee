@@ -572,7 +572,7 @@ function ActivityTable({ rows, agents }: { rows: ActivityRow[]; agents: { id: st
           const agentInitial = agentName.split(/[\s-]+/).filter(Boolean).map((p) => p[0]?.toUpperCase()).join("").slice(0, 2) || "?";
           return (
             <Link
-              key={`session-${s.session_id}`}
+              key={`session-${s.session_id}-${s.user_id}`}
               href={`/activity?session=${encodeURIComponent(s.session_id)}`}
               className="cursor-pointer hover:bg-cognee-hover"
               style={{ display: "flex", alignItems: "center", gap: 16, paddingBlock: 14, paddingInline: 20, borderBottom: "1px solid #F4F4F5", background: idx % 2 === 1 ? "#FAFAFA" : "transparent", textDecoration: "none", color: "inherit", transition: "background 150ms" }}

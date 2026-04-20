@@ -61,6 +61,88 @@ async def _resolve_user_id(user) -> Optional[str]:
     return str(user.id) if hasattr(user, "id") else None
 
 
+async def _resolve_session_cache_user_id(
+    session_id: str, caller_user_id: Optional[str]
+) -> Optional[str]:
+    """Resolve the user_id to use when querying the session cache.
+
+    Session-cache entries are keyed by the session's OWNER, not by the
+    authenticated caller. A caller may legitimately query someone
+    else's session via a dataset read grant — in that case we need to
+    return the owner's id so ``SessionManager.get_session`` finds the
+    entries.
+
+    Two complications the resolver handles:
+
+    * The same ``session_id`` can exist under multiple owners (the PK
+      is ``(session_id, user_id)``, not ``session_id`` alone). The
+      caller might own an empty row AND simultaneously have read
+      permission on a non-owned row that has all the cache content.
+      We pick the candidate most likely to have real entries — the
+      one with ``dataset_id`` populated wins over an empty row.
+
+    * Falls back to ``caller_user_id`` when nothing is in
+      ``session_records`` yet so behaviour matches the pre-visibility
+      state.
+    """
+    if not session_id:
+        return caller_user_id
+    try:
+        from uuid import UUID
+
+        from sqlalchemy import select
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.session_lifecycle.models import SessionRecord
+        from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
+            get_specific_user_permission_datasets,
+        )
+
+        caller_uuid = UUID(caller_user_id) if caller_user_id else None
+        if caller_uuid is None:
+            return caller_user_id
+
+        permitted_ids: list = []
+        try:
+            permitted = await get_specific_user_permission_datasets(caller_uuid, "read", None)
+            permitted_ids = [ds.id for ds in permitted] if permitted else []
+        except Exception:
+            permitted_ids = []
+
+        # Fetch ALL candidate rows the caller can see for this
+        # session_id. Owner match OR permitted-dataset match.
+        engine = get_relational_engine()
+        async with engine.get_async_session() as session:
+            stmt = select(SessionRecord).where(SessionRecord.session_id == session_id)
+            rows = list((await session.execute(stmt)).scalars().all())
+
+        if not rows:
+            return caller_user_id
+
+        visible: list[SessionRecord] = []
+        for r in rows:
+            if r.user_id == caller_uuid:
+                visible.append(r)
+            elif permitted_ids and r.dataset_id in permitted_ids:
+                visible.append(r)
+
+        if not visible:
+            return caller_user_id
+
+        # Prefer a row with dataset_id populated — those came through
+        # the proper write path and have cache content. Within that,
+        # prefer rows the caller does NOT own (the active writer of
+        # the session, e.g. an agent).
+        with_dataset = [r for r in visible if r.dataset_id is not None]
+        pool = with_dataset or visible
+        non_owner = [r for r in pool if r.user_id != caller_uuid]
+        chosen = (non_owner or pool)[0]
+        owner = getattr(chosen, "user_id", None)
+        return str(owner) if owner is not None else caller_user_id
+    except Exception:
+        pass
+    return caller_user_id
+
+
 async def _search_session(
     query_text: str,
     session_id: str,
@@ -76,8 +158,12 @@ async def _search_session(
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
-    user_id = await _resolve_user_id(user)
-    if not user_id:
+    caller_user_id = await _resolve_user_id(user)
+    if not caller_user_id:
+        return []
+    # Cache is keyed by session owner — resolve cross-user grants.
+    cache_user_id = await _resolve_session_cache_user_id(session_id, caller_user_id)
+    if not cache_user_id:
         return []
 
     sm = get_session_manager()
@@ -85,7 +171,7 @@ async def _search_session(
         return []
 
     entries = await sm.get_session(
-        user_id=user_id,
+        user_id=cache_user_id,
         session_id=session_id,
         formatted=False,
     )
@@ -138,15 +224,18 @@ async def _search_trace(
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
-    user_id = await _resolve_user_id(user)
-    if not user_id:
+    caller_user_id = await _resolve_user_id(user)
+    if not caller_user_id:
+        return []
+    cache_user_id = await _resolve_session_cache_user_id(session_id, caller_user_id)
+    if not cache_user_id:
         return []
 
     sm = get_session_manager()
     if not sm.is_available:
         return []
 
-    entries = await sm.get_agent_trace_session(user_id=user_id, session_id=session_id)
+    entries = await sm.get_agent_trace_session(user_id=cache_user_id, session_id=session_id)
 
     if not entries:
         return []
@@ -207,15 +296,18 @@ async def _fetch_graph_context(session_id: str, user=None) -> list:
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
-    user_id = await _resolve_user_id(user)
-    if not user_id:
+    caller_user_id = await _resolve_user_id(user)
+    if not caller_user_id:
+        return []
+    cache_user_id = await _resolve_session_cache_user_id(session_id, caller_user_id)
+    if not cache_user_id:
         return []
 
     sm = get_session_manager()
     if not sm.is_available:
         return []
 
-    snapshot = await sm.get_graph_context(user_id=user_id, session_id=session_id)
+    snapshot = await sm.get_graph_context(user_id=cache_user_id, session_id=session_id)
     if not snapshot:
         return []
 

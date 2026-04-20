@@ -12,7 +12,7 @@ from uuid import UUID as UUIDType
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.session_lifecycle.metrics import (
@@ -22,8 +22,12 @@ from cognee.modules.session_lifecycle.metrics import (
     list_session_rows,
 )
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
+    get_specific_user_permission_datasets,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("sessions_api")
@@ -41,6 +45,17 @@ def _range_since(range_key: _RangeLiteral) -> Optional[datetime]:
     if range_key == "30d":
         return now - timedelta(days=30)
     return None  # "all"
+
+
+async def _permitted_dataset_ids_for(user: User) -> list[UUIDType]:
+    """Return the UUIDs of datasets this user can read (empty on none)."""
+    try:
+        datasets = await get_specific_user_permission_datasets(user.id, "read", None)
+        return [ds.id for ds in datasets] if datasets else []
+    except PermissionDeniedError:
+        return []
+    except Exception:
+        return []
 
 
 def get_sessions_router() -> APIRouter:
@@ -70,8 +85,10 @@ def get_sessions_router() -> APIRouter:
         """
         since = _range_since(range)
         try:
+            permitted = await _permitted_dataset_ids_for(user)
             page = await list_session_rows(
                 user_id=user.id,
+                permitted_dataset_ids=permitted,
                 since=since,
                 status_filter=status,
                 limit=limit,
@@ -100,10 +117,16 @@ def get_sessions_router() -> APIRouter:
         """Aggregate counters for the dashboard stat cards + status bar."""
         since = _range_since(range)
         eff = get_effective_status_sql()
+        permitted = await _permitted_dataset_ids_for(user)
 
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
-            base_filter = [SessionRecord.user_id == user.id]
+            visibility_terms = [SessionRecord.user_id == user.id]
+            if permitted:
+                visibility_terms.append(SessionRecord.dataset_id.in_(permitted))
+            base_filter = [
+                or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0]
+            ]
             if since is not None:
                 base_filter.append(SessionRecord.last_activity_at >= since)
 
@@ -185,8 +208,12 @@ def get_sessions_router() -> APIRouter:
         range — requires a join back to the session row.
         """
         since = _range_since(range)
+        permitted = await _permitted_dataset_ids_for(user)
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
+            visibility_terms = [SessionRecord.user_id == user.id]
+            if permitted:
+                visibility_terms.append(SessionRecord.dataset_id.in_(permitted))
             stmt = (
                 select(
                     SessionModelUsage.model.label("model"),
@@ -202,7 +229,7 @@ def get_sessions_router() -> APIRouter:
                         SessionModelUsage.user_id == SessionRecord.user_id,
                     ),
                 )
-                .where(SessionRecord.user_id == user.id)
+                .where(or_(*visibility_terms) if len(visibility_terms) > 1 else visibility_terms[0])
                 .group_by(SessionModelUsage.model)
                 .order_by(func.sum(SessionModelUsage.cost_usd).desc())
             )
@@ -229,24 +256,32 @@ def get_sessions_router() -> APIRouter:
         session_id: str,
         user: User = Depends(get_authenticated_user),
     ):
-        row = await get_session_row(session_id=session_id, user_id=user.id)
+        permitted = await _permitted_dataset_ids_for(user)
+        row = await get_session_row(
+            session_id=session_id, user_id=user.id, permitted_dataset_ids=permitted
+        )
         if row is None:
             raise HTTPException(status_code=404, detail="session not found")
 
         # Pull the rich content (QAs + trace steps) from the session cache.
+        # Important: cache entries are keyed by the session's OWNER, not
+        # the authenticated caller. A user with dataset-granted read
+        # permission is viewing someone else's session, so we need to
+        # query the cache under the owner's user_id from the row.
         from cognee.infrastructure.session.get_session_manager import get_session_manager
 
+        owner_user_id = str(getattr(row, "user_id", ""))
         sm = get_session_manager()
         qas: list = []
         traces: list = []
-        if sm.is_available:
+        if sm.is_available and owner_user_id:
             try:
                 qas_raw = await sm.get_session(
-                    user_id=str(user.id), session_id=session_id, formatted=False
+                    user_id=owner_user_id, session_id=session_id, formatted=False
                 )
                 qas = qas_raw if isinstance(qas_raw, list) else []
                 traces = await sm.get_agent_trace_session(
-                    user_id=str(user.id), session_id=session_id
+                    user_id=owner_user_id, session_id=session_id
                 )
             except Exception:
                 pass
