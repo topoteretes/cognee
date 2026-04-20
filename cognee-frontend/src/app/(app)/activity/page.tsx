@@ -222,29 +222,30 @@ export default function ActivityPage() {
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    let cancelled = false;
 
     Promise.all([
-      cogniInstance.fetch("/v1/activity/pipeline-runs", { signal: controller.signal })
-        .then((r) => r.ok ? r.json() : [])
+      cogniInstance.fetch("/v1/activity/pipeline-runs")
+        .then((r) => (r.ok ? r.json() : []))
         .catch(() => []),
-      cogniInstance.fetch("/v1/activity/spans", { signal: controller.signal })
-        .then((r) => r.ok ? r.json() : [])
+      cogniInstance.fetch("/v1/activity/spans")
+        .then((r) => (r.ok ? r.json() : []))
         .catch(() => []),
       listSessions(cogniInstance, { range: "30d", limit: 50 }),
-    ]).then(([runData, spanData, sessionsPage]) => {
-      setRuns(Array.isArray(runData) ? runData : []);
-      setTraces(Array.isArray(spanData) ? spanData : []);
-      setSessions(sessionsPage.sessions);
-    }).catch(() => {}).finally(() => {
-      clearTimeout(timeout);
-      setLoading(false);
-    });
+    ])
+      .then(([runData, spanData, sessionsPage]) => {
+        if (cancelled) return;
+        setRuns(Array.isArray(runData) ? runData : []);
+        setTraces(Array.isArray(spanData) ? spanData : []);
+        setSessions(sessionsPage.sessions);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     return () => {
-      controller.abort();
-      clearTimeout(timeout);
+      cancelled = true;
     };
   }, [cogniInstance, isInitializing]);
 
@@ -335,66 +336,79 @@ export default function ActivityPage() {
         <span style={{ fontSize: 13, color: "#A1A1AA" }}>{filtered.length} events · {sessions.length} sessions</span>
       </div>
 
-      {/* Sessions */}
+      {/* Sessions timeline */}
       {sessions.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ borderLeft: "2px solid #E4E4E7", marginLeft: 6, paddingLeft: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, marginLeft: -27 }}>
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", flexShrink: 0 }} />
             <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", color: "#A1A1AA", textTransform: "uppercase" }}>Sessions</span>
-            <span style={{ fontSize: 11, color: "#D4D4D8" }}>·</span>
-            <span style={{ fontSize: 11, color: "#A1A1AA" }}>click to expand trace</span>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {sessions.map((s) => {
-              const isExpanded = expandedSessionId === s.session_id;
-              const detail = sessionDetails[s.session_id];
-              const detailLoading = !!sessionDetailLoading[s.session_id];
-              const failed = s.effective_status === "failed" || s.error_count > 0;
-              const dot = failed ? "#DC2626" : s.effective_status === "abandoned" ? "#D97706" : "#16A34A";
-              const label = detail?.label || s.session_id;
-              return (
+          {sessions.map((s) => {
+            const isExpanded = expandedSessionId === s.session_id;
+            const detail = sessionDetails[s.session_id];
+            const detailLoading = !!sessionDetailLoading[s.session_id];
+            const failed = s.effective_status === "failed" || s.error_count > 0;
+            const dot = failed ? "#EF4444" : s.effective_status === "abandoned" ? "#F59E0B" : "#22C55E";
+            const label = detail?.label || s.session_id;
+            return (
+              <div key={s.session_id} id={`session-row-${s.session_id}`} style={{ marginLeft: -27, marginBottom: 4 }}>
                 <div
-                  key={s.session_id}
-                  id={`session-row-${s.session_id}`}
-                  style={{ borderRadius: 8, border: isExpanded ? "1px solid #DDD6FE" : "1px solid #F4F4F5", background: isExpanded ? "#FAFAFF" : "#FFFFFF", overflow: "hidden" }}
+                  onClick={() => {
+                    if (isExpanded) {
+                      setExpandedSessionId(null);
+                    } else {
+                      setExpandedSessionId(s.session_id);
+                      loadSessionDetail(s.session_id);
+                    }
+                  }}
+                  style={{
+                    display: "flex", gap: 14, padding: "10px 12px 10px 28px", position: "relative",
+                    borderRadius: 8,
+                    background: isExpanded ? "#F0EDFF" : "transparent",
+                    border: isExpanded ? "1px solid #DDD6FE" : "1px solid transparent",
+                    cursor: "pointer",
+                    transition: "background 150ms",
+                  }}
                 >
-                  <div
-                    onClick={() => {
-                      if (isExpanded) {
-                        setExpandedSessionId(null);
-                      } else {
-                        setExpandedSessionId(s.session_id);
-                        loadSessionDetail(s.session_id);
-                      }
-                    }}
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", cursor: "pointer" }}
-                  >
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: dot, flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ color: "#18181B", fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-                      <span style={{ color: "#A1A1AA", fontSize: 11 }}>
-                        {s.effective_status} · {s.last_model ?? "no model"} · {s.tokens_in + s.tokens_out} tokens · {s.error_count} errors
-                      </span>
+                  <div style={{ position: "absolute", left: 3, top: 14, width: 8, height: 8, borderRadius: "50%", background: dot, border: "2px solid #FAFAF9" }} />
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 520 }}>{label}</span>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: failed ? "#EF4444" : "#6510F4" }}>session</span>
+                      <span style={{ fontSize: 12, color: dot }}>{s.effective_status}</span>
                     </div>
-                    <span style={{ color: "#A1A1AA", fontSize: 12 }}>{s.last_activity_at ? formatTimestamp(s.last_activity_at) : ""}</span>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4D4D8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points={isExpanded ? "6 9 12 15 18 9" : "9 18 15 12 9 6"} />
-                    </svg>
+                    <span style={{ fontSize: 13, color: "#A1A1AA" }}>
+                      {s.last_model ?? "—"} · {s.tokens_in + s.tokens_out} tokens · {s.error_count} error{s.error_count === 1 ? "" : "s"}
+                    </span>
                   </div>
-                  {isExpanded && (
-                    <div style={{ borderTop: "1px solid #EDE9FE", background: "#FFFFFF", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                      {detailLoading && !detail ? (
-                        <span style={{ fontSize: 12, color: "#A1A1AA" }}>Loading trace…</span>
-                      ) : detail ? (
-                        <TraceStepList traces={detail.traces} />
-                      ) : (
-                        <span style={{ fontSize: 12, color: "#A1A1AA" }}>No trace data.</span>
-                      )}
-                    </div>
-                  )}
+                  <div style={{ width: 80, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
+                    <span style={{ fontSize: 11, color: "#A1A1AA", fontVariantNumeric: "tabular-nums" }}>
+                      {s.last_activity_at ? formatTimestamp(s.last_activity_at) : ""}
+                    </span>
+                    <span style={{ fontSize: 11, color: "#D4D4D8" }}>
+                      {s.last_activity_at ? formatDate(s.last_activity_at) : ""}
+                    </span>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4D4D8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, alignSelf: "center" }}>
+                    <polyline points={isExpanded ? "6 9 12 15 18 9" : "9 18 15 12 9 6"} />
+                  </svg>
                 </div>
-              );
-            })}
-          </div>
+
+                {isExpanded && (
+                  <div style={{ margin: "4px 12px 12px 28px", padding: "12px 16px", background: "#FAFAFA", borderRadius: 8, border: "1px solid #F4F4F5" }}>
+                    {detailLoading && !detail ? (
+                      <span style={{ fontSize: 12, color: "#A1A1AA" }}>Loading trace…</span>
+                    ) : detail ? (
+                      <TraceStepList traces={detail.traces} />
+                    ) : (
+                      <span style={{ fontSize: 12, color: "#A1A1AA" }}>No trace data.</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div style={{ height: 12 }} />
         </div>
       )}
 
