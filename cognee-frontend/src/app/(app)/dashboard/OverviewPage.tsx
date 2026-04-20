@@ -331,7 +331,7 @@ export default function OverviewPage() {
       </div>
 
       {/* Search */}
-      <DashboardSearch datasets={filteredDatasets} cogniInstance={cogniInstance} />
+      <DashboardSearch datasets={filteredDatasets} cogniInstance={cogniInstance} sessions={sessions} />
 
       {/* Activity & Memory */}
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -639,13 +639,79 @@ function SdkIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill
 function KeyIconSm() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="4" y="8" width="16" height="8" rx="2" stroke="#52525B" strokeWidth="1.75" /><circle cx="9" cy="12" r="1.5" fill="#52525B" /></svg>; }
 function UploadIconSm() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 16V8M12 8L8 12M12 8L16 12" stroke="#FFFFFF" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="#FFFFFF" strokeWidth="1.75" strokeLinecap="round" /></svg>; }
 
+// ── Scope pills (shared) ─────────────────────────────────────────────────
+
+function ScopePills({
+  value,
+  onChange,
+  sessionAvailable,
+}: {
+  value: "graph" | "session" | "trace" | "all";
+  onChange: (v: "graph" | "session" | "trace" | "all") => void;
+  sessionAvailable: boolean;
+}) {
+  const items: { key: "graph" | "session" | "trace" | "all"; label: string; needsSession: boolean }[] = [
+    { key: "graph", label: "Graph", needsSession: false },
+    { key: "session", label: "Session", needsSession: true },
+    { key: "trace", label: "Traces", needsSession: true },
+    { key: "all", label: "All", needsSession: true },
+  ];
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {items.map((it) => {
+        const disabled = it.needsSession && !sessionAvailable;
+        const active = value === it.key && !disabled;
+        return (
+          <button
+            key={it.key}
+            type="button"
+            onClick={() => !disabled && onChange(it.key)}
+            disabled={disabled}
+            className="cursor-pointer"
+            title={disabled ? "No session available to search" : `Search ${it.label.toLowerCase()}`}
+            style={{
+              background: active ? "#18181B" : "#FFFFFF",
+              color: disabled ? "#D4D4D8" : active ? "#FFFFFF" : "#3F3F46",
+              border: active ? "none" : "1px solid #E4E4E7",
+              borderRadius: 100,
+              paddingBlock: 5,
+              paddingInline: 11,
+              fontSize: 12,
+              lineHeight: "16px",
+              fontFamily: "inherit",
+              cursor: disabled ? "not-allowed" : "pointer",
+            }}
+          >
+            {it.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Inline dashboard search ──
 
-function DashboardSearch({ datasets, cogniInstance }: { datasets: { id: string; name: string }[]; cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"] }) {
+type SearchScope = "graph" | "session" | "trace" | "all";
+
+function DashboardSearch({
+  datasets,
+  cogniInstance,
+  sessions,
+}: {
+  datasets: { id: string; name: string }[];
+  cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"];
+  sessions: import("@/modules/sessions/getSessions").SessionRow[];
+}) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{ search_result: string[]; dataset_name: string }[]>([]);
+  const [scope, setScope] = useState<SearchScope>("graph");
+  const [results, setResults] = useState<unknown[]>([]);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+
+  // Pick the most recently active session the user can see. Required
+  // for session / trace / all scope — recall returns nothing otherwise.
+  const mostRecentSessionId = sessions[0]?.session_id ?? "";
 
   async function handleSearch(q: string) {
     if (!q.trim() || !cogniInstance) return;
@@ -653,9 +719,23 @@ function DashboardSearch({ datasets, cogniInstance }: { datasets: { id: string; 
     setResults([]);
     setHasSearched(true);
     try {
-      const data = await searchDataset(cogniInstance, {
+      const { default: recallKnowledge } = await import("@/modules/datasets/recallKnowledge");
+      // Map UI scope → recall scope. Non-graph scopes require a
+      // session_id; we fall back to graph when none is available.
+      let sendScope: string | string[];
+      let sendSessionId: string | undefined;
+      if (scope === "graph") {
+        sendScope = "graph";
+      } else if (mostRecentSessionId) {
+        sendScope = scope === "all" ? ["graph", "session", "trace", "graph_context"] : scope;
+        sendSessionId = mostRecentSessionId;
+      } else {
+        sendScope = "graph";
+      }
+      const data = await recallKnowledge(cogniInstance, {
         query: q,
-        searchType: "GRAPH_COMPLETION",
+        scope: sendScope as never,
+        sessionId: sendSessionId,
         datasetIds: datasets.map((d) => d.id),
       });
       setResults(Array.isArray(data) ? data : []);
@@ -672,6 +752,11 @@ function DashboardSearch({ datasets, cogniInstance }: { datasets: { id: string; 
         <span style={{ fontSize: 15, fontWeight: 600, color: "#1A1A1A" }}>Search your knowledge</span>
         <Link href="/search" style={{ fontSize: 12, color: "#6C47FF", textDecoration: "none" }}>Full search</Link>
       </div>
+      <ScopePills
+        value={scope}
+        onChange={setScope}
+        sessionAvailable={Boolean(mostRecentSessionId)}
+      />
       <div style={{ background: "#fff", border: `1px solid ${query ? "#6510F4" : "#EEEEEE"}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, transition: "border-color 0.2s" }}>
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
           <circle cx="8" cy="8" r="5.5" stroke="#A1A1AA" strokeWidth="1.5" />
@@ -699,14 +784,35 @@ function DashboardSearch({ datasets, cogniInstance }: { datasets: { id: string; 
 
       {results.length > 0 && !searching && (
         <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, overflow: "hidden" }}>
-          {results.map((r, i) => (
-            <div key={i} style={{ padding: "14px 16px", borderBottom: i < results.length - 1 ? "1px solid #F4F4F5" : "none" }}>
-              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", color: "#6510F4", textTransform: "uppercase" }}>{r.dataset_name || "Result"}</span>
-              {r.search_result.map((text, j) => (
-                <p key={j} style={{ fontSize: 13, color: "#18181B", lineHeight: "20px", margin: "4px 0 0" }}>{text}</p>
-              ))}
-            </div>
-          ))}
+          {results.map((raw, i) => {
+            // searchDataset may return different shapes depending on
+            // search_type / route: { dataset_name, search_result:[...] },
+            // plain strings, or recall rows tagged with _source.
+            const r: { dataset_name?: string; search_result?: unknown } = raw as unknown as {
+              dataset_name?: string;
+              search_result?: unknown;
+            };
+            const label = r.dataset_name || "Result";
+            let lines: string[] = [];
+            if (Array.isArray(r.search_result)) {
+              lines = (r.search_result as unknown[]).map((x) => (typeof x === "string" ? x : JSON.stringify(x)));
+            } else if (typeof r.search_result === "string") {
+              lines = [r.search_result];
+            } else if (typeof raw === "string") {
+              lines = [raw as unknown as string];
+            } else {
+              // Recall-style row — stringify for display.
+              try { lines = [JSON.stringify(raw)]; } catch { lines = [String(raw)]; }
+            }
+            return (
+              <div key={i} style={{ padding: "14px 16px", borderBottom: i < results.length - 1 ? "1px solid #F4F4F5" : "none" }}>
+                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", color: "#6510F4", textTransform: "uppercase" }}>{label}</span>
+                {lines.map((text, j) => (
+                  <p key={j} style={{ fontSize: 13, color: "#18181B", lineHeight: "20px", margin: "4px 0 0" }}>{text}</p>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
 
