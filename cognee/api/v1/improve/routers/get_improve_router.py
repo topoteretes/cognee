@@ -26,6 +26,11 @@ class ImprovePayloadDTO(InDTO):
     dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
     node_name: Optional[List[str]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
+    # Session IDs to bridge into the permanent graph. When set, improve
+    # runs the full session pipeline (feedback weights + QA persist +
+    # trace-step persist + graph→session sync) in addition to the
+    # default memify enrichment.
+    session_ids: Optional[List[str]] = Field(default=None, examples=[[]])
 
 
 def get_improve_router() -> APIRouter:
@@ -79,6 +84,7 @@ def get_improve_router() -> APIRouter:
                 data=payload.data,
                 dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
                 node_name=payload.node_name,
+                session_ids=payload.session_ids,
                 user=user,
                 run_in_background=payload.run_in_background,
             )
