@@ -1,5 +1,5 @@
 import classNames from "classnames";
-import { CaretIcon } from "@/ui/icons";
+import { CaretIcon } from "@/ui/Icons";
 
 export interface AccordionProps {
   isOpen: boolean;
