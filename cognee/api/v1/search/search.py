@@ -20,6 +20,7 @@ from cognee.modules.observability import (
     COGNEE_RESULT_SUMMARY,
     COGNEE_RESULT_COUNT,
 )
+from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
 logger = get_logger()
 
@@ -249,27 +250,28 @@ async def search(
             if not datasets:
                 raise DatasetNotFoundError(message="No datasets found.")
 
-        filtered_search_results = await search_function(
-            query_text=query_text,
-            query_type=query_type,
-            dataset_ids=dataset_ids if dataset_ids else datasets,
-            user=user,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            node_name_filter_operator=normalized_node_name_filter_operator,
-            only_context=only_context,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-            feedback_influence=feedback_influence,
-            verbose=verbose,
-            retriever_specific_config=retriever_specific_config,
-            neighborhood_depth=neighborhood_depth,
-            neighborhood_seed_top_k=neighborhood_seed_top_k,
-        )
+        async with dataset_queue().acquire():
+            filtered_search_results = await search_function(
+                query_text=query_text,
+                query_type=query_type,
+                dataset_ids=dataset_ids if dataset_ids else datasets,
+                user=user,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=normalized_node_name_filter_operator,
+                only_context=only_context,
+                session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+                verbose=verbose,
+                retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+            )
 
         n = len(filtered_search_results) if filtered_search_results else 0
         span.set_attribute(COGNEE_RESULT_COUNT, n)
