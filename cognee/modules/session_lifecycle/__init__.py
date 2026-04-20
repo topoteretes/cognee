@@ -7,8 +7,11 @@ steps; this module only owns lifecycle (status), aggregate counters
 """
 
 from .metrics import (
+    SessionListPage,
+    SessionRowWithStatus,
     SessionStatus,
     accumulate_usage,
+    ensure_and_touch_session,
     ensure_session,
     get_effective_status_sql,
     get_session_row,
@@ -19,8 +22,11 @@ from .metrics import (
 from .usage_tracking import record_llm_call, track_session_usage
 
 __all__ = [
+    "SessionListPage",
+    "SessionRowWithStatus",
     "SessionStatus",
     "accumulate_usage",
+    "ensure_and_touch_session",
     "ensure_session",
     "get_effective_status_sql",
     "get_session_row",

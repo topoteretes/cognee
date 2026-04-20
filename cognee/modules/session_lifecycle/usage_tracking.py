@@ -66,12 +66,17 @@ _PRICING_PER_M_TOKENS = {
 }
 
 
+# Longest prefix first so specific models (e.g. ``gpt-4o-mini``) win
+# over their more general family (``gpt-4o``). Computed once at import.
+_PRICING_SORTED = sorted(_PRICING_PER_M_TOKENS.items(), key=lambda kv: -len(kv[0]))
+
+
 def _estimate_cost_usd(model: Optional[str], tokens_in: int, tokens_out: int) -> float:
     if not model:
         return 0.0
     # Normalize: strip provider prefix ("openai/gpt-4o" → "gpt-4o"), drop date suffix.
     key = model.split("/")[-1].lower()
-    for base, (pin, pout) in _PRICING_PER_M_TOKENS.items():
+    for base, (pin, pout) in _PRICING_SORTED:
         if key.startswith(base):
             return (tokens_in / 1_000_000) * pin + (tokens_out / 1_000_000) * pout
     return 0.0

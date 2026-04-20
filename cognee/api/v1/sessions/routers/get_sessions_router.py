@@ -21,7 +21,7 @@ from cognee.modules.session_lifecycle.metrics import (
     get_session_row,
     list_session_rows,
 )
-from cognee.modules.session_lifecycle.models import SessionRecord
+from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -43,15 +43,6 @@ def _range_since(range_key: _RangeLiteral) -> Optional[datetime]:
     return None  # "all"
 
 
-def _record_to_row_dict(rec: SessionRecord) -> dict:
-    d = rec.to_dict()
-    # Caller sets effective_status attr on the instance
-    eff = getattr(rec, "effective_status", None)
-    if eff is not None:
-        d["effective_status"] = eff
-    return d
-
-
 def get_sessions_router() -> APIRouter:
     router = APIRouter()
 
@@ -65,9 +56,21 @@ def get_sessions_router() -> APIRouter:
         descending: bool = Query(True),
         user: User = Depends(get_authenticated_user),
     ):
+        """Paginated list of sessions.
+
+        Response envelope::
+
+            {
+              "sessions": [...],
+              "total": <int>,      # rows matching filters before pagination
+              "limit":  <int>,
+              "offset": <int>,
+              "has_more": <bool>,
+            }
+        """
         since = _range_since(range)
         try:
-            rows = await list_session_rows(
+            page = await list_session_rows(
                 user_id=user.id,
                 since=since,
                 status_filter=status,
@@ -76,7 +79,15 @@ def get_sessions_router() -> APIRouter:
                 order_by=order_by,
                 descending=descending,
             )
-            return jsonable_encoder([_record_to_row_dict(r) for r in rows])
+            return jsonable_encoder(
+                {
+                    "sessions": [r.to_dict() for r in page.sessions],
+                    "total": page.total,
+                    "limit": page.limit,
+                    "offset": page.offset,
+                    "has_more": page.has_more,
+                }
+            )
         except Exception as exc:
             logger.error("list_sessions failed: %s", exc, exc_info=True)
             return JSONResponse(status_code=500, content={"error": "list failed"})
@@ -166,19 +177,34 @@ def get_sessions_router() -> APIRouter:
         range: _RangeLiteral = Query("30d"),
         user: User = Depends(get_authenticated_user),
     ):
+        """Cost + token totals grouped by the model that produced them.
+
+        Aggregates ``session_model_usage`` rows (one per session × model),
+        so a session that used multiple models splits its cost correctly.
+        Filters on ``session_records.last_activity_at`` to scope by
+        range — requires a join back to the session row.
+        """
         since = _range_since(range)
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
             stmt = (
                 select(
-                    SessionRecord.last_model.label("model"),
-                    func.count().label("session_count"),
-                    func.coalesce(func.sum(SessionRecord.cost_usd), 0).label("cost_usd"),
-                    func.coalesce(func.sum(SessionRecord.tokens_in), 0).label("tokens_in"),
-                    func.coalesce(func.sum(SessionRecord.tokens_out), 0).label("tokens_out"),
+                    SessionModelUsage.model.label("model"),
+                    func.count(func.distinct(SessionModelUsage.session_id)).label("session_count"),
+                    func.coalesce(func.sum(SessionModelUsage.cost_usd), 0).label("cost_usd"),
+                    func.coalesce(func.sum(SessionModelUsage.tokens_in), 0).label("tokens_in"),
+                    func.coalesce(func.sum(SessionModelUsage.tokens_out), 0).label("tokens_out"),
+                )
+                .join(
+                    SessionRecord,
+                    and_(
+                        SessionModelUsage.session_id == SessionRecord.session_id,
+                        SessionModelUsage.user_id == SessionRecord.user_id,
+                    ),
                 )
                 .where(SessionRecord.user_id == user.id)
-                .group_by(SessionRecord.last_model)
+                .group_by(SessionModelUsage.model)
+                .order_by(func.sum(SessionModelUsage.cost_usd).desc())
             )
             if since is not None:
                 stmt = stmt.where(SessionRecord.last_activity_at >= since)
@@ -225,13 +251,19 @@ def get_sessions_router() -> APIRouter:
             except Exception:
                 pass
 
-        record = _record_to_row_dict(row)
-        # Label = first QA's question, if any (for the dashboard's "LABEL" column).
+        record = row.to_dict()
+        # Label = first QA's question, else first trace's origin_function
+        # (so trace-only sessions — the plugin case — still have a label).
         label = None
         for entry in qas:
             if isinstance(entry, dict) and entry.get("question"):
                 label = str(entry["question"])[:120]
                 break
+        if label is None:
+            for entry in traces:
+                if isinstance(entry, dict) and entry.get("origin_function"):
+                    label = str(entry["origin_function"])
+                    break
         record["label"] = label
         record["msg_count"] = len(qas)
         record["tool_calls"] = len(traces)

@@ -25,6 +25,9 @@ from cognee.modules.observability import (
 logger = get_logger("SessionManager")
 
 
+_session_record_write_failed = False
+
+
 async def _record_session_activity(
     user_id: str,
     session_id: str,
@@ -33,17 +36,19 @@ async def _record_session_activity(
 ) -> None:
     """Write a lifecycle heartbeat for this session.
 
-    Upserts the SessionRecord row (first call) and bumps
-    ``last_activity_at`` (subsequent calls). Swallows failures — the
-    session_records table is optional for SessionManager correctness.
+    Upserts + touches the SessionRecord row in one DB round trip.
+    Swallows failures — the session_records table is optional for
+    SessionManager correctness — but logs once at WARNING per process
+    so silent breakage is visible in ops.
     """
+    global _session_record_write_failed
+
     try:
         from uuid import UUID
 
         from cognee.modules.session_lifecycle.metrics import (
             accumulate_usage,
-            ensure_session,
-            touch_session,
+            ensure_and_touch_session,
         )
 
         try:
@@ -51,12 +56,20 @@ async def _record_session_activity(
         except (ValueError, TypeError):
             return
 
-        await ensure_session(session_id=session_id, user_id=user_uuid)
-        await touch_session(session_id=session_id, user_id=user_uuid)
+        await ensure_and_touch_session(session_id=session_id, user_id=user_uuid)
         if errored:
             await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
     except Exception as exc:
-        logger.debug("SessionManager: session_records write failed (%s)", exc)
+        if not _session_record_write_failed:
+            _session_record_write_failed = True
+            logger.warning(
+                "SessionManager: session_records write failed (%s); "
+                "subsequent failures will log at debug. "
+                "Check alembic migrations for the session_records table.",
+                exc,
+            )
+        else:
+            logger.debug("SessionManager: session_records write failed (%s)", exc)
 
 
 def _validate_session_params(

@@ -268,12 +268,24 @@ async def recall(
     user = kwargs.get("user")
 
     # Resolve scope → concrete source list. "auto" (the default) picks
-    # based on what's available: session_id alone → session, else graph.
+    # sources based on what the caller supplied:
+    #
+    # * session_id alone (no datasets, no query_type):
+    #     session → graph, short-circuit on session hit (legacy behaviour).
+    # * session_id + datasets and/or query_type:
+    #     session AND graph, both contribute (legacy "auto" scope).
+    # * no session_id:
+    #     graph only.
+    #
+    # Explicit ``scope`` values bypass this entirely.
     resolved_scope = normalize_scope(scope)
     if resolved_scope == ["auto"]:
         if session_id and not datasets and query_type is None:
-            sources = ["session", "graph"]  # session first, fall through to graph
-            auto_fallthrough = True
+            sources = ["session", "graph"]
+            auto_fallthrough = True  # session hit short-circuits graph
+        elif session_id:
+            sources = ["session", "graph"]
+            auto_fallthrough = False  # both contribute
         else:
             sources = ["graph"]
             auto_fallthrough = False

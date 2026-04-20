@@ -1,12 +1,22 @@
-"""Per-session lock primitives — in-process asyncio.Lock registry.
+"""Per-session lock primitives — in-process asyncio registry.
 
-Keyed by ``(session_id, op)``. Serializes concurrent asyncio tasks in
-the same process that want to mutate the same session.
+Two primitives:
 
-Scope: single-worker FastAPI deployment (the default). For multi-
-worker setups (gunicorn workers, k8s replicas), layer a row-level SQL
-advisory lock or Redis SETNX on top — the call sites are already
-factored so that's a local change.
+* ``session_lock(session_id, op)`` — async context manager that
+  serializes concurrent tasks on the same ``(session_id, op)`` key.
+  Used for short read-modify-write flows (``update_qa``,
+  ``add_feedback``, ``delete_qa``).
+
+* ``try_acquire_improve_lock(session_id)`` /
+  ``release_improve_lock(session_id)`` — non-blocking claim for
+  long-running ``improve()`` calls. The claim is atomic: a
+  registry-wide ``asyncio.Lock`` protects a set of held keys, and
+  the check-and-add happens inside that critical section so two
+  callers can't both see "free" and both think they won.
+
+Scope: single-worker FastAPI. For multi-worker deployments, layer a
+row-level SQL advisory lock or Redis SETNX on top — the call sites
+are factored so that's a local change.
 """
 
 import asyncio
@@ -50,28 +60,40 @@ async def session_lock(session_id: str, op: str = "write"):
         yield
 
 
-async def try_acquire_improve_lock(session_id: str) -> bool:
-    """Non-blocking attempt to acquire the improve() lock for a session.
+# ----- Non-blocking improve-lock claim ---------------------------------------
+#
+# asyncio.Lock has no ``acquire_nowait`` on current Python, and the
+# obvious ``if lock.locked(): ... await lock.acquire()`` pattern is
+# racy — two coroutines can both observe "free" at the check before
+# either reaches the acquire. Use a plain set guarded by a
+# registry-wide lock instead: the check-and-add happens inside the
+# registry lock's critical section, so the test is atomic.
 
-    Returns True if we got it (caller MUST call
-    ``release_improve_lock`` when done). Returns False if someone else
-    is already improving this session — caller should no-op.
+_improving_sessions: set[str] = set()
+_improve_registry_lock = asyncio.Lock()
+
+
+async def try_acquire_improve_lock(session_id: str) -> bool:
+    """Atomically claim the improve-lock for ``session_id``.
+
+    Returns ``True`` iff we got it. The caller MUST call
+    ``release_improve_lock`` when done (use try/finally). Returns
+    ``False`` immediately when another task already holds the lock —
+    callers should no-op rather than wait.
     """
     if not session_id:
         return True  # no-op sessions don't need exclusion
 
-    lock = await _get_lock(session_id, "improve")
-    # asyncio.Lock has no try_acquire shortcut pre-3.11; emulate:
-    if lock.locked():
-        return False
-    # acquire() on an unlocked Lock never blocks.
-    await lock.acquire()
-    return True
+    async with _improve_registry_lock:
+        if session_id in _improving_sessions:
+            return False
+        _improving_sessions.add(session_id)
+        return True
 
 
 async def release_improve_lock(session_id: str) -> None:
+    """Release the improve-lock for ``session_id``. Idempotent."""
     if not session_id:
         return
-    lock = await _get_lock(session_id, "improve")
-    if lock.locked():
-        lock.release()
+    async with _improve_registry_lock:
+        _improving_sessions.discard(session_id)

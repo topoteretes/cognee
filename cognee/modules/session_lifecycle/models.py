@@ -60,7 +60,9 @@ class SessionRecord(Base):
     # scanning the cache.
     error_count = Column(Integer, nullable=False, default=0)
 
-    # Last-seen model string — handy for the "Cost by Model" chart.
+    # Last-seen model string — informational only. Per-model cost
+    # aggregates live in ``SessionModelUsage`` so mixed-model sessions
+    # attribute correctly.
     last_model = Column(Text, nullable=True)
 
     def to_dict(self) -> dict:
@@ -81,4 +83,44 @@ class SessionRecord(Base):
             "cost_usd": self.cost_usd,
             "error_count": self.error_count,
             "last_model": self.last_model,
+        }
+
+
+class SessionModelUsage(Base):
+    """Per-(session, user, model) token + cost aggregate.
+
+    Populated by ``accumulate_usage`` when an LLM call fires inside a
+    tracked session scope. Normalizing this out of ``SessionRecord``
+    lets mixed-model sessions (e.g. embedding calls + completion calls
+    on different models) attribute cost correctly in
+    ``GET /api/v1/sessions/cost-by-model``.
+    """
+
+    __tablename__ = "session_model_usage"
+
+    session_id = Column(String, primary_key=True)
+    user_id = Column(UUID, primary_key=True, index=True)
+    model = Column(Text, primary_key=True)
+
+    tokens_in = Column(Integer, nullable=False, default=0)
+    tokens_out = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Float, nullable=False, default=0.0)
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    def to_dict(self) -> dict:
+        updated = getattr(self, "updated_at", None)
+        return {
+            "session_id": self.session_id,
+            "user_id": str(self.user_id),
+            "model": self.model,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
+            "cost_usd": self.cost_usd,
+            "updated_at": updated.isoformat() if updated is not None else None,
         }

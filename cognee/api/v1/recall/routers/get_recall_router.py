@@ -21,7 +21,10 @@ from cognee.shared.logging_utils import get_logger
 
 
 class RecallPayloadDTO(InDTO):
-    search_type: Optional[SearchType] = Field(default=None)
+    # Default preserved as GRAPH_COMPLETION for backward compatibility
+    # with existing HTTP clients. Pass ``search_type: null`` explicitly
+    # to opt into auto-routing (the new ``cognee.recall`` default).
+    search_type: Optional[SearchType] = Field(default=SearchType.GRAPH_COMPLETION)
     datasets: Optional[list[str]] = Field(default=None)
     dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
     query: str = Field(default="What is in the document?")

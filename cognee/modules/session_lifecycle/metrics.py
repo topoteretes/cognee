@@ -1,10 +1,16 @@
 """Session-lifecycle operations — thin wrappers around SessionRecord.
 
 All public functions are async and idempotent where possible:
-* ``ensure_session`` upserts on first write.
-* ``touch_session`` bumps ``last_activity_at`` — cheap UPDATE.
-* ``accumulate_usage`` atomically adds tokens / cost.
+
+* ``ensure_and_touch_session`` upserts the row and bumps
+  ``last_activity_at`` in a single DB round trip.
+* ``accumulate_usage`` atomically adds tokens / cost to the session row
+  and, when a model is named, updates the ``session_model_usage``
+  table so ``cost-by-model`` attributes mixed-model sessions correctly.
 * ``mark_ended`` transitions to a terminal status.
+
+Writes to ``running`` sessions only — terminal sessions (completed /
+failed) stay frozen so late tool-calls don't resurrect or distort them.
 
 The ``abandoned`` transition is never written — it's computed at read
 time via ``get_effective_status_sql`` against
@@ -12,18 +18,20 @@ time via ``get_effective_status_sql`` against
 """
 
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional, Sequence
 from uuid import UUID as UUIDType
 
-from sqlalchemy import and_, case, select, update
+from sqlalchemy import and_, case, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
 
-from .models import SessionRecord
+from .models import SessionModelUsage, SessionRecord
 
 logger = get_logger("session_lifecycle")
 
@@ -44,107 +52,81 @@ def _abandon_after_seconds() -> int:
         return 1800
 
 
-async def ensure_session(
+def _dialect_name(bind) -> str:
+    try:
+        return bind.dialect.name
+    except Exception:
+        return ""
+
+
+async def ensure_and_touch_session(
     *,
     session_id: str,
     user_id: UUIDType,
     dataset_id: Optional[UUIDType] = None,
 ) -> None:
-    """Create the session row if it doesn't exist; no-op if it does.
+    """Upsert the session row in one round trip.
 
-    Safe to call on every write — the INSERT uses ON CONFLICT DO
-    NOTHING (SQLite) or equivalent. Subsequent activity updates flow
-    through ``touch_session`` / ``accumulate_usage``.
+    Creates the row if absent (status=running). If present AND still
+    running, bumps ``last_activity_at``. Terminal sessions are left
+    untouched so a late straggler can't accidentally resurrect them.
+    Also fills in ``dataset_id`` when currently null.
     """
+    now = datetime.now(timezone.utc)
     engine = get_relational_engine()
+
     async with engine.get_async_session() as session:
-        now = datetime.now(timezone.utc)
-        stmt = sqlite_insert(SessionRecord).values(
-            session_id=session_id,
-            user_id=user_id,
-            dataset_id=dataset_id,
-            status=SessionStatus.RUNNING.value,
-            started_at=now,
-            last_activity_at=now,
-            tokens_in=0,
-            tokens_out=0,
-            cost_usd=0.0,
-            error_count=0,
-        )
-        # ON CONFLICT DO NOTHING is SQLite-specific; Postgres supports
-        # the same shape. For other dialects, the SELECT-then-INSERT
-        # fallback below handles it.
-        try:
-            stmt = stmt.on_conflict_do_nothing(index_elements=["session_id", "user_id"])
+        bind = await session.connection()
+        dialect = _dialect_name(bind)
+
+        values = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "dataset_id": dataset_id,
+            "status": SessionStatus.RUNNING.value,
+            "started_at": now,
+            "last_activity_at": now,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_usd": 0.0,
+            "error_count": 0,
+        }
+
+        if dialect in ("sqlite", "postgresql"):
+            insert = sqlite_insert if dialect == "sqlite" else pg_insert
+            stmt = insert(SessionRecord).values(**values)
+            set_ = {"last_activity_at": now}
+            # Back-fill a previously-unset dataset_id.
+            set_["dataset_id"] = case(
+                (SessionRecord.dataset_id.is_(None), dataset_id),
+                else_=SessionRecord.dataset_id,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["session_id", "user_id"],
+                set_=set_,
+                where=SessionRecord.status == SessionStatus.RUNNING.value,
+            )
             await session.execute(stmt)
             await session.commit()
             return
-        except Exception:
-            await session.rollback()
 
-        # Fallback path for non-SQLite/Postgres dialects.
-        existing = await session.execute(
-            select(SessionRecord).where(
-                and_(
-                    SessionRecord.session_id == session_id,
-                    SessionRecord.user_id == user_id,
+        # Portable fallback: SELECT-then-INSERT/UPDATE. Two round trips.
+        existing = (
+            await session.execute(
+                select(SessionRecord).where(
+                    and_(
+                        SessionRecord.session_id == session_id,
+                        SessionRecord.user_id == user_id,
+                    )
                 )
             )
-        )
-        if existing.scalar_one_or_none() is not None:
-            return
-
-        session.add(
-            SessionRecord(
-                session_id=session_id,
-                user_id=user_id,
-                dataset_id=dataset_id,
-                status=SessionStatus.RUNNING.value,
-                started_at=now,
-                last_activity_at=now,
-            )
-        )
-        await session.commit()
-
-
-async def touch_session(
-    *,
-    session_id: str,
-    user_id: UUIDType,
-    dataset_id: Optional[UUIDType] = None,
-) -> None:
-    """Bump ``last_activity_at`` to now.
-
-    Called after every cache write. Also opportunistically fills in
-    ``dataset_id`` if it's currently null and we have one now.
-    """
-    now = datetime.now(timezone.utc)
-
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        # Only touch rows that are still active — terminal sessions
-        # stay terminal. This avoids a late tool-call resurrecting a
-        # session that SessionEnd already marked completed.
-        stmt = (
-            update(SessionRecord)
-            .where(
-                and_(
-                    SessionRecord.session_id == session_id,
-                    SessionRecord.user_id == user_id,
-                    SessionRecord.status == SessionStatus.RUNNING.value,
-                )
-            )
-            .values(last_activity_at=now)
-        )
-        if dataset_id is not None:
-            # Don't clobber a pre-existing dataset_id — only fill null.
-            stmt = stmt.values(
-                dataset_id=case(
-                    (SessionRecord.dataset_id.is_(None), dataset_id),
-                    else_=SessionRecord.dataset_id,
-                )
-            )
-        await session.execute(stmt)
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(SessionRecord(**values))
+        elif existing.status == SessionStatus.RUNNING.value:
+            existing.last_activity_at = now
+            if existing.dataset_id is None and dataset_id is not None:
+                existing.dataset_id = dataset_id
         await session.commit()
 
 
@@ -158,22 +140,21 @@ async def accumulate_usage(
     model: Optional[str] = None,
     errored: bool = False,
 ) -> None:
-    """Atomically add usage counters to the session row.
+    """Atomically add usage counters to the session row + per-model row.
 
-    Uses SQL-level arithmetic (column + :delta) so concurrent
-    accumulators from two LLM calls don't clobber each other.
+    Only mutates sessions in ``running`` state — terminal sessions are
+    frozen. Per-model accumulation runs against
+    ``session_model_usage`` via an upsert so mixed-model sessions
+    attribute correctly in ``cost-by-model``.
     """
     if tokens_in == 0 and tokens_out == 0 and cost_usd == 0.0 and not errored and model is None:
         return
 
     engine = get_relational_engine()
+
     async with engine.get_async_session() as session:
-        stmt = update(SessionRecord).where(
-            and_(
-                SessionRecord.session_id == session_id,
-                SessionRecord.user_id == user_id,
-            )
-        )
+        # 1) Session-level aggregate. Gated on running status so a
+        #    terminal session doesn't accrue straggler charges.
         values = {}
         if tokens_in:
             values["tokens_in"] = SessionRecord.tokens_in + tokens_in
@@ -185,10 +166,78 @@ async def accumulate_usage(
             values["error_count"] = SessionRecord.error_count + 1
         if model:
             values["last_model"] = model
-        if not values:
-            return
-        stmt = stmt.values(**values)
-        await session.execute(stmt)
+
+        if values:
+            await session.execute(
+                update(SessionRecord)
+                .where(
+                    and_(
+                        SessionRecord.session_id == session_id,
+                        SessionRecord.user_id == user_id,
+                        SessionRecord.status == SessionStatus.RUNNING.value,
+                    )
+                )
+                .values(**values)
+            )
+
+        # 2) Per-model row — only when there's usage to credit.
+        if model and (tokens_in or tokens_out or cost_usd):
+            now = datetime.now(timezone.utc)
+            bind = await session.connection()
+            dialect = _dialect_name(bind)
+
+            if dialect in ("sqlite", "postgresql"):
+                insert = sqlite_insert if dialect == "sqlite" else pg_insert
+                stmt = insert(SessionModelUsage).values(
+                    session_id=session_id,
+                    user_id=user_id,
+                    model=model,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_usd=cost_usd,
+                    updated_at=now,
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["session_id", "user_id", "model"],
+                    set_={
+                        "tokens_in": SessionModelUsage.tokens_in + tokens_in,
+                        "tokens_out": SessionModelUsage.tokens_out + tokens_out,
+                        "cost_usd": SessionModelUsage.cost_usd + cost_usd,
+                        "updated_at": now,
+                    },
+                )
+                await session.execute(stmt)
+            else:
+                # Portable fallback: SELECT then INSERT/UPDATE.
+                existing = (
+                    await session.execute(
+                        select(SessionModelUsage).where(
+                            and_(
+                                SessionModelUsage.session_id == session_id,
+                                SessionModelUsage.user_id == user_id,
+                                SessionModelUsage.model == model,
+                            )
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing is None:
+                    session.add(
+                        SessionModelUsage(
+                            session_id=session_id,
+                            user_id=user_id,
+                            model=model,
+                            tokens_in=tokens_in,
+                            tokens_out=tokens_out,
+                            cost_usd=cost_usd,
+                            updated_at=now,
+                        )
+                    )
+                else:
+                    existing.tokens_in = existing.tokens_in + tokens_in
+                    existing.tokens_out = existing.tokens_out + tokens_out
+                    existing.cost_usd = existing.cost_usd + cost_usd
+                    existing.updated_at = now
+
         await session.commit()
 
 
@@ -221,10 +270,6 @@ async def mark_ended(
 
 def get_effective_status_sql():
     """Return a SQL expression that evaluates to the effective status.
-
-    Usage (in a SELECT):
-        from sqlalchemy import select
-        select(SessionRecord, get_effective_status_sql().label("effective_status"))
 
     Rule: if stored status is ``running`` AND last_activity_at is older
     than ``SESSION_ABANDON_AFTER_SECONDS`` → ``abandoned``. Otherwise
@@ -265,6 +310,35 @@ async def get_session_row(
         return result.scalar_one_or_none()
 
 
+@dataclass(slots=True)
+class SessionRowWithStatus:
+    """List envelope for ``list_session_rows`` — the SessionRecord plus
+    the computed effective status, without attaching dynamic
+    attributes to the ORM instance."""
+
+    record: SessionRecord
+    effective_status: str
+
+    def to_dict(self) -> dict:
+        d = self.record.to_dict()
+        d["effective_status"] = self.effective_status
+        return d
+
+
+@dataclass(slots=True)
+class SessionListPage:
+    """Paginated list envelope."""
+
+    sessions: list[SessionRowWithStatus]
+    total: int
+    limit: int
+    offset: int
+
+    @property
+    def has_more(self) -> bool:
+        return self.offset + len(self.sessions) < self.total
+
+
 async def list_session_rows(
     *,
     user_id: Optional[UUIDType] = None,
@@ -274,26 +348,32 @@ async def list_session_rows(
     offset: int = 0,
     order_by: str = "last_activity_at",
     descending: bool = True,
-) -> Sequence[SessionRecord]:
-    """List sessions with pagination.
+) -> SessionListPage:
+    """List sessions with pagination metadata.
 
     status_filter accepts the effective status (including
-    'abandoned') — the SQL predicate handles the abandoned-by-time
+    ``abandoned``) — the SQL predicate handles the abandoned-by-time
     inference.
     """
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
         eff = get_effective_status_sql()
-        stmt = select(SessionRecord, eff.label("effective_status"))
-        if user_id is not None:
-            stmt = stmt.where(SessionRecord.user_id == user_id)
-        if since is not None:
-            stmt = stmt.where(SessionRecord.last_activity_at >= since)
-        if status_filter:
-            stmt = stmt.where(eff == status_filter)
 
-        # Sort column allow-list to avoid arbitrary SQL injection via
-        # the order_by param.
+        filters = []
+        if user_id is not None:
+            filters.append(SessionRecord.user_id == user_id)
+        if since is not None:
+            filters.append(SessionRecord.last_activity_at >= since)
+        if status_filter:
+            filters.append(eff == status_filter)
+
+        # Count before pagination so the caller can render
+        # "showing N of M".
+        count_stmt = select(func.count()).select_from(SessionRecord)
+        if filters:
+            count_stmt = count_stmt.where(and_(*filters))
+        total = (await session.execute(count_stmt)).scalar_one()
+
         sortable = {
             "last_activity_at": SessionRecord.last_activity_at,
             "started_at": SessionRecord.started_at,
@@ -303,15 +383,32 @@ async def list_session_rows(
             "tokens_out": SessionRecord.tokens_out,
         }
         sort_col = sortable.get(order_by, SessionRecord.last_activity_at)
-        stmt = stmt.order_by(sort_col.desc() if descending else sort_col.asc())
-        stmt = stmt.limit(limit).offset(offset)
 
-        result = await session.execute(stmt)
-        rows = result.all()
-        # Attach the effective status to each SessionRecord for the caller.
-        out = []
-        for row in rows:
-            rec = row[0]
-            setattr(rec, "effective_status", row[1])
-            out.append(rec)
-        return out
+        rows_stmt = select(SessionRecord, eff.label("effective_status"))
+        if filters:
+            rows_stmt = rows_stmt.where(and_(*filters))
+        rows_stmt = rows_stmt.order_by(sort_col.desc() if descending else sort_col.asc())
+        rows_stmt = rows_stmt.limit(limit).offset(offset)
+
+        rows = (await session.execute(rows_stmt)).all()
+
+        return SessionListPage(
+            sessions=[SessionRowWithStatus(record=r[0], effective_status=r[1]) for r in rows],
+            total=int(total),
+            limit=limit,
+            offset=offset,
+        )
+
+
+# Backward-compatibility shims ------------------------------------------------
+
+
+async def ensure_session(*, session_id, user_id, dataset_id=None):
+    """Deprecated: prefer ``ensure_and_touch_session``. Kept for callers
+    that only want the "row must exist" half."""
+    await ensure_and_touch_session(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
+
+
+async def touch_session(*, session_id, user_id, dataset_id=None):
+    """Deprecated: prefer ``ensure_and_touch_session``."""
+    await ensure_and_touch_session(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
