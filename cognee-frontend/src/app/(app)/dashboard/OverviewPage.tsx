@@ -306,9 +306,8 @@ export default function OverviewPage() {
 
       {/* Onboarding strip */}
       <div style={{ display: "flex", alignItems: "center", background: "#FFFFFF", border: "1px solid #E4E4E7", borderRadius: 12, padding: 4 }}>
-        <OnboardingItem title="Python SDK installed" subtitle="pip install cognee" icon={<SdkIcon />} done />
-        <OnboardingItem title="API key copied" subtitle="Open API Keys →" icon={<KeyIconSm />} done href="/api-keys" />
-        <OnboardingItem title={`${agentCount} agents connected`} subtitle="+ Connect another" icon={<AgentIconSm />} done href="/connections" highlightSubtitle />
+        <OnboardingItem title="Python SDK" subtitle="pip install cognee" icon={<SdkIcon />} />
+        <OnboardingItem title="API key" subtitle="Open API Keys →" icon={<KeyIconSm />} href="/api-keys" />
         <OnboardingItem title="Upload data" subtitle="Build more memory →" icon={<UploadIconSm />} accent onClick={() => uploadInputRef.current?.click()} loading={isUploading} />
       </div>
 
