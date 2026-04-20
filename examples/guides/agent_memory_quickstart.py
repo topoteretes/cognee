@@ -47,7 +47,7 @@ async def ask_llm(question: str) -> str:
 
 @cognee.agent_memory(
     with_memory=True,
-    save_traces=True,
+    save_session_traces=True,
     memory_query_fixed="What animal does cognee internal name refer to?",
     memory_system_prompt=(
         "Return only the codename from memory context. "
@@ -61,7 +61,7 @@ async def with_memory_agent() -> str:
 
 @cognee.agent_memory(
     with_memory=True,
-    save_traces=True,
+    save_session_traces=True,
     memory_query_from_method="question",
 )
 async def with_dynamic_memory_agent(question: str) -> str:
@@ -69,13 +69,13 @@ async def with_dynamic_memory_agent(question: str) -> str:
     return await ask_llm(question)
 
 
-@cognee.agent_memory(with_memory=False, save_traces=False)
+@cognee.agent_memory(with_memory=False, save_session_traces=False)
 async def without_memory_agent() -> str:
     # Same downstream LLM call shape, but memory retrieval is disabled.
     return await ask_llm("What animal does cognee internal name refer to?")
 
 
-@cognee.agent_memory(with_memory=False, save_traces=True)
+@cognee.agent_memory(with_memory=False, save_session_traces=True)
 async def trace_test() -> str:
     # Simple call that is mostly useful for checking trace persistence.
     return await ask_llm("Just write out: results")
@@ -84,7 +84,7 @@ async def trace_test() -> str:
 @cognee.agent_memory(
     with_memory=False,
     with_session_memory=True,
-    save_traces=True,
+    save_session_traces=True,
     session_memory_last_n=5,
 )
 async def with_session_memory_agent() -> str:
