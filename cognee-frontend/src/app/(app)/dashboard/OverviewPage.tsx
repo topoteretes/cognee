@@ -10,6 +10,7 @@ import searchDataset from "@/modules/datasets/searchDataset";
 import addData from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import createDataset from "@/modules/datasets/createDataset";
+import { listSessions, getSessionStats } from "@/modules/sessions/getSessions";
 import { notifications } from "@mantine/notifications";
 
 interface PipelineRun { id: string; pipeline_name: string; status: string; dataset_id: string | null; dataset_name: string | null; owner_email: string | null; created_at: string | null; pipeline_run_id: string | null }
@@ -126,14 +127,24 @@ export default function OverviewPage() {
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
 
+    let cancelled = false;
+
+    // Poll telemetry + sessions every 15s. The Activity & Memory
+    // table binds to `sessions`, so each tick refreshes it.
     function fetchTelemetry() {
-      const { listSessions, getSessionStats } = require("@/modules/sessions/getSessions");
       return Promise.all([
-        cogniInstance!.fetch("/v1/activity/pipeline-runs").then((r) => r.ok ? r.json() : []).catch(() => []),
-        cogniInstance!.fetch("/v1/activity/spans").then((r) => r.ok ? r.json() : []).catch(() => []),
+        cogniInstance!
+          .fetch("/v1/activity/pipeline-runs")
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []),
+        cogniInstance!
+          .fetch("/v1/activity/spans")
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []),
         listSessions(cogniInstance!, { range, limit: 20 }),
         getSessionStats(cogniInstance!, range),
       ]).then(([runData, spanData, sessionsPage, stats]) => {
+        if (cancelled) return;
         setRuns(Array.isArray(runData) ? runData : []);
         setTraceCount(Array.isArray(spanData) ? spanData.length : 0);
         setSessions(sessionsPage?.sessions ?? []);
@@ -141,14 +152,22 @@ export default function OverviewPage() {
       });
     }
 
-    fetchTelemetry().then(() => {
-      if (datasets.length === 0 && !filterLoading && !sessionStorage.getItem("cognee-onboarding-skipped")) {
-        router.replace("/onboarding");
-      }
-    }).finally(() => setLoading(false));
+    fetchTelemetry()
+      .then(() => {
+        if (cancelled) return;
+        if (datasets.length === 0 && !filterLoading && !sessionStorage.getItem("cognee-onboarding-skipped")) {
+          router.replace("/onboarding");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     const interval = setInterval(fetchTelemetry, 15000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [cogniInstance, isInitializing, datasets, filterLoading, router, range]);
 
   if (loading || isInitializing || filterLoading) {
