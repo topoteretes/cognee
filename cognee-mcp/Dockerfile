@@ -17,9 +17,9 @@ ARG DEBUG
 ENV DEBUG=${DEBUG}
 
 # Needed when psycopg2 is built from source via cognee[postgres] in linux images.
-# libpq-dev provides pg_config; gcc is required for compilation.
+# libpq-dev provides pg_config; build-essential provides libc headers and toolchain.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
+    build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
