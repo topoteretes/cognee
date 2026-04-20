@@ -1,8 +1,8 @@
 import os
 import asyncio
 from uuid import UUID
-from pydantic import Field
-from typing import List, Optional
+from pydantic import Field, field_validator
+from typing import List, Optional, Union
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
@@ -39,8 +39,8 @@ logger = get_logger("api.cognify")
 
 
 class CognifyPayloadDTO(InDTO):
-    datasets: Optional[List[str]] = Field(default=None)
-    dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
+    datasets: Optional[Union[str, List[str]]] = Field(default=None)
+    dataset_ids: Optional[Union[UUID, List[UUID]]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
     graph_model: Optional[dict] = Field(default=None, examples=[{}])
     custom_prompt: Optional[str] = Field(
@@ -56,6 +56,20 @@ class CognifyPayloadDTO(InDTO):
         description="Number of chunks to process per task batch in Cognify (overrides default).",
         examples=[10, 20, 50, 100],
     )
+
+    @field_validator("datasets", mode="before")
+    @classmethod
+    def normalize_datasets(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
+
+    @field_validator("dataset_ids", mode="before")
+    @classmethod
+    def normalize_dataset_ids(cls, v):
+        if isinstance(v, (str, UUID)):
+            return [UUID(str(v)) if isinstance(v, str) else v]
+        return v
 
 
 def get_cognify_router() -> APIRouter:

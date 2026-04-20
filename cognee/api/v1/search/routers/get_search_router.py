@@ -1,7 +1,7 @@
 from uuid import UUID
 from typing import Optional, Union, List, Any
 from datetime import datetime
-from pydantic import Field
+from pydantic import Field, field_validator
 from fastapi import Depends, APIRouter, status
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
@@ -24,8 +24,8 @@ from cognee.api.DTO import ErrorResponse
 #       To search for datasets not owned by the request sender dataset UUID is needed
 class SearchPayloadDTO(InDTO):
     search_type: SearchType = Field(default=SearchType.GRAPH_COMPLETION)
-    datasets: Optional[list[str]] = Field(default=None)
-    dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
+    datasets: Optional[Union[str, list[str]]] = Field(default=None)
+    dataset_ids: Optional[Union[UUID, list[UUID]]] = Field(default=None, examples=[[]])
     query: str = Field(default="What is in the document?")
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
@@ -34,6 +34,20 @@ class SearchPayloadDTO(InDTO):
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
+
+    @field_validator("datasets", mode="before")
+    @classmethod
+    def normalize_datasets(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
+
+    @field_validator("dataset_ids", mode="before")
+    @classmethod
+    def normalize_dataset_ids(cls, v):
+        if isinstance(v, (str, UUID)):
+            return [UUID(str(v)) if isinstance(v, str) else v]
+        return v
 
 
 def get_search_router() -> APIRouter:
