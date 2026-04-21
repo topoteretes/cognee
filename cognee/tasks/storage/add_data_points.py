@@ -43,10 +43,6 @@ async def add_data_points(
         embed_triplets: If True, creates and indexes triplet embeddings.
         ctx: Pipeline runtime context (user, dataset, data_item).
     """
-    import time
-
-    start = time.perf_counter()
-
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
     dataset = ctx.dataset if ctx else None
@@ -94,8 +90,6 @@ async def add_data_points(
         await asyncio.gather(
             graph_engine.add_nodes(nodes), index_data_points(nodes, vector_engine=vector_engine)
         )
-        # await graph_engine.add_nodes(nodes)
-        # await index_data_points(nodes, vector_engine=vector_engine)
 
     if user and dataset and data_item:
         await upsert_nodes(
@@ -119,8 +113,6 @@ async def add_data_points(
         await asyncio.gather(
             graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine)
         )
-        # await graph_engine.add_edges(edges)
-        # await index_graph_edges(edges, vector_engine=vector_engine)
 
     if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
@@ -132,8 +124,6 @@ async def add_data_points(
                 graph_engine.add_edges(custom_edges),
                 index_graph_edges(custom_edges, vector_engine=vector_engine),
             )
-            # await graph_engine.add_edges(custom_edges)
-            # await index_graph_edges(custom_edges, vector_engine=vector_engine)
 
         if user and dataset and data_item:
             await upsert_edges(
@@ -152,8 +142,6 @@ async def add_data_points(
             await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
-    end = time.perf_counter()
-    print(f"TOTAL ADD_DATA_POINTS TIME: {end - start}")
     return data_points
 
 
