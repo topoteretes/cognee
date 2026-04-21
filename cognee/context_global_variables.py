@@ -181,9 +181,11 @@ class DatabaseContextManager:
             ),
             "graph_dataset_database_handler": "",
             "graph_database_port": "",
-            # Inherit subprocess mode from the global config so that per-dataset DB wrappers
-            # are also spawned as subprocesses when the feature is enabled.
+            # Inherit subprocess mode and Kuzu tuning from the global config so that
+            # per-dataset DB wrappers are spawned with matching settings.
             "graph_database_subprocess_enabled": get_graph_config().graph_database_subprocess_enabled,
+            "kuzu_num_threads": get_graph_config().kuzu_num_threads,
+            "kuzu_buffer_pool_size": get_graph_config().kuzu_buffer_pool_size,
         }
 
         storage_config = {

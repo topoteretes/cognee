@@ -23,12 +23,10 @@ import psutil
 
 import cognee
 
-from cognee.infrastructure.databases.graph.subprocess_graph_wrapper import (
-    SubprocessGraphDBWrapper,
-)
-from cognee.infrastructure.databases.vector.subprocess_vector_wrapper import (
-    SubprocessVectorDBWrapper,
-)
+# The old SubprocessGraphDBWrapper / SubprocessVectorDBWrapper have been
+# replaced by in-adapter subprocess proxies that only import the native DB
+# library in the child. The adapter itself surfaces subprocess state via the
+# ``_session`` attribute and the MemoryItem protocol (memory_used / clean).
 
 
 GUTENBERG_URL = "https://www.gutenberg.org/cache/epub/2600/pg2600.txt"
@@ -145,7 +143,7 @@ def _force_vector_subprocess_args(*args, **kwargs):
 
 def _assert_graph_engine_mode(engine: Any, *args, require_subprocess: bool, **kwargs) -> None:
     if require_subprocess and _graph_provider_from_factory_args(*args, **kwargs) == "kuzu":
-        if not isinstance(engine, SubprocessGraphDBWrapper):
+        if getattr(engine, "_session", None) is None:
             raise AssertionError(
                 "Expected Kuzu graph engine to run in a subprocess when --subprocess is enabled"
             )
@@ -153,7 +151,7 @@ def _assert_graph_engine_mode(engine: Any, *args, require_subprocess: bool, **kw
 
 def _assert_vector_engine_mode(engine: Any, *args, require_subprocess: bool, **kwargs) -> None:
     if require_subprocess and _vector_provider_from_factory_args(*args, **kwargs) == "lancedb":
-        if not isinstance(engine, SubprocessVectorDBWrapper):
+        if getattr(engine, "_session", None) is None:
             raise AssertionError(
                 "Expected LanceDB vector engine to run in a subprocess when --subprocess is enabled"
             )
@@ -375,7 +373,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--subprocess", action="store_true", default=False,
-        help="Run KuzuAdapter in an isolated subprocess via SubprocessGraphDBWrapper",
+        help="Run KuzuAdapter and LanceDBAdapter against subprocess-backed DB clients",
     )
     args = parser.parse_args()
     asyncio.run(

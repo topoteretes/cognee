@@ -53,22 +53,97 @@ class KuzuAdapter(GraphDBInterface):
     well as for graph metrics and data extraction.
     """
 
-    def __init__(self, db_path: str):
-        """Initialize Kuzu database connection and schema."""
+    def __init__(
+        self,
+        db_path: str,
+        kuzu_num_threads: int = 0,
+        kuzu_buffer_pool_size: int = DEFAULT_BUFFER_POOL_SIZE,
+        *,
+        database: Optional[Any] = None,
+        connection: Optional[Any] = None,
+        session: Optional[Any] = None,
+    ):
+        """Initialize Kuzu database connection and schema.
+
+        Parameters
+        ----------
+        db_path:
+            Path to the Kuzu database directory.
+        kuzu_num_threads:
+            Maximum number of threads Kuzu uses to execute queries. ``0`` keeps
+            Kuzu's internal default (one per CPU).
+        kuzu_buffer_pool_size:
+            Maximum size of the Kuzu buffer pool in bytes.
+        database, connection, session:
+            Optional pre-built Database/Connection and a subprocess session.
+            When supplied, the adapter runs in subprocess-proxy mode: the
+            native kuzu.Database/Connection live in a dedicated worker process
+            and ``database``/``connection`` are main-side proxies. In this mode
+            the adapter does NOT rebuild the connection lazily on close; the
+            lifecycle is owned by the factory + LRU cache.
+        """
         self.open_connections = 0
         self.db_path = db_path  # Path for the database directory
-        self.db: Optional[Database] = None
-        self.connection: Optional[Connection] = None
+        self.kuzu_num_threads = kuzu_num_threads
+        self.kuzu_buffer_pool_size = kuzu_buffer_pool_size
+        self._session = session
+        injected = database is not None and connection is not None
+        # Remember that this adapter was constructed in subprocess-proxy mode.
+        # After close(), we must NOT silently fall through to a local
+        # kuzu.Database re-init on the same db_path — that would conflict with
+        # any surviving subprocess holding the Kuzu file lock. If a caller
+        # tries to reuse a closed subprocess-mode adapter we raise explicitly.
+        self._subprocess_mode = injected
+        self._permanently_closed = False
+        self.db: Optional[Database] = database
+        self.connection: Optional[Connection] = connection
+
         if cache_config.shared_kuzu_lock:
+            if injected:
+                raise RuntimeError(
+                    "Kuzu subprocess mode is incompatible with shared_kuzu_lock."
+                )
             self.redis_lock = get_cache_engine(
                 lock_key="kuzu-lock-" + str(uuid5(NAMESPACE_OID, db_path))
             )
         else:
             self.executor = ThreadPoolExecutor()
-            self._initialize_connection()
+            if injected:
+                self._ensure_schema()
+            else:
+                self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
         self._connection_change_lock = asyncio.Lock()
         self._connection_lock = asyncio.Lock()
+
+    def _ensure_schema(self) -> None:
+        """Create Node + EDGE tables on the current ``self.connection``.
+
+        Extracted from ``_initialize_connection`` so the subprocess path (where
+        the native db/connection are constructed by the factory) can still run
+        the same schema bootstrap.
+        """
+        assert self.connection is not None
+        self.connection.execute("""
+            CREATE NODE TABLE IF NOT EXISTS Node(
+                id STRING PRIMARY KEY,
+                name STRING,
+                type STRING,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                properties STRING
+            )
+        """)
+        self.connection.execute("""
+            CREATE REL TABLE IF NOT EXISTS EDGE(
+                FROM Node TO Node,
+                relationship_name STRING,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                properties STRING
+            )
+        """)
+        logger.debug("Kuzu database schema ensured")
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -104,7 +179,8 @@ class KuzuAdapter(GraphDBInterface):
 
                 self.db = Database(
                     self.temp_graph_file,
-                    buffer_pool_size=DEFAULT_BUFFER_POOL_SIZE,
+                    buffer_pool_size=self.kuzu_buffer_pool_size,
+                    max_num_threads=self.kuzu_num_threads,
                     max_db_size=DEFAULT_MAX_DB_SIZE,
                 )
             else:
@@ -125,7 +201,8 @@ class KuzuAdapter(GraphDBInterface):
                 try:
                     self.db = Database(
                         self.db_path,
-                        buffer_pool_size=DEFAULT_BUFFER_POOL_SIZE,
+                        buffer_pool_size=self.kuzu_buffer_pool_size,
+                        max_num_threads=self.kuzu_num_threads,
                         max_db_size=DEFAULT_MAX_DB_SIZE,
                     )
                 except RuntimeError:
@@ -149,7 +226,8 @@ class KuzuAdapter(GraphDBInterface):
 
                     self.db = Database(
                         self.db_path,
-                        buffer_pool_size=DEFAULT_BUFFER_POOL_SIZE,
+                        buffer_pool_size=self.kuzu_buffer_pool_size,
+                        max_num_threads=self.kuzu_num_threads,
                         max_db_size=DEFAULT_MAX_DB_SIZE,
                     )
 
@@ -304,10 +382,20 @@ class KuzuAdapter(GraphDBInterface):
     def get_or_init_connection(self) -> Connection:
         """Return the current connection, initializing it first if needed.
 
+        In subprocess-proxy mode we never fall through to a local
+        ``kuzu.Database`` init — that would open the same DB path in the main
+        process and conflict with any surviving subprocess on the Kuzu file
+        lock. A closed subprocess-mode adapter is a permanent error state.
+
         Callers must hold ``_connection_lock`` to prevent races with
         explicit calls to ``close()``.
         """
         if not self.connection:
+            if self._subprocess_mode or self._permanently_closed:
+                raise RuntimeError(
+                    "KuzuAdapter is closed; a new adapter must be created "
+                    "(subprocess-mode adapters cannot be re-initialized)."
+                )
             self._initialize_connection()
         assert self.connection is not None
         return self.connection
@@ -316,16 +404,58 @@ class KuzuAdapter(GraphDBInterface):
         """Close the database and connection, releasing native resources.
 
         Holds ``_connection_lock`` to prevent closing while a query is
-        initializing or using the connection.
+        initializing or using the connection. In subprocess-proxy mode, also
+        tears down the worker session.
         """
         async with self._connection_lock:
             if self.connection:
-                self.connection.close()
+                try:
+                    self.connection.close()
+                except Exception as e:
+                    logger.warning(f"Error closing Kuzu connection: {e}")
                 self.connection = None
             if self.db:
-                self.db.close()
+                try:
+                    self.db.close()
+                except Exception as e:
+                    logger.warning(f"Error closing Kuzu database: {e}")
                 self.db = None
+            if self._session is not None:
+                try:
+                    self._session.shutdown()
+                except Exception as e:
+                    logger.warning(f"Error shutting down Kuzu subprocess: {e}")
+                self._session = None
+            self._permanently_closed = True
         logger.info("Kuzu database closed successfully")
+
+    # ---- MemoryCleanupManager protocol ----
+    def memory_used(self) -> int:
+        if self._session is None:
+            return 0
+        try:
+            return self._session.memory_used_bytes()
+        except Exception:
+            return 0
+
+    def last_accessed_ts(self) -> float:
+        if self._session is None:
+            return 0.0
+        return float(self._session.last_accessed_at)
+
+    def clean(self):
+        """Called by MemoryCleanupManager; synchronous shutdown of the subprocess."""
+        if self._session is None:
+            return None
+        try:
+            self._session.shutdown()
+        except Exception:
+            pass
+        self._session = None
+        self.db = None
+        self.connection = None
+        self._permanently_closed = True
+        return None
 
     @asynccontextmanager
     async def get_session(self):

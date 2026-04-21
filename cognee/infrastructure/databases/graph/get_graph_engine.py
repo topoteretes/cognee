@@ -78,6 +78,8 @@ def create_graph_engine(
     graph_database_key="",
     graph_dataset_database_handler="",
     graph_database_subprocess_enabled=False,
+    kuzu_num_threads=0,
+    kuzu_buffer_pool_size=2 * 1024 * 1024 * 1024,
 ):
     """
     Wrapper function to call create graph engine with caching.
@@ -116,6 +118,8 @@ def create_graph_engine(
         graph_database_key,
         graph_dataset_database_handler,
         graph_database_subprocess_enabled,
+        kuzu_num_threads,
+        kuzu_buffer_pool_size,
     )
 
 
@@ -132,6 +136,8 @@ def _create_graph_engine(
     graph_database_key="",
     graph_dataset_database_handler="",
     graph_database_subprocess_enabled=False,
+    kuzu_num_threads=0,
+    kuzu_buffer_pool_size=2 * 1024 * 1024 * 1024,
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -199,14 +205,60 @@ def _create_graph_engine(
         if not graph_file_path:
             raise EnvironmentError("Missing required Kuzu database path.")
 
-        from .kuzu.adapter import KuzuAdapter
+        from .kuzu.adapter import KuzuAdapter, DEFAULT_MAX_DB_SIZE
+
         if graph_database_subprocess_enabled:
-            from .subprocess_graph_wrapper import SubprocessGraphDBWrapper
+            from .kuzu.subprocess.proxy import (
+                KuzuSubprocessSession,
+                RemoteKuzuConnection,
+                RemoteKuzuDatabase,
+                install_json_extension,
+            )
 
-            subprocess_graph_wrapper_cls = cast(Any, SubprocessGraphDBWrapper)
-            return subprocess_graph_wrapper_cls(KuzuAdapter, db_path=graph_file_path)
+            # Kuzu expects the parent directory of its db file to already exist.
+            # The local-mode adapter does this in _initialize_connection; in
+            # subprocess mode we do the equivalent here before spinning up the
+            # worker.
+            import os as _os
 
-        return KuzuAdapter(db_path=graph_file_path)
+            _db_parent = _os.path.dirname(_os.path.abspath(graph_file_path))
+            if _db_parent:
+                _os.makedirs(_db_parent, exist_ok=True)
+
+            session = KuzuSubprocessSession.start()
+            try:
+                install_json_extension(session, kuzu_buffer_pool_size)
+                db = RemoteKuzuDatabase(
+                    session,
+                    db_path=graph_file_path,
+                    buffer_pool_size=kuzu_buffer_pool_size,
+                    max_num_threads=kuzu_num_threads,
+                    max_db_size=DEFAULT_MAX_DB_SIZE,
+                )
+                db.init_database()
+                conn = RemoteKuzuConnection(session, db)
+                try:
+                    conn.load_extension("JSON")
+                except Exception:
+                    pass
+            except Exception:
+                session.shutdown(timeout=2.0)
+                raise
+
+            return KuzuAdapter(
+                db_path=graph_file_path,
+                kuzu_num_threads=kuzu_num_threads,
+                kuzu_buffer_pool_size=kuzu_buffer_pool_size,
+                database=db,
+                connection=conn,
+                session=session,
+            )
+
+        return KuzuAdapter(
+            db_path=graph_file_path,
+            kuzu_num_threads=kuzu_num_threads,
+            kuzu_buffer_pool_size=kuzu_buffer_pool_size,
+        )
 
     elif graph_database_provider == "kuzu-remote":
         if not graph_database_url:

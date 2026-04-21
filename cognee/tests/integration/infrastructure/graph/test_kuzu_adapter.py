@@ -1,7 +1,9 @@
-"""Tests for KuzuAdapter and SubprocessGraphDBWrapper(KuzuAdapter).
+"""Tests for KuzuAdapter in both local and subprocess-proxy modes.
 
-Each test is parametrized to run against both a direct KuzuAdapter and the
-same adapter wrapped in a SubprocessGraphDBWrapper.
+The subprocess mode uses ``get_graph_engine`` with
+``graph_database_subprocess_enabled=True`` so the native ``kuzu.Database`` /
+``kuzu.Connection`` live in a worker process while the adapter stays in the
+main process.
 """
 
 import json
@@ -12,9 +14,7 @@ import pytest
 
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
-from cognee.infrastructure.databases.graph.subprocess_graph_wrapper import (
-    SubprocessGraphDBWrapper,
-)
+from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
 
 DEMO_KG_PATH = os.path.join(os.path.dirname(__file__), "test_kg.json")
 
@@ -26,31 +26,30 @@ def _load_demo_kg() -> KnowledgeGraph:
 
 @pytest.fixture
 def kuzu_adapter(tmp_path):
-    """Direct KuzuAdapter instance."""
+    """Direct KuzuAdapter instance (local mode)."""
     return KuzuAdapter(db_path=str(tmp_path / "kuzu_direct"))
 
 
 @pytest.fixture
 def subprocess_adapter(tmp_path):
-    """KuzuAdapter running inside a subprocess via the wrapper."""
-    return SubprocessGraphDBWrapper(
-        KuzuAdapter,
-        db_path=str(tmp_path / "kuzu_subprocess"),
-        shutdown_timeout=10,
+    """KuzuAdapter backed by a subprocess-resident Kuzu client."""
+    return create_graph_engine(
+        graph_database_provider="kuzu",
+        graph_file_path=str(tmp_path / "kuzu_subprocess"),
+        graph_database_subprocess_enabled=True,
     )
 
 
 @pytest.fixture(params=["direct", "subprocess"])
 def adapter(request, tmp_path):
-    """Parametrized fixture: yields both direct and subprocess-wrapped adapters."""
+    """Parametrized fixture: both local and subprocess-backed adapters."""
     if request.param == "direct":
         return KuzuAdapter(db_path=str(tmp_path / "kuzu_direct"))
-    else:
-        return SubprocessGraphDBWrapper(
-            KuzuAdapter,
-            db_path=str(tmp_path / "kuzu_subprocess"),
-            shutdown_timeout=10,
-        )
+    return create_graph_engine(
+        graph_database_provider="kuzu",
+        graph_file_path=str(tmp_path / "kuzu_subprocess"),
+        graph_database_subprocess_enabled=True,
+    )
 
 
 # ---------------------------------------------------------------------------

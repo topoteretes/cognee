@@ -70,34 +70,97 @@ class LanceDBAdapter(VectorDBInterface):
     name = "LanceDB"
     url: str
     api_key: str
-    connection: lancedb.AsyncConnection = None
+    connection = None
 
     def __init__(
         self,
         url: Optional[str],
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
+        *,
+        connection: Optional[object] = None,
+        session: Optional[object] = None,
     ):
+        """
+        In subprocess-proxy mode, ``connection`` is a ``RemoteLanceDBConnection``
+        and ``session`` is a ``LanceDBSubprocessSession``. In local mode both
+        are ``None`` and the adapter lazily creates a ``lancedb.AsyncConnection``
+        on first use.
+        """
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.VECTOR_DB_LOCK = asyncio.Lock()
+        self.connection = connection
+        self._session = session
+        # Remember the adapter is bound to a specific subprocess session.
+        # After close(), any operation that would re-open a real lancedb
+        # connection locally is forbidden — otherwise we'd silently downgrade
+        # subprocess-mode to local-mode and sidestep the whole point.
+        self._subprocess_mode = session is not None
+        self._permanently_closed = False
 
     async def get_connection(self):
         """
-        Establishes and returns a connection to the LanceDB.
+        Return the connection used by this adapter.
 
-        If a connection already exists, it will return the existing connection.
+        - Local mode: lazily constructs a ``lancedb.AsyncConnection``.
+        - Subprocess mode: returns the injected ``RemoteLanceDBConnection``
+          (ensuring its underlying subprocess ``lancedb`` connection is opened).
 
-        Returns:
-        --------
-
-            - lancedb.AsyncConnection: An active connection to the LanceDB.
+        A subprocess-mode adapter that has been closed is an error state —
+        we refuse to silently fall through to a local lancedb connection.
         """
+        if self._permanently_closed:
+            raise RuntimeError(
+                "LanceDBAdapter is closed; a new adapter must be created "
+                "(subprocess-mode adapters cannot be re-initialized)."
+            )
         if self.connection is None:
+            if self._subprocess_mode:
+                raise RuntimeError(
+                    "LanceDBAdapter subprocess session is gone; adapter cannot "
+                    "be re-initialized in local mode."
+                )
             self.connection = await lancedb.connect_async(self.url, api_key=self.api_key)
-
+        else:
+            # Remote connection lazily opens its own underlying lancedb handle.
+            ensure = getattr(self.connection, "_ensure_connected", None)
+            if ensure is not None:
+                await ensure()
         return self.connection
+
+    # ------------------------------------------------------------------
+    # Subprocess-mode conversion helpers. In local mode these are no-ops.
+    # ------------------------------------------------------------------
+    def _schema_for_create_table(self, lance_model_cls):
+        """Return the schema value to pass to ``connection.create_table``.
+
+        Local mode: a ``LanceModel`` class (lancedb accepts it directly).
+        Subprocess mode: a ``pa.Schema`` derived from the LanceModel so the
+        worker doesn't need to see pydantic.
+        """
+        if self._session is None:
+            return lance_model_cls
+        return lance_model_cls.to_arrow_schema()
+
+    def _records_for_write(self, records):
+        """Convert LanceModel instances to a typed pyarrow RecordBatch in
+        subprocess mode so the worker never needs to see pydantic. The
+        RecordBatch carries both the data and the schema (derived from the
+        LanceModel class via ``to_arrow_schema``) so LanceDB gets the exact
+        types it expects.
+        """
+        if not records:
+            return records
+        if self._session is None:
+            return records
+
+        import pyarrow as pa
+
+        dicts = [r.model_dump() for r in records]
+        schema = type(records[0]).to_arrow_schema()
+        return pa.Table.from_pylist(dicts, schema=schema)
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
@@ -163,7 +226,7 @@ class LanceDBAdapter(VectorDBInterface):
                     connection = await self.get_connection()
                     return await connection.create_table(
                         name=collection_name,
-                        schema=LanceDataPoint,
+                        schema=self._schema_for_create_table(LanceDataPoint),
                         exist_ok=True,
                     )
 
@@ -233,7 +296,7 @@ class LanceDBAdapter(VectorDBInterface):
                     collection.merge_insert("id")
                     .when_matched_update_all()
                     .when_not_matched_insert_all()
-                    .execute(lance_data_points)
+                    .execute(self._records_for_write(lance_data_points))
                 )
         except (ValueError, OSError, RuntimeError) as e:
             # Two LanceDB schema-drift failure modes are recoverable by rebuilding
@@ -343,19 +406,19 @@ class LanceDBAdapter(VectorDBInterface):
             await connection.drop_table(collection_name)
             await connection.create_table(
                 name=collection_name,
-                schema=MigrationLanceDataPoint,
+                schema=self._schema_for_create_table(MigrationLanceDataPoint),
             )
             collection = await connection.open_table(collection_name)
 
             if typed_old_rows:
-                await collection.add(typed_old_rows)
+                await collection.add(self._records_for_write(typed_old_rows))
 
             if new_lance_data_points:
                 await (
                     collection.merge_insert("id")
                     .when_matched_update_all()
                     .when_not_matched_insert_all()
-                    .execute(new_lance_data_points)
+                    .execute(self._records_for_write(new_lance_data_points))
                 )
 
         logger.info(
@@ -794,3 +857,42 @@ class LanceDBAdapter(VectorDBInterface):
             },
             exclude_fields=["metadata"] + related_models_fields,
         )
+
+    async def close(self):
+        """Release the underlying connection and, in subprocess mode, tear down
+        the worker process. Once closed the adapter is not reusable.
+        """
+        self.connection = None
+        if self._session is not None:
+            try:
+                self._session.shutdown()
+            except Exception as e:
+                logger.warning("Error shutting down LanceDB subprocess: %s", e)
+            self._session = None
+        self._permanently_closed = True
+
+    # ---- MemoryCleanupManager protocol ----
+    def memory_used(self) -> int:
+        if self._session is None:
+            return 0
+        try:
+            return self._session.memory_used_bytes()
+        except Exception:
+            return 0
+
+    def last_accessed_ts(self) -> float:
+        if self._session is None:
+            return 0.0
+        return float(self._session.last_accessed_at)
+
+    def clean(self):
+        if self._session is None:
+            return None
+        try:
+            self._session.shutdown()
+        except Exception:
+            pass
+        self._session = None
+        self.connection = None
+        self._permanently_closed = True
+        return None

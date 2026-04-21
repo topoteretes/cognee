@@ -143,6 +143,18 @@ class config:
         graph_config.graph_database_subprocess_enabled = graph_database_subprocess_enabled
 
     @staticmethod
+    def set_kuzu_num_threads(kuzu_num_threads: int):
+        """Set the maximum number of threads Kuzu uses per query. 0 = Kuzu default."""
+        graph_config = get_graph_config()
+        graph_config.kuzu_num_threads = kuzu_num_threads
+
+    @staticmethod
+    def set_kuzu_buffer_pool_size(kuzu_buffer_pool_size: int):
+        """Set the Kuzu buffer pool size in bytes."""
+        graph_config = get_graph_config()
+        graph_config.kuzu_buffer_pool_size = kuzu_buffer_pool_size
+
+    @staticmethod
     def set_llm_provider(llm_provider: str):
         """Set the LLM provider.
 
@@ -545,6 +557,8 @@ class config:
             "embedding_api_key": "set_embedding_api_key",
             "graph_database_provider": "set_graph_database_provider",
             "graph_database_subprocess_enabled": "set_graph_database_subprocess_enabled",
+            "kuzu_num_threads": "set_kuzu_num_threads",
+            "kuzu_buffer_pool_size": "set_kuzu_buffer_pool_size",
             "vector_db_provider": "set_vector_db_provider",
             "vector_db_subprocess_enabled": "set_vector_db_subprocess_enabled",
             "vector_db_url": "set_vector_db_url",
