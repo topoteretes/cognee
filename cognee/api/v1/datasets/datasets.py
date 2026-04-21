@@ -147,8 +147,6 @@ class datasets:
 
         if not data:
             # If data is not found in the system, user is using a custom graph model.
-            # set_database_global_context_variables below also acquires the
-            # dataset queue slot for this task (re-entrant).
             await set_database_global_context_variables(dataset_id, dataset.owner_id)
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
@@ -161,8 +159,6 @@ class datasets:
         if not any(ds.id == dataset_id for ds in data.datasets):
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
-        # set_database_global_context_variables below also acquires the
-        # dataset queue slot for this task (re-entrant).
         await set_database_global_context_variables(dataset_id, dataset.owner_id)
 
         if not await has_data_related_nodes(dataset_id, data_id):

@@ -71,9 +71,6 @@ async def run_pipeline_per_dataset(
     incremental_loading=False,
     data_per_batch: int = 20,
 ):
-    # set_database_global_context_variables below also acquires the dataset
-    # queue slot for this task (re-entrant: same task + same dataset = no-op).
-    # The slot is auto-released when the task completes.
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
     if not data:

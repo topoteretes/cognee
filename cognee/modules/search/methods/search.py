@@ -315,29 +315,27 @@ async def search_in_datasets_context(
     else:
         # Run search without setting database context in case access control is disabled
         # Needed for low level pipelines that need to run search without dataset context.
-        async def _queued_single_retrieval():
-            async with dataset_queue().acquire():
-                return await get_retriever_output(
-                    query_type=query_type,
-                    query_text=query_text,
-                    dataset=None,
-                    system_prompt_path=system_prompt_path,
-                    system_prompt=system_prompt,
-                    top_k=top_k,
-                    node_type=node_type,
-                    node_name=node_name,
-                    node_name_filter_operator=node_name_filter_operator,
-                    only_context=only_context,
-                    session_id=session_id,
-                    wide_search_top_k=wide_search_top_k,
-                    triplet_distance_penalty=triplet_distance_penalty,
-                    feedback_influence=feedback_influence,
-                    retriever_specific_config=retriever_specific_config,
-                    neighborhood_depth=neighborhood_depth,
-                    neighborhood_seed_top_k=neighborhood_seed_top_k,
-                )
-
-        tasks.append(_queued_single_retrieval())
+        tasks.append(
+            get_retriever_output(
+                query_type=query_type,
+                query_text=query_text,
+                dataset=None,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
+                only_context=only_context,
+                session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+                retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+            )
+        )
 
     return await asyncio.gather(*tasks)
 
