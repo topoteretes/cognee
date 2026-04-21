@@ -3,24 +3,27 @@ import uuid
 from typing import Any, Optional, Type, Union
 
 from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache import SessionQAEntry
+from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import AgentTraceFeedbackSummary
+from cognee.modules.agent_memory.sanitization import sanitize_value
+from cognee.modules.observability import (
+    COGNEE_DATA_SIZE_BYTES,
+    COGNEE_SESSION_ENTRY_COUNT,
+    COGNEE_SESSION_ID,
+    new_span,
+)
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_session_completion_with_optional_summary,
 )
-from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_SESSION_ID,
-    COGNEE_SESSION_ENTRY_COUNT,
-    COGNEE_DATA_SIZE_BYTES,
-)
 
 logger = get_logger("SessionManager")
 
@@ -105,7 +108,7 @@ class SessionManager:
 
     def __init__(
         self,
-        cache_engine,
+        cache_engine: CacheDBInterface,
         default_session_id: str = "default_session",
         session_history_last_n: int = 10,
     ):
@@ -339,8 +342,9 @@ class SessionManager:
         used_graph_element_ids: Optional[dict] = None,
         max_context_chars: Optional[int] = None,
     ) -> Any:
-        from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
         from uuid import UUID as _UUID
+
+        from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
 
         _ctx_user = session_user.get()
         _ctx_uid_raw = getattr(_ctx_user, "id", None)
@@ -553,7 +557,7 @@ class SessionManager:
         formatted: bool = False,
         session_id: Optional[str] = None,
         include_context: bool = True,
-    ) -> Union[list[dict], str]:
+    ) -> Union[list[SessionQAEntry], str]:
         """
         Get session QAs by (user_id, session_id).
 
@@ -592,7 +596,9 @@ class SessionManager:
             return "" if formatted else []
         entries_list = list(entries)
         return (
-            self.format_entries(entries_list, include_context=include_context)
+            self.format_entries(
+                [entry.model_dump() for entry in entries_list], include_context=include_context
+            )
             if formatted
             else entries_list
         )
@@ -603,7 +609,7 @@ class SessionManager:
         user_id: str,
         session_id: Optional[str] = None,
         last_n: Optional[int] = None,
-    ) -> list[dict]:
+    ) -> list[SessionAgentTraceEntry]:
         """
         Get the agent trace session for the given user/session pair.
         """
@@ -614,7 +620,7 @@ class SessionManager:
             return []
 
         entries = await self._cache.get_agent_trace_session(user_id, session_id, last_n=last_n)
-        return list(entries) if entries else []
+        return entries
 
     async def get_agent_trace_feedback(
         self,
