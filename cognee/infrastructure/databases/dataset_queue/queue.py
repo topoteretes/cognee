@@ -47,13 +47,8 @@ class DatasetQueueSettings:
     __slots__ = ("enabled", "max_concurrent")
 
     def __init__(self, enabled: bool, max_concurrent: int) -> None:
-        # TODO: Return commented out settings
-        # self.enabled = enabled
-        # self.max_concurrent = max_concurrent
-        self.enabled = True
-        self.max_concurrent = (
-            3  # TESTING CI PURPOSES ONLY, REMOVE THIS AND UNCOMMENT ABOVE BEFORE MERGING
-        )
+        self.enabled = enabled
+        self.max_concurrent = max_concurrent
 
 
 def get_dataset_queue_settings() -> DatasetQueueSettings:
@@ -177,6 +172,46 @@ class DatasetQueue:
         self._ensure_task_cleanup_registered(task, task_id)
         # After registration, the task entry exists in ``_task_slots``.
         self._task_slots[task_id][ds_key] = release
+
+    # -------------------------------------------------------- release_slot_for
+    def release_slot_for(self, dataset_id: Any = None) -> None:
+        """Explicitly release this task's slot for ``dataset_id``.
+
+        Normally slots accumulate and are released together when the task
+        ends. Call this between iterations of a sequential multi-dataset
+        loop (``run_pipeline``'s per-dataset loop, ``delete_all``'s per-
+        dataset loop) so the task doesn't hold slots for datasets it has
+        already finished with.
+
+        No-op when:
+          * the queue is disabled,
+          * there is no running task,
+          * the current task doesn't hold a slot for ``dataset_id``.
+
+        Idempotent: calling twice for the same ``dataset_id`` is safe; the
+        second call is a no-op. The underlying release function is
+        idempotent too, so task-end cleanup after an explicit release
+        doesn't double-release.
+        """
+        if not self._enabled:
+            return
+        try:
+            task = asyncio.current_task()
+        except RuntimeError:
+            # Called outside a running event loop — nothing to release.
+            return
+        if task is None:
+            return
+
+        task_id = id(task)
+        ds_key = f"ds:{dataset_id}" if dataset_id is not None else "ds:<none>"
+
+        entry = self._task_slots.get(task_id)
+        if entry is None or ds_key not in entry:
+            return
+
+        release_fn = entry.pop(ds_key)
+        release_fn()
 
     # ---------------------------------------------------------------- acquire
     @asynccontextmanager

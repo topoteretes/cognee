@@ -17,6 +17,7 @@ from cognee.modules.graph.methods import (
 )
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.infrastructure.databases.dataset_queue import dataset_queue
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -182,6 +183,11 @@ class datasets:
         user_datasets = await get_authorized_existing_datasets([], "delete", user)
 
         for dataset in user_datasets:
+            # Note: set_database_global_context_variables acquires this dataset's
+            # dataset queue slot. the explicit release below keeps the loop from
+            # accumulating slots across iterations.
             await set_database_global_context_variables(dataset.id, dataset.owner_id)
-
-            await datasets.empty_dataset(dataset.id, user)
+            try:
+                await datasets.empty_dataset(dataset.id, user)
+            finally:
+                dataset_queue().release_slot_for(dataset.id)
