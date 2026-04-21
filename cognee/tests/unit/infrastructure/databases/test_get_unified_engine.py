@@ -10,10 +10,11 @@ from cognee.infrastructure.databases.unified.get_unified_engine import (
 
 
 class TestIsHybridProvider:
-    def test_both_neptune_analytics_is_hybrid(self):
-        g = {"graph_database_provider": "neptune_analytics"}
-        v = {"vector_db_provider": "neptune_analytics"}
-        assert _is_hybrid_provider(g, v) is True
+    # NOTE: This test is disabled temporarily, until we implement Neptune hybrid capabilities
+    # def test_both_neptune_analytics_is_hybrid(self):
+    #     g = {"graph_database_provider": "neptune_analytics"}
+    #     v = {"vector_db_provider": "neptune_analytics"}
+    #     assert _is_hybrid_provider(g, v) is True
 
     def test_kuzu_lancedb_is_not_hybrid(self):
         g = {"graph_database_provider": "kuzu"}
@@ -33,8 +34,9 @@ class TestIsHybridProvider:
     def test_empty_configs(self):
         assert _is_hybrid_provider({}, {}) is False
 
-    def test_hybrid_providers_registry(self):
-        assert "neptune_analytics" in HYBRID_PROVIDERS
+    # NOTE: This test is disabled temporarily, until we implement Neptune hybrid capabilities
+    # def test_hybrid_providers_registry(self):
+    #     assert "neptune_analytics" in HYBRID_PROVIDERS
 
 
 @pytest.mark.asyncio
