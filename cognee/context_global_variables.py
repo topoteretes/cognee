@@ -1,4 +1,5 @@
 import os
+import warnings
 from contextvars import ContextVar
 from typing import Union
 from uuid import UUID
@@ -194,8 +195,17 @@ class DatabaseContextManager:
         self._applied = True
 
     def __await__(self):
-        # Preserves the legacy ``await set_database_global_context_variables(...)``
-        # call shape.
+        # Legacy ``await set_database_global_context_variables(...)`` call shape.
+        # Deprecated — emit a warning pointing users at the ``async with`` form,
+        # which scopes the dataset queue slot to a block and releases it on exit.
+        warnings.warn(
+            "`await set_database_global_context_variables(...)` is deprecated. "
+            "Use `async with set_database_global_context_variables(...):` instead "
+            "for scoped dataset-queue slot management; the `async with` form "
+            "releases the database queue slot automatically on block exit, the deprecated method does not.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._apply().__await__()
 
     async def __aenter__(self) -> "DatabaseContextManager":
