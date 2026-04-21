@@ -1,7 +1,8 @@
+from typing import Any
 from uuid import UUID
 
 
-def parse_id(id: any):
+def parse_id(id: Any) -> Any:
     """
     Parse the input ID and convert it to a UUID object if it is a valid string
     representation.
