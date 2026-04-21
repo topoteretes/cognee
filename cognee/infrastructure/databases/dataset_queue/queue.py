@@ -45,7 +45,7 @@ logger = get_logger("DatasetQueue")
 
 
 # Recognised truthy values for ``DATASET_QUEUE_ENABLED``.
-_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on", "y", "t"})
+TRUE_VALUES = frozenset({"1", "true", "yes", "on", "y", "t"})
 
 
 class DatasetQueueSettings:
@@ -61,10 +61,11 @@ class DatasetQueueSettings:
 def get_dataset_queue_settings() -> DatasetQueueSettings:
     """Return effective settings. Test mock seam."""
     raw = os.getenv("DATASET_QUEUE_ENABLED", "").strip().lower()
-    enabled = raw in _TRUTHY_VALUES
+    enabled = raw in TRUE_VALUES
 
     max_concurrent = os.getenv("DATASET_QUEUE_MAX_CONCURRENT", None)
     if not max_concurrent:
+        # Default to the same max concurrency as the LRU cache size, which is a reasonable baseline for a shared resource limit.
         max_concurrent = int(DATABASE_MAX_LRU_CACHE_SIZE)
 
     return DatasetQueueSettings(enabled=enabled, max_concurrent=max_concurrent)
@@ -88,7 +89,7 @@ def _make_release(semaphore: asyncio.Semaphore) -> Callable[[], None]:
     return _release
 
 
-class _SlotEntry:
+class SlotEntry:
     """A single acquired slot with a nesting depth counter."""
 
     __slots__ = ("release", "depth")
@@ -115,11 +116,11 @@ class DatasetQueue:
 
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(safe_max)
 
-        # Per-task slot registry: task_id → { slot_key → _SlotEntry }.
+        # Per-task slot registry: task_id → { slot_key → SlotEntry }.
         # ``slot_key`` is ``"ds:<dataset_id>"`` for ``ensure_slot`` and
         # ``"acquire:<unique>"`` for ``acquire()``. A task may hold multiple
         # entries; all are released together when the task finishes.
-        self._task_slots: Dict[int, Dict[str, _SlotEntry]] = {}
+        self._task_slots: Dict[int, Dict[str, SlotEntry]] = {}
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
         self._registered_tasks: Set[int] = set()
@@ -188,7 +189,7 @@ class DatasetQueue:
 
         self._ensure_task_cleanup_registered(task, task_id)
         # After registration, the task entry exists in ``_task_slots``.
-        self._task_slots[task_id][ds_key] = _SlotEntry(release, depth=1)
+        self._task_slots[task_id][ds_key] = SlotEntry(release, depth=1)
 
     # -------------------------------------------------------- release_slot_for
     def release_slot_for(self, dataset_id: Any = None) -> None:
@@ -272,9 +273,9 @@ class DatasetQueue:
         if task_id is not None:
             self._ensure_task_cleanup_registered(task, task_id)
             slot_key = f"acquire:{id(release)}"
-            # Store a _SlotEntry for type uniformity; acquire() is scoped
+            # Store a SlotEntry for type uniformity; acquire() is scoped
             # and doesn't use the depth counter.
-            self._task_slots[task_id][slot_key] = _SlotEntry(release, depth=1)
+            self._task_slots[task_id][slot_key] = SlotEntry(release, depth=1)
 
         try:
             yield
