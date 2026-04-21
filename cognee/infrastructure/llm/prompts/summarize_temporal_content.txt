@@ -1,0 +1,7 @@
+Extract only the time-related events from the text.
+Return plain text only.
+Write one temporal event per line.
+Each line should be natural language suitable for semantic retrieval, for example using phrases like "in 2018", "between 2020 and 2022", "before", "after", "during", "earlier", or "later".
+Do not use bullets, numbering, JSON, headings, intro text, or outro text.
+Do not summarize the full document.
+If there is no meaningful time-related event information, return an empty string.

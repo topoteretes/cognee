@@ -6,11 +6,38 @@ from pydantic import BaseModel
 from cognee.tasks.summarization.exceptions import InvalidSummaryInputsError
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.infrastructure.llm.extraction import extract_summary
+from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.tasks.summarization.models import TextSummary
 
 
 from cognee.modules.pipelines.tasks.task import task_summary
+
+
+class TemporalSummaryContent(BaseModel):
+    text: str
+
+
+async def extract_temporal_summary(content: str) -> TemporalSummaryContent:
+    system_prompt = read_query_prompt("summarize_temporal_content.txt")
+    return await LLMGateway.acreate_structured_output(content, system_prompt, TemporalSummaryContent)
+
+
+async def _build_summary_text_from_chunk(
+    chunk: DocumentChunk, summarization_model: Type[BaseModel]
+) -> str:
+    summary_result, temporal_result = await asyncio.gather(
+        extract_summary(chunk.text, summarization_model),
+        extract_temporal_summary(chunk.text),
+    )
+
+    summary_text = summary_result.summary.strip()
+    temporal_text = temporal_result.text.strip()
+    if not temporal_text:
+        return f"Summary:\n{summary_text}"
+
+    return f"Summary:\n{summary_text}\n\nEvents:\n{temporal_text}"
 
 
 @task_summary("Summarized {n} chunk(s)")
@@ -66,14 +93,14 @@ async def summarize_text(
         summarization_model = cognee_config.summarization_model
 
     chunk_summaries = await asyncio.gather(
-        *[extract_summary(chunk.text, summarization_model) for chunk in non_dlt_chunks]
+        *[_build_summary_text_from_chunk(chunk, summarization_model) for chunk in non_dlt_chunks]
     )
 
     summaries = [
         TextSummary(
             id=uuid5(chunk.id, "TextSummary"),
             made_from=chunk,
-            text=chunk_summaries[chunk_index].summary,
+            text=chunk_summaries[chunk_index],
             importance_weight=chunk.importance_weight,
         )
         for (chunk_index, chunk) in enumerate(non_dlt_chunks)
