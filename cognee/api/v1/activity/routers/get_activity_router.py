@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Depends
 from cognee.modules.users.models import User
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
     get_specific_user_permission_datasets,
 )
@@ -28,10 +29,20 @@ def get_activity_router() -> APIRouter:
         from cognee.modules.users.models import User
         from sqlalchemy import select, outerjoin
 
-        dataset_ids = await get_specific_user_permission_datasets(
-            user.id, "read", [dataset_id] if dataset_id else None
-        )
-        dataset_ids = [ds.id for ds in dataset_ids]
+        try:
+            permitted_datasets = await get_specific_user_permission_datasets(
+                user.id, "read", [dataset_id] if dataset_id else None
+            )
+        except PermissionDeniedError:
+            # For list requests, treat "no accessible datasets" as an empty activity feed.
+            # Keep explicit dataset requests strict by propagating the original 403.
+            if dataset_id is None:
+                return []
+            raise
+
+        dataset_ids = [ds.id for ds in permitted_datasets]
+        if not dataset_ids:
+            return []
 
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:

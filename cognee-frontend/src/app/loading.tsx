@@ -1,4 +1,4 @@
-import { LoadingIndicator } from "@/ui/app";
+import { LoadingIndicator } from "@/ui/App";
 
 export default function Loading() {
   return (
