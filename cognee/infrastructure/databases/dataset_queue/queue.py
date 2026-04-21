@@ -2,13 +2,25 @@
 
 Each distinct dataset a task touches via :func:`set_database_global_context_variables`
 (which calls :meth:`DatasetQueue.ensure_slot` under the hood) takes its own
-slot against the shared budget. Slots accumulate across the lifetime of the
-task and are released *together* when the task completes — normal return,
-exception, or cancellation.
+slot against the shared budget.
+
+Ref-counting model (per (task, dataset)):
+
+Repeated :meth:`DatasetQueue.ensure_slot` calls for the same ``(task, dataset)``
+bump a per-entry depth counter rather than re-acquiring the semaphore. The
+corresponding :meth:`DatasetQueue.release_slot_for` decrements that counter;
+the underlying semaphore slot is freed only when the counter hits zero. This
+makes nested ``async with set_database_global_context_variables(D, u)`` scopes
+safe — an inner exit never steals an outer holder's slot.
+
+Task-end cleanup is a safety net: when the current task finishes, every entry
+still in ``_task_slots`` is force-released regardless of depth. This covers
+``await``-style callers that never decrement, so long-lived task slots still
+clean up correctly.
 
 Re-entrancy rules:
 
-* Same task + same dataset → no-op. The slot is already held.
+* Same task + same dataset → depth counter increments; no new acquire.
 * Same task + different dataset → acquire an additional slot (may block).
 * Different task (e.g. a child task that inherited the ContextVar) → treated
   as a fresh task; acquires its own independent slot.
@@ -16,15 +28,7 @@ Re-entrancy rules:
 Configuration:
 
 * ``DATASET_QUEUE_ENABLED`` — env var. Truthy values enable the queue.
-* ``DATABASE_MAX_LRU_CACHE_SIZE`` — shared constant from
-  :mod:`cognee.shared.lru_cache` (default: ``128``).
-
-Sizing note:
-    A single task touching K distinct datasets holds K slots concurrently.
-    For the default ``max_concurrent=128`` this accommodates typical calls
-    (1–3 datasets per operation) with large headroom. If you design a flow
-    that fans out many datasets within a single task, size the budget
-    accordingly.
+* ``DATASET_QUEUE_MAX_CONCURRENT`` — env var. Defaults to ``DATABASE_MAX_LRU_CACHE_SIZE`` for a safe baseline
 """
 
 from __future__ import annotations
@@ -81,6 +85,16 @@ def _make_release(semaphore: asyncio.Semaphore) -> Callable[[], None]:
     return _release
 
 
+class _SlotEntry:
+    """A single acquired slot with a nesting depth counter."""
+
+    __slots__ = ("release", "depth")
+
+    def __init__(self, release: Callable[[], None], depth: int = 1) -> None:
+        self.release = release
+        self.depth = depth
+
+
 class DatasetQueue:
     """Concurrency limiter for dataset-level operations.
 
@@ -100,11 +114,11 @@ class DatasetQueue:
         # first touch the singleton from inside a running loop.
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(safe_max)
 
-        # Per-task slot registry: task_id → { slot_key → release_fn }.
+        # Per-task slot registry: task_id → { slot_key → _SlotEntry }.
         # ``slot_key`` is ``"ds:<dataset_id>"`` for ``ensure_slot`` and
         # ``"acquire:<unique>"`` for ``acquire()``. A task may hold multiple
         # entries; all are released together when the task finishes.
-        self._task_slots: Dict[int, Dict[str, Callable[[], None]]] = {}
+        self._task_slots: Dict[int, Dict[str, _SlotEntry]] = {}
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
         self._registered_tasks: Set[int] = set()
@@ -127,21 +141,23 @@ class DatasetQueue:
         def _release_all_on_done(_t: asyncio.Task, _tid: int = task_id) -> None:
             slots = self._task_slots.pop(_tid, {})
             self._registered_tasks.discard(_tid)
-            for release in slots.values():
-                release()
+            for entry in slots.values():
+                # Backstop: release whatever's left regardless of depth.
+                entry.release()
 
         task.add_done_callback(_release_all_on_done)
 
     # ------------------------------------------------------------ ensure_slot
     async def ensure_slot(self, dataset_id: Any = None) -> None:
-        """Acquire a slot for (current task, ``dataset_id``) if not already held.
+        """Acquire (or bump the depth of) a slot for (current task, ``dataset_id``).
 
         Rules:
 
-        * If the current task already has a slot for the same dataset → no-op.
-        * Otherwise → acquire a fresh slot; it will be released automatically
-          when the task completes, along with any other slots the task
-          accumulated.
+        * If the current task already has an entry for the same dataset →
+          increment its depth counter; do **not** re-acquire the semaphore.
+        * Otherwise → acquire a fresh slot; it will be released when the
+          matching :meth:`release_slot_for` drops the counter to zero, or
+          unconditionally at task-end as a backstop.
 
         This is the mechanism behind
         :func:`cognee.context_global_variables.set_database_global_context_variables`:
@@ -153,16 +169,15 @@ class DatasetQueue:
         task = asyncio.current_task()
         if task is None:
             # Rare: no running task, no way to track ownership.
-            # Acquire without automatic release — caller must not rely on it.
-            await self._semaphore.acquire()
-            return
+            raise RuntimeError("DatasetQueue.ensure_slot called outside of a running task")
 
         task_id = id(task)
         ds_key = f"ds:{dataset_id}" if dataset_id is not None else "ds:<none>"
 
-        entry = self._task_slots.get(task_id)
-        if entry is not None and ds_key in entry:
-            # Same task, same dataset — re-entrant no-op.
+        entry = self._task_slots.get(task_id, {}).get(ds_key)
+        if entry is not None:
+            # Same task, same dataset — re-entrant: bump depth, do NOT re-acquire.
+            entry.depth += 1
             return
 
         # Acquire a fresh slot for this (task, dataset).
@@ -171,27 +186,24 @@ class DatasetQueue:
 
         self._ensure_task_cleanup_registered(task, task_id)
         # After registration, the task entry exists in ``_task_slots``.
-        self._task_slots[task_id][ds_key] = release
+        self._task_slots[task_id][ds_key] = _SlotEntry(release, depth=1)
 
     # -------------------------------------------------------- release_slot_for
     def release_slot_for(self, dataset_id: Any = None) -> None:
-        """Explicitly release this task's slot for ``dataset_id``.
+        """Decrement this task's depth counter for ``dataset_id``. Actually
+        release the semaphore only when the counter hits zero.
 
-        Normally slots accumulate and are released together when the task
-        ends. Call this between iterations of a sequential multi-dataset
-        loop (``run_pipeline``'s per-dataset loop, ``delete_all``'s per-
-        dataset loop) so the task doesn't hold slots for datasets it has
-        already finished with.
+        Normally slots are scoped by ``async with`` and released on block
+        exit. ``await``-style callers that never decrement rely on the
+        task-end cleanup backstop.
 
         No-op when:
           * the queue is disabled,
           * there is no running task,
           * the current task doesn't hold a slot for ``dataset_id``.
 
-        Idempotent: calling twice for the same ``dataset_id`` is safe; the
-        second call is a no-op. The underlying release function is
-        idempotent too, so task-end cleanup after an explicit release
-        doesn't double-release.
+        Idempotent past depth=0: further calls are no-ops because the entry
+        was popped once depth reached zero.
         """
         if not self._enabled:
             return
@@ -206,12 +218,18 @@ class DatasetQueue:
         task_id = id(task)
         ds_key = f"ds:{dataset_id}" if dataset_id is not None else "ds:<none>"
 
-        entry = self._task_slots.get(task_id)
-        if entry is None or ds_key not in entry:
+        entry = self._task_slots.get(task_id, {}).get(ds_key)
+        if entry is None:
             return
 
-        release_fn = entry.pop(ds_key)
-        release_fn()
+        entry.depth -= 1
+        if entry.depth > 0:
+            # Outer holder still has a claim — keep the slot.
+            return
+
+        # Depth reached zero — pop the entry and actually release.
+        self._task_slots[task_id].pop(ds_key, None)
+        entry.release()
 
     # ---------------------------------------------------------------- acquire
     @asynccontextmanager
@@ -224,6 +242,10 @@ class DatasetQueue:
         Re-entrant: if the current task already holds *any* slot (via
         ``ensure_slot`` or a prior ``acquire``), this is a pass-through.
         Otherwise a fresh slot is taken and released at block exit.
+
+        Unlike ``ensure_slot``/``release_slot_for``, ``acquire`` is always
+        strictly scoped (enter/exit pair in a single ``async with``), so no
+        depth counter is needed — the entry is popped and released on exit.
         """
         if not self._enabled:
             yield
@@ -247,7 +269,9 @@ class DatasetQueue:
         if task_id is not None:
             self._ensure_task_cleanup_registered(task, task_id)
             slot_key = f"acquire:{id(release)}"
-            self._task_slots[task_id][slot_key] = release
+            # Store a _SlotEntry for type uniformity; acquire() is scoped
+            # and doesn't use the depth counter.
+            self._task_slots[task_id][slot_key] = _SlotEntry(release, depth=1)
 
         try:
             yield

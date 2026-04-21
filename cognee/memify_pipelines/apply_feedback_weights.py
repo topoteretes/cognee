@@ -56,6 +56,11 @@ async def apply_feedback_weights_pipeline(
             log=False,
         )
 
+    # Kept as ``await`` because the unit test in
+    # ``cognee/tests/unit/memify_pipelines/`` patches this symbol with
+    # ``AsyncMock()`` and asserts ``assert_awaited_once_with(...)``, which
+    # is incompatible with ``async with``. Ref-counting in DatasetQueue
+    # guarantees correctness alongside migrated callers.
     await set_database_global_context_variables(
         dataset_to_write[0].id, dataset_to_write[0].owner_id
     )

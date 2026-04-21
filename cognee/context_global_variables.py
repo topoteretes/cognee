@@ -104,19 +104,137 @@ def is_multi_user_support_possible():
     )
 
 
-async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
+class DatabaseContextManager:
+    """Dual-mode helper returned by :func:`set_database_global_context_variables`.
+
+    Supports both ``await`` (legacy) and ``async with`` (scoped) usage.
     """
-    If backend access control is enabled this function will ensure all datasets have their own databases,
-    access to which will be enforced by given permissions.
+
+    __slots__ = ("_dataset", "_user_id", "_applied")
+
+    def __init__(self, dataset: Union[str, UUID], user_id: UUID) -> None:
+        self._dataset = dataset
+        self._user_id = user_id
+        self._applied = False
+
+    async def apply_database_context_variables(
+        self, dataset: Union[str, UUID], user_id: UUID
+    ) -> None:
+        if not backend_access_control_enabled():
+            return
+
+        # Imported lazily to avoid circular imports at module load.
+        from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+        await dataset_queue().ensure_slot(dataset)
+
+        user = await get_user(user_id)
+
+        # To ensure permissions are enforced properly all datasets will have their own databases
+        dataset_database = await get_or_create_dataset_database(dataset, user)
+        # Ensure that all connection info is resolved properly
+        dataset_database = await resolve_dataset_database_connection_info(dataset_database)
+
+        base_config = get_base_config()
+        data_root_directory = os.path.join(
+            base_config.data_root_directory, str(user.tenant_id or user.id)
+        )
+        databases_directory_path = os.path.join(
+            base_config.system_root_directory, "databases", str(user.id)
+        )
+
+        # Set vector and graph database configuration based on dataset database information
+        vector_config = {
+            "vector_db_provider": dataset_database.vector_database_provider,
+            "vector_db_url": dataset_database.vector_database_url,
+            "vector_db_key": dataset_database.vector_database_key,
+            "vector_db_name": dataset_database.vector_database_name,
+            "vector_db_port": dataset_database.vector_database_connection_info.get("port", ""),
+            "vector_db_host": dataset_database.vector_database_connection_info.get("host", ""),
+            "vector_db_username": dataset_database.vector_database_connection_info.get(
+                "username", ""
+            ),
+            "vector_db_password": dataset_database.vector_database_connection_info.get(
+                "password", ""
+            ),
+        }
+
+        graph_config = {
+            "graph_database_provider": dataset_database.graph_database_provider,
+            "graph_database_url": dataset_database.graph_database_url,
+            "graph_database_name": dataset_database.graph_database_name,
+            "graph_database_key": dataset_database.graph_database_key,
+            "graph_file_path": os.path.join(
+                databases_directory_path, dataset_database.graph_database_name
+            ),
+            "graph_database_username": dataset_database.graph_database_connection_info.get(
+                "graph_database_username", ""
+            ),
+            "graph_database_password": dataset_database.graph_database_connection_info.get(
+                "graph_database_password", ""
+            ),
+            "graph_dataset_database_handler": "",
+            "graph_database_port": "",
+        }
+
+        storage_config = {
+            "data_root_directory": data_root_directory,
+        }
+
+        # Use ContextVar to use these graph and vector configurations are used
+        # in the current async context across Cognee
+        graph_db_config.set(graph_config)
+        vector_db_config.set(vector_config)
+        file_storage_config.set(storage_config)
+
+    async def _apply(self) -> None:
+        if self._applied:
+            return
+        await self.apply_database_context_variables(self._dataset, self._user_id)
+        self._applied = True
+
+    def __await__(self):
+        # Preserves the legacy ``await set_database_global_context_variables(...)``
+        # call shape.
+        return self._apply().__await__()
+
+    async def __aenter__(self) -> "DatabaseContextManager":
+        await self._apply()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        # Lazily import to avoid circular imports at module load.
+        from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+        # Release the slot for this dataset when exiting the context.
+        dataset_queue().release_slot_for(self._dataset)
+        return None
+
+
+def set_database_global_context_variables(
+    dataset: Union[str, UUID], user_id: UUID
+) -> "DatabaseContextManager":
+    """Returns a dual-mode helper that is both awaitable and an async context manager.
+
+    - ``await set_database_global_context_variables(ds, user_id)`` — legacy;
+      applies the context and relies on task-end queue cleanup to release the
+      slot.
+    - ``async with set_database_global_context_variables(ds, user_id):`` —
+      applies the context on enter; explicitly releases this dataset's queue
+      slot on exit. Preferred for sequential multi-dataset loops and scoped
+      operations.
+
+    If backend access control is enabled this ensures all datasets have their
+    own databases, access to which will be enforced by given permissions.
     Database name will be determined by dataset and the appropriate vector and
     graph database handlers will be enforced.
 
-    Additionally, this function acts as the queue gate for dataset-level
-    operations: calling it ensures the current asyncio task holds a
+    Additionally, this acts as the queue gate for dataset-level operations:
+    applying the context ensures the current asyncio task holds a
     :class:`DatasetQueue` slot for ``dataset``. Repeated calls in the same
     task for the same dataset are no-ops; calls with a different dataset in
     the same task swap slots. The slot is released automatically when the
-    task completes.
+    task completes (legacy mode) or on async-with exit (scoped mode).
 
     Note: This is only currently supported by the following databases:
           Relational: SQLite, Postgres
@@ -128,67 +246,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
         user_id: UUID of the owner of the dataset
 
     Returns:
-
+        A :class:`DatabaseContextManager` that can be awaited or used as an
+        async context manager.
     """
-    if not backend_access_control_enabled():
-        return
-
-    # Imported lazily to avoid circular imports at module load.
-    from cognee.infrastructure.databases.dataset_queue import dataset_queue
-
-    await dataset_queue().ensure_slot(dataset)
-
-    user = await get_user(user_id)
-
-    # To ensure permissions are enforced properly all datasets will have their own databases
-    dataset_database = await get_or_create_dataset_database(dataset, user)
-    # Ensure that all connection info is resolved properly
-    dataset_database = await resolve_dataset_database_connection_info(dataset_database)
-
-    base_config = get_base_config()
-    data_root_directory = os.path.join(
-        base_config.data_root_directory, str(user.tenant_id or user.id)
-    )
-    databases_directory_path = os.path.join(
-        base_config.system_root_directory, "databases", str(user.id)
-    )
-
-    # Set vector and graph database configuration based on dataset database information
-    vector_config = {
-        "vector_db_provider": dataset_database.vector_database_provider,
-        "vector_db_url": dataset_database.vector_database_url,
-        "vector_db_key": dataset_database.vector_database_key,
-        "vector_db_name": dataset_database.vector_database_name,
-        "vector_db_port": dataset_database.vector_database_connection_info.get("port", ""),
-        "vector_db_host": dataset_database.vector_database_connection_info.get("host", ""),
-        "vector_db_username": dataset_database.vector_database_connection_info.get("username", ""),
-        "vector_db_password": dataset_database.vector_database_connection_info.get("password", ""),
-    }
-
-    graph_config = {
-        "graph_database_provider": dataset_database.graph_database_provider,
-        "graph_database_url": dataset_database.graph_database_url,
-        "graph_database_name": dataset_database.graph_database_name,
-        "graph_database_key": dataset_database.graph_database_key,
-        "graph_file_path": os.path.join(
-            databases_directory_path, dataset_database.graph_database_name
-        ),
-        "graph_database_username": dataset_database.graph_database_connection_info.get(
-            "graph_database_username", ""
-        ),
-        "graph_database_password": dataset_database.graph_database_connection_info.get(
-            "graph_database_password", ""
-        ),
-        "graph_dataset_database_handler": "",
-        "graph_database_port": "",
-    }
-
-    storage_config = {
-        "data_root_directory": data_root_directory,
-    }
-
-    # Use ContextVar to use these graph and vector configurations are used
-    # in the current async context across Cognee
-    graph_db_config.set(graph_config)
-    vector_db_config.set(vector_config)
-    file_storage_config.set(storage_config)
+    return DatabaseContextManager(dataset, user_id)
