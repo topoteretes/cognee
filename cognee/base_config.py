@@ -52,6 +52,12 @@ class BaseConfig(BaseSettings):
         "1",
         "yes",
     )
+    # RTL text processing support
+    enable_rtl_support: bool = os.getenv("ENABLE_RTL_SUPPORT", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "cognee")
     otel_exporter_otlp_endpoint: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     otel_exporter_otlp_headers: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
@@ -65,6 +71,7 @@ class BaseConfig(BaseSettings):
             "monitoring_tool": self.monitoring_tool,
             "cache_root_directory": self.cache_root_directory,
             "logs_root_directory": self.logs_root_directory,
+            "enable_rtl_support": self.enable_rtl_support,
         }
 
 

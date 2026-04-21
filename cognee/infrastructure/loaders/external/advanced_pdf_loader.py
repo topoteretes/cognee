@@ -11,6 +11,8 @@ from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadat
 from cognee.infrastructure.loaders.external.pypdf_loader import PyPdfLoader
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.base_config import get_base_config
+from cognee.modules.data.processing.rtl_processor import process_rtl_text
 
 logger = get_logger(__name__)
 
@@ -94,6 +96,10 @@ class AdvancedPdfLoader(LoaderInterface):
 
             # Combine all page outputs
             full_content = "\n".join(page_contents)
+
+            config = get_base_config()
+            if getattr(config, "enable_rtl_support", False):
+                full_content = process_rtl_text(full_content, enable_rtl=config.enable_rtl_support)
 
             if not kwargs.get("persist", True):
                 return full_content
