@@ -21,7 +21,10 @@ from cognee.shared.logging_utils import get_logger
 
 
 class RecallPayloadDTO(InDTO):
-    search_type: SearchType = Field(default=SearchType.GRAPH_COMPLETION)
+    # Default preserved as GRAPH_COMPLETION for backward compatibility
+    # with existing HTTP clients. Pass ``search_type: null`` explicitly
+    # to opt into auto-routing (the new ``cognee.recall`` default).
+    search_type: Optional[SearchType] = Field(default=SearchType.GRAPH_COMPLETION)
     datasets: Optional[list[str]] = Field(default=None)
     dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
     query: str = Field(default="What is in the document?")
@@ -32,6 +35,15 @@ class RecallPayloadDTO(InDTO):
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
+    session_id: Optional[str] = Field(default=None)
+    scope: Optional[Union[str, list[str]]] = Field(
+        default=None,
+        description=(
+            "Which memory sources to include: 'graph', 'session', 'trace', "
+            "'graph_context', 'all', or a list. Defaults to 'auto' (session "
+            "first when session_id is set, else graph)."
+        ),
+    )
 
 
 def get_recall_router() -> APIRouter:
@@ -97,10 +109,10 @@ def get_recall_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.search import search as cognee_search
+        from cognee.api.v1.recall import recall as cognee_recall
 
         try:
-            results = await cognee_search(
+            results = await cognee_recall(
                 query_text=payload.query,
                 query_type=payload.search_type,
                 user=user,
@@ -111,6 +123,8 @@ def get_recall_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                session_id=payload.session_id,
+                scope=payload.scope,
             )
             return jsonable_encoder(results)
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
