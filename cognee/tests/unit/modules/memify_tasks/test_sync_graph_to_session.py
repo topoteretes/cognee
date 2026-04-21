@@ -990,9 +990,27 @@ class TestRecallSessionMode:
     @pytest.mark.asyncio
     async def test_fallthrough_to_graph_when_session_empty(self):
         """When session search returns nothing, falls through to graph."""
+        from cognee.modules.search.types import (
+            SearchResponse,
+            SearchResultItem,
+            SearchResultKind,
+            SearchType,
+        )
+
         recall_mod = _get_recall_module()
 
-        mock_graph_results = ["graph result"]
+        graph_response = SearchResponse(
+            query="test",
+            search_type=SearchType.GRAPH_COMPLETION,
+            results=[
+                SearchResultItem(
+                    kind=SearchResultKind.GRAPH_COMPLETION,
+                    search_type=SearchType.GRAPH_COMPLETION,
+                    text="graph result",
+                )
+            ],
+            total=1,
+        )
 
         with (
             patch.object(
@@ -1002,7 +1020,7 @@ class TestRecallSessionMode:
             ),
             patch(
                 "cognee.api.v1.search.search",
-                AsyncMock(return_value=mock_graph_results),
+                AsyncMock(return_value=graph_response),
             ),
             patch.object(
                 _mod_query_router,
@@ -1012,22 +1030,39 @@ class TestRecallSessionMode:
         ):
             results = await recall_mod.recall("test", session_id="s1")
 
-        # Should get graph results since session was empty
-        assert results == mock_graph_results
+        assert len(results) == 1
+        assert results[0]["text"] == "graph result"
+        assert results[0]["_source"] == "graph"
 
     @pytest.mark.asyncio
     async def test_explicit_query_type_skips_session_search(self):
         """When query_type is explicit, session search is skipped."""
-        from cognee.modules.search.types import SearchType
+        from cognee.modules.search.types import (
+            SearchResponse,
+            SearchResultItem,
+            SearchResultKind,
+            SearchType,
+        )
 
-        mock_graph_results = ["graph result"]
+        graph_response = SearchResponse(
+            query="test",
+            search_type=SearchType.GRAPH_COMPLETION,
+            results=[
+                SearchResultItem(
+                    kind=SearchResultKind.GRAPH_COMPLETION,
+                    search_type=SearchType.GRAPH_COMPLETION,
+                    text="graph result",
+                )
+            ],
+            total=1,
+        )
 
         recall_mod = _get_recall_module()
 
         with (
             patch(
                 "cognee.api.v1.search.search",
-                AsyncMock(return_value=mock_graph_results),
+                AsyncMock(return_value=graph_response),
             ),
         ):
             results = await recall_mod.recall(
@@ -1036,4 +1071,6 @@ class TestRecallSessionMode:
                 session_id="s1",
             )
 
-        assert results == mock_graph_results
+        assert len(results) == 1
+        assert results[0]["text"] == "graph result"
+        assert results[0]["_source"] == "graph"

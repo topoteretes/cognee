@@ -3,7 +3,7 @@ from typing import Union, Optional, List, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import SearchResponse, SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -41,11 +41,10 @@ async def search(
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
-    verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
-) -> List[SearchResult]:
+) -> SearchResponse:
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
     ):
@@ -150,27 +149,17 @@ async def search(
 
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
-        verbose: If True, returns detailed result information including graph representation (when possible).
-
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
 
     Returns:
-        list: Search results in format determined by query_type:
-
-            **GRAPH_COMPLETION/RAG_COMPLETION**:
-                [List of conversational AI response strings]
-
-            **CHUNKS**:
-                [List of relevant text passages with source metadata]
-
-            **SUMMARIES**:
-                [List of hierarchical summaries from general to specific]
-
-            **CODE**:
-                [List of structured code information with context]
-
-            **FEELING_LUCKY**:
-                [List of results in the format of the search type that is automatically selected]
+        SearchResponse: A normalized envelope containing the original
+        query, the effective ``search_type`` (resolved type for
+        ``FEELING_LUCKY``), a flat list of ``SearchResultItem`` objects,
+        and a total count. Every item has a renderable ``text`` field;
+        ``raw`` preserves the original retriever payload, ``metadata``
+        carries kind-specific fields (chunk_id, doc_id, score, etc.),
+        and ``kind`` indicates how the item was normalized (e.g.
+        ``graph_completion``, ``chunk``, ``summary``, ``cypher``).
 
 
 
@@ -207,7 +196,8 @@ async def search(
 
     client = get_remote_client()
     if client is not None:
-        return await client.search(query_text, search_type=query_type, datasets=datasets)
+        raw = await client.search(query_text, search_type=query_type, datasets=datasets)
+        return SearchResponse.model_validate(raw)
 
     with new_span("cognee.api.search") as span:
         span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
@@ -265,17 +255,15 @@ async def search(
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
-            verbose=verbose,
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
 
-        n = len(filtered_search_results) if filtered_search_results else 0
-        span.set_attribute(COGNEE_RESULT_COUNT, n)
+        span.set_attribute(COGNEE_RESULT_COUNT, filtered_search_results.total)
         span.set_attribute(
             COGNEE_RESULT_SUMMARY,
-            f"Found {n} result(s) via {query_type.value}",
+            f"Found {filtered_search_results.total} result(s) via {query_type.value}",
         )
 
         return filtered_search_results

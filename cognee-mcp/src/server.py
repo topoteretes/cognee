@@ -615,68 +615,40 @@ async def search(
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
-            search_results = await cognee_client.search(
+            response = await cognee_client.search(
                 query_text=search_query,
                 query_type=search_type,
                 top_k=top_k,
                 datasets=datasets_list,
             )
 
-            # Strip embedding vectors from results to save LLM context
-            # text_vector contains raw floats (~92KB per result), useless for clients
-            search_results = strip_vectors(search_results)
-
-            def _combine_completion_results(results):
-                """Combine results from all datasets instead of returning only the first.
-
-                Each result may be a dict (from _backwards_compatible_search_results)
-                or a SearchResult object. Results are labeled with their dataset name
-                so users can distinguish which dataset each answer came from.
-                """
-                if not isinstance(results, list) or len(results) == 0:
-                    return str(results)
-                combined = []
-                for sr in results:
-                    if isinstance(sr, dict):
-                        ds_name = sr.get("dataset_name", "unknown")
-                        sr_content = sr.get("search_result", str(sr))
-                    elif hasattr(sr, "dataset_name") and hasattr(sr, "search_result"):
-                        ds_name = sr.dataset_name or "unknown"
-                        sr_content = sr.search_result
-                    else:
-                        combined.append(str(sr))
-                        continue
-                    if isinstance(sr_content, list):
-                        for item in sr_content:
-                            combined.append(f"[{ds_name}] {item}")
-                    else:
-                        combined.append(f"[{ds_name}] {sr_content}")
-                return "\n\n".join(combined)
-
-            # Handle different result formats based on API vs direct mode
-            if cognee_client.use_api:
-                # API mode returns JSON-serialized results
-                if isinstance(search_results, str):
-                    return search_results
-                elif isinstance(search_results, list):
-                    if search_type.upper() in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
-                        return _combine_completion_results(search_results)
-                    return str(search_results)
-                else:
-                    return json.dumps(search_results, cls=JSONEncoder)
+            # Normalize to a dict envelope. cognee_client.search returns
+            # either a SearchResponse (direct mode) or a dict parsed from
+            # JSON (API mode).
+            if hasattr(response, "model_dump"):
+                envelope = response.model_dump(mode="json")
+            elif isinstance(response, dict):
+                envelope = response
             else:
-                # Direct mode processing
-                if search_type.upper() == "CODE":
-                    return json.dumps(search_results, cls=JSONEncoder)
-                elif search_type.upper() in ("GRAPH_COMPLETION", "RAG_COMPLETION"):
-                    return _combine_completion_results(search_results)
-                elif search_type.upper() == "CHUNKS":
-                    return str(search_results)
-                elif search_type.upper() == "INSIGHTS":
-                    results = retrieved_edges_to_string(search_results)
-                    return results
-                else:
-                    return str(search_results)
+                return str(response)
+
+            items = envelope.get("results") or []
+            items = strip_vectors(items)
+
+            upper_type = search_type.upper()
+            if upper_type in ("GRAPH_COMPLETION", "RAG_COMPLETION"):
+                lines = []
+                for item in items:
+                    ds_name = item.get("dataset_name") or "unknown"
+                    text = item.get("text") or ""
+                    lines.append(f"[{ds_name}] {text}")
+                return "\n\n".join(lines) if lines else ""
+
+            if upper_type == "INSIGHTS":
+                raw_objects = [item.get("raw") for item in items if item.get("raw") is not None]
+                return retrieved_edges_to_string(raw_objects)
+
+            return json.dumps({"results": items, "total": envelope.get("total", len(items))}, cls=JSONEncoder)
 
     # Parse comma-separated datasets into list
     datasets_list = [d.strip() for d in datasets.split(",") if d.strip()] if datasets else None

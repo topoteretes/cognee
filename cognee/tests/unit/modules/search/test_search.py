@@ -2,8 +2,9 @@ import types
 from uuid import uuid4, uuid5, NAMESPACE_OID
 
 import pytest
+
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import SearchResponse, SearchType
 
 
 def _make_user(user_id: str = "u1", tenant_id=None):
@@ -28,10 +29,6 @@ def search_mod():
 
 @pytest.fixture(autouse=True)
 def _patch_side_effect_boundaries(monkeypatch, search_mod):
-    """
-    Keep production logic; patch only unavoidable side-effect boundaries.
-    """
-
     async def dummy_log_query(_query_text, _query_type, _user_id):
         return types.SimpleNamespace(id="qid-1")
 
@@ -46,7 +43,7 @@ def _patch_side_effect_boundaries(monkeypatch, search_mod):
 
 
 @pytest.mark.asyncio
-async def test_search_access_control_returns_dataset_shaped_dicts(monkeypatch, search_mod):
+async def test_search_access_control_returns_search_response(monkeypatch, search_mod):
     user = _make_user()
     ds = _make_dataset(name="ds1", tenant_id="t1")
 
@@ -67,28 +64,23 @@ async def test_search_access_control_returns_dataset_shaped_dicts(monkeypatch, s
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
 
-    out_non_verbose = await search_mod.search(
+    response = await search_mod.search(
         query_text="q",
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
-        verbose=False,
     )
 
-    assert out_non_verbose == [
-        {
-            "search_result": ["r"],
-            "dataset_id": ds.id,
-            "dataset_name": "ds1",
-            "dataset_tenant_id": uuid5(NAMESPACE_OID, "t1"),
-        }
-    ]
+    assert isinstance(response, SearchResponse)
+    assert response.query == "q"
+    assert response.total == 1
+    assert response.results[0].text == "r"
+    assert response.results[0].dataset_name == "ds1"
+    assert response.results[0].dataset_id == str(uuid5(NAMESPACE_OID, "ds1"))
 
 
 @pytest.mark.asyncio
-async def test_search_access_control_only_context_returns_dataset_shaped_dicts(
-    monkeypatch, search_mod
-):
+async def test_search_only_context_uses_context_text(monkeypatch, search_mod):
     user = _make_user()
     ds = _make_dataset(name="ds1", tenant_id="t1")
 
@@ -98,6 +90,7 @@ async def test_search_access_control_only_context_returns_dataset_shaped_dicts(
                 result_object="object",
                 context=["ctx"],
                 completion=None,
+                only_context=True,
                 search_type=SearchType.CHUNKS,
                 dataset_name=ds.name,
                 dataset_id=ds.id,
@@ -108,7 +101,7 @@ async def test_search_access_control_only_context_returns_dataset_shaped_dicts(
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
 
-    out = await search_mod.search(
+    response = await search_mod.search(
         query_text="q",
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
@@ -116,14 +109,8 @@ async def test_search_access_control_only_context_returns_dataset_shaped_dicts(
         only_context=True,
     )
 
-    assert out == [
-        {
-            "search_result": ["ctx"],
-            "dataset_id": ds.id,
-            "dataset_name": "ds1",
-            "dataset_tenant_id": uuid5(NAMESPACE_OID, "t1"),
-        }
-    ]
+    assert response.total == 1
+    assert response.results[0].text == "ctx"
 
 
 @pytest.mark.asyncio
@@ -147,17 +134,7 @@ async def test_authorized_search_delegates_to_search_in_datasets_context(monkeyp
     ]
 
     async def dummy_search_in_datasets_context(**_kwargs):
-        return [
-            SearchResultPayload(
-                result_object="object",
-                context="text",
-                completion="test",
-                search_type=SearchType.CHUNKS,
-                dataset_name=ds.name,
-                dataset_id=ds.id,
-                dataset_tenant_id=ds.tenant_id,
-            )
-        ]
+        return expected
 
     monkeypatch.setattr(
         search_mod, "get_authorized_existing_datasets", dummy_get_authorized_existing_datasets
@@ -199,7 +176,7 @@ async def test_search_passes_retriever_specific_config_to_authorized_search(
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
 
-    out = await search_mod.search(
+    response = await search_mod.search(
         query_text="q",
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
@@ -207,4 +184,4 @@ async def test_search_passes_retriever_specific_config_to_authorized_search(
         feedback_influence=0.25,
     )
 
-    assert out
+    assert response.total == 1

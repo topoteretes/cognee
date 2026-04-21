@@ -1,4 +1,11 @@
-## The Objective of these tests is to cover the search - prepare search results behavior (later to be removed)
+"""Contract tests for the normalized SearchResponse envelope.
+
+Replaces the legacy ``_backwards_compatible_search_results`` coverage.
+Each test drives ``search`` through its normal plumbing and asserts the
+shape callers can rely on: a ``SearchResponse`` with a flat
+``results`` list of ``SearchResultItem`` objects, each carrying a
+renderable ``text``, a ``kind``, and the original payload in ``raw``.
+"""
 
 import types
 from uuid import uuid4, uuid5, UUID, NAMESPACE_OID
@@ -7,7 +14,7 @@ import pytest
 from pydantic import BaseModel
 
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import SearchResponse, SearchResultKind, SearchType
 
 
 class DummyDataset(BaseModel):
@@ -32,11 +39,6 @@ def search_mod():
 
 @pytest.fixture(autouse=True)
 def _patch_search_side_effects(monkeypatch, search_mod):
-    """
-    These tests validate prepare_search_result behavior *through* search.py.
-    We only patch unavoidable side effects (telemetry + query/result logging).
-    """
-
     async def dummy_log_query(_query_text, _query_type, _user_id):
         return types.SimpleNamespace(id="qid-1")
 
@@ -51,7 +53,7 @@ def _patch_search_side_effects(monkeypatch, search_mod):
 
 
 @pytest.mark.asyncio
-async def test_search_backend_access_verbose(monkeypatch, search_mod):
+async def test_search_returns_search_response(monkeypatch, search_mod):
     user = types.SimpleNamespace(id="u1", tenant_id=None)
     ds = _ds("ds1")
 
@@ -60,7 +62,80 @@ async def test_search_backend_access_verbose(monkeypatch, search_mod):
             SearchResultPayload(
                 result_object="object",
                 context="text",
-                completion="test",
+                completion=["completion text"],
+                search_type=SearchType.GRAPH_COMPLETION,
+                dataset_name=ds.name,
+                dataset_id=ds.id,
+                dataset_tenant_id=ds.tenant_id,
+            )
+        ]
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+
+    response = await search_mod.search(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[ds.id],
+        user=user,
+    )
+
+    assert isinstance(response, SearchResponse)
+    assert response.query == "q"
+    assert response.search_type == SearchType.GRAPH_COMPLETION.value
+    assert response.total == 1
+    assert len(response.results) == 1
+    item = response.results[0]
+    assert item.text == "completion text"
+    assert item.kind == SearchResultKind.GRAPH_COMPLETION.value
+    assert item.dataset_name == "ds1"
+    assert item.dataset_id == str(uuid5(NAMESPACE_OID, "ds1"))
+
+
+@pytest.mark.asyncio
+async def test_search_flattens_completion_list(monkeypatch, search_mod):
+    user = types.SimpleNamespace(id="u1", tenant_id=None)
+    ds = _ds("ds1")
+
+    async def dummy_authorized_search(**_kwargs):
+        return [
+            SearchResultPayload(
+                result_object=None,
+                context=None,
+                completion=["first", "second", "third"],
+                search_type=SearchType.GRAPH_COMPLETION,
+                dataset_name=ds.name,
+                dataset_id=ds.id,
+                dataset_tenant_id=ds.tenant_id,
+            )
+        ]
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: False)
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+
+    response = await search_mod.search(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[ds.id],
+        user=user,
+    )
+
+    assert response.total == 3
+    assert [r.text for r in response.results] == ["first", "second", "third"]
+
+
+@pytest.mark.asyncio
+async def test_search_chunks_preserves_dict_payload_in_raw(monkeypatch, search_mod):
+    user = types.SimpleNamespace(id="u1", tenant_id=None)
+    ds = _ds("ds1")
+    chunk = {"text": "chunk body", "id": "c1", "score": 0.42}
+
+    async def dummy_authorized_search(**_kwargs):
+        return [
+            SearchResultPayload(
+                result_object=None,
+                context=None,
+                completion=[chunk],
                 search_type=SearchType.CHUNKS,
                 dataset_name=ds.name,
                 dataset_id=ds.id,
@@ -71,24 +146,23 @@ async def test_search_backend_access_verbose(monkeypatch, search_mod):
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
 
-    out = await search_mod.search(
+    response = await search_mod.search(
         query_text="q",
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
-        verbose=True,
     )
 
-    assert out[0]["dataset_name"] == "ds1"
-    assert out[0]["dataset_tenant_id"] == uuid5(NAMESPACE_OID, "t1")
-    assert out[0]["dataset_id"] == uuid5(NAMESPACE_OID, "ds1")
-    assert out[0]["objects_result"] == "object"
-    assert out[0]["context_result"] == "text"
-    assert out[0]["text_result"] == "test"
+    assert response.total == 1
+    item = response.results[0]
+    assert item.kind == SearchResultKind.CHUNK.value
+    assert item.text == "chunk body"
+    assert item.score == 0.42
+    assert item.raw == chunk
 
 
 @pytest.mark.asyncio
-async def test_search_no_backend_access_verbose(monkeypatch, search_mod):
+async def test_search_only_context_uses_context(monkeypatch, search_mod):
     user = types.SimpleNamespace(id="u1", tenant_id=None)
     ds = _ds("ds1")
 
@@ -96,43 +170,9 @@ async def test_search_no_backend_access_verbose(monkeypatch, search_mod):
         return [
             SearchResultPayload(
                 result_object="object",
-                context="text",
-                completion="test",
-                search_type=SearchType.CHUNKS,
-                dataset_name=ds.name,
-                dataset_id=ds.id,
-                dataset_tenant_id=ds.tenant_id,
-            )
-        ]
-
-    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: False)
-    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
-
-    out = await search_mod.search(
-        query_text="q",
-        query_type=SearchType.CHUNKS,
-        dataset_ids=[ds.id],
-        user=user,
-        verbose=True,
-    )
-
-    assert out[0]["objects_result"] == "object"
-    assert out[0]["context_result"] == "text"
-    assert out[0]["text_result"] == "test"
-    assert out[0].get("dataset_name") is None
-
-
-@pytest.mark.asyncio
-async def test_search_backend_access(monkeypatch, search_mod):
-    user = types.SimpleNamespace(id="u1", tenant_id=None)
-    ds = _ds("ds1")
-
-    async def dummy_authorized_search(**_kwargs):
-        return [
-            SearchResultPayload(
-                result_object="object",
-                context="text",
-                completion="test",
+                context=["ctx body"],
+                completion=None,
+                only_context=True,
                 search_type=SearchType.CHUNKS,
                 dataset_name=ds.name,
                 dataset_id=ds.id,
@@ -143,48 +183,52 @@ async def test_search_backend_access(monkeypatch, search_mod):
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
 
-    out = await search_mod.search(
+    response = await search_mod.search(
         query_text="q",
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
+        only_context=True,
     )
 
-    assert out[0]["dataset_name"] == "ds1"
-    assert out[0]["dataset_id"] == uuid5(NAMESPACE_OID, "ds1")
-    assert out[0]["dataset_tenant_id"] == uuid5(NAMESPACE_OID, "t1")
-    assert (
-        out[0]["search_result"] == "test"
-    )  # Search result should be resolved to completion if it exists
+    assert response.total == 1
+    assert response.results[0].text == "ctx body"
 
 
 @pytest.mark.asyncio
-async def test_search_no_backend_access(monkeypatch, search_mod):
+async def test_search_merges_results_across_datasets(monkeypatch, search_mod):
     user = types.SimpleNamespace(id="u1", tenant_id=None)
-    ds = _ds("ds1")
+    ds1 = _ds("ds1")
+    ds2 = _ds("ds2", tenant_id=uuid5(NAMESPACE_OID, "t2"))
 
     async def dummy_authorized_search(**_kwargs):
         return [
             SearchResultPayload(
-                result_object="object",
-                context="text",
-                completion="test",
-                search_type=SearchType.CHUNKS,
-                dataset_name=ds.name,
-                dataset_id=ds.id,
-                dataset_tenant_id=ds.tenant_id,
-            )
+                completion=["a"],
+                search_type=SearchType.GRAPH_COMPLETION,
+                dataset_name=ds1.name,
+                dataset_id=ds1.id,
+                dataset_tenant_id=ds1.tenant_id,
+            ),
+            SearchResultPayload(
+                completion=["b", "c"],
+                search_type=SearchType.GRAPH_COMPLETION,
+                dataset_name=ds2.name,
+                dataset_id=ds2.id,
+                dataset_tenant_id=ds2.tenant_id,
+            ),
         ]
 
-    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: False)
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
 
-    out = await search_mod.search(
+    response = await search_mod.search(
         query_text="q",
-        query_type=SearchType.CHUNKS,
-        dataset_ids=[ds.id],
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[ds1.id, ds2.id],
         user=user,
     )
 
-    assert isinstance(out, list)
-    assert out[0] == "test"  # Search result should be resolved to completion if it exists
+    assert response.total == 3
+    assert [r.text for r in response.results] == ["a", "b", "c"]
+    assert {r.dataset_name for r in response.results} == {"ds1", "ds2"}

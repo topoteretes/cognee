@@ -1,7 +1,7 @@
 import json
 import asyncio
 from uuid import UUID
-from typing import Any, List, Optional, Tuple, Type, Union
+from typing import List, Optional, Type
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
@@ -12,11 +12,12 @@ from cognee.context_global_variables import (
 )
 
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import (
-    SearchResult,
+    SearchResponse,
     SearchType,
 )
+from cognee.modules.search.methods.normalize_search_result import to_search_response
 from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
@@ -37,7 +38,7 @@ logger = get_logger()
 async def search(
     query_text: str,
     query_type: SearchType,
-    dataset_ids: Union[list[UUID], None],
+    dataset_ids: Optional[list[UUID]],
     user: User,
     system_prompt_path="answer_simple_question.txt",
     system_prompt: Optional[str] = None,
@@ -50,11 +51,10 @@ async def search(
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
-    verbose=False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
-) -> List[SearchResult]:
+) -> SearchResponse:
     """
 
     Args:
@@ -137,7 +137,7 @@ async def search(
         user.id,
     )
 
-    return _backwards_compatible_search_results(search_results, verbose)
+    return to_search_response(search_results, query_text, query_type)
 
 
 async def authorized_search(
@@ -159,7 +159,7 @@ async def authorized_search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
-) -> List[Tuple[Any, Union[List[Edge], str], List[Dataset]]]:
+) -> List[SearchResultPayload]:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
     Not to be used outside of active access control mode.
@@ -211,7 +211,7 @@ async def search_in_datasets_context(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
-) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
+) -> List[SearchResultPayload]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
     Not to be used outside of active access control mode.
@@ -235,7 +235,7 @@ async def search_in_datasets_context(
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = None,
-    ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
+    ) -> SearchResultPayload:
         with new_span("cognee.search.dataset") as span:
             span.set_attribute("cognee.search.dataset_name", dataset.name or "")
             span.set_attribute("cognee.search.dataset_id", str(dataset.id))
@@ -336,54 +336,3 @@ async def search_in_datasets_context(
         )
 
     return await asyncio.gather(*tasks)
-
-
-def _backwards_compatible_search_results(search_results, verbose: bool):
-    """
-    Prepares search results in a format compatible with previous versions of the API.
-    """
-    # This is for maintaining backwards compatibility
-    if backend_access_control_enabled():
-        return_value = []
-        for search_result in search_results:
-            # Dataset info needs to be always included
-            search_result_dict = {
-                "dataset_id": search_result.dataset_id,
-                "dataset_name": search_result.dataset_name,
-                "dataset_tenant_id": search_result.dataset_tenant_id,
-            }
-            if verbose:
-                # Include all different types of results only in verbose mode
-                search_result_dict["text_result"] = search_result.completion
-                search_result_dict["context_result"] = search_result.context
-                search_result_dict["objects_result"] = search_result.result_object
-            else:
-                # Result attribute handles returning appropriate result based on set flags and outputs
-                search_result_dict["search_result"] = search_result.result
-
-            return_value.append(search_result_dict)
-        return return_value
-    else:
-        return_value = []
-        if verbose:
-            for search_result in search_results:
-                # Include all different types of results only in verbose mode
-                search_result_dict = {
-                    "text_result": search_result.completion,
-                    "context_result": search_result.context,
-                    "objects_result": search_result.result_object,
-                }
-                return_value.append(search_result_dict)
-            return return_value
-        else:
-            for search_result in search_results:
-                # Result attribute handles returning appropriate result based on set flags and outputs
-                return_value.append(search_result.result)
-
-            # For maintaining backwards compatibility
-            if len(return_value) == 1 and isinstance(return_value[0], list):
-                # If a single element list return the element directly
-                return return_value[0]
-            else:
-                # Otherwise return the list of results
-                return return_value
