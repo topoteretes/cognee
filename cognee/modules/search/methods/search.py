@@ -25,7 +25,6 @@ from cognee.modules.data.methods.get_authorized_existing_datasets import (
 )
 from cognee import __version__ as cognee_version
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
-from cognee.infrastructure.databases.dataset_queue import dataset_queue
 from cognee.modules.observability import (
     new_span,
     COGNEE_SEARCH_TYPE,

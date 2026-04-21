@@ -6,7 +6,6 @@ from cognee.modules.visualization.cognee_network_visualization import (
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger, setup_logging, ERROR
-from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
 
 import asyncio
