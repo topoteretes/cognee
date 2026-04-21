@@ -39,6 +39,9 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable, Dict, Set
 
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("DatasetQueue")
 
 
 # Recognised truthy values for ``DATASET_QUEUE_ENABLED``.
@@ -109,9 +112,7 @@ class DatasetQueue:
 
         self._enabled: bool = bool(enabled)
         self._max_concurrent: int = safe_max
-        # On Python 3.10+ the semaphore is loop-agnostic until first acquire.
-        # On 3.9 it binds eagerly via ``get_event_loop()``; callers should
-        # first touch the singleton from inside a running loop.
+
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(safe_max)
 
         # Per-task slot registry: task_id → { slot_key → _SlotEntry }.
@@ -181,6 +182,7 @@ class DatasetQueue:
             return
 
         # Acquire a fresh slot for this (task, dataset).
+        logger.debug("Task %d acquiring dataset queue slot for dataset_id=%s", task_id, dataset_id)
         await self._semaphore.acquire()
         release = _make_release(self._semaphore)
 
@@ -229,6 +231,7 @@ class DatasetQueue:
 
         # Depth reached zero — pop the entry and actually release.
         self._task_slots[task_id].pop(ds_key, None)
+        logger.debug("Task %d releasing dataset queue slot for dataset_id=%s", task_id, dataset_id)
         entry.release()
 
     # ---------------------------------------------------------------- acquire
