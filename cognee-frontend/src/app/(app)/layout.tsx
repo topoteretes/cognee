@@ -1,8 +1,8 @@
-import { CustomAppShell } from "@/ui/layout";
+import { CustomAppShell } from "@/ui/Layout";
 import AppProvider from "@/modules/tenant/AppProvider";
-import { NavbarProvider } from "@/ui/layout/NavbarContext";
-import { FilterProvider } from "@/ui/layout/FilterContext";
-import MobileMenuButton from "@/ui/layout/MobileMenuButton";
+import { NavbarProvider } from "@/ui/Layout/NavbarContext";
+import { FilterProvider } from "@/ui/Layout/FilterContext";
+import MobileMenuButton from "@/ui/Layout/MobileMenuButton";
 
 export default function AppLayout({
   children,

@@ -1,4 +1,4 @@
-from typing import Type, Optional, Coroutine
+from typing import Any, Coroutine, Optional, Type
 from pydantic import BaseModel
 from cognee.infrastructure.llm import get_llm_config
 
@@ -7,15 +7,38 @@ def _inject_agent_memory(text_input: str) -> str:
     from cognee.modules.agent_memory import get_current_agent_memory_context
 
     context = get_current_agent_memory_context()
-    if context is None or not context.config.with_memory or not context.memory_context:
+    if context is None or not context.memory_context:
         return text_input
 
-    return (
-        "Additional Cognee Memory Context:\n"
-        f"{context.memory_context}\n\n"
-        "Original Input:\n"
-        f"{text_input}"
-    )
+    return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
+
+
+async def _record_session_usage_after(
+    coro: Coroutine,
+    *,
+    text_input: str,
+) -> Any:
+    """Run the LLM coroutine, then (best-effort) accumulate usage onto
+    any active session tracker. Failures never propagate — usage
+    accounting is strictly auxiliary.
+    """
+    result = await coro
+    try:
+        from cognee.modules.session_lifecycle.usage_tracking import record_llm_call
+
+        if isinstance(result, BaseModel):
+            output_repr = result.model_dump_json()
+        else:
+            output_repr = str(result)
+        model = get_llm_config().llm_model
+        await record_llm_call(
+            input_text=text_input,
+            output_text=output_repr,
+            model=model,
+        )
+    except Exception:
+        pass
+    return result
 
 
 class LLMGateway:
@@ -35,7 +58,7 @@ class LLMGateway:
                 acreate_structured_output,
             )
 
-            return acreate_structured_output(
+            inner = acreate_structured_output(
                 text_input=text_input,
                 system_prompt=system_prompt,
                 response_model=response_model,
@@ -46,12 +69,16 @@ class LLMGateway:
             )
 
             llm_client = get_llm_client()
-            return llm_client.acreate_structured_output(
+            inner = llm_client.acreate_structured_output(
                 text_input=text_input,
                 system_prompt=system_prompt,
                 response_model=response_model,
                 **kwargs,
             )
+
+        # Wrap so usage is recorded against any active session tracker.
+        # No-op when no tracker is installed.
+        return _record_session_usage_after(inner, text_input=text_input)
 
     @staticmethod
     def create_transcript(input) -> Coroutine:
