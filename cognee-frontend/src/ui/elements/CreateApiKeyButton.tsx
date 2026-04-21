@@ -2,7 +2,7 @@
 
 import { startTransition, useActionState } from "react";
 import { IconButton } from "@/ui/elements";
-import { LoadingIndicator } from "@/ui/app";
+import { LoadingIndicator } from "@/ui/App";
 import createApiKey from "@/modules/apiKeys/createAPIKey";
 
 

@@ -5,7 +5,7 @@ import { v4 as uuid4 } from "uuid";
 import { NodeObject, LinkObject } from "react-force-graph-2d";
 import { ChangeEvent, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-import { DeleteIcon } from "@/ui/icons";
+import { DeleteIcon } from "@/ui/Icons";
 // import { FeedbackForm } from "@/ui/Partials";
 import { CTAButton, Input, NeutralButton, Select } from "@/ui/elements";
 

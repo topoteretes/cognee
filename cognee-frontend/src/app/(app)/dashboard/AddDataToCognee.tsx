@@ -1,8 +1,8 @@
 import { FormEvent, useCallback, useState } from "react";
 
-import { LoadingIndicator } from "@/ui/app";
+import { LoadingIndicator } from "@/ui/App";
 import { useModal } from "@/ui/elements/Modal";
-import { CloseIcon, MinusIcon, PlusIcon } from "@/ui/icons";
+import { CloseIcon, MinusIcon, PlusIcon } from "@/ui/Icons";
 import { CTAButton, GhostButton, IconButton, Modal, NeutralButton, Select } from "@/ui/elements";
 
 import { isCloudEnvironment } from "@/utils";
