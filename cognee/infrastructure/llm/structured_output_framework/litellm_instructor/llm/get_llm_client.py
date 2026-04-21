@@ -38,23 +38,56 @@ class LLMProvider(Enum):
     LLAMA_CPP = "llama_cpp"
 
 
+# Config-keyed cache of instantiated LLM adapters. Callers hit
+# ``get_llm_client`` on every ``acreate_structured_output`` invocation — and
+# each fresh adapter re-builds per-instance instructor/pydantic state that
+# pydantic's global SchemaValidator/Serializer dicts never release. Caching
+# by config tuple means: same config → same adapter reused; config mutated
+# via ``cognee.config.set(...)`` → cache key changes → new adapter. No
+# explicit cache-clear needed.
+_LLM_CLIENT_CACHE: dict = {}
+
+
+def _llm_client_cache_key(llm_config, raise_api_key_error: bool) -> tuple:
+    return (
+        getattr(llm_config, "llm_provider", None),
+        getattr(llm_config, "llm_model", None),
+        getattr(llm_config, "llm_endpoint", None),
+        getattr(llm_config, "llm_api_version", None),
+        getattr(llm_config, "llm_api_key", None),
+        getattr(llm_config, "llm_max_completion_tokens", None),
+        getattr(llm_config, "llm_instructor_mode", None),
+        getattr(llm_config, "llm_streaming", None),
+        getattr(llm_config, "fallback_model", None),
+        getattr(llm_config, "fallback_api_key", None),
+        getattr(llm_config, "fallback_endpoint", None),
+        bool(raise_api_key_error),
+    )
+
+
 def get_llm_client(raise_api_key_error: bool = True):
     """
     Get the LLM client based on the configuration using Enums.
 
-    This function retrieves the configuration for the LLM provider and model, and
-    initializes the appropriate LLM client adapter accordingly. It raises an
-    LLMAPIKeyNotSetError if the LLM API key is not set for certain providers or if the provider
-    is unsupported.
-
-    Returns:
-    --------
-
-        An instance of the appropriate LLM client adapter based on the provider
-        configuration.
+    Clients are cached by a config tuple so repeated cognify calls don't
+    re-mint Instructor+OpenAI clients. Each fresh adapter construction
+    re-registers pydantic response-model validators that pydantic's global
+    caches never release — observed as steady per-cycle FieldInfo /
+    ModelMetaclass growth in long-running benchmark runs.
     """
     llm_config = get_llm_config()
+    cache_key = _llm_client_cache_key(llm_config, raise_api_key_error)
+    cached = _LLM_CLIENT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
 
+    client = _build_llm_client(llm_config, raise_api_key_error)
+    _LLM_CLIENT_CACHE[cache_key] = client
+    return client
+
+
+def _build_llm_client(llm_config, raise_api_key_error: bool):
+    """Provider-dispatch body. See ``get_llm_client`` for the caching wrapper."""
     provider = LLMProvider(llm_config.llm_provider)
 
     # Check if max_token value is defined in liteLLM for given model

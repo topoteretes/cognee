@@ -6,7 +6,13 @@ from __future__ import annotations
 
 import pickle
 
-from .harness import HandleRegistry, HandleResult, Request, run_worker_loop
+from .harness import (
+    DEFAULT_DISPATCH,
+    HandleRegistry,
+    HandleResult,
+    Request,
+    run_worker_loop,
+)
 from .lancedb_protocol import (
     OP_CONNECT,
     OP_CREATE_TABLE,
@@ -207,6 +213,7 @@ async def _op_merge_insert_execute(registry: HandleRegistry, req: Request):
 
 
 DISPATCH = {
+    **DEFAULT_DISPATCH,
     OP_CONNECT: _op_connect,
     OP_TABLE_NAMES: _op_table_names,
     OP_CREATE_TABLE: _op_create_table,

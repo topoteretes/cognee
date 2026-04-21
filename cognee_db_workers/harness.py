@@ -29,6 +29,12 @@ _DEFAULT_MAX_RETRIES = 2
 _PROCESS_CHECK_INTERVAL = 1.0
 _READY_SENTINEL = "__SUBPROCESS_HARNESS_READY__"
 
+# Universal op code — every worker's DISPATCH includes an entry for it so
+# callers can force a ``gc.collect()`` inside the worker (useful before
+# reading the subprocess's RSS so the number reflects reachable objects
+# only, not uncollected cycles).
+OP_GC_COLLECT = 99
+
 
 class SubprocessTransportError(RuntimeError):
     """Raised when the subprocess transport itself is broken — the worker
@@ -265,6 +271,49 @@ def _safe_pickle_exception(e: BaseException) -> Optional[BaseException]:
         return None
 
 
+def _op_gc_collect(_registry: HandleRegistry, _req: Request):
+    """Worker-side handler for ``OP_GC_COLLECT`` — runs Python's garbage
+    collector inside the worker process. Included in every adapter worker's
+    DISPATCH via ``DEFAULT_DISPATCH``.
+    """
+    import gc as _gc
+
+    return int(_gc.collect())
+
+
+DEFAULT_DISPATCH: Dict[int, Dispatcher] = {
+    OP_GC_COLLECT: _op_gc_collect,
+}
+
+
+import weakref
+
+# Weak registry of all live sessions. Used by ``collect_garbage_in_all_workers``
+# so callers (e.g. benchmark scripts that want to read accurate per-child
+# RSS) can trigger ``gc.collect()`` in every worker without threading a
+# session reference through the call site.
+_all_sessions: "weakref.WeakSet[SubprocessSession]" = weakref.WeakSet()
+
+
+def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
+    """Send ``OP_GC_COLLECT`` to every live session's worker. Returns the
+    count of sessions that responded successfully. Best-effort: a session
+    that's mid-shutdown, crashed, or busy is skipped silently.
+
+    Intended as a preamble to RSS measurement so subprocess memory numbers
+    reflect reachable objects only.
+    """
+    collected = 0
+    # Snapshot so the iteration isn't perturbed by concurrent weakref churn.
+    for session in list(_all_sessions):
+        try:
+            session.call(Request(op=OP_GC_COLLECT), timeout=timeout)
+            collected += 1
+        except Exception:
+            continue
+    return collected
+
+
 class SubprocessSession:
     """Main-process owner of a spawned worker process + its queues.
 
@@ -314,6 +363,10 @@ class SubprocessSession:
         self._sync_rpc_lock = threading.Lock()
         self._terminate_lock = threading.Lock()
         self._respawn_lock = threading.Lock()
+
+        # Register in the global weak set so ``collect_garbage_in_all_workers``
+        # can reach this session without an explicit reference.
+        _all_sessions.add(self)
 
     @property
     def pid(self) -> Optional[int]:
@@ -552,6 +605,16 @@ class SubprocessSession:
         except Exception:
             pass
         self._terminate(timeout=t)
+
+        # Break the ref cycle: each ReplayStep's ``make_request`` is a
+        # closure that captures a proxy object, and the proxy holds
+        # ``self._session`` = this session. Without clearing the list here,
+        # evicted sessions stay alive via that cycle until the gc gets
+        # around to it (and ``__del__`` used to block cycle collection
+        # pre-PEP-442). Clearing also lets the child's worker-side state —
+        # held indirectly through the proxies — become collectable sooner.
+        self._replay_steps.clear()
+        self._handle_remap.clear()
 
     def _terminate(self, timeout: float = 2.0) -> None:
         """Force-terminate the worker process. Idempotent and serialized by

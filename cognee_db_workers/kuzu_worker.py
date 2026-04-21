@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import tempfile
 
-from .harness import HandleRegistry, HandleResult, Request, run_worker_loop
+from .harness import (
+    DEFAULT_DISPATCH,
+    HandleRegistry,
+    HandleResult,
+    Request,
+    run_worker_loop,
+)
 from .kuzu_protocol import (
     OP_CONN_CLOSE,
     OP_CONN_EXECUTE_FETCH_ALL,
@@ -142,6 +148,7 @@ def _load_extension(registry: HandleRegistry, req: Request) -> None:
 
 
 DISPATCH = {
+    **DEFAULT_DISPATCH,
     OP_OPEN_DATABASE: _open_database,
     OP_DB_INIT: _db_init,
     OP_DB_CLOSE: _db_close,

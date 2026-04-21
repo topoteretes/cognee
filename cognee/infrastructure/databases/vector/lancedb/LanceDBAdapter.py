@@ -6,7 +6,7 @@ from enum import Enum
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
-from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
+from typing import List, Optional, Union, get_args, get_origin, get_type_hints
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
@@ -71,6 +71,20 @@ class LanceDBAdapter(VectorDBInterface):
     url: str
     api_key: str
     connection = None
+
+    # Class-level memoization caches. They are shared across all adapter
+    # instances because ``copy_model()`` and the LanceModel subclassing only
+    # depend on the source DataPoint type + vector size — never on the
+    # adapter instance itself.
+    #
+    # Pydantic attaches large per-class state (FieldInfo, SchemaSerializer,
+    # SchemaValidator, ModelMetaclass, LazyClassAttribute) and caches it
+    # globally by class identity. Without memoization, every call to
+    # ``create_data_points`` mints a brand-new class for every data point,
+    # and those classes are never collected — the tracemalloc profile on a
+    # 2-cycle run showed +5550 FieldInfo and +879 ModelMetaclass per cycle.
+    _payload_schema_cache: dict = {}
+    _lance_datapoint_class_cache: dict = {}
 
     def __init__(
         self,
@@ -204,21 +218,7 @@ class LanceDBAdapter(VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size()
 
         payload_schema = self.get_data_point_schema(payload_schema)
-        data_point_types = get_type_hints(payload_schema)
-
-        class LanceDataPoint(LanceModel):
-            """
-            Represents a data point in the Lance model with an ID, vector, and associated payload.
-
-            The class inherits from LanceModel and defines the following public attributes:
-            - id: A unique identifier for the data point.
-            - vector: A vector representing the data point in a specified dimensional space.
-            - payload: Additional data or metadata associated with the data point.
-            """
-
-            id: data_point_types["id"]
-            vector: Vector(vector_size)
-            payload: payload_schema
+        LanceDataPoint = self._make_lance_datapoint_cls(payload_schema, vector_size)
 
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
@@ -254,30 +254,22 @@ class LanceDBAdapter(VectorDBInterface):
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
         )
 
-        IdType = TypeVar("IdType")
-        PayloadSchema = TypeVar("PayloadSchema")
         vector_size = self.embedding_engine.get_vector_size()
 
-        class LanceDataPoint(LanceModel, Generic[IdType, PayloadSchema]):
-            """
-            Represents a data point in the Lance model with an ID, vector, and payload.
+        # One LanceDataPoint class per (payload schema, vector size), cached
+        # globally. Building a new class per call — let alone per record —
+        # leaks pydantic SchemaValidator/Serializer state that never gets gc'd.
+        def _lance_cls_for(data_point):
+            schema = self.get_data_point_schema(type(data_point))
+            return self._make_lance_datapoint_cls(schema, vector_size), schema
 
-            This class encapsulates a data point consisting of an identifier, a vector representing
-            the data, and an associated payload, allowing for operations and manipulations specific
-            to the Lance data structure.
-            """
-
-            id: IdType
-            vector: Vector(vector_size)
-            payload: PayloadSchema
-
-        def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
-            payload_model = self.get_data_point_schema(type(data_point))
+        def create_lance_data_point(data_point: DataPoint, vector: list[float]):
+            lance_cls, payload_model = _lance_cls_for(data_point)
             properties = payload_model.model_validate(
                 serialize_data(data_point.model_dump())
             ).model_dump()
 
-            return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
+            return lance_cls(
                 id=str(data_point.id),
                 vector=vector,
                 payload=properties,
@@ -332,14 +324,14 @@ class LanceDBAdapter(VectorDBInterface):
 
         vector_size = self.embedding_engine.get_vector_size()
         schema_model = self.get_data_point_schema(payload_schema)
-        data_point_types = get_type_hints(schema_model)
         valid_payload_fields = set(schema_model.model_fields.keys())
         defaults = self._get_payload_defaults(payload_schema)
 
-        class MigrationLanceDataPoint(LanceModel):
-            id: data_point_types["id"]
-            vector: Vector(vector_size)
-            payload: schema_model
+        # Reuse the cached LanceDataPoint class rather than mint a new
+        # ``MigrationLanceDataPoint`` class per migration call.
+        MigrationLanceDataPoint = self._make_lance_datapoint_cls(
+            schema_model, vector_size
+        )
 
         new_ids = {dp.id for dp in new_lance_data_points}
         typed_old_rows = []
@@ -821,6 +813,40 @@ class LanceDBAdapter(VectorDBInterface):
             await get_file_storage(db_dir_path).remove_all(db_file_name)
 
     def get_data_point_schema(self, model_type: BaseModel):
+        """Return the storable payload schema for ``model_type``. Memoized on
+        the class — repeated calls with the same DataPoint subclass reuse the
+        same synthesized Pydantic class instead of re-minting one every time
+        (which pydantic's SchemaValidator / SchemaSerializer cache would
+        otherwise accumulate indefinitely).
+        """
+        cached = self._payload_schema_cache.get(model_type)
+        if cached is not None:
+            return cached
+        cached = self._build_data_point_schema(model_type)
+        self._payload_schema_cache[model_type] = cached
+        return cached
+
+    @classmethod
+    def _make_lance_datapoint_cls(cls, payload_schema, vector_size: int):
+        """Return a concrete (non-generic) ``LanceDataPoint`` subclass for the
+        given (payload_schema, vector_size) pair. Memoized globally so cognee
+        workloads that keep hitting the same DataPoint types don't mint a new
+        LanceModel subclass on every insert.
+        """
+        key = (payload_schema, int(vector_size))
+        cached = cls._lance_datapoint_class_cache.get(key)
+        if cached is not None:
+            return cached
+
+        class LanceDataPoint(LanceModel):
+            id: str
+            vector: Vector(vector_size)
+            payload: payload_schema
+
+        cls._lance_datapoint_class_cache[key] = LanceDataPoint
+        return LanceDataPoint
+
+    def _build_data_point_schema(self, model_type: BaseModel):
         related_models_fields = []
 
         for field_name, field_config in model_type.model_fields.items():
