@@ -1,15 +1,14 @@
-import uuid
-from datetime import datetime
 import json
+import uuid
+from contextlib import contextmanager
+from datetime import datetime
 
 import redis
 import redis.asyncio as aioredis
-from contextlib import contextmanager
+from pydantic import BaseModel, ValidationError
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
-from pydantic import ValidationError
-
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
     SessionQAEntryValidationError,
@@ -146,7 +145,7 @@ class RedisAdapter(CacheDBInterface):
         )
         return entry.model_dump()
 
-    async def _load_entries(self, session_key: str, start: int = 0, end: int = -1) -> list:
+    async def _load_entries(self, session_key: str, start: int = 0, end: int = -1) -> list[dict]:
         """Load and deserialize a Redis list slice for the given key."""
         raw = await self.async_redis.lrange(session_key, start, end)
         return [json.loads(e) for e in raw] if raw else []
@@ -272,7 +271,7 @@ class RedisAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
-    ):
+    ) -> None:
         """
         Add a Q/A/context triplet to a Redis list for this session.
         Same QA fields as update_qa_entry. Creates the session if it doesn't exist.
@@ -300,23 +299,25 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def get_latest_qa_entries(self, user_id: str, session_id: str, last_n: int = 5):
+    async def get_latest_qa_entries(
+        self, user_id: str, session_id: str, last_n: int = 5
+    ) -> list[SessionQAEntry]:
         """
         Retrieve the most recent Q/A/context triplet(s) for the given session.
         """
         session_key = self._session_key(user_id, session_id)
         if last_n == 1:
             data = await self.async_redis.lindex(session_key, -1)
-            return [json.loads(data)] if data else None
+            return [SessionQAEntry.model_validate_json(data)] if data else None
         data = await self.async_redis.lrange(session_key, -last_n, -1)
-        return [json.loads(d) for d in data] if data else []
+        return [SessionQAEntry.model_validate_json(d) for d in data] if data else []
 
-    async def get_all_qa_entries(self, user_id: str, session_id: str):
+    async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """
         Retrieve all Q/A/context triplets for the given session.
         """
         session_key = self._session_key(user_id, session_id)
-        return await self._load_entries(session_key)
+        return [SessionQAEntry(**entry) for entry in await self._load_entries(session_key)]
 
     async def update_qa_entry(
         self,
@@ -480,19 +481,22 @@ class RedisAdapter(CacheDBInterface):
 
     async def get_agent_trace_session(
         self, user_id: str, session_id: str, last_n: int | None = None
-    ) -> list[dict]:
+    ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
         if last_n is not None:
-            return await self._load_entries(trace_key, -last_n, -1)
-        return await self._load_entries(trace_key)
+            return [
+                SessionAgentTraceEntry(**entry)
+                for entry in await self._load_entries(trace_key, -last_n, -1)
+            ]
+        return [SessionAgentTraceEntry(**entry) for entry in await self._load_entries(trace_key)]
 
     async def get_agent_trace_feedback(
         self, user_id: str, session_id: str, last_n: int | None = None
     ) -> list[str]:
         """Retrieve ordered per-step feedback for the given trace session."""
         entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
-        return [entry.get("session_feedback", "") for entry in entries]
+        return [entry.session_feedback for entry in entries]
 
     async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
         """Return the number of stored trace steps for the given session."""
