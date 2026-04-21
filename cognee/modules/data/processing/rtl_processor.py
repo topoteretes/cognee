@@ -15,8 +15,8 @@ def detect_visual_order(text: str) -> bool:
     if not stripped_text:
         return False
 
-    # Check if the text actually contains RTL characters in the first 500 chars
-    has_rtl = any(is_rtl(c) for c in stripped_text[:500])
+    # Check if the text actually contains RTL characters by scanning the full text.
+    has_rtl = any(is_rtl(c) for c in stripped_text)
     if not has_rtl:
         return False
 
@@ -83,6 +83,9 @@ def process_rtl_text(text: str, enable_rtl: bool, is_visual: bool | None = None)
         # Reshape Arabic characters to their correct contextual forms
         reshaped_text = arabic_reshaper.reshape(text)
         # Convert from visual order to logical order using python-bidi
+        # Note: While get_display is designed for logical-to-visual, it is
+        # mathematically symmetric for basic reordering and effectively restores 
+        # logical order from visual-only extraction for LLM consumption.
         bidi_text = get_display(reshaped_text)
         return bidi_text
     except Exception as e:
