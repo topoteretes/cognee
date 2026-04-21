@@ -25,6 +25,53 @@ from cognee.modules.observability import (
 logger = get_logger("SessionManager")
 
 
+_session_record_write_failed = False
+
+
+async def _record_session_activity(
+    user_id: str,
+    session_id: str,
+    *,
+    errored: bool = False,
+) -> None:
+    """Write a lifecycle heartbeat for this session.
+
+    Upserts + touches the SessionRecord row in one DB round trip.
+    Swallows failures — the session_records table is optional for
+    SessionManager correctness — but logs once at WARNING per process
+    so silent breakage is visible in ops.
+    """
+    global _session_record_write_failed
+
+    try:
+        from uuid import UUID
+
+        from cognee.modules.session_lifecycle.metrics import (
+            accumulate_usage,
+            ensure_and_touch_session,
+        )
+
+        try:
+            user_uuid = UUID(str(user_id))
+        except (ValueError, TypeError):
+            return
+
+        await ensure_and_touch_session(session_id=session_id, user_id=user_uuid)
+        if errored:
+            await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
+    except Exception as exc:
+        if not _session_record_write_failed:
+            _session_record_write_failed = True
+            logger.warning(
+                "SessionManager: session_records write failed (%s); "
+                "subsequent failures will log at debug. "
+                "Check alembic migrations for the session_records table.",
+                exc,
+            )
+        else:
+            logger.debug("SessionManager: session_records write failed (%s)", exc)
+
+
 def _validate_session_params(
     *,
     user_id: Optional[str] = None,
@@ -139,6 +186,7 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
             )
+            await _record_session_activity(user_id, session_id)
             return qa_id
 
     @staticmethod
@@ -256,6 +304,7 @@ class SessionManager:
             error_message=error_message,
             session_feedback=session_feedback,
         )
+        await _record_session_activity(user_id, session_id, errored=status == "error")
         return trace_id
 
     def is_session_available_for_completion(self, user_id: Optional[str]) -> bool:
@@ -277,6 +326,58 @@ class SessionManager:
         return history if isinstance(history, str) else ""
 
     async def generate_completion_with_session(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        query: str,
+        context: str,
+        user_prompt_path: str,
+        system_prompt_path: str,
+        system_prompt: Optional[str] = None,
+        response_model: Type = str,
+        summarize_context: bool = False,
+        used_graph_element_ids: Optional[dict] = None,
+        max_context_chars: Optional[int] = None,
+    ) -> Any:
+        from cognee.modules.session_lifecycle.usage_tracking import track_session_usage
+        from uuid import UUID as _UUID
+
+        _ctx_user = session_user.get()
+        _ctx_uid_raw = getattr(_ctx_user, "id", None)
+        _ctx_sid = self._resolve_session_id(session_id)
+        try:
+            _ctx_uid = _UUID(str(_ctx_uid_raw)) if _ctx_uid_raw is not None else None
+        except (ValueError, TypeError):
+            _ctx_uid = None
+
+        if _ctx_uid is not None and _ctx_sid:
+            async with track_session_usage(_ctx_sid, _ctx_uid):
+                return await self._generate_completion_with_session_inner(
+                    session_id=session_id,
+                    query=query,
+                    context=context,
+                    user_prompt_path=user_prompt_path,
+                    system_prompt_path=system_prompt_path,
+                    system_prompt=system_prompt,
+                    response_model=response_model,
+                    summarize_context=summarize_context,
+                    used_graph_element_ids=used_graph_element_ids,
+                    max_context_chars=max_context_chars,
+                )
+        return await self._generate_completion_with_session_inner(
+            session_id=session_id,
+            query=query,
+            context=context,
+            user_prompt_path=user_prompt_path,
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            response_model=response_model,
+            summarize_context=summarize_context,
+            used_graph_element_ids=used_graph_element_ids,
+            max_context_chars=max_context_chars,
+        )
+
+    async def _generate_completion_with_session_inner(
         self,
         *,
         session_id: Optional[str] = None,
@@ -501,17 +602,18 @@ class SessionManager:
         *,
         user_id: str,
         session_id: Optional[str] = None,
+        last_n: Optional[int] = None,
     ) -> list[dict]:
         """
-        Get the full agent trace session for the given user/session pair.
+        Get the agent trace session for the given user/session pair.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace session")
             return []
 
-        entries = await self._cache.get_agent_trace_session(user_id, session_id)
+        entries = await self._cache.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return list(entries) if entries else []
 
     async def get_agent_trace_feedback(
@@ -519,18 +621,38 @@ class SessionManager:
         *,
         user_id: str,
         session_id: Optional[str] = None,
+        last_n: Optional[int] = None,
     ) -> list[str]:
         """
         Get only per-step feedback strings for the trace session.
         """
         session_id = self._resolve_session_id(session_id)
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty agent trace feedback")
             return []
 
-        feedback_list = await self._cache.get_agent_trace_feedback(user_id, session_id)
+        feedback_list = await self._cache.get_agent_trace_feedback(
+            user_id, session_id, last_n=last_n
+        )
         return list(feedback_list) if feedback_list else []
+
+    async def get_agent_trace_count(
+        self,
+        *,
+        user_id: str,
+        session_id: Optional[str] = None,
+    ) -> int:
+        """
+        Get the number of trace steps stored for the given user/session pair.
+        """
+        session_id = self._resolve_session_id(session_id)
+        _validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty agent trace count")
+            return 0
+
+        return await self._cache.get_agent_trace_count(user_id, session_id)
 
     async def update_qa(
         self,
@@ -552,23 +674,26 @@ class SessionManager:
         Returns True if updated, False if not found or cache unavailable.
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         """
+        from cognee.infrastructure.locks import session_lock
+
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_qa")
             return False
 
-        return await self._cache.update_qa_entry(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=qa_id,
-            question=question,
-            context=context,
-            answer=answer,
-            feedback_text=feedback_text,
-            feedback_score=feedback_score,
-            memify_metadata=memify_metadata,
-        )
+        async with session_lock(session_id, "update_qa"):
+            return await self._cache.update_qa_entry(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=qa_id,
+                question=question,
+                context=context,
+                answer=answer,
+                feedback_text=feedback_text,
+                feedback_score=feedback_score,
+                memify_metadata=memify_metadata,
+            )
 
     async def add_feedback(
         self,
@@ -635,22 +760,26 @@ class SessionManager:
 
         Returns True if deleted, False if not found or cache unavailable.
         """
+        from cognee.infrastructure.locks import session_lock
+
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_qa")
             return False
 
-        return await self._cache.delete_qa_entry(
-            user_id=user_id,
-            session_id=session_id,
-            qa_id=qa_id,
-        )
+        async with session_lock(session_id, "update_qa"):
+            return await self._cache.delete_qa_entry(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=qa_id,
+            )
 
     # -- Graph knowledge context (separate from QA history) -----------------
 
     @staticmethod
     def _graph_context_key(user_id: str, session_id: str) -> str:
+        """Build the cache key used for session-scoped graph knowledge snapshots."""
         return f"graph_knowledge:{user_id}:{session_id}"
 
     async def get_graph_context(self, *, user_id: str, session_id: Optional[str] = None) -> str:

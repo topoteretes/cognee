@@ -5,7 +5,7 @@ import getApiKeys, { type ApiKey } from "@/modules/apiKeys/getApiKeys";
 import CopyApiKeyButton from "@/ui/elements/CopyApiKeyButton";
 import DeleteApiKeyButton from "@/ui/elements/DeleteApiKeyButton";
 import { Box, Center, Flex, Text } from "@mantine/core";
-import { LoadingIndicator } from "@/ui/app";
+import { LoadingIndicator } from "@/ui/App";
 import { tokens } from "@/ui/theme/tokens";
 
 const ROW_EXIT_MS = 220;
