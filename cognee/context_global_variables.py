@@ -111,6 +111,13 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     Database name will be determined by dataset and the appropriate vector and
     graph database handlers will be enforced.
 
+    Additionally, this function acts as the queue gate for dataset-level
+    operations: calling it ensures the current asyncio task holds a
+    :class:`DatasetQueue` slot for ``dataset``. Repeated calls in the same
+    task for the same dataset are no-ops; calls with a different dataset in
+    the same task swap slots. The slot is released automatically when the
+    task completes.
+
     Note: This is only currently supported by the following databases:
           Relational: SQLite, Postgres
           Vector: LanceDB, pgvector
@@ -123,9 +130,13 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     Returns:
 
     """
-
     if not backend_access_control_enabled():
         return
+
+    # Imported lazily to avoid circular imports at module load.
+    from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+    await dataset_queue().ensure_slot(dataset)
 
     user = await get_user(user_id)
 
