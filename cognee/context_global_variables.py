@@ -109,6 +109,8 @@ class DatabaseContextManager:
     """Dual-mode helper returned by :func:`set_database_global_context_variables`.
 
     Supports both ``await`` (legacy) and ``async with`` (scoped) usage.
+
+    Note: Single-use object, should not be reused across multiple calls.
     """
 
     __slots__ = ("_dataset", "_user_id", "_applied")
@@ -242,14 +244,8 @@ def set_database_global_context_variables(
     Additionally, this acts as the queue gate for dataset-level operations:
     applying the context ensures the current asyncio task holds a
     :class:`DatasetQueue` slot for ``dataset``. Repeated calls in the same
-    task for the same dataset are no-ops; calls with a different dataset in
-    the same task swap slots. The slot is released automatically when the
+    task for the same dataset are no-ops;. The dataset queue slot is released automatically when the
     task completes (legacy mode) or on async-with exit (scoped mode).
-
-    Note: This is only currently supported by the following databases:
-          Relational: SQLite, Postgres
-          Vector: LanceDB, pgvector
-          Graph: KuzuDB, neo4j_aura_dev
 
     Args:
         dataset: Cognee dataset name or id
