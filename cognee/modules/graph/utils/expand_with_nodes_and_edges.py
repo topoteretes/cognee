@@ -1,6 +1,10 @@
+import asyncio
 from typing import Optional
 
 from cognee.infrastructure.engine.models.Edge import Edge
+from pydantic import BaseModel, Field
+from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import (
@@ -16,6 +20,64 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
     get_default_ontology_resolver,
     get_ontology_resolver_from_env,
 )
+
+
+class ChunkTemporalEdgeEvent(BaseModel):
+    description: str
+    related_entities: list[str] = Field(default_factory=list)
+
+
+class ChunkTemporalEdgeEvents(BaseModel):
+    events: list[ChunkTemporalEdgeEvent] = Field(default_factory=list)
+
+
+async def _extract_chunk_temporal_edge_events(
+    data_chunk: DocumentChunk, entity_nodes: list[Entity]
+) -> ChunkTemporalEdgeEvents:
+    system_prompt = read_query_prompt("summarize_chunk_temporal_edges.txt")
+    entity_names = "\n".join(f"- {entity_node.name}" for entity_node in entity_nodes)
+    text_input = f"Entity names:\n{entity_names}\n\nChunk text:\n{data_chunk.text}"
+
+    return await LLMGateway.acreate_structured_output(
+        text_input, system_prompt, ChunkTemporalEdgeEvents
+    )
+
+
+def _normalize_entity_name(name: str) -> str:
+    return generate_node_name(name).strip()
+
+
+def _build_entity_event_map(chunk_events: ChunkTemporalEdgeEvents) -> dict[str, list[str]]:
+    entity_event_map: dict[str, list[str]] = {}
+
+    for event in chunk_events.events:
+        description = event.description.strip()
+        if not description:
+            continue
+
+        for entity_name in event.related_entities:
+            normalized_name = _normalize_entity_name(entity_name)
+            if not normalized_name:
+                continue
+            entity_event_map.setdefault(normalized_name, []).append(description)
+
+    return entity_event_map
+
+
+def _build_contains_edge_text(entity_node: Entity, entity_event_map: dict[str, list[str]]) -> str:
+    description_text = "; ".join(
+        [
+            "relationship_name: contains",
+            f"entity_name: {entity_node.name}",
+            f"entity_description: {entity_node.description}",
+        ]
+    )
+    event_lines = entity_event_map.get(_normalize_entity_name(entity_node.name), [])
+
+    if not event_lines:
+        return f"Description:\n{description_text}"
+
+    return f"Description:\n{description_text}\n\nEvents:\n" + "\n".join(event_lines)
 
 
 def _create_node_key(node_id: str, category: str) -> str:
@@ -207,7 +269,7 @@ def _create_entity_node(
     return entity_node
 
 
-def _process_graph_nodes(
+async def _process_graph_nodes(
     data_chunk: DocumentChunk,
     graph: KnowledgeGraph,
     ontology_resolver: RDFLibOntologyResolver,
@@ -219,6 +281,8 @@ def _process_graph_nodes(
     ontology_relationships: list,
 ) -> None:
     """Process nodes in a knowledge graph"""
+    entity_nodes = []
+
     for node in graph.nodes:
         # Create type node
         type_node = _create_type_node(
@@ -252,19 +316,20 @@ def _process_graph_nodes(
         if data_chunk.contains is None:
             data_chunk.contains = []
 
-        edge_text = "; ".join(
-            [
-                "relationship_name: contains",
-                f"entity_name: {entity_node.name}",
-                f"entity_description: {entity_node.description}",
-            ]
-        )
+        entity_nodes.append(entity_node)
 
+    if not entity_nodes:
+        return
+
+    chunk_events = await _extract_chunk_temporal_edge_events(data_chunk, entity_nodes)
+    entity_event_map = _build_entity_event_map(chunk_events)
+
+    for entity_node in entity_nodes:
         data_chunk.contains.append(
             (
                 Edge(
                     relationship_type="contains",
-                    edge_text=edge_text,
+                    edge_text=_build_contains_edge_text(entity_node, entity_event_map),
                 ),
                 entity_node,
             )
@@ -320,7 +385,7 @@ def _populate_node_relations(all_nodes: dict, relationships: list, key_mapping: 
         src_node.relations.append((Edge(relationship_type=rel_name), tgt_node))
 
 
-def expand_with_nodes_and_edges(
+async def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
     ontology_resolver: BaseOntologyResolver = None,
@@ -389,7 +454,7 @@ def expand_with_nodes_and_edges(
             continue
 
         # Process nodes first
-        _process_graph_nodes(
+        await _process_graph_nodes(
             data_chunk,
             graph,
             ontology_resolver,

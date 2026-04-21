@@ -107,7 +107,7 @@ async def integrate_chunk_graphs(
         chunk_graphs,
     )
 
-    data_chunks, entity_nodes = expand_with_nodes_and_edges(
+    data_chunks, entity_nodes = await expand_with_nodes_and_edges(
         data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
     )
 

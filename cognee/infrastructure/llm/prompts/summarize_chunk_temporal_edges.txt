@@ -1,0 +1,15 @@
+Extract only the event-related temporal information needed to enrich chunk-to-entity contains edges.
+
+Return structured output with:
+- `events`: a list of events
+- each event must include:
+  - `description`: one natural-language line describing the event and its time context
+  - `related_entities`: the entities from the provided entity list that participate in that event
+
+Rules:
+- Use only entity names from the provided entity list.
+- `description` should be a single line of natural language suitable for semantic retrieval.
+- Include time wording when supported by the text, such as "in 2018", "during the acquisition", "before the launch", "after the announcement", or "between 2020 and 2022".
+- Only include events that are meaningfully related to one or more provided entities.
+- If an event relates to multiple entities, include all of them in `related_entities`.
+- If there are no relevant event-entity relations, return an empty `events` list.
