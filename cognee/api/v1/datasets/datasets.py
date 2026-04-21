@@ -17,6 +17,7 @@ from cognee.modules.graph.methods import (
 )
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
+from cognee.infrastructure.databases.dataset_queue import dataset_queue
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -147,30 +148,36 @@ class datasets:
 
         if not data:
             # If data is not found in the system, user is using a custom graph model.
-            await set_database_global_context_variables(dataset_id, dataset.owner_id)
-            await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+            # Gate the per-dataset graph/DB work through the queue so concurrent
+            # deletes respect ``DATABASE_MAX_LRU_CACHE_SIZE``.
+            async with dataset_queue().acquire():
+                await set_database_global_context_variables(dataset_id, dataset.owner_id)
+                await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
-            dataset_data = await get_dataset_data(dataset.id)
-            if not dataset_data and delete_dataset_if_empty:
-                await delete_dataset(dataset)
+                dataset_data = await get_dataset_data(dataset.id)
+                if not dataset_data and delete_dataset_if_empty:
+                    await delete_dataset(dataset)
 
             return {"status": "success"}
 
         if not any(ds.id == dataset_id for ds in data.datasets):
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
-        await set_database_global_context_variables(dataset_id, dataset.owner_id)
+        # Gate the per-dataset graph/DB work through the queue so concurrent
+        # deletes respect ``DATABASE_MAX_LRU_CACHE_SIZE``.
+        async with dataset_queue().acquire():
+            await set_database_global_context_variables(dataset_id, dataset.owner_id)
 
-        if not await has_data_related_nodes(dataset_id, data_id):
-            await legacy_delete(data, "soft")
-        else:
-            await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+            if not await has_data_related_nodes(dataset_id, data_id):
+                await legacy_delete(data, "soft")
+            else:
+                await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
-        await delete_data(data, dataset_id)
+            await delete_data(data, dataset_id)
 
-        dataset_data = await get_dataset_data(dataset.id)
-        if not dataset_data and delete_dataset_if_empty:
-            await delete_dataset(dataset)
+            dataset_data = await get_dataset_data(dataset.id)
+            if not dataset_data and delete_dataset_if_empty:
+                await delete_dataset(dataset)
 
         return {"status": "success"}
 

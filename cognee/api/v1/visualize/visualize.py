@@ -6,6 +6,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger, setup_logging, ERROR
+from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
 
 import asyncio
@@ -15,10 +16,13 @@ logger = get_logger()
 
 
 async def visualize_graph(destination_file_path: str = None) -> str:
-    graph_engine = await get_graph_engine()
-    graph_data = await graph_engine.get_graph_data()
+    # Gate graph reads through the dataset queue so concurrent visualize
+    # calls from the UI respect ``DATABASE_MAX_LRU_CACHE_SIZE``.
+    async with dataset_queue().acquire():
+        graph_engine = await get_graph_engine()
+        graph_data = await graph_engine.get_graph_data()
 
-    graph = await cognee_network_visualization(graph_data, destination_file_path)
+        graph = await cognee_network_visualization(graph_data, destination_file_path)
 
     if destination_file_path:
         logger.info(f"The HTML file has been stored at path: {destination_file_path}")
