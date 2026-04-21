@@ -7,7 +7,9 @@ from cognee.infrastructure.loaders.external.pypdf_loader import PyPdfLoader
 from cognee.infrastructure.loaders.external.unstructured_loader import UnstructuredLoader
 
 def clean_extracted_path(path: str) -> str:
-    """Helper to handle Windows file:/// paths."""
+    """Helper to handle Windows file:/// paths and plain filesystem paths."""
+    if not path.startswith("file://"):
+        return path
     clean = path.replace("file:///", "").replace("file://", "")
     # On Windows the residual path starts with a drive letter (e.g. "C:/...");
     # on POSIX re-prepend "/".
@@ -15,16 +17,24 @@ def clean_extracted_path(path: str) -> str:
         return clean
     return "/" + clean.lstrip("/")
 
+BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
+
 @pytest.mark.asyncio
 async def test_rtl_pdf_extraction(monkeypatch):
-    test_file = pathlib.Path("cognee/tests/test_data/rtl/hebrew_alphabet.pdf")
+    test_file = BASE_DIR / "test_data/rtl/hebrew_alphabet.pdf"
     assert test_file.exists(), f"Test file {test_file} missing - should have been downloaded"
 
     config = get_base_config()
     monkeypatch.setattr(config, "enable_rtl_support", True)
     
     loader = PyPdfLoader()
-    extracted_path = await loader.load(str(test_file))
+    
+    # Patch maybe_normalize_rtl to verify it's called
+    with patch("cognee.infrastructure.loaders.external.pypdf_loader.maybe_normalize_rtl",
+               wraps=lambda x, **kw: x) as mock_normalize:
+        extracted_path = await loader.load(str(test_file))
+        mock_normalize.assert_called()
+
     clean_path = clean_extracted_path(extracted_path)
 
     with open(clean_path, "r", encoding="utf-8") as f:
@@ -35,7 +45,7 @@ async def test_rtl_pdf_extraction(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_rtl_docx_extraction(monkeypatch):
-    test_file = pathlib.Path("cognee/tests/test_data/rtl/hebrew_sample.docx")
+    test_file = BASE_DIR / "test_data/rtl/hebrew_sample.docx"
     assert test_file.exists(), f"Test file {test_file} missing - should have been created"
 
     config = get_base_config()
@@ -84,20 +94,22 @@ async def test_advanced_pdf_loader_rtl_coverage(monkeypatch, tmp_path):
     async def mock_store(name, content):
         return "mock_path"
 
-    with patch.dict("sys.modules", {"unstructured.partition.pdf": mock_pdf_module}):
-        with patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.get_file_metadata",
-                   return_value={"content_hash": "mock"}):
-            with patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.get_storage_config",
-                       return_value={"data_root_directory": ""}):
-                with patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.get_file_storage") as mock_storage:
-                    mock_storage_instance = MagicMock()
-                    mock_storage.return_value = mock_storage_instance
-                    mock_storage_instance.store = MagicMock(side_effect=mock_store)
-                    
-                    with patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.maybe_normalize_rtl",
-                               wraps=lambda x, **kw: x) as mock_normalize:
-                        await loader.load(str(dummy_file))
-                        mock_normalize.assert_called()
+    with (
+        patch.dict("sys.modules", {"unstructured.partition.pdf": mock_pdf_module}),
+        patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.get_file_metadata",
+               return_value={"content_hash": "mock"}),
+        patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.get_storage_config",
+               return_value={"data_root_directory": ""}),
+        patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.get_file_storage") as mock_storage,
+        patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.maybe_normalize_rtl",
+               wraps=lambda x, **kw: x) as mock_normalize
+    ):
+        mock_storage_instance = MagicMock()
+        mock_storage.return_value = mock_storage_instance
+        mock_storage_instance.store = MagicMock(side_effect=mock_store)
+        
+        await loader.load(str(dummy_file))
+        mock_normalize.assert_called()
 
 @pytest.mark.asyncio
 async def test_docling_loader_rtl_coverage(monkeypatch, tmp_path):
@@ -117,23 +129,25 @@ async def test_docling_loader_rtl_coverage(monkeypatch, tmp_path):
     async def mock_store(name, content):
         return "mock_path"
 
-    with patch("cognee.infrastructure.loaders.external.docling_loader._get_docling_converter") as mock_get_conv:
+    with (
+        patch("cognee.infrastructure.loaders.external.docling_loader._get_docling_converter") as mock_get_conv,
+        patch("cognee.infrastructure.loaders.external.docling_loader.get_file_metadata",
+               return_value={"content_hash": "mock"}),
+        patch("cognee.infrastructure.loaders.external.docling_loader.get_storage_config",
+               return_value={"data_root_directory": ""}),
+        patch("cognee.infrastructure.loaders.external.docling_loader.get_file_storage") as mock_storage,
+        patch("cognee.infrastructure.loaders.external.docling_loader.maybe_normalize_rtl",
+               wraps=lambda x, **kw: x) as mock_normalize
+    ):
         mock_get_conv.return_value = mock_converter = MagicMock()
         mock_converter.convert.return_value = mock_conv_result
         
-        with patch("cognee.infrastructure.loaders.external.docling_loader.get_file_metadata",
-                   return_value={"content_hash": "mock"}):
-            with patch("cognee.infrastructure.loaders.external.docling_loader.get_storage_config",
-                       return_value={"data_root_directory": ""}):
-                with patch("cognee.infrastructure.loaders.external.docling_loader.get_file_storage") as mock_storage:
-                    mock_storage_instance = MagicMock()
-                    mock_storage.return_value = mock_storage_instance
-                    mock_storage_instance.store = MagicMock(side_effect=mock_store)
-                    
-                    with patch("cognee.infrastructure.loaders.external.docling_loader.maybe_normalize_rtl",
-                               wraps=lambda x, **kw: x) as mock_normalize:
-                        await loader.load(str(dummy_file))
-                        mock_normalize.assert_called()
+        mock_storage_instance = MagicMock()
+        mock_storage.return_value = mock_storage_instance
+        mock_storage_instance.store = MagicMock(side_effect=mock_store)
+        
+        await loader.load(str(dummy_file))
+        mock_normalize.assert_called()
 
 @pytest.mark.asyncio
 async def test_rtl_processor_direct_logic():
@@ -150,7 +164,7 @@ async def test_rtl_processor_direct_logic():
     # When disabled, should be identical
     assert process_rtl_text(visual_input, enable_rtl=False) == visual_input
     
-    # When enabled and is_visual=True (default), it should flip it back to logical
+    # When enabled and is_visual=True (explicit; default is None for auto-detection)
     result = process_rtl_text(visual_input, enable_rtl=True, is_visual=True)
     assert result == "Hello שלום"
     
