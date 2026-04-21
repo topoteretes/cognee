@@ -19,16 +19,6 @@ async def main():
     """
     await cognee.add(text)
 
-    import os
-    import pathlib
-
-    explanation_file_path_quantum = os.path.join(
-        pathlib.Path(__file__).parent.parent.parent,
-        "cognee/tests/test_data/artificial-intelligence.pdf",
-    )
-
-    await cognee.add(explanation_file_path_quantum)
-
     await cognee.cognify()
 
     query_text = "Tell me about NLP"
