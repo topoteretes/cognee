@@ -173,6 +173,23 @@ To open the local UI, run:
 cognee-cli -ui
 ```
 
+## RTL and Mixed-Text Support
+
+Cognee provides opt-in support for Right-to-Left (RTL) languages (Hebrew, Arabic) and mixed RTL/LTR text. It includes an automated normalization layer that detects visual-order text extraction (common in some PDF extractors) and converts it back to logical order for correct LLM processing.
+
+### Setup
+
+1. **Install with RTL dependencies**:
+```bash
+pip install "cognee[rtl]"
+```
+
+2. **Enable in Configuration**:
+Set the environment variable or add it to your `.env` file:
+```bash
+ENABLE_RTL_SUPPORT=True
+```
+
 ## Use with AI Agents
 
 ### Claude Code
