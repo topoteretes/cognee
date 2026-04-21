@@ -2,13 +2,23 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import searchDataset from "@/modules/datasets/searchDataset";
+import recallKnowledge from "@/modules/datasets/recallKnowledge";
 import getDatasets from "@/modules/datasets/getDatasets";
+import { listSessions, type SessionRow } from "@/modules/sessions/getSessions";
+
+type SearchScope = "graph" | "session" | "trace" | "all";
 
 interface SearchResultItem {
-  search_result: string[];
-  dataset_id: string;
-  dataset_name: string;
+  search_result?: string[];
+  dataset_id?: string;
+  dataset_name?: string;
+  // Recall-style fields (when scope includes session/trace)
+  question?: string;
+  answer?: string;
+  origin_function?: string;
+  method_return_value?: unknown;
+  session_feedback?: string;
+  _source?: string;
 }
 
 interface HistoryEntry {
@@ -40,6 +50,8 @@ export default function SearchPage() {
   const [showDatasetDropdown, setShowDatasetDropdown] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
+  const [scope, setScope] = useState<SearchScope>("graph");
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +59,9 @@ export default function SearchPage() {
     if (!cogniInstance || isInitializing) return;
     getDatasets(cogniInstance)
       .then((data: { id: string; name: string }[]) => setDatasets(Array.isArray(data) ? data : []))
+      .catch(() => {});
+    listSessions(cogniInstance, { range: "30d", limit: 10 })
+      .then((page) => setSessions(page.sessions))
       .catch(() => {});
   }, [cogniInstance, isInitializing]);
 
@@ -72,15 +87,32 @@ export default function SearchPage() {
     setHasSearched(true);
 
     try {
-      const data = await searchDataset(cogniInstance, {
+      const mostRecentSessionId = sessions[0]?.session_id ?? "";
+      let sendScope: string | string[];
+      let sendSessionId: string | undefined;
+      if (scope === "graph") {
+        sendScope = "graph";
+      } else if (mostRecentSessionId) {
+        sendScope = scope === "all" ? ["graph", "session", "trace", "graph_context"] : scope;
+        sendSessionId = mostRecentSessionId;
+      } else {
+        sendScope = "graph";
+      }
+      const data = await recallKnowledge(cogniInstance, {
         query: q,
-        searchType: "GRAPH_COMPLETION",
+        scope: sendScope as never,
+        sessionId: sendSessionId,
         datasetIds: searchDatasetIds,
       });
-      const resultData = Array.isArray(data) ? data : [];
+      const resultData = (Array.isArray(data) ? data : []) as SearchResultItem[];
       setResults(resultData);
-      // Add to history (deduplicate: remove previous entry with same query)
-      const totalResults = resultData.reduce((sum: number, r: SearchResultItem) => sum + r.search_result.length, 0);
+      // History total count — sum search_result lengths where present,
+      // otherwise count rows (recall shape).
+      const totalResults = resultData.reduce(
+        (sum: number, r: SearchResultItem) =>
+          sum + (Array.isArray(r.search_result) ? r.search_result.length : 1),
+        0,
+      );
       setHistory((prev) => [
         { query: q, resultCount: totalResults, results: resultData, time: new Date() },
         ...prev.filter((h) => h.query !== q),
@@ -153,6 +185,40 @@ export default function SearchPage() {
       )}
 
       {/* Search bar */}
+      {/* Scope pills */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {(["graph", "session", "trace", "all"] as const).map((s) => {
+          const needsSession = s !== "graph";
+          const disabled = needsSession && sessions.length === 0;
+          const active = scope === s && !disabled;
+          const label = s === "graph" ? "Graph" : s === "session" ? "Session" : s === "trace" ? "Traces" : "All";
+          return (
+            <button
+              key={s}
+              type="button"
+              disabled={disabled}
+              onClick={() => !disabled && setScope(s)}
+              className="cursor-pointer"
+              title={disabled ? "No session available to search" : `Search ${label.toLowerCase()}`}
+              style={{
+                background: active ? "#18181B" : "#FFFFFF",
+                color: disabled ? "#D4D4D8" : active ? "#FFFFFF" : "#3F3F46",
+                border: active ? "none" : "1px solid #E4E4E7",
+                borderRadius: 100,
+                paddingBlock: 5,
+                paddingInline: 11,
+                fontSize: 12,
+                lineHeight: "16px",
+                fontFamily: "inherit",
+                cursor: disabled ? "not-allowed" : "pointer",
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       <div style={{ background: "#fff", border: `1px solid ${query ? "#6510F4" : "#E5E7EB"}`, borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, boxShadow: "0 1px 3px #0000000A", transition: "border-color 0.2s" }}>
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style={{ flexShrink: 0 }}>
           <circle cx="7.5" cy="7.5" r="5.5" stroke="#A1A1AA" strokeWidth="1.5" />
@@ -197,24 +263,60 @@ export default function SearchPage() {
           </div>
 
           <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, overflow: "hidden" }}>
-            {results.map((r, i) => (
-              <div
-                key={i}
-                className="hover:bg-cognee-hover"
-                style={{ padding: "16px 20px", borderBottom: i < results.length - 1 ? "1px solid #F4F4F5" : "none", display: "flex", flexDirection: "column", gap: 8, transition: "background 150ms" }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", color: "#6510F4", textTransform: "uppercase" }}>
-                    {r.dataset_name || "Result"}
-                  </span>
+            {results.map((raw, i) => {
+              // Normalize recall/search result shapes. The endpoint may
+              // return { dataset_name, search_result: [...] } (legacy),
+              // a plain string, a recall row ({ question, answer, ... }),
+              // or a bare object — coerce all of them into a list of
+              // display lines before mapping.
+              const r: {
+                dataset_name?: string;
+                search_result?: unknown;
+                question?: string;
+                answer?: string;
+                _source?: string;
+              } = raw as unknown as {
+                dataset_name?: string;
+                search_result?: unknown;
+                question?: string;
+                answer?: string;
+                _source?: string;
+              };
+              const label = r.dataset_name || (r._source ? r._source : "Result");
+              let lines: string[] = [];
+              if (Array.isArray(r.search_result)) {
+                lines = (r.search_result as unknown[]).map((x) =>
+                  typeof x === "string" ? x : JSON.stringify(x),
+                );
+              } else if (typeof r.search_result === "string") {
+                lines = [r.search_result];
+              } else if (typeof raw === "string") {
+                lines = [raw as unknown as string];
+              } else if (r.question || r.answer) {
+                if (r.question) lines.push(`Q: ${r.question}`);
+                if (r.answer) lines.push(`A: ${r.answer}`);
+              } else {
+                try { lines = [JSON.stringify(raw)]; } catch { lines = [String(raw)]; }
+              }
+              return (
+                <div
+                  key={i}
+                  className="hover:bg-cognee-hover"
+                  style={{ padding: "16px 20px", borderBottom: i < results.length - 1 ? "1px solid #F4F4F5" : "none", display: "flex", flexDirection: "column", gap: 8, transition: "background 150ms" }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", color: "#6510F4", textTransform: "uppercase" }}>
+                      {label}
+                    </span>
+                  </div>
+                  {lines.map((text, j) => (
+                    <p key={j} style={{ fontSize: 13, color: "#18181B", lineHeight: "20px", margin: 0 }}>
+                      {text}
+                    </p>
+                  ))}
                 </div>
-                {r.search_result.map((text, j) => (
-                  <p key={j} style={{ fontSize: 13, color: "#18181B", lineHeight: "20px", margin: 0 }}>
-                    {text}
-                  </p>
-                ))}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -271,14 +373,22 @@ export default function SearchPage() {
               {/* Expanded results */}
               {expandedHistory === i && h.results.length > 0 && (
                 <div style={{ marginLeft: 36, marginBottom: 8, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
-                  {h.results.map((r, ri) => (
-                    <div key={ri} style={{ padding: "12px 16px", borderBottom: ri < h.results.length - 1 ? "1px solid #F4F4F5" : "none" }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", color: "#6510F4", textTransform: "uppercase" }}>{r.dataset_name || "Result"}</span>
-                      {r.search_result.map((text, j) => (
-                        <p key={j} style={{ fontSize: 12, color: "#52525B", lineHeight: "18px", margin: "4px 0 0" }}>{text}</p>
-                      ))}
-                    </div>
-                  ))}
+                  {h.results.map((r, ri) => {
+                    const label = r.dataset_name || r._source || "Result";
+                    let lines: string[] = [];
+                    if (Array.isArray(r.search_result)) lines = r.search_result;
+                    else if (r.answer) lines = [r.answer];
+                    else if (r.question) lines = [`Q: ${r.question}`];
+                    else if (r.origin_function) lines = [`${r.origin_function}${r.session_feedback ? ": " + r.session_feedback : ""}`];
+                    return (
+                      <div key={ri} style={{ padding: "12px 16px", borderBottom: ri < h.results.length - 1 ? "1px solid #F4F4F5" : "none" }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", color: "#6510F4", textTransform: "uppercase" }}>{label}</span>
+                        {lines.map((text, j) => (
+                          <p key={j} style={{ fontSize: 12, color: "#52525B", lineHeight: "18px", margin: "4px 0 0" }}>{text}</p>
+                        ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

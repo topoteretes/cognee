@@ -10,10 +10,12 @@ import pytest_asyncio
 
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.agent_memory.runtime import get_current_agent_memory_context
 from cognee.modules.data.methods import get_datasets_by_name
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.engine.operations.setup import setup as engine_setup
-from cognee.modules.users.methods import create_user
+from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 from cognee.infrastructure.session.session_manager import SessionManager
 
@@ -43,6 +45,14 @@ async def _reset_engines_and_prune() -> None:
     await cognee.prune.prune_system(metadata=True)
 
 
+def _reset_cache_backend_caches() -> None:
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+    from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
+
+    get_cache_config.cache_clear()
+    create_cache_engine.cache_clear()
+
+
 async def _fake_trace_feedback(
     *,
     origin_function: str,
@@ -64,12 +74,26 @@ def _patch_session_manager(monkeypatch, session_manager):
     monkeypatch.setattr(session_manager_module, "get_session_manager", lambda: session_manager)
 
 
+def _count_document_chunks(nodes) -> int:
+    document_chunk_count = 0
+    for _node_id, props in nodes:
+        node_type = props.get("type")
+        if isinstance(node_type, dict) and node_type.get("DocumentChunk"):
+            document_chunk_count += 1
+        elif node_type == "DocumentChunk":
+            document_chunk_count += 1
+    return document_chunk_count
+
+
 @pytest_asyncio.fixture
 async def agent_memory_integration_env(tmp_path, monkeypatch):
     """Create a clean environment with kuzu graph storage and FS-backed session traces."""
     pytest.importorskip("kuzu")
 
     root = Path(tmp_path)
+    monkeypatch.setenv("CACHE_BACKEND", "fs")
+    monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
+    _reset_cache_backend_caches()
     vector_db_config.set(None)
     graph_db_config.set(None)
     cognee.config.set_graph_database_provider("kuzu")
@@ -111,10 +135,11 @@ async def agent_memory_integration_env(tmp_path, monkeypatch):
 
         cache_adapter.cache.close()
         await _reset_engines_and_prune()
+        _reset_cache_backend_caches()
 
 
 @pytest.mark.asyncio
-async def test_agent_memory_save_traces_does_not_require_dataset_permissions_integration(
+async def test_agent_memory_save_session_traces_does_not_require_dataset_permissions_integration(
     agent_memory_integration_env,
 ):
     """Trace persistence should work without dataset scope resolution when search is disabled."""
@@ -123,7 +148,7 @@ async def test_agent_memory_save_traces_does_not_require_dataset_permissions_int
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         session_id="permissionless-trace",
         user=member,
         dataset_name="shared_without_permissions",
@@ -177,7 +202,7 @@ async def test_agent_memory_retrieves_memory_from_shared_dataset_with_read_and_w
 
     @cognee.agent_memory(
         with_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=member,
         dataset_name=dataset_name,
         memory_query_fixed="What is the private codename for cognee agent_memory?",
@@ -220,7 +245,7 @@ async def test_agent_memory_retrieves_session_memory_without_dataset_permissions
     @cognee.agent_memory(
         with_memory=False,
         with_session_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=member,
         session_id=session_id,
         dataset_name="shared_without_permissions",
@@ -244,7 +269,7 @@ async def test_agent_memory_persists_trace_to_session_store_integration(
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         user=owner,
         session_id="trace-success",
     )
@@ -267,6 +292,119 @@ async def test_agent_memory_persists_trace_to_session_store_integration(
     assert trace_entries[0]["session_feedback"] == (
         "test_agent_memory_persists_trace_to_session_store_integration.<locals>.traced_agent "
         "returned: agent-memory integration trace"
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_memory_periodically_memifies_recent_trace_steps_integration(
+    agent_memory_integration_env,
+    monkeypatch,
+):
+    """Periodic trace memify should trigger only when the step count hits the configured interval."""
+    owner = await create_user(f"owner_{uuid4().hex[:8]}@example.com", "example")
+    session_id = "trace-periodic-memify"
+    persist_memify_mock = AsyncMock()
+    monkeypatch.setattr(
+        "cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph.persist_agent_trace_feedbacks_in_knowledge_graph_pipeline",
+        persist_memify_mock,
+    )
+
+    @cognee.agent_memory(
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=2,
+        user=owner,
+        session_id=session_id,
+        dataset_name="integration_dataset",
+    )
+    async def traced_agent(step: str) -> str:
+        return step
+
+    assert await traced_agent("first") == "first"
+    persist_memify_mock.assert_not_awaited()
+
+    assert await traced_agent("second") == "second"
+    persist_memify_mock.assert_awaited_once_with(
+        user=owner,
+        session_ids=[session_id],
+        dataset="integration_dataset",
+        raw_trace_content=False,
+        last_n_steps=2,
+        run_in_background=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_memory_periodic_memify_reaches_graph_integration(
+    agent_memory_integration_env,
+):
+    """Periodic trace memify should write agent trace content into the graph on the threshold step."""
+    owner = await get_default_user()
+    dataset_name = f"agent_trace_periodic_{uuid4().hex[:8]}"
+    session_id = "trace-periodic-memify-real-pipeline"
+
+    await cognee.add(
+        ["Periodic memify integration dataset bootstrap content."],
+        dataset_name=dataset_name,
+        user=owner,
+    )
+    await cognee.cognify([dataset_name], user=owner)
+
+    @cognee.agent_memory(
+        with_memory=False,
+        save_session_traces=True,
+        persist_session_trace_after=2,
+        session_trace_summary=False,
+        user=owner,
+        session_id=session_id,
+        dataset_name=dataset_name,
+    )
+    async def traced_agent(step: str) -> str:
+        return step
+
+    assert await traced_agent("first real step") == "first real step"
+    assert await traced_agent("second real step") == "second real step"
+
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_nodeset_subgraph(NodeSet, ["agent_trace_feedbacks"])
+
+    assert any(node[1].get("name") == "agent_trace_feedbacks" for node in nodes)
+    assert _count_document_chunks(nodes) >= 1
+    assert nodes or edges
+
+
+@pytest.mark.asyncio
+async def test_agent_memory_can_disable_trace_summary_generation_integration(
+    agent_memory_integration_env,
+):
+    """Decorator trace persistence can fall back to deterministic feedback generation."""
+    session_manager = agent_memory_integration_env["session_manager"]
+    owner = await create_user(f"owner_{uuid4().hex[:8]}@example.com", "example")
+
+    @cognee.agent_memory(
+        with_memory=False,
+        save_session_traces=True,
+        session_trace_summary=False,
+        user=owner,
+        session_id="trace-fallback-feedback",
+    )
+    async def traced_agent() -> str:
+        return "agent-memory integration trace"
+
+    result = await traced_agent()
+
+    assert result == "agent-memory integration trace"
+    session_manager._generate_agent_trace_feedback.assert_not_awaited()
+
+    trace_entries = await session_manager.get_agent_trace_session(
+        user_id=str(owner.id),
+        session_id="trace-fallback-feedback",
+    )
+
+    assert len(trace_entries) == 1
+    assert trace_entries[0]["session_feedback"] == (
+        "test_agent_memory_can_disable_trace_summary_generation_integration"
+        ".<locals>.traced_agent succeeded."
     )
 
 
@@ -302,7 +440,7 @@ async def test_agent_memory_persists_full_trace_payload_with_cognee_memory_integ
 
     @cognee.agent_memory(
         with_memory=True,
-        save_traces=True,
+        save_session_traces=True,
         user=member,
         dataset_name=dataset_name,
         session_id=session_id,
@@ -351,7 +489,7 @@ async def test_agent_memory_persists_error_trace_and_reraises_integration(
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         user=owner,
         session_id="trace-error",
     )
@@ -409,7 +547,7 @@ async def test_agent_memory_retrieves_recent_session_memory_integration(
     @cognee.agent_memory(
         with_memory=False,
         with_session_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=user,
         session_id=session_id,
         session_memory_last_n=2,
@@ -465,7 +603,7 @@ async def test_agent_memory_combines_session_and_cognee_memory_integration(
     @cognee.agent_memory(
         with_memory=True,
         with_session_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=member,
         dataset_name=dataset_name,
         session_id=session_id,

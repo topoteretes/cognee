@@ -20,7 +20,10 @@ logger = get_logger("FSCacheAdapter")
 
 
 class FSCacheAdapter(CacheDBInterface):
+    """Filesystem-backed cache adapter for session QA and agent-trace storage."""
+
     def __init__(self, session_ttl_seconds: int | None = 604800):
+        """Initialize the disk-backed cache and eagerly evict expired entries."""
         default_key = "sessions_db"
 
         storage_config = get_storage_config()
@@ -36,10 +39,12 @@ class FSCacheAdapter(CacheDBInterface):
 
     @staticmethod
     def _session_key(user_id: str, session_id: str) -> str:
+        """Build the storage key for QA session entries."""
         return f"agent_sessions:{user_id}:{session_id}"
 
     @staticmethod
     def _agent_trace_key(user_id: str, session_id: str) -> str:
+        """Build the storage key for agent trace entries."""
         return f"agent_traces:{user_id}:{session_id}"
 
     @staticmethod
@@ -53,6 +58,7 @@ class FSCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
     ) -> dict:
+        """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
             time=datetime.utcnow().isoformat(),
             question=question,
@@ -78,6 +84,7 @@ class FSCacheAdapter(CacheDBInterface):
         error_message: str = "",
         session_feedback: str = "",
     ) -> dict:
+        """Serialize one agent-trace step into the normalized cache payload shape."""
         entry = SessionAgentTraceEntry(
             trace_id=trace_id,
             origin_function=origin_function,
@@ -92,6 +99,7 @@ class FSCacheAdapter(CacheDBInterface):
         return entry.model_dump()
 
     def _load_entries(self, session_key: str) -> list:
+        """Load and deserialize all entries stored under the given cache key."""
         # Evict expired keys so stale sessions don't linger on disk
         self.cache.expire()
         value = self.cache.get(session_key)
@@ -100,6 +108,7 @@ class FSCacheAdapter(CacheDBInterface):
         return json.loads(value)
 
     def _save_entries(self, session_key: str, entries: list) -> None:
+        """Persist the full entry list or delete the key when it becomes empty."""
         if entries:
             expire = (
                 self.session_ttl_seconds
@@ -121,6 +130,7 @@ class FSCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
     ) -> dict:
+        """Merge partial QA updates into an existing entry payload."""
         merged = {**entry}
         if question is not None:
             merged["question"] = question
@@ -145,10 +155,12 @@ class FSCacheAdapter(CacheDBInterface):
 
     @staticmethod
     def _merge_entry_clear_feedback(entry: dict) -> dict:
+        """Return a copy of the entry with feedback fields cleared."""
         return {**entry, "feedback_text": None, "feedback_score": None}
 
     @staticmethod
     def _validate_entry_dict(entry_dict: dict) -> dict:
+        """Validate one serialized QA entry and return its normalized dump."""
         try:
             return SessionQAEntry.model_validate(entry_dict).model_dump()
         except ValidationError as e:
@@ -158,6 +170,7 @@ class FSCacheAdapter(CacheDBInterface):
 
     @staticmethod
     def _find_index_by_qa_id(entries: list, qa_id: str) -> int | None:
+        """Return the list index for a QA entry id, or None when absent."""
         for i, entry in enumerate(entries):
             if entry.get("qa_id") == qa_id:
                 return i
@@ -188,6 +201,7 @@ class FSCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
     ):
+        """Append one QA entry to the filesystem-backed session history."""
         try:
             session_key = self._session_key(user_id, session_id)
             qa_entry = self._build_qa_entry_dump(
@@ -210,6 +224,7 @@ class FSCacheAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from e
 
     async def get_latest_qa_entries(self, user_id: str, session_id: str, last_n: int = 5):
+        """Return the most recent QA entries stored for the given session."""
         session_key = self._session_key(user_id, session_id)
         entries = self._load_entries(session_key)
         if not entries:
@@ -217,6 +232,7 @@ class FSCacheAdapter(CacheDBInterface):
         return entries[-last_n:] if len(entries) > last_n else entries
 
     async def get_all_qa_entries(self, user_id: str, session_id: str):
+        """Return all QA entries stored for the given session."""
         session_key = self._session_key(user_id, session_id)
         return self._load_entries(session_key)
 
@@ -365,15 +381,27 @@ class FSCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def get_agent_trace_session(self, user_id: str, session_id: str) -> list[dict]:
-        """Retrieve all stored trace steps for the given session."""
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[dict]:
+        """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
-        return self._load_entries(trace_key)
+        entries = self._load_entries(trace_key)
+        if last_n is not None:
+            return entries[-last_n:]
+        return entries
 
-    async def get_agent_trace_feedback(self, user_id: str, session_id: str) -> list[str]:
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
         """Retrieve ordered per-step feedback for the given trace session."""
-        entries = await self.get_agent_trace_session(user_id, session_id)
+        entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return [entry.get("session_feedback", "") for entry in entries]
+
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """Return the number of stored trace steps for the given session."""
+        trace_key = self._agent_trace_key(user_id, session_id)
+        return len(self._load_entries(trace_key))
 
     async def prune(self) -> None:
         """
@@ -411,6 +439,7 @@ class FSCacheAdapter(CacheDBInterface):
         return []
 
     async def close(self):
+        """Flush diskcache expirations and close the underlying cache handle."""
         if self.cache is not None:
             self.cache.expire()
             self.cache.close()

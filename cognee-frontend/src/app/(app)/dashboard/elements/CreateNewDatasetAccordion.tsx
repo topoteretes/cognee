@@ -1,10 +1,10 @@
-import { LoadingIndicator } from "@/ui/app";
+import { LoadingIndicator } from "@/ui/App";
 import CTAButton from "@/ui/elements/CTAButton";
 import GhostButton from "@/ui/elements/GhostButton";
 import IconButton from "@/ui/elements/IconButton";
 import Input from "@/ui/elements/Input";
 import { Modal } from "@/ui/elements/Modal";
-import CloseIcon from "@/ui/icons/CloseIcon";
+import CloseIcon from "@/ui/Icons/CloseIcon";
 import { FormEvent } from "react";
 
 interface CreateNewDatasetModalProps {

@@ -11,12 +11,12 @@ import {
   Modal,
 } from "@/ui/elements";
 import { AccordionProps } from "@/ui/elements/Accordion";
-import { CloseIcon, DatasetIcon, MinusIcon, PlusIcon } from "@/ui/icons";
+import { CloseIcon, DatasetIcon, MinusIcon, PlusIcon } from "@/ui/Icons";
 import useDatasets, { Dataset } from "@/modules/ingestion/useDatasets";
 import addData from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import { DataFile } from "@/modules/ingestion/useData";
-import { LoadingIndicator } from "@/ui/app";
+import { LoadingIndicator } from "@/ui/App";
 import { CogneeInstance } from "@/modules/instances/types";
 import { useModal } from "@/ui/elements/Modal";
 import CreateNewDatasetModal from "./elements/CreateNewDatasetAccordion";
