@@ -74,6 +74,11 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 
 :crab: _Available as a plugin for your OpenClaw — [cognee-openclaw](https://www.npmjs.com/package/@cognee/cognee-openclaw)_
 
+✴️ _Available as a plugin for your Claude Code — [claude-code-plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code)_
+
+
+Cognee memory plugin
+
 
 ### Why use Cognee:
 
@@ -172,7 +177,7 @@ cognee-cli -ui
 
 ### Claude Code
 
-Install the [Cognee memory plugin](https://github.com/topoteretes/cognee-integrations/tree/feat/claude-code-v2/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin automatically captures tool calls into session memory via hooks and syncs to the permanent knowledge graph at session end.
+Install the [Cognee memory plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin automatically captures tool calls into session memory via hooks and syncs to the permanent knowledge graph at session end.
 
 **Setup:**
 
@@ -182,7 +187,6 @@ pip install cognee
 
 # Configure
 export LLM_API_KEY="your-openai-key"
-export CACHING=true
 
 # Clone the plugin
 git clone https://github.com/topoteretes/cognee-integrations.git
@@ -219,7 +223,6 @@ hermes  # start chatting — session memory and graph persistence are automatic
 
 Or run `hermes memory setup` and select Cognee. For Cognee Cloud, set `COGNEE_SERVICE_URL` and `COGNEE_API_KEY` in `~/.hermes/.env`.
 
-Each conversation turn is stored in the session cache. When the session ends, `improve()` bridges session data into the permanent knowledge graph — applying feedback weights, persisting Q&A, enriching triplet embeddings, and syncing the graph back to the session cache.
 
 ### Connect to Cognee Cloud
 
