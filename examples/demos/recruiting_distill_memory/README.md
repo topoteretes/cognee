@@ -111,24 +111,36 @@ python -m examples.demos.recruiting_distill_memory.review_pending_rules
 cognee-cli -ui
 ```
 
-### Edge-case run: trigger-matching correctness
+### Edge-case run: agent proposes, human approves
 
-To verify that R4's trigger (only Stripe/Plaid/Adyen) keeps it out of an
-unrelated candidate's screen invite:
+Maria Cruz is ex-Revolut — similar fintech non-compete exposure as
+Stripe/Plaid/Adyen, but not in R4's enumerated list. Running her through
+the grounded agent exercises the full human-in-the-loop path:
 
 ```bash
 python -m examples.demos.recruiting_distill_memory.run_grounded_edge
 python -m examples.demos.recruiting_distill_memory.link_traces_to_rules \
   --session-id recruiting-demo-grounded-maria
+python -m examples.demos.recruiting_distill_memory.review_pending_rules \
+  --plan grounded_plan_maria.json
 ```
 
-Maria Cruz is ex-Revolut. Expected behavior: `compose_screen_invite`
-does **not** apply R4 (Revolut isn't in R4's enumerated list), even
-though Revolut is a fintech and a human might argue it's relevant. This
-is trigger-matching working correctly — and it's the counterpart to
-Dev Rao's run, where R4 does fire. Any "extend R4 to cover Revolut"
-decision is deferred to a human via `review_pending_rules.py` rather
-than made implicitly by the LLM.
+Expected behavior:
+1. `compose_screen_invite` returns `applied_rule_ids=[]` and
+   `compliance_notes='novel'` — no retrieved rule clearly applies. Linker
+   buckets this step as `novel`.
+2. One or more tool calls populate `proposed_new_rules` — the agent
+   notices the Revolut non-compete gap and coins
+   `proposed_R*_revolut_noncompete`, proposes timezone-aware scheduling,
+   etc.
+3. `review_pending_rules.py` prints each proposal with its origin and
+   prompts `[a]pprove / [r]eject / [s]kip`. Approved proposals become
+   `Rule` DataPoints (`status='approved'`, `source='agent_proposal:<origin>'`)
+   in `human_memory`, so the next grounded run retrieves them.
+
+This is the second payoff of the demo: distilled human memory **guides**
+agentic behavior, and every rule the agent wants to add to that memory
+requires explicit human approval before it lands in the graph.
 
 ## Expected payoff
 
