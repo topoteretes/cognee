@@ -218,7 +218,17 @@ class LanceDBAdapter(VectorDBInterface):
                     .execute(lance_data_points)
                 )
         except (ValueError, OSError, RuntimeError) as e:
-            if "not found in target schema" not in str(e):
+            # Two LanceDB schema-drift failure modes are recoverable by rebuilding
+            # the table via Pydantic validation (which fills defaults from the
+            # current DataPoint subclass):
+            #   1) "not found in target schema" — incoming payload has a field the
+            #      old table schema does not know about.
+            #   2) "contained null values" — old rows lack a field that the current
+            #      schema now requires to be non-null. Raised from the Rust side
+            #      (lance-file writer) when an old-schema row is upserted against
+            #      a newer schema with a non-null field and no default in storage.
+            err = str(e)
+            if "not found in target schema" not in err and "contained null values" not in err:
                 raise
             logger.warning(
                 "Schema mismatch detected for collection '%s', migrating table: %s",
