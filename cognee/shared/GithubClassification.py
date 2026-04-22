@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import List
 
 from pydantic import BaseModel
 
@@ -21,7 +20,7 @@ class ContentType(BaseModel):
 class TextContent(ContentType):
     """Textual content class for more specific text categories."""
 
-    subclass: List[TextSubclass]
+    subclass: list[TextSubclass]
 
 
 class CodeContentPrediction(BaseModel):

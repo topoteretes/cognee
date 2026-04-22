@@ -1,14 +1,18 @@
 import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from os import path
 from urllib.parse import urlparse
-from contextlib import asynccontextmanager
 
-from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 
 
 @asynccontextmanager
-async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None, **kwargs):
+async def open_data_file(
+    file_path: str, mode: str = "rb", encoding: str | None = None, **kwargs
+) -> AsyncGenerator[FileBufferedReader]:
     # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
     if file_path.startswith("file://"):
         # Now split the actual filesystem path
@@ -18,7 +22,7 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
 
         file_storage = LocalFileStorage(file_dir_path)
 
-        with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
+        async with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
             yield file
 
     elif file_path.startswith("s3://"):
@@ -50,5 +54,5 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
 
         file_storage = LocalFileStorage(file_dir_path)
 
-        with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
+        async with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
             yield file

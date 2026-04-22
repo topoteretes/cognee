@@ -1,33 +1,35 @@
 """Adapter for Azure OpenAI with managed identity and API key support."""
 
-import litellm
+import logging
+from typing import Any
+
 import instructor
-from typing import Any, Dict, Type, Optional
-from pydantic import BaseModel
+import litellm
+from instructor.core import InstructorRetryException
+from litellm.exceptions import ContentPolicyViolationError
 from openai import (
-    AzureOpenAI as AzureOpenAIClient,
     AsyncAzureOpenAI,
     ContentFilterFinishReasonError,
 )
-from litellm.exceptions import ContentPolicyViolationError
-from instructor.core import InstructorRetryException
-
-import logging
+from openai import (
+    AzureOpenAI as AzureOpenAIClient,
+)
+from pydantic import BaseModel
 from tenacity import (
+    before_sleep_log,
     retry,
+    retry_if_not_exception_type,
     stop_after_delay,
     wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
 )
 
+from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
     OpenAIAdapter,
 )
-from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
 observe = get_observe()
@@ -46,17 +48,17 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         api_key: str,
         model: str,
         max_completion_tokens: int,
-        endpoint: str = None,
-        api_version: str = None,
-        transcription_model: str = None,
-        instructor_mode: str = None,
+        endpoint: str | None = None,
+        api_version: str | None = None,
+        transcription_model: str | None = None,
+        instructor_mode: str | None = None,
         streaming: bool = False,
-        fallback_model: str = None,
-        fallback_api_key: str = None,
-        fallback_endpoint: str = None,
-        llm_args: Optional[Dict[str, Any]] = None,
+        fallback_model: str | None = None,
+        fallback_api_key: str | None = None,
+        fallback_endpoint: str | None = None,
+        llm_args: dict[str, Any] | None = None,
         use_managed_identity: bool = False,
-    ):
+    ) -> None:
         if use_managed_identity:
             self._init_managed_identity(
                 model=model,
@@ -93,19 +95,22 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         self,
         model: str,
         max_completion_tokens: int,
-        endpoint: str,
-        api_version: str,
-        transcription_model: str,
-        instructor_mode: str,
+        endpoint: str | None,
+        api_version: str | None,
+        transcription_model: str | None,
+        instructor_mode: str | None,
         streaming: bool,
-        fallback_model: str,
-        fallback_api_key: str,
-        fallback_endpoint: str,
-        llm_args: Optional[Dict[str, Any]],
-    ):
+        fallback_model: str | None,
+        fallback_api_key: str | None,
+        fallback_endpoint: str | None,
+        llm_args: dict[str, Any] | None,
+    ) -> None:
         """Initialize using Azure managed identity (DefaultAzureCredential)."""
         try:
-            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            from azure.identity import (  # ty:ignore[unresolved-import]
+                DefaultAzureCredential,
+                get_bearer_token_provider,
+            )
         except ImportError:
             raise ImportError(
                 "azure-identity is required for managed identity authentication. "
@@ -138,7 +143,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
-        self.llm_args = llm_args or {}
+        self.llm_args: dict[str, Any] = llm_args or {}
         self.streaming = streaming
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
@@ -183,7 +188,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs
     ) -> BaseModel:
         if not self.use_managed_identity:
             return await super().acreate_structured_output(

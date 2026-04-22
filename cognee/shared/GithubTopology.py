@@ -1,10 +1,11 @@
+from typing import Any
+
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any, Union
 
 
 class Relationship(BaseModel):
     type: str
-    attributes: Optional[Dict[str, Any]] = {}
+    attributes: dict[str, Any] | None = {}
 
 
 class Document(BaseModel):
@@ -15,8 +16,8 @@ class Document(BaseModel):
 
 class Directory(BaseModel):
     name: str
-    documents: List[Document] = []
-    directories: List["Directory"] = []
+    documents: list[Document] = []
+    directories: list["Directory"] = []
 
 
 # Allows recursive Directory Model
@@ -24,18 +25,18 @@ Directory.model_rebuild()
 
 
 class RepositoryProperties(BaseModel):
-    custom_properties: Optional[Dict[str, Any]] = None
-    location: Optional[str] = None  # Simplified location reference
+    custom_properties: dict[str, Any] | None = None
+    location: str | None = None  # Simplified location reference
 
 
 class RepositoryNode(BaseModel):
     node_id: str
     node_type: str  # 'document' or 'directory'
     properties: RepositoryProperties = RepositoryProperties()
-    content: Union[Document, Directory, None] = None
-    relationships: List[Relationship] = []
+    content: Document | Directory | None = None
+    relationships: list[Relationship] = []
 
 
 class RepositoryGraphModel(BaseModel):
     root: RepositoryNode
-    default_relationships: List[Relationship] = []
+    default_relationships: list[Relationship] = []

@@ -242,11 +242,7 @@ class SessionManager:
                 system_prompt=system_prompt,
                 response_model=AgentTraceFeedbackSummary,
             )
-            session_feedback = (
-                result.session_feedback.strip()
-                if isinstance(result, AgentTraceFeedbackSummary)
-                else ""
-            )
+            session_feedback = result.session_feedback.strip()
             return session_feedback if session_feedback else fallback_feedback
         except Exception as e:
             logger.warning(

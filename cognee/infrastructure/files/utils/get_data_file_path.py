@@ -1,6 +1,6 @@
 import os
 import posixpath
-from urllib.parse import urlparse, unquote
+from urllib.parse import unquote, urlparse
 
 
 def get_data_file_path(file_path: str) -> str:

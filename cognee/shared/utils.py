@@ -8,7 +8,7 @@ import socketserver
 import ssl
 from datetime import datetime, timezone
 from threading import Thread
-from typing import Any, Union
+from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import aiohttp
@@ -43,7 +43,7 @@ _ANON_ID_DIR = pathlib.Path(__file__).parent.parent.parent.resolve()
 _ANON_ID_FILE = _ANON_ID_DIR / ".anon_id"
 
 
-def get_anonymous_id():
+def get_anonymous_id() -> str:
     """Get or create the original anonymous ID (project-root based).
 
     Stored in the project root as .anon_id. This is the original ID
@@ -70,7 +70,7 @@ def get_anonymous_id():
     return anonymous_id
 
 
-def get_persistent_id():
+def get_persistent_id() -> str:
     """Get or create a persistent machine-level ID.
 
     Stored in ~/.cognee/.persistent_id — a user-level directory that
@@ -151,7 +151,7 @@ def _get_api_key_fingerprint() -> str:
     return hashlib.sha256(key[-5:].encode()).hexdigest()[:8]
 
 
-def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = None):
+def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: dict | None = None):
     """Send a product telemetry event.
 
     Three identity layers are sent with every event:

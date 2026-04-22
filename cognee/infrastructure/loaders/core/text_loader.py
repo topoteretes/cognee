@@ -85,6 +85,6 @@ class TextLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(storage_file_name, content)  # ty:ignore[invalid-argument-type]
+        full_file_path = await storage.store(storage_file_name, content)
 
         return full_file_path

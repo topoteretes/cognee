@@ -1,15 +1,17 @@
-import os
-import sys
+import importlib.metadata
 import logging
 import logging.handlers
-import tempfile
-import structlog
-import traceback
+import os
 import platform
+import sys
+import tempfile
+import traceback
+from collections.abc import MutableMapping
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
-import importlib.metadata
+from typing import Any, Protocol
+
+import structlog
 
 
 def _get_cognee_version() -> str:
@@ -34,7 +36,7 @@ cognee_version = _get_cognee_version()
 
 
 # Configure external library logging
-def configure_external_library_logging():
+def configure_external_library_logging() -> None:
     """Configure logging for external libraries to reduce verbosity.
 
     Sets env vars eagerly (cheap) but only configures litellm's Python
@@ -69,13 +71,13 @@ def configure_external_library_logging():
     # This avoids a ~900ms cold import just to set verbose=False.
     litellm = sys.modules.get("litellm")
     if litellm is not None:
-        litellm.set_verbose = False
+        litellm.set_verbose = False  # ty:ignore[unresolved-attribute]
         if hasattr(litellm, "suppress_debug_info"):
-            litellm.suppress_debug_info = True
+            litellm.suppress_debug_info = True  # ty:ignore[unresolved-attribute]
         if hasattr(litellm, "turn_off_message"):
-            litellm.turn_off_message = True
+            litellm.turn_off_message = True  # ty:ignore[unresolved-attribute]
         if hasattr(litellm, "_turn_on_debug"):
-            litellm._turn_on_debug = False
+            litellm._turn_on_debug = False  # ty:ignore[unresolved-attribute]
 
 
 # Export common log levels
@@ -98,7 +100,7 @@ log_levels = {
 _is_structlog_configured = False
 
 
-def resolve_logs_dir():
+def resolve_logs_dir() -> Path | None:
     """Resolve a writable logs directory.
 
     Priority:
@@ -152,7 +154,7 @@ class PlainFileHandler(logging.handlers.RotatingFileHandler):
     when they reach maxBytes, keeping at most backupCount old files.
     """
 
-    def emit(self, record):
+    def emit(self, record) -> None:
         try:
             # Check if stream is available before trying to write
             if self.stream is None:
@@ -225,19 +227,12 @@ class PlainFileHandler(logging.handlers.RotatingFileHandler):
         except Exception as e:
             self.handleError(record)
             # Write error about handling this record
-            self.stream.write(f"Error in log handler: {e}\n")
+            if self.stream:
+                self.stream.write(f"Error in log handler: {e}\n")
             self.flush()
 
 
-class LoggerInterface(Protocol):
-    def info(self, msg: str, *args, **kwargs) -> None: ...
-    def warning(self, msg: str, *args, **kwargs) -> None: ...
-    def error(self, msg: str, *args, **kwargs) -> None: ...
-    def critical(self, msg: str, *args, **kwargs) -> None: ...
-    def debug(self, msg: str, *args, **kwargs) -> None: ...
-
-
-def get_logger(name=None, level=None) -> LoggerInterface:
+def get_logger(name=None, level=None) -> logging.Logger:
     """Get a logger.
 
     If `setup_logging()` has not been called, returns a standard Python logger.
@@ -252,12 +247,12 @@ def get_logger(name=None, level=None) -> LoggerInterface:
         return logger
 
 
-def log_database_configuration(logger):
+def log_database_configuration(logger) -> None:
     """Log the current database configuration for all database types"""
     # NOTE: Has to be imporated at runtime to avoid circular import
+    from cognee.infrastructure.databases.graph.config import get_graph_config
     from cognee.infrastructure.databases.relational.config import get_relational_config
     from cognee.infrastructure.databases.vector.config import get_vectordb_config
-    from cognee.infrastructure.databases.graph.config import get_graph_config
 
     try:
         # Get base database directory path
@@ -273,7 +268,7 @@ def log_database_configuration(logger):
         logger.debug(f"Could not retrieve database configuration: {str(e)}")
 
 
-def cleanup_old_logs(logs_dir, max_files):
+def cleanup_old_logs(logs_dir, max_files) -> bool:
     """
     Removes old log files, keeping only the most recent ones.
 
@@ -313,7 +308,7 @@ def cleanup_old_logs(logs_dir, max_files):
         return False
 
 
-def setup_logging(log_level=None, name=None):
+def setup_logging(log_level=None, name=None) -> bool:
     """Sets up the logging configuration with structlog integration.
 
     Args:
@@ -380,7 +375,7 @@ def setup_logging(log_level=None, name=None):
 
     # Add custom filter to suppress LiteLLM worker cancellation errors
     class LiteLLMFilter(logging.Filter):
-        def filter(self, record):
+        def filter(self, record) -> bool:
             # Suppress LiteLLM worker cancellation errors
             if hasattr(record, "msg") and isinstance(record.msg, str):
                 msg_lower = record.msg.lower()
@@ -400,8 +395,12 @@ def setup_logging(log_level=None, name=None):
     litellm_filter = LiteLLMFilter()
     logging.getLogger().addFilter(litellm_filter)
 
-    def exception_handler(logger, method_name, event_dict):
+    def exception_handler(
+        logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+    ) -> dict[str, Any]:
         """Custom processor to handle uncaught exceptions."""
+        event_dict = dict(event_dict)
+
         # Check if there's an exc_info that needs to be processed
         if event_dict.get("exc_info"):
             # If it's already a tuple, use it directly
@@ -410,7 +409,7 @@ def setup_logging(log_level=None, name=None):
             else:
                 exc_type, exc_value, tb = sys.exc_info()
 
-            if hasattr(exc_type, __name__):
+            if exc_type and hasattr(exc_type, __name__):
                 event_dict["exception_type"] = exc_type.__name__
             event_dict["exception_message"] = str(exc_value)
             event_dict["traceback"] = True
@@ -437,7 +436,7 @@ def setup_logging(log_level=None, name=None):
     )
 
     # Set up system-wide exception handling
-    def handle_exception(exc_type, exc_value, traceback):
+    def handle_exception(exc_type, exc_value, traceback) -> None:
         """Handle any uncaught exception."""
         if issubclass(exc_type, KeyboardInterrupt):
             # Let KeyboardInterrupt pass through
@@ -468,13 +467,13 @@ def setup_logging(log_level=None, name=None):
                 "warning": structlog.dev.YELLOW,
                 "info": structlog.dev.GREEN,
                 "debug": structlog.dev.BLUE,
-            },
+            },  # ty:ignore[invalid-argument-type]
         ),
     )
 
     # Setup handler with newlines for console output
     class NewlineStreamHandler(logging.StreamHandler):
-        def emit(self, record):
+        def emit(self, record) -> None:
             try:
                 msg = self.format(record)
                 stream = self.stream
@@ -523,7 +522,7 @@ def setup_logging(log_level=None, name=None):
             # Rotating file handler: caps each file at LOG_MAX_BYTES,
             # keeps LOG_BACKUP_COUNT old files (default 50 MB × 5 = 250 MB total).
             file_handler = PlainFileHandler(
-                log_file_path,
+                log_file_path,  # ty:ignore[invalid-argument-type]
                 maxBytes=LOG_MAX_BYTES,
                 backupCount=LOG_BACKUP_COUNT,
                 encoding="utf-8",
@@ -569,7 +568,7 @@ def setup_logging(log_level=None, name=None):
     return logger
 
 
-def _log_deferred_info(logger):
+def _log_deferred_info(logger) -> None:
     """Log lightweight startup info. Heavy DB config is logged on first pipeline call."""
     logger.warning(
         "Cognee 1.0 changes: "
@@ -600,7 +599,7 @@ def _log_deferred_info(logger):
     logger.info(f"Database storage: {databases_path}")
 
 
-def get_log_file_location():
+def get_log_file_location() -> str | None:
     """Return the file path of the log file in use, if any."""
     root_logger = logging.getLogger()
 
@@ -610,7 +609,7 @@ def get_log_file_location():
             return handler.baseFilename
 
 
-def get_timestamp_format():
+def get_timestamp_format() -> str:
     # NOTE: Some users have complained that Cognee crashes when trying to get microsecond value
     #       Added handler to not use microseconds if users can't access it
     logger = structlog.get_logger()
