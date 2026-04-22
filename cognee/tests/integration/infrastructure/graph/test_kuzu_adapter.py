@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
@@ -24,32 +25,62 @@ def _load_demo_kg() -> KnowledgeGraph:
     return KnowledgeGraph.model_validate(data)
 
 
-@pytest.fixture
-def kuzu_adapter(tmp_path):
+async def _close_adapter(a) -> None:
+    """Tear-down helper. ``close`` is async and ``subprocess_enabled``
+    adapters spawn a child process that must be reaped, or the pytest run
+    leaks one worker per parametrized test.
+    """
+    try:
+        await a.close()
+    except Exception:
+        pass
+
+
+@pytest_asyncio.fixture
+async def kuzu_adapter(tmp_path):
     """Direct KuzuAdapter instance (local mode)."""
-    return KuzuAdapter(db_path=str(tmp_path / "kuzu_direct"))
+    a = KuzuAdapter(db_path=str(tmp_path / "kuzu_direct"))
+    if hasattr(a, "initialize"):
+        await a.initialize()
+    try:
+        yield a
+    finally:
+        await _close_adapter(a)
 
 
-@pytest.fixture
-def subprocess_adapter(tmp_path):
+@pytest_asyncio.fixture
+async def subprocess_adapter(tmp_path):
     """KuzuAdapter backed by a subprocess-resident Kuzu client."""
-    return create_graph_engine(
+    a = create_graph_engine(
         graph_database_provider="kuzu",
         graph_file_path=str(tmp_path / "kuzu_subprocess"),
         graph_database_subprocess_enabled=True,
     )
+    if hasattr(a, "initialize"):
+        await a.initialize()
+    try:
+        yield a
+    finally:
+        await _close_adapter(a)
 
 
-@pytest.fixture(params=["direct", "subprocess"])
-def adapter(request, tmp_path):
+@pytest_asyncio.fixture(params=["direct", "subprocess"])
+async def adapter(request, tmp_path):
     """Parametrized fixture: both local and subprocess-backed adapters."""
     if request.param == "direct":
-        return KuzuAdapter(db_path=str(tmp_path / "kuzu_direct"))
-    return create_graph_engine(
-        graph_database_provider="kuzu",
-        graph_file_path=str(tmp_path / "kuzu_subprocess"),
-        graph_database_subprocess_enabled=True,
-    )
+        a = KuzuAdapter(db_path=str(tmp_path / "kuzu_direct"))
+    else:
+        a = create_graph_engine(
+            graph_database_provider="kuzu",
+            graph_file_path=str(tmp_path / "kuzu_subprocess"),
+            graph_database_subprocess_enabled=True,
+        )
+    if hasattr(a, "initialize"):
+        await a.initialize()
+    try:
+        yield a
+    finally:
+        await _close_adapter(a)
 
 
 # ---------------------------------------------------------------------------

@@ -86,6 +86,22 @@ def _stillborn_worker(req_q, resp_q):
     return
 
 
+def _wait_for_worker_exit(session, timeout: float = 5.0) -> None:
+    """Poll until the worker process is no longer alive, bounded by ``timeout``.
+
+    Several tests SIGKILL the worker and then need to observe its death
+    before issuing the next RPC. An unbounded wait hangs the suite if the
+    kill signal is delivered out-of-order or the process never transitions
+    (e.g. because it was reaped by another test's cleanup path).
+    """
+    deadline = time.time() + timeout
+    while session._proc.is_alive() and time.time() < deadline:
+        time.sleep(0.05)
+    assert not session._proc.is_alive(), (
+        f"worker did not exit within {timeout}s"
+    )
+
+
 def _start_session(target=_worker_main, **kwargs) -> SubprocessSession:
     ctx = mp.get_context("spawn")
     req_q = ctx.Queue()
@@ -299,8 +315,7 @@ def test_retry_gives_up_after_max_retries():
         session._respawn_factory = _stillborn_spawn
 
         os.kill(session.pid, signal.SIGKILL)
-        while session._proc.is_alive():
-            time.sleep(0.05)
+        _wait_for_worker_exit(session)
 
         with pytest.raises(SubprocessTransportError):
             session.call(Request(op=OP_ECHO, args=("never",)))
@@ -346,8 +361,7 @@ def test_replay_steps_fire_on_respawn():
         )
 
         os.kill(session.pid, signal.SIGKILL)
-        while session._proc.is_alive():
-            time.sleep(0.05)
+        _wait_for_worker_exit(session)
 
         # First call after crash triggers: respawn → replay (one step) →
         # retry the original request on the new worker.
@@ -391,8 +405,7 @@ async def test_kuzu_adapter_survives_worker_sigkill(tmp_path):
         session = adapter._session
         old_pid = session.pid
         os.kill(session.pid, signal.SIGKILL)
-        while session._proc.is_alive():
-            time.sleep(0.05)
+        _wait_for_worker_exit(session)
 
         # Next query should respawn + replay + retry transparently. The Kuzu
         # DB on disk still has our row, so we expect it back.
@@ -436,7 +449,8 @@ async def test_lancedb_table_handle_release(tmp_path):
         await t.release()
 
         # handle_id is now cleared; attempting to use the table fails loudly
-        with pytest.raises(AssertionError):
+        # (RuntimeError, not AssertionError — asserts get stripped under -O).
+        with pytest.raises(RuntimeError, match="lancedb table handle released"):
             _ = t.handle_id
     finally:
         session.shutdown()

@@ -234,10 +234,12 @@ def _create_graph_engine(
                 )
                 db.init_database()
                 conn = RemoteKuzuConnection(session, db)
-                try:
-                    conn.load_extension("JSON")
-                except Exception:
-                    pass
+                # ``install_json_extension`` on the preceding line already
+                # installed the extension inside the worker; loading it onto
+                # the real connection should succeed. If it doesn't, fail
+                # loudly here rather than letting the first JSON-touching
+                # query blow up with a confusing error inside the worker.
+                conn.load_extension("JSON")
             except Exception:
                 session.shutdown(timeout=2.0)
                 raise

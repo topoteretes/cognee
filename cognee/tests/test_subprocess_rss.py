@@ -100,18 +100,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 ARGS = _parse_args()
 os.environ["DATABASE_MAX_LRU_CACHE_SIZE"] = str(ARGS.lru_cache_size)
 
-import asyncio
-import gc
-import pathlib
-import tempfile
-import urllib.request
+import asyncio  # noqa: E402
+import gc  # noqa: E402
+import pathlib  # noqa: E402
+import tempfile  # noqa: E402
+import urllib.request  # noqa: E402
 
-import psutil
+import psutil  # noqa: E402
 
-import cognee
-from cognee.modules.search.types import SearchType
+import cognee  # noqa: E402
+from cognee.modules.search.types import SearchType  # noqa: E402
 
-from cognee_db_workers.harness import collect_garbage_in_all_workers
+from cognee_db_workers.harness import collect_garbage_in_all_workers  # noqa: E402
 
 
 # Twenty distinct public-domain Gutenberg books (each roughly 400 KB – 1.5 MB).

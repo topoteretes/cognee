@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import traceback
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
@@ -41,11 +42,25 @@ def _env_float(name: str, default: Optional[float]) -> Optional[float]:
     return None if val <= 0 else val
 
 
+def _env_int(name: str, default: int) -> int:
+    """Graceful ``int`` parse. Returns the default if the env var is missing,
+    empty, or not a valid integer — we don't want a typo in a deployment's
+    env vars to crash module import.
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 # Per-RPC deadline for subprocess calls. Guards against hung native libraries.
 # Override with ``SUBPROCESS_CALL_TIMEOUT`` env var (seconds, or <=0 to
 # disable entirely — not recommended outside benchmarks).
 _DEFAULT_CALL_TIMEOUT: Optional[float] = _env_float("SUBPROCESS_CALL_TIMEOUT", 300.0)
-_DEFAULT_MAX_RETRIES = int(os.environ.get("SUBPROCESS_MAX_RETRIES", "2"))
+_DEFAULT_MAX_RETRIES = _env_int("SUBPROCESS_MAX_RETRIES", 2)
 _PROCESS_CHECK_INTERVAL = 1.0
 _READY_SENTINEL = "__SUBPROCESS_HARNESS_READY__"
 
@@ -325,8 +340,6 @@ DEFAULT_DISPATCH: Dict[int, Dispatcher] = {
 }
 
 
-import weakref
-
 # Weak registry of all live sessions. Used by ``collect_garbage_in_all_workers``
 # so callers (e.g. benchmark scripts that want to read accurate per-child
 # RSS) can trigger ``gc.collect()`` in every worker without threading a
@@ -349,11 +362,25 @@ def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
     # strong refs, but the broad try/except below still covers the narrower
     # race where a session is mid-shutdown by the time we call into it.
     for session in list(_all_sessions):
+        # Skip busy sessions rather than blocking on ``_rpc_lock`` — the
+        # docstring says this is best-effort, but ``session.call`` would
+        # otherwise wait behind a long-running RPC before the per-call
+        # timeout even starts ticking.
+        if not session._rpc_lock.acquire(blocking=False):
+            continue
         try:
-            session.call(Request(op=OP_GC_COLLECT), timeout=timeout)
+            if session._closed or not session._proc.is_alive():
+                continue
+            session.touch()
+            session._req_q.put(Request(op=OP_GC_COLLECT))
+            deadline, effective_timeout = session._resolve_deadline(timeout)
+            resp = session._wait_response(deadline, effective_timeout)
+            session._handle_response(resp)
             collected += 1
         except Exception:
             continue
+        finally:
+            session._rpc_lock.release()
     return collected
 
 
@@ -611,7 +638,20 @@ class SubprocessSession:
                 "Subprocess session has no respawn factory; retry is disabled"
             )
 
-        with self._respawn_lock:
+        # Take BOTH ``_respawn_lock`` (coalesces concurrent retries) and
+        # ``_rpc_lock`` (serializes against in-flight / incoming RPCs). Once
+        # ``self._closed`` flips back to False, another caller can immediately
+        # use the new queues — without ``_rpc_lock`` here, that caller could
+        # consume the ``_READY_SENTINEL`` from ``wait_for_ready`` or interleave
+        # with a replay RPC on the fresh queue pair.
+        with self._respawn_lock, self._rpc_lock:
+            # Another concurrent retry may have already respawned successfully
+            # between the moment the current caller's RPC failed and us
+            # acquiring the lock. If the process is alive again, bail out —
+            # the caller's outer retry loop will just try the RPC again.
+            if not self._closed and self._proc.is_alive():
+                return
+
             self._terminate()
 
             new_proc, new_req_q, new_resp_q = self._respawn_factory()
@@ -664,8 +704,9 @@ class SubprocessSession:
             self._handle_remap = composed
 
     def _raw_call_locked(self, req: Request) -> Response:
-        """Single-shot RPC without retry or rpc_lock (caller holds
-        ``_respawn_lock``). Used during replay.
+        """Single-shot RPC without retry or rpc_lock acquisition. Caller must
+        already hold ``_rpc_lock`` (and typically ``_respawn_lock``). Used
+        during replay inside ``_respawn``.
         """
         self._check_alive()
         self.touch()
@@ -675,20 +716,26 @@ class SubprocessSession:
         return self._handle_response(resp)
 
     def shutdown(self, timeout: Optional[float] = None) -> None:
-        if self._closed:
-            return
+        """Tear down the worker process. Always reaches ``_terminate``, even
+        if the session is already marked ``_closed`` — a timeout or crash
+        flips ``_closed`` to True without reaping the child, and a second
+        call would orphan a still-alive process holding file locks.
+        Skip only the graceful SHUTDOWN sentinel when already closed.
+        """
+        already_closed = self._closed
         self._closed = True
         t = timeout if timeout is not None else self._shutdown_timeout
 
-        try:
-            if self._proc.is_alive():
-                self._req_q.put(SHUTDOWN)
-                try:
-                    self._resp_q.get(timeout=t)
-                except std_queue.Empty:
-                    pass
-        except Exception:
-            pass
+        if not already_closed:
+            try:
+                if self._proc.is_alive():
+                    self._req_q.put(SHUTDOWN)
+                    try:
+                        self._resp_q.get(timeout=t)
+                    except std_queue.Empty:
+                        pass
+            except Exception:
+                pass
         self._terminate(timeout=t)
 
         # Break the ref cycle: each ReplayStep's ``make_request`` is a

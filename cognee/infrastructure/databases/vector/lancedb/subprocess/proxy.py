@@ -154,11 +154,41 @@ class RemoteLanceDBTable:
         self._session = session
         self._handle_id: Optional[int] = handle_id
         self.name = name
+        # Register a replay step so that if the worker dies and respawns, the
+        # table is re-opened and the handle remap rewrites in-flight Requests
+        # from the old handle id to the new one. Without this, a retried
+        # ``table.add(...)`` after a worker crash would send the stale
+        # handle id and fail with "unknown handle".
+        self._replay_step = ReplayStep(
+            make_request=lambda: Request(op=OP_OPEN_TABLE, args=(self.name,)),
+            apply_new_handle=self._apply_new_handle,
+        )
+        self._session.add_replay_step(self._replay_step)
+
+    def _apply_new_handle(self, new_handle_id: int) -> Optional[int]:
+        """Called by the session after a successful replay of our OPEN_TABLE
+        step. Returns the previous handle id so the session's handle-remap
+        dict rewrites stale in-flight Requests. Returns ``None`` if the proxy
+        has already been released (no remap needed in that case).
+        """
+        old = self._handle_id
+        self._handle_id = new_handle_id
+        return old
 
     @property
     def handle_id(self) -> int:
-        assert self._handle_id is not None, "lancedb table handle released"
+        if self._handle_id is None:
+            raise RuntimeError("lancedb table handle released")
         return self._handle_id
+
+    def _deregister_replay(self) -> None:
+        step = getattr(self, "_replay_step", None)
+        if step is not None:
+            try:
+                self._session.remove_replay_step(step)
+            except Exception:
+                pass
+            self._replay_step = None
 
     async def release(self) -> None:
         """Release the worker-side table handle. Idempotent."""
@@ -166,6 +196,7 @@ class RemoteLanceDBTable:
             return
         hid = self._handle_id
         self._handle_id = None
+        self._deregister_replay()
         try:
             await self._session.call_async(
                 Request(op=OP_TABLE_RELEASE, handle_id=hid)
@@ -180,6 +211,7 @@ class RemoteLanceDBTable:
             return
         hid = self._handle_id
         self._handle_id = None
+        self._deregister_replay()
         try:
             self._session.call(Request(op=OP_TABLE_RELEASE, handle_id=hid))
         except Exception:

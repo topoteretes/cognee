@@ -15,6 +15,52 @@ from cognee.tasks.translation.config import get_translation_config
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 
 
+_BOOL_TRUE = {"true", "1", "yes", "on", "t", "y"}
+_BOOL_FALSE = {"false", "0", "no", "off", "f", "n", ""}
+
+
+def _coerce_bool(value, name: str) -> bool:
+    """Coerce ``value`` to ``bool``. Accepts bool, int, or a string of the
+    common truthy/falsy spellings. Used by setters that can be invoked from
+    the CLI (``cognee config set <key> <value>``), which always passes
+    strings.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _BOOL_TRUE:
+            return True
+        if normalized in _BOOL_FALSE:
+            return False
+    raise ValueError(
+        f"{name} must be a bool or boolean-like string (true/false), got {value!r}"
+    )
+
+
+def _coerce_int(value, name: str, *, min_value: int | None = None) -> int:
+    """Coerce ``value`` to ``int``, optionally enforcing a minimum. Accepts
+    ints or strings of digits. Used by setters reachable via the CLI.
+    """
+    if isinstance(value, bool):
+        # ``bool`` is a subclass of ``int`` but semantically wrong here.
+        raise ValueError(f"{name} must be an integer, got bool {value!r}")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str):
+        try:
+            result = int(value)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer, got {value!r}") from exc
+    else:
+        raise ValueError(f"{name} must be an integer, got {type(value).__name__}")
+    if min_value is not None and result < min_value:
+        raise ValueError(f"{name} must be >= {min_value}, got {result}")
+    return result
+
+
 class config:
     """
     Configuration namespace for Cognee's runtime settings.
@@ -138,21 +184,48 @@ class config:
         graph_config.graph_database_provider = graph_database_provider
 
     @staticmethod
-    def set_graph_database_subprocess_enabled(graph_database_subprocess_enabled: bool):
+    def set_graph_database_subprocess_enabled(graph_database_subprocess_enabled):
+        """Enable the subprocess-backed graph DB adapter.
+
+        When enabled, the native Kuzu client runs in a dedicated worker
+        process so its memory and file-lock state are isolated from the main
+        cognee process. Required for long-running services that otherwise
+        accumulate native memory in the embedded Kuzu engine.
+
+        Accepts a ``bool`` or a truthy/falsy string (``"true"``/``"false"``,
+        ``"1"``/``"0"``, ``"yes"``/``"no"``) — the generic ``config.set()``
+        path is used by the CLI, which can only pass strings.
+        """
         graph_config = get_graph_config()
-        graph_config.graph_database_subprocess_enabled = graph_database_subprocess_enabled
+        graph_config.graph_database_subprocess_enabled = _coerce_bool(
+            graph_database_subprocess_enabled,
+            "graph_database_subprocess_enabled",
+        )
 
     @staticmethod
-    def set_kuzu_num_threads(kuzu_num_threads: int):
-        """Set the maximum number of threads Kuzu uses per query. 0 = Kuzu default."""
+    def set_kuzu_num_threads(kuzu_num_threads):
+        """Set the maximum number of threads Kuzu uses per query.
+
+        ``0`` keeps Kuzu's internal default (one per CPU). Accepts ``int``
+        or a string of digits; the CLI path (``config set``) always passes
+        strings.
+        """
         graph_config = get_graph_config()
-        graph_config.kuzu_num_threads = kuzu_num_threads
+        graph_config.kuzu_num_threads = _coerce_int(
+            kuzu_num_threads, "kuzu_num_threads", min_value=0
+        )
 
     @staticmethod
-    def set_kuzu_buffer_pool_size(kuzu_buffer_pool_size: int):
-        """Set the Kuzu buffer pool size in bytes."""
+    def set_kuzu_buffer_pool_size(kuzu_buffer_pool_size):
+        """Set the Kuzu buffer pool size in bytes.
+
+        Accepts ``int`` or a string of digits; the CLI path (``config set``)
+        always passes strings.
+        """
         graph_config = get_graph_config()
-        graph_config.kuzu_buffer_pool_size = kuzu_buffer_pool_size
+        graph_config.kuzu_buffer_pool_size = _coerce_int(
+            kuzu_buffer_pool_size, "kuzu_buffer_pool_size", min_value=1
+        )
 
     @staticmethod
     def set_llm_provider(llm_provider: str):
@@ -412,9 +485,19 @@ class config:
         vector_db_config.vector_db_provider = vector_db_provider
 
     @staticmethod
-    def set_vector_db_subprocess_enabled(vector_db_subprocess_enabled: bool):
+    def set_vector_db_subprocess_enabled(vector_db_subprocess_enabled):
+        """Enable the subprocess-backed vector DB adapter (LanceDB).
+
+        When enabled, the native LanceDB client runs in a dedicated worker
+        process so its memory and file state are isolated from the main
+        cognee process. Accepts a ``bool`` or a truthy/falsy string; the
+        generic ``config.set()`` path is used by the CLI which only passes
+        strings.
+        """
         vector_db_config = get_vectordb_config()
-        vector_db_config.vector_db_subprocess_enabled = vector_db_subprocess_enabled
+        vector_db_config.vector_db_subprocess_enabled = _coerce_bool(
+            vector_db_subprocess_enabled, "vector_db_subprocess_enabled"
+        )
 
     @staticmethod
     def set_relational_db_config(config_dict: dict):

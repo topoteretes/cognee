@@ -142,9 +142,28 @@ class LanceDBAdapter(VectorDBInterface):
             self.connection = await lancedb.connect_async(self.url, api_key=self.api_key)
         else:
             # Remote connection lazily opens its own underlying lancedb handle.
+            # If the first connect fails (bad URL, auth, network) the session
+            # stays alive and never gets used — tear it down immediately so a
+            # retry doesn't leak an orphan worker process for each failed
+            # attempt.
             ensure = getattr(self.connection, "_ensure_connected", None)
             if ensure is not None:
-                await ensure()
+                try:
+                    await ensure()
+                except Exception:
+                    if self._session is not None:
+                        try:
+                            self._session.shutdown()
+                        except Exception as teardown_err:
+                            logger.warning(
+                                "Error shutting down LanceDB subprocess after "
+                                "connect failure: %s",
+                                teardown_err,
+                            )
+                        self._session = None
+                    self.connection = None
+                    self._permanently_closed = True
+                    raise
         return self.connection
 
     # ------------------------------------------------------------------

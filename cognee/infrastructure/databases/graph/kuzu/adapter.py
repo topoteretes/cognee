@@ -98,6 +98,11 @@ class KuzuAdapter(GraphDBInterface):
         self.db: Optional[Database] = database
         self.connection: Optional[Connection] = connection
 
+        # Always construct the executor — the shared-lock query path still
+        # runs ``blocking_query`` through ``loop.run_in_executor(self.executor,
+        # ...)`` and would hit AttributeError without it.
+        self.executor = ThreadPoolExecutor()
+
         if cache_config.shared_kuzu_lock:
             if injected:
                 raise RuntimeError(
@@ -107,7 +112,6 @@ class KuzuAdapter(GraphDBInterface):
                 lock_key="kuzu-lock-" + str(uuid5(NAMESPACE_OID, db_path))
             )
         else:
-            self.executor = ThreadPoolExecutor()
             if injected:
                 self._ensure_schema()
             else:
@@ -342,40 +346,40 @@ class KuzuAdapter(GraphDBInterface):
                     raise
 
             try:
-                # Hold _connection_lock only for initialization, not for the
-                # full query execution.
-                async with self._connection_lock:
-                    connection = self.get_or_init_connection()
-
                 if cache_config.shared_kuzu_lock:
-                    # Acquire + release the Redis lock around the query. The
-                    # release MUST happen after ``_drop_native_resources`` so
-                    # the next holder of the Redis lock can open Kuzu without
-                    # fighting this process over the on-disk file lock.
-                    # ``_drop_native_resources`` is transient: the adapter
-                    # reinitializes on the next query.
+                    # Shared-lock path: the Redis lock MUST be acquired before
+                    # any native ``kuzu.Database`` is opened on this file.
+                    # Opening Kuzu takes the on-disk file lock, and if we open
+                    # first we race the previous Redis-lock holder that's
+                    # still releasing its own native handles.
                     assert self.redis_lock is not None
                     self.redis_lock.acquire_lock()
-                    self.open_connections += 1
-                    logger.info(f"Open connections after open: {self.open_connections}")
                     try:
-                        result = await loop.run_in_executor(
-                            self.executor, blocking_query, connection
-                        )
-                    finally:
-                        self.open_connections -= 1
-                        logger.info(f"Open connections after close: {self.open_connections}")
-                        # Hold _connection_lock across BOTH the native drop
-                        # and the Redis release. Releasing Redis outside the
-                        # lock would let another coroutine enter ``query()``
-                        # and open a fresh local Kuzu handle on the same file
-                        # before the next Redis-lock holder starts — the
-                        # shared lock's whole point is to serialize native
-                        # file-lock contention, which requires this ordering.
                         async with self._connection_lock:
-                            self._drop_native_resources()
-                            self.redis_lock.release_lock()
+                            connection = self.get_or_init_connection()
+                        self.open_connections += 1
+                        logger.info(f"Open connections after open: {self.open_connections}")
+                        try:
+                            result = await loop.run_in_executor(
+                                self.executor, blocking_query, connection
+                            )
+                        finally:
+                            self.open_connections -= 1
+                            logger.info(
+                                f"Open connections after close: {self.open_connections}"
+                            )
+                            # Drop native handles BEFORE releasing the Redis
+                            # lock so the next holder can take the on-disk
+                            # file lock without fighting us.
+                            async with self._connection_lock:
+                                self._drop_native_resources()
+                    finally:
+                        self.redis_lock.release_lock()
                 else:
+                    # Hold _connection_lock only for initialization, not for
+                    # the full query execution.
+                    async with self._connection_lock:
+                        connection = self.get_or_init_connection()
                     result = await loop.run_in_executor(
                         self.executor, blocking_query, connection
                     )

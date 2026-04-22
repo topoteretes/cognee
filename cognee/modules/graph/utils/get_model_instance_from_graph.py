@@ -40,7 +40,24 @@ def get_model_instance_from_graph(nodes: list[DataPoint], edges: list, entity_id
         NewModel = _extended_model_for(
             type(source_node), type(target_node), edge_label, is_list
         )
-        value = [target_node] if is_list else target_node
-        node_map[edge[0]] = NewModel(**source_node.model_dump(), **{edge_label: value})
+
+        if is_list:
+            # Preserve any targets already attached to this (source, edge)
+            # from an earlier edge in the loop — otherwise multi-target list
+            # relationships lose all but the last iteration's target.
+            existing = getattr(source_node, edge_label, None)
+            if isinstance(existing, list):
+                value = existing + [target_node]
+            else:
+                value = [target_node]
+        else:
+            value = target_node
+
+        dump = source_node.model_dump()
+        # Drop the field we're about to overwrite so the kwargs form isn't
+        # a duplicate keyword, and so a previously-list value on the dumped
+        # dict doesn't collide with the new list.
+        dump.pop(edge_label, None)
+        node_map[edge[0]] = NewModel(**dump, **{edge_label: value})
 
     return node_map[entity_id]

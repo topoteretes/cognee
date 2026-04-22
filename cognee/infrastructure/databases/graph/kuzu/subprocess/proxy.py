@@ -127,7 +127,8 @@ class RemoteKuzuDatabase:
 
     @property
     def handle_id(self) -> int:
-        assert self._handle_id is not None, "database handle closed"
+        if self._handle_id is None:
+            raise RuntimeError("database handle closed")
         return self._handle_id
 
     def _open(self) -> None:
@@ -189,7 +190,8 @@ class RemoteKuzuConnection:
 
     @property
     def handle_id(self) -> int:
-        assert self._handle_id is not None, "connection handle closed"
+        if self._handle_id is None:
+            raise RuntimeError("connection handle closed")
         return self._handle_id
 
     def _apply_new_conn_handle(self, new_hid: int) -> Optional[int]:

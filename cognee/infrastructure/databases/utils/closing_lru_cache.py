@@ -3,10 +3,8 @@
 import asyncio
 import logging
 from collections import OrderedDict
-from dataclasses import dataclass
 from functools import wraps
 from threading import Lock
-from time import time
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +25,19 @@ def _close_value(value):
     """
     if not hasattr(value, "close"):
         return
-    result = value.close()
+    try:
+        result = value.close()
+    except Exception:
+        # A raising close() must not abort the surrounding loop (eviction
+        # iteration in ``cache_clear`` or a single eviction in
+        # ``get_or_create``). Log and keep going — the caller already lost
+        # the reference, and any partial cleanup is better than none.
+        logger.warning(
+            "Failed to close %s during eviction",
+            type(value).__name__,
+            exc_info=True,
+        )
+        return
     if asyncio.iscoroutine(result):
         try:
             loop = asyncio.get_running_loop()
@@ -61,24 +71,18 @@ class ClosingLRUCache:
         self._lock = Lock()
 
     def get_or_create(self, key, factory):
-        now = time()
-
         with self._lock:
             if key in self._cache:
-                entry = self._cache[key]
-                entry.last_accessed_at = now
                 self._cache.move_to_end(key)
-                return entry.value
+                return self._cache[key]
 
         value = factory()
 
         with self._lock:
             # Re-check after releasing lock — another thread may have created it.
             if key in self._cache:
-                entry = self._cache[key]
-                entry.last_accessed_at = now
                 self._cache.move_to_end(key)
-                cached_value = entry.value
+                cached_value = self._cache[key]
             else:
                 cached_value = None
 
@@ -88,28 +92,22 @@ class ClosingLRUCache:
 
             if self._maxsize > 0 and len(self._cache) >= self._maxsize:
                 _, evicted = self._cache.popitem(last=False)
-                _close_value(evicted.value)
+                _close_value(evicted)
 
-            self._cache[key] = _CacheEntry(value=value, last_accessed_at=now)
+            self._cache[key] = value
             return value
 
     def cache_clear(self):
         """Close and remove all cached entries."""
         with self._lock:
-            for entry in self._cache.values():
-                _close_value(entry.value)
+            for value in self._cache.values():
+                _close_value(value)
             self._cache.clear()
 
     def cache_info(self):
         """Return current size and max size."""
         with self._lock:
             return {"size": len(self._cache), "maxsize": self._maxsize}
-
-
-@dataclass
-class _CacheEntry:
-    value: object
-    last_accessed_at: float
 
 
 def closing_lru_cache(maxsize: int = 128):
