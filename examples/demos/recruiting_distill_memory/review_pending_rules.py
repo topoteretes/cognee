@@ -75,7 +75,10 @@ def _promote(origin: str, proposal: ProposedRule) -> Rule:
         action=proposal.action,
         rationale=proposal.rationale,
     )
-    rule.belongs_to_set = ["rule", rule.status]
+    # Tag distinctly from seed rules so the graph UI and node_set queries
+    # can separate agent-originated rules from Alex's originals even after
+    # they share status='approved'.
+    rule.belongs_to_set = ["rule", rule.status, "agent_authored"]
     return rule
 
 

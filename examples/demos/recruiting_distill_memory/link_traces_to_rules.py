@@ -61,7 +61,10 @@ def load_canonical_rules() -> dict[str, Rule]:
     out: dict[str, Rule] = {}
     for record in raw["rules"]:
         rule = Rule.model_validate(record)
-        rule.belongs_to_set = ["rule", rule.status]
+        # Must match ingest_human_memory.py's tagging — same Rule, same
+        # Dedup key, so rebuilding this instance for edge targets yields
+        # the identical UUID and merges onto the persisted node.
+        rule.belongs_to_set = ["rule", rule.status, "human_authored"]
         out[rule.rule_id] = rule
     return out
 

@@ -43,7 +43,10 @@ def load_seed_rules() -> list[Rule]:
     rules: list[Rule] = []
     for record in raw["rules"]:
         rule = Rule.model_validate(record)
-        rule.belongs_to_set = ["rule", rule.status]
+        # Tag as human_authored so agent-proposed rules (tagged
+        # 'agent_authored' by review_pending_rules.py) stay visually and
+        # programmatically distinct after both have status='approved'.
+        rule.belongs_to_set = ["rule", rule.status, "human_authored"]
         rules.append(rule)
     return rules
 
