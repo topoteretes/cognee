@@ -112,6 +112,33 @@ def test_eviction_handles_async_close():
     assert obj.closed is True
 
 
+def test_eviction_async_close_under_running_loop_completes():
+    """When a loop is already running, eviction schedules the close coroutine
+    on that loop via ``create_task``. The task must be anchored somewhere so
+    gc can't collect it before it runs — verify the close actually completes
+    before the loop exits.
+    """
+    import asyncio
+
+    cache = ClosingLRUCache(maxsize=1)
+
+    async def run():
+        first = _AsyncCloseable("first")
+        cache.get_or_create("a", lambda: first)
+        # Triggers eviction of ``first`` while a loop is running.
+        cache.get_or_create("b", lambda: _Closeable("b"))
+        # Yield twice so the scheduled task has a chance to run.
+        for _ in range(3):
+            await asyncio.sleep(0)
+        return first
+
+    first = asyncio.run(run())
+    assert first.closed is True, (
+        "async close() scheduled under a running loop must actually execute "
+        "— the task was garbage-collected before completing"
+    )
+
+
 # -- ClosingLRUCache: cache_clear --------------------------------------------
 
 

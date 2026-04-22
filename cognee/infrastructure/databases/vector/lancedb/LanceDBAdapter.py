@@ -107,10 +107,13 @@ class LanceDBAdapter(VectorDBInterface):
         self.VECTOR_DB_LOCK = asyncio.Lock()
         self.connection = connection
         self._session = session
-        # Remember the adapter is bound to a specific subprocess session.
-        # After close(), any operation that would re-open a real lancedb
-        # connection locally is forbidden — otherwise we'd silently downgrade
-        # subprocess-mode to local-mode and sidestep the whole point.
+        # True iff this adapter was constructed in subprocess-proxy mode.
+        # Latched at construction and NOT cleared by close()/clean(); once a
+        # session is provided the adapter is forever bound to it. Combined
+        # with ``_permanently_closed`` this gives a clean 3-state model:
+        #   (False, False) — local mode, usable
+        #   (True,  False) — subprocess mode, usable
+        #   (*,     True)  — closed, not reusable in either mode
         self._subprocess_mode = session is not None
         self._permanently_closed = False
 
@@ -154,7 +157,7 @@ class LanceDBAdapter(VectorDBInterface):
         Subprocess mode: a ``pa.Schema`` derived from the LanceModel so the
         worker doesn't need to see pydantic.
         """
-        if self._session is None:
+        if not self._subprocess_mode:
             return lance_model_cls
         return lance_model_cls.to_arrow_schema()
 
@@ -167,7 +170,7 @@ class LanceDBAdapter(VectorDBInterface):
         """
         if not records:
             return records
-        if self._session is None:
+        if not self._subprocess_mode:
             return records
 
         import pyarrow as pa

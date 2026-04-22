@@ -24,8 +24,27 @@ from typing import Any, Callable, Dict, Optional
 SHUTDOWN = "__SUBPROCESS_HARNESS_SHUTDOWN__"
 _DEFAULT_SHUTDOWN_TIMEOUT = 10.0
 _DEFAULT_INIT_TIMEOUT = 60.0
-_DEFAULT_CALL_TIMEOUT: Optional[float] = 300.0  # 5 min; guards against hung workers
-_DEFAULT_MAX_RETRIES = 2
+
+
+def _env_float(name: str, default: Optional[float]) -> Optional[float]:
+    """Parse a float-or-disabled env var. Empty / unset → ``default``; a
+    value <= 0 disables the timeout (``None``); any other float is used.
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        val = float(raw)
+    except ValueError:
+        return default
+    return None if val <= 0 else val
+
+
+# Per-RPC deadline for subprocess calls. Guards against hung native libraries.
+# Override with ``SUBPROCESS_CALL_TIMEOUT`` env var (seconds, or <=0 to
+# disable entirely — not recommended outside benchmarks).
+_DEFAULT_CALL_TIMEOUT: Optional[float] = _env_float("SUBPROCESS_CALL_TIMEOUT", 300.0)
+_DEFAULT_MAX_RETRIES = int(os.environ.get("SUBPROCESS_MAX_RETRIES", "2"))
 _PROCESS_CHECK_INTERVAL = 1.0
 _READY_SENTINEL = "__SUBPROCESS_HARNESS_READY__"
 
@@ -304,7 +323,11 @@ def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
     reflect reachable objects only.
     """
     collected = 0
-    # Snapshot so the iteration isn't perturbed by concurrent weakref churn.
+    # Materialize a snapshot before iterating: ``WeakSet`` entries can
+    # disappear at any time when the last strong reference is dropped, which
+    # would raise ``RuntimeError`` mid-iteration. The snapshot holds temporary
+    # strong refs, but the broad try/except below still covers the narrower
+    # race where a session is mid-shutdown by the time we call into it.
     for session in list(_all_sessions):
         try:
             session.call(Request(op=OP_GC_COLLECT), timeout=timeout)

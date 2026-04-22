@@ -11,6 +11,14 @@ from time import time
 logger = logging.getLogger(__name__)
 
 
+# Strong refs for fire-and-forget async close() tasks. ``asyncio.create_task``
+# returns a task whose only strong reference is our local variable; without
+# anchoring here, Python's gc can collect an in-flight eviction task before
+# it completes (and the async close never runs). Tasks remove themselves on
+# done, so this set's size tracks currently-pending close operations.
+_PENDING_CLOSE_TASKS: set = set()
+
+
 def _close_value(value):
     """Call close() on a value, scheduling it as a task if it returns a coroutine.
 
@@ -23,7 +31,6 @@ def _close_value(value):
     if asyncio.iscoroutine(result):
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(result)
         except RuntimeError:
             try:
                 asyncio.run(result)
@@ -33,6 +40,11 @@ def _close_value(value):
                     type(value).__name__,
                     exc_info=True,
                 )
+            return
+
+        task = loop.create_task(result)
+        _PENDING_CLOSE_TASKS.add(task)
+        task.add_done_callback(_PENDING_CLOSE_TASKS.discard)
 
 
 class ClosingLRUCache:

@@ -208,22 +208,20 @@ def _create_graph_engine(
         from .kuzu.adapter import KuzuAdapter, DEFAULT_MAX_DB_SIZE
 
         if graph_database_subprocess_enabled:
+            # Kuzu expects the parent directory of its db file to already exist.
+            # The local-mode adapter does this in _initialize_connection; in
+            # subprocess mode we do the equivalent here before spinning up the
+            # worker.
+            db_parent = os.path.dirname(os.path.abspath(graph_file_path))
+            if db_parent:
+                os.makedirs(db_parent, exist_ok=True)
+
             from .kuzu.subprocess.proxy import (
                 KuzuSubprocessSession,
                 RemoteKuzuConnection,
                 RemoteKuzuDatabase,
                 install_json_extension,
             )
-
-            # Kuzu expects the parent directory of its db file to already exist.
-            # The local-mode adapter does this in _initialize_connection; in
-            # subprocess mode we do the equivalent here before spinning up the
-            # worker.
-            import os as _os
-
-            _db_parent = _os.path.dirname(_os.path.abspath(graph_file_path))
-            if _db_parent:
-                _os.makedirs(_db_parent, exist_ok=True)
 
             session = KuzuSubprocessSession.start()
             try:
