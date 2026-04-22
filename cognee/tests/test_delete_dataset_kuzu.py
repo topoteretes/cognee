@@ -145,15 +145,17 @@ async def main(mock_create_structured_output: AsyncMock):
     await set_database_global_context_variables(johns_dataset_id, default_user.id)
     graph_engine = await get_graph_engine()
     johns_initial_nodes, johns_initial_edges = await graph_engine.get_graph_data()
-    assert len(johns_initial_nodes) == 9 and len(johns_initial_edges) == 10, (
-        "Number of nodes and edges is not correct."
+    johns_data_nodes = [n for n in johns_initial_nodes if n[1].get("type") != "EdgeType"]
+    assert len(johns_data_nodes) == 9 and len(johns_initial_edges) == 10, (
+        f"Expected 9 data nodes and 10 edges for John, got {len(johns_data_nodes)} and {len(johns_initial_edges)}"
     )
 
     await set_database_global_context_variables(maries_dataset_id, new_user.id)
     graph_engine = await get_graph_engine()
     maries_initial_nodes, maries_initial_edges = await graph_engine.get_graph_data()
-    assert len(maries_initial_nodes) == 9 and len(maries_initial_edges) == 10, (
-        "Number of nodes and edges is not correct."
+    maries_data_nodes = [n for n in maries_initial_nodes if n[1].get("type") != "EdgeType"]
+    assert len(maries_data_nodes) == 9 and len(maries_initial_edges) == 10, (
+        f"Expected 9 data nodes and 10 edges for Marie, got {len(maries_data_nodes)} and {len(maries_initial_edges)}"
     )
 
     johns_initial_nodes_by_collection = {}

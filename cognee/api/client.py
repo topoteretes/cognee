@@ -26,6 +26,10 @@ from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_ro
 from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
+from cognee.api.v1.remember.routers import get_remember_router
+from cognee.api.v1.recall.routers import get_recall_router
+from cognee.api.v1.improve.routers import get_improve_router
+from cognee.api.v1.forget.routers import get_forget_router
 from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.llm.routers import get_llm_router
 from cognee.api.v1.sync.routers import get_sync_router
@@ -42,6 +46,8 @@ from cognee.api.v1.users.routers import (
     get_user_id_by_email_router,
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
+from cognee.api.v1.activity.routers import get_activity_router
+from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
@@ -73,9 +79,15 @@ async def lifespan(app: FastAPI):
     # await prune_system(metadata = True)
     # if app_environment == "local" or app_environment == "dev":
     from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.run_migrations import run_startup_migrations
 
-    db_engine = get_relational_engine()
-    await db_engine.create_database()
+    try:
+        await run_startup_migrations()
+    except Exception:
+        db_engine = get_relational_engine()
+        await db_engine.create_database()
+
+    await run_startup_migrations()
 
     from cognee.modules.users.methods import get_default_user
 
@@ -273,6 +285,25 @@ app.include_router(
     prefix="/health",
     tags=["health"],
 )
+
+# Activity / observability
+app.include_router(
+    get_activity_router(),
+    prefix="/api/v1/activity",
+    tags=["activity"],
+)
+
+# Sessions lifecycle + dashboard aggregates
+app.include_router(
+    get_sessions_router(),
+    prefix="/api/v1/sessions",
+    tags=["sessions"],
+)
+
+app.include_router(get_remember_router(), prefix="/api/v1/remember", tags=["remember"])
+app.include_router(get_recall_router(), prefix="/api/v1/recall", tags=["recall"])
+app.include_router(get_improve_router(), prefix="/api/v1/improve", tags=["improve"])
+app.include_router(get_forget_router(), prefix="/api/v1/forget", tags=["forget"])
 
 
 @app.get("/")

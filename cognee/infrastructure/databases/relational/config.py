@@ -1,8 +1,9 @@
-import os
 import json
-import pydantic
-from typing import Union
+import os
 from functools import lru_cache
+from typing import Union
+
+import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.base_config import get_base_config
@@ -82,7 +83,7 @@ class RelationalConfig(BaseSettings):
 
 
 @lru_cache
-def get_relational_config():
+def get_relational_config() -> RelationalConfig:
     """
     Cache and return the relational database configuration.
 

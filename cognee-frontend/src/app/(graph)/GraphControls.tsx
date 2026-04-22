@@ -6,6 +6,7 @@ import { NodeObject, LinkObject } from "react-force-graph-2d";
 import { ChangeEvent, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { DeleteIcon } from "@/ui/Icons";
+// import { FeedbackForm } from "@/ui/Partials";
 import { CTAButton, Input, NeutralButton, Select } from "@/ui/elements";
 
 interface GraphControlsProps {
@@ -229,6 +230,12 @@ export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeCha
           )}
         </>
         {/* )} */}
+
+        {/* {selectedTab === "feedback" && (
+          <div className="flex flex-col gap-2">
+            <FeedbackForm onSuccess={() => {}} />
+          </div>
+        )} */}
       </div>
     </>
   );

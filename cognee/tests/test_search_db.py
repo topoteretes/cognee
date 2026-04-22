@@ -14,6 +14,9 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
     GraphCompletionContextExtensionRetriever,
 )
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
+    GraphCompletionDecompositionRetriever,
+)
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -159,6 +162,13 @@ async def e2e_state():
 
     contexts = {
         "graph_completion": await _get_retriever_context(GraphCompletionRetriever(), query=query),
+        "graph_completion_decomposition_answer_per_subquery": await _get_retriever_context(
+            GraphCompletionDecompositionRetriever(), query=query
+        ),
+        "graph_completion_decomposition_combined_triplets": await _get_retriever_context(
+            GraphCompletionDecompositionRetriever(decomposition_mode="combined_triplets_context"),
+            query=query,
+        ),
         "graph_completion_cot": await _get_retriever_context(
             GraphCompletionCotRetriever(), query=query
         ),
@@ -192,6 +202,17 @@ async def e2e_state():
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Where is germany located, next to which country?",
         verbose=True,
+    )
+    completion_decomposition_answer_per_subquery = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        query_text="Where is germany located, next to which country?",
+        verbose=True,
+    )
+    completion_decomposition_combined_triplets = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        query_text="Where is germany located, next to which country?",
+        verbose=True,
+        retriever_specific_config={"decomposition_mode": "combined_triplets_context"},
     )
     completion_cot = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_COT,
@@ -247,6 +268,12 @@ async def e2e_state():
         "triplets": triplets,
         "search_results": {
             "graph_completion": completion_gk,
+            "graph_completion_decomposition_answer_per_subquery": (
+                completion_decomposition_answer_per_subquery
+            ),
+            "graph_completion_decomposition_combined_triplets": (
+                completion_decomposition_combined_triplets
+            ),
             "graph_completion_cot": completion_cot,
             "graph_completion_context_extension": completion_ext,
             "graph_summary_completion": completion_sum,
@@ -273,6 +300,8 @@ async def test_e2e_retriever_contexts(e2e_state):
 
     for name in [
         "graph_completion",
+        "graph_completion_decomposition_answer_per_subquery",
+        "graph_completion_decomposition_combined_triplets",
         "graph_completion_cot",
         "graph_completion_context_extension",
         "graph_summary_completion",
@@ -363,6 +392,8 @@ async def test_e2e_search_results_and_wrappers(e2e_state):
     # Completion-like search types: validate wrapper + content
     for name in [
         "graph_completion",
+        "graph_completion_decomposition_answer_per_subquery",
+        "graph_completion_decomposition_combined_triplets",
         "graph_completion_cot",
         "graph_completion_context_extension",
         "graph_summary_completion",

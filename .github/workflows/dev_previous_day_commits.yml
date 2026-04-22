@@ -1,0 +1,521 @@
+name: automation | Draft Docs PRs For Current Day Dev Merges
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: Number of UTC calendar days to look back when scanning merged commits
+        required: false
+        default: "1"
+      anchor_date:
+        description: Optional UTC date to scan, in YYYY-MM-DD format
+        required: false
+        default: ""
+  schedule:
+    - cron: "59 23 * * *"
+
+permissions:
+  contents: read
+
+env:
+  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
+
+jobs:
+  prepare-merged-branches:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      start_date: ${{ steps.prepare.outputs.start_date }}
+      end_date: ${{ steps.prepare.outputs.end_date }}
+      has_merges: ${{ steps.prepare.outputs.has_merges }}
+      merge_summary: ${{ steps.prepare.outputs.merge_summary }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch latest dev branch
+        run: git fetch origin dev:refs/remotes/origin/dev --no-tags
+
+      - name: Prepare current day merged branches
+        id: prepare
+        shell: bash
+        env:
+          INPUT_ANCHOR_DATE: ${{ github.event.inputs.anchor_date || '' }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --branch origin/dev
+            --lookback-days "${lookback_days}"
+          )
+
+          anchor_date="${INPUT_ANCHOR_DATE}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            anchor_date="$(date -u -d 'yesterday' +%F)"
+          fi
+
+          if [ -n "${anchor_date}" ]; then
+            echo "Using anchor date ${anchor_date}"
+            args+=(--anchor-date "${anchor_date}")
+          fi
+
+          python3 tools/prepare_merged_branches.py "${args[@]}"
+
+  create-docs-prs:
+    needs:
+      - prepare-merged-branches
+    if: ${{ needs.prepare-merged-branches.outputs.has_merges == 'true' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare-merged-branches.outputs.matrix) }}
+
+    steps:
+      - name: Check out core repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install workflow dependencies
+        run: uv sync --locked
+
+      - name: Fetch latest dev branch
+        run: git fetch origin dev:refs/remotes/origin/dev --no-tags
+
+      - name: Prepare branch note paths
+        id: branch_paths
+        run: |
+          OUTPUT_DIR="branch-dev-notes/${{ matrix.safe_branch }}-${{ matrix.short_sha }}"
+          mkdir -p "${OUTPUT_DIR}"
+          echo "output_dir=${OUTPUT_DIR}" >> "${GITHUB_OUTPUT}"
+          echo "notes_json=${OUTPUT_DIR}/branch_notes.json" >> "${GITHUB_OUTPUT}"
+          echo "notes_markdown=${OUTPUT_DIR}/branch_notes.md" >> "${GITHUB_OUTPUT}"
+          echo "assessment_json=${OUTPUT_DIR}/docs_assessment.json" >> "${GITHUB_OUTPUT}"
+          echo "assessment_markdown=${OUTPUT_DIR}/docs_assessment.md" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate branch notes
+        env:
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
+          NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
+        run: |
+          uv run python tools/generate_branch_notes.py \
+            --branch-name "${{ matrix.branch_name }}" \
+            --merge-sha "${{ matrix.merge_sha }}" \
+            --first-parent "${{ matrix.first_parent }}" \
+            --second-parent "${{ matrix.second_parent }}" \
+            --json-output "${NOTES_JSON}" \
+            --markdown-output "${NOTES_MARKDOWN}"
+
+      - name: Assess documentation impact for branch
+        id: assessment
+        env:
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
+          NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
+          ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
+          ASSESSMENT_MARKDOWN: ${{ steps.branch_paths.outputs.assessment_markdown }}
+          BRANCH_NAME: ${{ matrix.branch_name }}
+          BRANCH_SLUG: ${{ matrix.safe_branch }}
+          SHORT_SHA: ${{ matrix.short_sha }}
+          MERGE_SHA: ${{ matrix.merge_sha }}
+        run: |
+          uv run python tools/assess_branch_notes.py \
+            --notes-json "${NOTES_JSON}" \
+            --notes-markdown "${NOTES_MARKDOWN}" \
+            --json-output "${ASSESSMENT_JSON}" \
+            --markdown-output "${ASSESSMENT_MARKDOWN}"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          assessment = json.loads(Path(os.environ["ASSESSMENT_JSON"]).read_text())
+
+          needs_update = bool(assessment.get("needs_documentation_update"))
+          branch_slug = os.environ["BRANCH_SLUG"]
+          short_sha = os.environ["SHORT_SHA"]
+          docs_branch = f"automation/docs-{branch_slug}-{short_sha}"
+          pr_title = f"docs: draft updates for {os.environ['BRANCH_NAME']}"
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as fh:
+              fh.write(f"needs_update={'true' if needs_update else 'false'}\n")
+              fh.write(f"docs_branch={docs_branch}\n")
+              fh.write(f"pr_title={pr_title}\n")
+          PY
+
+      - name: Skip docs PR creation when docs are not needed
+        if: ${{ steps.assessment.outputs.needs_update != 'true' }}
+        run: echo "Assessment says no documentation update is needed for ${{ matrix.branch_name }}; skipping docs PR."
+
+      - name: Check out docs repository
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        uses: actions/checkout@v6
+        with:
+          repository: topoteretes/cognee-docs
+          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          ref: main
+          path: docs-repo
+
+      - name: Prepare docs branch
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        working-directory: docs-repo
+        run: |
+          git fetch origin "${{ steps.assessment.outputs.docs_branch }}" || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git show-ref --verify --quiet "refs/remotes/origin/${{ steps.assessment.outputs.docs_branch }}"; then
+            git checkout -B "${{ steps.assessment.outputs.docs_branch }}" "origin/${{ steps.assessment.outputs.docs_branch }}"
+          else
+            git checkout -B "${{ steps.assessment.outputs.docs_branch }}"
+          fi
+
+      - name: Prepare docs edit scope
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: docs_scope
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          from tools.merge_branch_diff import get_branch_changed_files
+
+          first_parent = "${{ matrix.first_parent }}"
+          second_parent = "${{ matrix.second_parent }}"
+          docs_root = Path("docs-repo")
+
+          changed_files = get_branch_changed_files(first_parent, second_parent)
+
+          doc_files = sorted(
+              path.relative_to(docs_root).as_posix()
+              for path in docs_root.rglob("*")
+              if path.is_file() and path.suffix.lower() == ".mdx"
+          )
+
+          ignored_parts = {
+              "cognee",
+              "__init__.py",
+              "models",
+              "operations",
+              "modules",
+              "tasks",
+              "routers",
+              "shared",
+              "infrastructure",
+          }
+
+          keywords: list[str] = []
+          for changed_file in changed_files:
+              path = Path(changed_file)
+              stem = path.stem.lower()
+              if len(stem) >= 3 and stem not in ignored_parts:
+                  keywords.append(stem)
+              for part in path.parts:
+                  token = part.lower()
+                  if len(token) >= 4 and token not in ignored_parts:
+                      keywords.append(token)
+
+          unique_keywords: list[str] = []
+          for keyword in keywords:
+              if keyword not in unique_keywords:
+                  unique_keywords.append(keyword)
+
+          scored: list[tuple[int, str]] = []
+          for doc_file in doc_files:
+              haystack = doc_file.lower()
+              score = sum(1 for keyword in unique_keywords if keyword in haystack)
+              if score > 0:
+                  scored.append((score, doc_file))
+
+          scored.sort(key=lambda item: (-item[0], item[1]))
+          candidate_doc_files = [doc_file for _, doc_file in scored[:5]]
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as fh:
+              fh.write("changed_source_files<<EOF\n")
+              fh.write("\n".join(changed_files) + "\n")
+              fh.write("EOF\n")
+              fh.write("candidate_doc_files<<EOF\n")
+              fh.write("\n".join(candidate_doc_files) + "\n")
+              fh.write("EOF\n")
+          PY
+
+      - name: Generate docs changes with Claude
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are a documentation improvement agent for the Cognee project.
+
+            Update the existing Cognee documentation to reflect this merged branch.
+            Your job is to document the actual behavior and API changes introduced by this branch, not to make adjacent or generic documentation improvements.
+
+            - Branch: `${{ matrix.branch_name }}`
+            - Merge SHA: `${{ matrix.merge_sha }}`
+            - Short SHA: `${{ matrix.short_sha }}`
+            - First parent: `${{ matrix.first_parent }}`
+            - Second parent: `${{ matrix.second_parent }}`
+
+            ## Available resources
+
+            - **Documentation repo** (`./docs-repo`): Contains the documentation pages. Use existing `.md` and `.mdx` pages as the primary targets for edits. Read `./docs-repo/docs.json` if it exists to understand the documentation structure.
+            - **Cognee source code** (current workspace root): Use the source code to verify actual implementation details, defaults, supported options, function signatures, env vars, and behavior.
+            - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`): Summary of the merged branch.
+            - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`): Candidate docs areas and rationale for the update.
+
+            ## Precomputed scope
+
+            Changed source files:
+            ${{ steps.docs_scope.outputs.changed_source_files }}
+
+            Likely documentation targets:
+            ${{ steps.docs_scope.outputs.candidate_doc_files }}
+
+            ## Required approach
+
+            Start by reading the branch notes, then inspect the actual code diff for this branch. Use the branch parents above to identify what really changed. Prefer the merge-base-aware diff `git diff ${{ matrix.first_parent }}...${{ matrix.second_parent }}` and read the touched source files before editing docs.
+            Focus on the precomputed source files and likely documentation targets first. Only search outside those targets if they are clearly not sufficient.
+
+            Before making any docs edits:
+
+            1. List the source files changed by this branch.
+            2. For each changed source file, identify whether it changes:
+               - public behavior
+               - public API / imports / entrypoints
+               - documented configuration or defaults
+               - developer-facing extension semantics
+               - examples or usage patterns
+               - or only internal implementation details
+            3. Only edit docs for items that fall into the documented/public categories above.
+            4. If a proposed docs edit cannot be traced back to a concrete source diff in this branch, do not make that edit.
+
+            ## Instructions
+
+            1. Read the branch notes and documentation assessment first.
+            2. Inspect the source diff for `${{ matrix.first_parent }}...${{ matrix.second_parent }}` and identify which changes are documentation-worthy.
+            3. Review the touched source files themselves, not just the merge summary.
+            4. Only document user-facing behavior, public API changes, examples, or developer-facing semantics that actually changed in this branch.
+            5. Do not make unrelated cleanup edits, style edits, or generic improvements to nearby docs sections unless they are strictly required to explain the branch changes.
+            6. Prefer the smallest possible set of docs edits that fully covers the code changes.
+            7. Review the relevant existing documentation pages in `./docs-repo`.
+            8. Search the Cognee source code in the current workspace to verify technical details before editing docs.
+            9. Edit at most 3 documentation files unless the source diff clearly requires more.
+            10. Prefer updating existing pages over creating new ones.
+            11. Do not edit `docs.json` unless you are creating a new docs page that is strictly required by the code diff.
+            12. Do not edit any workflow files, automation files, integration docs, provider docs, or unrelated concept pages unless the changed source files in this branch directly require it.
+            13. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
+            14. Do NOT create git commits.
+
+            ## What to prioritize
+
+            Give priority to documenting changes like:
+
+            - user-facing behavior changes
+            - public API, CLI, SDK, or configuration changes
+            - example code that is now outdated because of the merged branch
+            - developer-facing semantics that custom integrators or extension authors rely on
+            - changes to documented imports, entrypoints, arguments, defaults, return shapes, or supported options
+
+            Lower priority or likely no-doc items unless explicitly exposed in public docs:
+
+            - internal performance optimizations
+            - internal race-condition fixes
+            - private implementation details that users do not interact with directly
+
+            If a change is purely internal and not represented in public docs, leave it undocumented rather than inventing a public-facing explanation.
+
+            ## Output discipline
+
+            The resulting docs PR should be easy to justify from the code diff.
+
+            - Keep the PR narrowly scoped to this merge.
+            - Avoid adding documentation for features, integrations, or guides that were not touched by this branch.
+            - Do not add new conceptual pages unless the source diff introduces a new public concept that cannot fit into an existing page.
+            - If the branch only warrants one or two doc edits, make only one or two doc edits.
+            - Every edited file must be explainable by pointing to one or more changed source files in this merge.
+            - If you cannot justify an edit from the code diff, skip it.
+            - It is better to produce a very small PR than a broad PR with speculative documentation updates.
+
+            When done, print a short summary of what you changed and which existing documentation pages you updated.
+          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 20"
+
+      - name: Prepare docs PR content
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: pr_content
+        env:
+          BRANCH_NAME: ${{ matrix.branch_name }}
+          SHORT_SHA: ${{ matrix.short_sha }}
+          ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
+          DEFAULT_PR_TITLE: ${{ steps.assessment.outputs.pr_title }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          assessment = json.loads(Path(os.environ["ASSESSMENT_JSON"]).read_text())
+          reason = assessment.get("reason", "")
+          candidate_areas = assessment.get("candidate_areas", [])
+          recommended = assessment.get("recommended_next_steps", [])
+
+          changed_files = [
+              line.rstrip()
+              for line in subprocess.check_output(
+                  ["git", "-C", "docs-repo", "status", "--short"],
+                  text=True,
+              ).splitlines()
+              if line.strip()
+          ]
+          normalized_files = [entry[3:] if len(entry) > 3 else entry for entry in changed_files]
+
+          pr_title = os.environ["DEFAULT_PR_TITLE"]
+          pr_body_lines = [
+              f"Automated documentation draft for merged branch `{os.environ['BRANCH_NAME']}` (`{os.environ['SHORT_SHA']}`).",
+              "",
+              "This PR includes Claude-generated updates grounded in the current documentation pages and verified against the source repository.",
+              "",
+              f"Reason: {reason}",
+          ]
+          if candidate_areas:
+              pr_body_lines.extend(["", "Candidate areas:"])
+              pr_body_lines.extend([f"- {item}" for item in candidate_areas])
+          if normalized_files:
+              pr_body_lines.extend(["", "Documentation files updated:"])
+              pr_body_lines.extend([f"- `{item}`" for item in normalized_files])
+          if recommended:
+              pr_body_lines.extend(["", "Recommended next steps:"])
+              pr_body_lines.extend([f"- {item}" for item in recommended])
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as fh:
+              fh.write(f"pr_title={pr_title}\n")
+              fh.write("pr_body<<EOF\n")
+              fh.write("\n".join(pr_body_lines) + "\n")
+              fh.write("EOF\n")
+              fh.write("changed_files<<EOF\n")
+              fh.write("\n".join(normalized_files) + "\n")
+              fh.write("EOF\n")
+          PY
+
+      - name: Create docs draft commit
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: commit_docs
+        working-directory: docs-repo
+        run: |
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "changes_made=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "${{ steps.pr_content.outputs.pr_title }}"
+          echo "changes_made=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push docs draft branch
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
+        working-directory: docs-repo
+        run: git push --force-with-lease origin "${{ steps.assessment.outputs.docs_branch }}"
+
+      - name: Create or update docs pull request
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: manage_pr
+        working-directory: docs-repo
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          TARGET_REPO: topoteretes/cognee-docs
+          HEAD_BRANCH: ${{ steps.assessment.outputs.docs_branch }}
+          PR_TITLE: ${{ steps.pr_content.outputs.pr_title }}
+          PR_BODY: ${{ steps.pr_content.outputs.pr_body }}
+          CHANGES_MADE: ${{ steps.commit_docs.outputs.changes_made }}
+        run: |
+          EXISTING_PR_NUMBER="$(gh pr list \
+            --repo "${TARGET_REPO}" \
+            --head "topoteretes:${HEAD_BRANCH}" \
+            --base main \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          if [ -n "${EXISTING_PR_NUMBER}" ]; then
+            gh pr edit "${EXISTING_PR_NUMBER}" \
+              --repo "${TARGET_REPO}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}"
+            PR_NUMBER="${EXISTING_PR_NUMBER}"
+          elif [ "${CHANGES_MADE}" = "true" ]; then
+            gh pr create \
+              --repo "${TARGET_REPO}" \
+              --base main \
+              --head "${HEAD_BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}"
+            PR_NUMBER="$(gh pr list \
+              --repo "${TARGET_REPO}" \
+              --head "${HEAD_BRANCH}" \
+              --base main \
+              --state open \
+              --json number \
+              --jq '.[0].number')"
+          else
+            echo "Expected documentation changes for ${HEAD_BRANCH}, but no docs changes were committed and no open PR exists." >&2
+            exit 1
+          fi
+
+          PR_URL="$(gh pr view "${PR_NUMBER}" --repo "${TARGET_REPO}" --json url --jq '.url')"
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize docs PR result
+        env:
+          CHANGED_FILES: ${{ steps.pr_content.outputs.changed_files }}
+        run: |
+          {
+            echo "## Branch docs review: ${{ matrix.branch_name }}"
+            echo
+            echo "- Merge commit: \`${{ matrix.merge_sha }}\`"
+            echo "- Needs documentation update: \`${{ steps.assessment.outputs.needs_update }}\`"
+            if [ "${{ steps.assessment.outputs.needs_update }}" = "true" ]; then
+              echo "- Docs branch: \`${{ steps.assessment.outputs.docs_branch }}\`"
+              if [ -n "${CHANGED_FILES}" ]; then
+                echo "- Updated docs files:"
+                printf '%s\n' "${CHANGED_FILES}" | while IFS= read -r changed_file; do
+                  [ -n "${changed_file}" ] || continue
+                  echo "  - \`${changed_file}\`"
+                done
+              else
+                echo "- Updated docs files: none"
+              fi
+              if [ -n "${{ steps.manage_pr.outputs.pr_url }}" ]; then
+                echo "- Pull request: ${{ steps.manage_pr.outputs.pr_url }}"
+              else
+                echo "- Pull request: not created"
+              fi
+            fi
+            echo
+            echo "### Documentation assessment"
+            echo
+            cat "${{ steps.branch_paths.outputs.assessment_markdown }}"
+          } >> "${GITHUB_STEP_SUMMARY}"

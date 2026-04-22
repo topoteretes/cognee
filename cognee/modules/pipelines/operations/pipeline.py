@@ -1,6 +1,6 @@
 import asyncio
 from uuid import UUID
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
@@ -40,7 +40,6 @@ async def run_pipeline(
     vector_db_config: Optional[dict] = None,
     graph_db_config: Optional[dict] = None,
     incremental_loading: bool = False,
-    context: Optional[Dict] = None,
     data_per_batch: int = 20,
 ):
     validate_pipeline_tasks(tasks)
@@ -55,7 +54,6 @@ async def run_pipeline(
             tasks=tasks,
             data=data,
             pipeline_name=pipeline_name,
-            context={"dataset": dataset, "pipeline_name": pipeline_name},
             use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
@@ -71,7 +69,6 @@ async def run_pipeline_per_dataset(
     pipeline_name: str = "custom_pipeline",
     use_pipeline_cache=False,
     incremental_loading=False,
-    context: Optional[Dict] = None,
     data_per_batch: int = 20,
 ):
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
@@ -103,9 +100,8 @@ async def run_pipeline_per_dataset(
         data,
         user,
         pipeline_name,
-        context,
-        incremental_loading,
-        data_per_batch,
+        incremental_loading=incremental_loading,
+        data_per_batch=data_per_batch,
     )
 
     async for pipeline_run_info in pipeline_run:

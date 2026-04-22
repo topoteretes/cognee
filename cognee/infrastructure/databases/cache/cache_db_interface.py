@@ -12,6 +12,7 @@ class CacheDBInterface(ABC):
     def __init__(
         self, host: str, port: int, lock_key: str = "default_lock", log_key: str = "usage_logs"
     ):
+        """Store shared cache/lock configuration for concrete adapter implementations."""
         self.host = host
         self.port = port
         self.lock_key = lock_key
@@ -149,6 +150,51 @@ class CacheDBInterface(ABC):
         """
         Delete the entire session and all its QA entries.
         Returns True if deleted, False if session did not exist.
+        """
+        pass
+
+    @abstractmethod
+    async def append_agent_trace_step(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> None:
+        """
+        Append one agent trace step to the session-scoped trace list.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[dict]:
+        """
+        Retrieve agent trace steps for the given session.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
+        """
+        Retrieve per-step feedback strings for the given trace session.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """
+        Retrieve the number of trace steps stored for the given trace session.
         """
         pass
 

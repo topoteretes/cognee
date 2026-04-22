@@ -1,11 +1,15 @@
+from typing import Any
 from uuid import UUID
+
 from sqlalchemy import literal, select
+
 from cognee.infrastructure.databases.relational import get_relational_engine
+
 from ..models.Query import Query
 from ..models.Result import Result
 
 
-async def get_history(user_id: UUID, limit: int = 10) -> list[Result]:
+async def get_history(user_id: UUID, limit: int = 10) -> list[dict[str, Any]]:
     db_engine = get_relational_engine()
 
     queries_query = select(
@@ -24,4 +28,4 @@ async def get_history(user_id: UUID, limit: int = 10) -> list[Result]:
     async with db_engine.get_async_session() as session:
         history = (await session.execute(history_query)).all()
 
-        return history
+        return [row._asdict() for row in history]

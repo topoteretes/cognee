@@ -5,6 +5,7 @@ from .embeddings import get_embedding_engine
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
 
 from functools import lru_cache
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 
 def create_vector_engine(
@@ -22,6 +23,29 @@ def create_vector_engine(
     Wrapper function to call create vector engine with caching.
     For a detailed description, see _create_vector_engine.
     """
+    # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
+    import os
+
+    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified_provider == "pghybrid":
+        from cognee.infrastructure.databases.relational import get_relational_config
+
+        embedding_engine = get_embedding_engine()
+        relational_config = get_relational_config()
+        connection_string = (
+            f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
+            f"@{relational_config.db_host}:{relational_config.db_port}"
+            f"/{relational_config.db_name}"
+        )
+
+        from .pgvector.PGVectorAdapter import PGVectorAdapter
+
+        return PGVectorAdapter(
+            connection_string,
+            vector_db_key,
+            embedding_engine,
+        )
+
     return _create_vector_engine(
         vector_db_provider,
         vector_db_url,
@@ -35,7 +59,7 @@ def create_vector_engine(
     )
 
 
-@lru_cache
+@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
