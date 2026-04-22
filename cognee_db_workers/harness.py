@@ -397,13 +397,13 @@ class SubprocessSession:
         self._max_retries = max(0, int(max_retries)) if respawn_factory else 0
         self._replay_steps: "list[ReplayStep]" = []
         self._handle_remap: "dict[int, int]" = {}
-        # Eager construction avoids a lazy "is None then assign" race that
-        # could give two concurrent callers different Lock instances.
-        # asyncio.Lock in Python 3.10+ constructs without a running loop.
-        import threading
-
-        self._rpc_lock = asyncio.Lock()
-        self._sync_rpc_lock = threading.Lock()
+        # Single ``threading.Lock`` shared by both sync ``call`` and async
+        # ``call_async``. The two paths MUST NOT use independent locks — they
+        # share the same ``multiprocessing.Queue`` pair, which has no
+        # per-caller correlation, so interleaved put/get pairs would return
+        # responses to the wrong caller. Async path acquires via a
+        # ``run_in_executor`` hop to avoid blocking the loop.
+        self._rpc_lock = threading.Lock()
         self._terminate_lock = threading.Lock()
         self._respawn_lock = threading.Lock()
 
@@ -460,6 +460,20 @@ class SubprocessSession:
         except ValueError:
             pass
 
+    def _do_locked_call(
+        self, req: Request, deadline, effective_timeout
+    ) -> Response:
+        """Single RPC round trip under ``_rpc_lock``. Shared by sync and async
+        entry points so the two paths can't interleave put/get on the same
+        queues.
+        """
+        with self._rpc_lock:
+            self._check_alive()
+            self.touch()
+            self._req_q.put(req)
+            resp = self._wait_response(deadline, effective_timeout)
+        return self._handle_response(resp)
+
     def call(self, req: Request, timeout: Optional[float] = ...) -> Response:
         """Blocking synchronous call. Retries transport failures up to
         ``max_retries`` times (respawning + replaying setup steps between
@@ -471,12 +485,7 @@ class SubprocessSession:
             deadline, effective_timeout = self._resolve_deadline(timeout)
             req_to_send = self._apply_remap(req)
             try:
-                with self._sync_rpc_lock:
-                    self._check_alive()
-                    self.touch()
-                    self._req_q.put(req_to_send)
-                    resp = self._wait_response(deadline, effective_timeout)
-                    return self._handle_response(resp)
+                return self._do_locked_call(req_to_send, deadline, effective_timeout)
             except (SubprocessTransportError, TimeoutError):
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
@@ -484,26 +493,29 @@ class SubprocessSession:
                 self._respawn()
 
     async def call_async(self, req: Request, timeout: Optional[float] = ...) -> Response:
-        """Async counterpart of ``call`` with identical retry semantics."""
+        """Async counterpart of ``call`` with identical retry semantics.
+
+        Hops the same ``_rpc_lock``-protected routine onto a thread via
+        ``run_in_executor`` — a dedicated asyncio.Lock would let a sync
+        caller slip a request between our put and get on the shared queues.
+        """
         attempts_left = self._max_retries
+        loop = asyncio.get_running_loop()
         while True:
             deadline, effective_timeout = self._resolve_deadline(timeout)
             req_to_send = self._apply_remap(req)
             try:
-                async with self._rpc_lock:
-                    self._check_alive()
-                    self.touch()
-                    loop = asyncio.get_running_loop()
-                    await loop.run_in_executor(None, self._req_q.put, req_to_send)
-                    resp = await loop.run_in_executor(
-                        None, self._wait_response, deadline, effective_timeout
-                    )
-                    return self._handle_response(resp)
+                return await loop.run_in_executor(
+                    None,
+                    self._do_locked_call,
+                    req_to_send,
+                    deadline,
+                    effective_timeout,
+                )
             except (SubprocessTransportError, TimeoutError):
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
                 attempts_left -= 1
-                loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, self._respawn)
 
     def _can_respawn(self) -> bool:

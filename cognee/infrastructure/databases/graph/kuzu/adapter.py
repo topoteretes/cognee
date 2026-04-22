@@ -365,9 +365,16 @@ class KuzuAdapter(GraphDBInterface):
                     finally:
                         self.open_connections -= 1
                         logger.info(f"Open connections after close: {self.open_connections}")
+                        # Hold _connection_lock across BOTH the native drop
+                        # and the Redis release. Releasing Redis outside the
+                        # lock would let another coroutine enter ``query()``
+                        # and open a fresh local Kuzu handle on the same file
+                        # before the next Redis-lock holder starts — the
+                        # shared lock's whole point is to serialize native
+                        # file-lock contention, which requires this ordering.
                         async with self._connection_lock:
                             self._drop_native_resources()
-                        self.redis_lock.release_lock()
+                            self.redis_lock.release_lock()
                 else:
                     result = await loop.run_in_executor(
                         self.executor, blocking_query, connection
@@ -435,7 +442,17 @@ class KuzuAdapter(GraphDBInterface):
         and awaiting a foreign-loop lock raises "got Future attached to a
         different loop". After this call the adapter is not reusable — see
         ``_drop_native_resources`` if you want a transient drop.
+
+        Shuts down our ``ThreadPoolExecutor`` with ``wait=True`` first — this
+        serves two purposes: (a) drains any in-flight ``blocking_query``
+        submissions, preventing a race where ``close()`` tears down
+        ``self.connection`` while an executor thread is still mid-
+        ``connection.execute``; (b) reaps the executor threads that would
+        otherwise leak on every LRU eviction.
         """
+        executor = getattr(self, "executor", None)
+        if executor is not None:
+            executor.shutdown(wait=True)
         self._drop_native_resources()
         if self._session is not None:
             try:
