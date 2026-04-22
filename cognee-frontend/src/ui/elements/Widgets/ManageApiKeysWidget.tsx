@@ -1,7 +1,7 @@
 import { Stack, Title, Text, Flex, Center } from "@mantine/core";
 import ApiKeys from "./elements/ApiKeys";
 import { Suspense } from "react";
-import { LoadingIndicator } from "@/ui/App";
+import { LoadingIndicator } from "@/ui/app";
 import CreateApiKeyButton from "./elements/CreateApiKeyButton";
 
 export default function ManageApiKeysWidget() {
