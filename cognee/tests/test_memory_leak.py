@@ -26,7 +26,7 @@ import cognee
 # The old SubprocessGraphDBWrapper / SubprocessVectorDBWrapper have been
 # replaced by in-adapter subprocess proxies that only import the native DB
 # library in the child. The adapter itself surfaces subprocess state via the
-# ``_session`` attribute and the MemoryItem protocol (memory_used / clean).
+# ``_session`` attribute.
 
 
 GUTENBERG_URL = "https://www.gutenberg.org/cache/epub/2600/pg2600.txt"

@@ -394,12 +394,17 @@ class SQLAlchemyAdapter:
         """
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                # Load the schema information into the MetaData object
-                await connection.run_sync(Base.metadata.reflect)
+                # Reflecting into Base.metadata would pollute the shared
+                # declarative registry; a class later defined with a matching
+                # __tablename__ (e.g. the lazily-imported SessionRecord) would
+                # raise "Table already defined".
                 if table_name in Base.metadata.tables:
                     return Base.metadata.tables[table_name]
-                else:
-                    raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
+                metadata = MetaData()
+                await connection.run_sync(metadata.reflect, only=[table_name])
+                if table_name in metadata.tables:
+                    return metadata.tables[table_name]
+                raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
             else:
                 # Create a MetaData instance to load table information
                 metadata = MetaData()

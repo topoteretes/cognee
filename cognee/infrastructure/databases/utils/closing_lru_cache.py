@@ -8,13 +8,7 @@ from functools import wraps
 from threading import Lock
 from time import time
 
-from cognee.infrastructure.memory_cleanup import get_memory_cleanup_manager
-
 logger = logging.getLogger(__name__)
-
-
-def _is_memory_trackable(value):
-    return all(hasattr(value, attr) for attr in ("memory_used", "last_accessed_ts"))
 
 
 def _close_value(value):
@@ -53,45 +47,8 @@ class ClosingLRUCache:
         self._cache: OrderedDict = OrderedDict()
         self._maxsize = maxsize
         self._lock = Lock()
-        self._registered = False
-
-    def _ensure_registered(self):
-        if self._registered:
-            return
-
-        with self._lock:
-            if self._registered:
-                return
-            get_memory_cleanup_manager().register_component(self)
-            self._registered = True
-
-    def _evict_key_if_matching(self, key, value):
-        with self._lock:
-            entry = self._cache.get(key)
-            if entry is None or entry.value is not value:
-                return False
-            self._cache.pop(key)
-
-        _close_value(value)
-        return True
-
-    @staticmethod
-    def _value_last_accessed_ts(value):
-        if not _is_memory_trackable(value):
-            return 0.0
-
-        try:
-            return float(value.last_accessed_ts())
-        except Exception:
-            logger.warning(
-                "Failed to read memory timestamp from %s",
-                type(value).__name__,
-                exc_info=True,
-            )
-            return 0.0
 
     def get_or_create(self, key, factory):
-        self._ensure_registered()
         now = time()
 
         with self._lock:
@@ -136,41 +93,11 @@ class ClosingLRUCache:
         with self._lock:
             return {"size": len(self._cache), "maxsize": self._maxsize}
 
-    def get_items(self):
-        self._ensure_registered()
-
-        with self._lock:
-            return [
-                _CacheMemoryItem(self, key, entry)
-                for key, entry in self._cache.items()
-                if _is_memory_trackable(entry.value)
-            ]
-
 
 @dataclass
 class _CacheEntry:
     value: object
     last_accessed_at: float
-
-
-class _CacheMemoryItem:
-    def __init__(self, cache: ClosingLRUCache, key, entry: _CacheEntry):
-        self._cache = cache
-        self._key = key
-        self._value = entry.value
-        self._cache_accessed_at = entry.last_accessed_at
-
-    def memory_used(self) -> int:
-        return int(self._value.memory_used())
-
-    def last_accessed_ts(self) -> float:
-        return max(
-            self._cache_accessed_at,
-            self._cache._value_last_accessed_ts(self._value),
-        )
-
-    def clean(self):
-        self._cache._evict_key_if_matching(self._key, self._value)
 
 
 def closing_lru_cache(maxsize: int = 128):

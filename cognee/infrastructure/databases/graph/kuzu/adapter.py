@@ -429,34 +429,6 @@ class KuzuAdapter(GraphDBInterface):
             self._permanently_closed = True
         logger.info("Kuzu database closed successfully")
 
-    # ---- MemoryCleanupManager protocol ----
-    def memory_used(self) -> int:
-        if self._session is None:
-            return 0
-        try:
-            return self._session.memory_used_bytes()
-        except Exception:
-            return 0
-
-    def last_accessed_ts(self) -> float:
-        if self._session is None:
-            return 0.0
-        return float(self._session.last_accessed_at)
-
-    def clean(self):
-        """Called by MemoryCleanupManager; synchronous shutdown of the subprocess."""
-        if self._session is None:
-            return None
-        try:
-            self._session.shutdown()
-        except Exception:
-            pass
-        self._session = None
-        self.db = None
-        self.connection = None
-        self._permanently_closed = True
-        return None
-
     @asynccontextmanager
     async def get_session(self):
         """
