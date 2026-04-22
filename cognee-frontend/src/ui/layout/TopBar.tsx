@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import getUser from "@/modules/users/getUser";
 import getLocalUser from "@/modules/users/getLocalUser";
 import CogneeUser from "@/modules/users/CogneeUser";
@@ -9,7 +9,7 @@ import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import createWorkspace from "@/modules/tenant/createWorkspace";
 import HelpMenu from "./HelpMenu";
 import ProfileMenu from "./ProfileMenu";
-import { useFilter, Agent, Dataset } from "./FilterContext";
+import { useFilter } from "./FilterContext";
 import useBoolean from "@/utils/useBoolean";
 import useOutsideClick from "@/utils/useOutsideClick";
 
@@ -77,7 +77,6 @@ export default function TopBar() {
   const [user, setUser] = useState<CogneeUser>();
   const cloud = isCloudEnvironment();
   const pathname = usePathname();
-  const router = useRouter();
   const { workspace, workspaces, setWorkspace, selectedAgent, selectedDataset, setSelectedAgent, setSelectedDataset, agents, datasets } = useFilter();
 
   // Create workspace modal state
