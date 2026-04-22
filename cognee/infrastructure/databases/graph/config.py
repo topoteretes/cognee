@@ -47,7 +47,9 @@ class GraphConfig(BaseSettings):
     graph_filename: str = ""
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
-    graph_dataset_database_handler: str = "kuzu"
+    graph_dataset_database_handler: str = Field(
+        "kuzu", env="GRAPH_DATASET_TO_DATABASE_HANDLER"
+    )
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
