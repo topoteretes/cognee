@@ -1,0 +1,92 @@
+# Ledgerline interviewing rulebook — seed rules authored by Alex Chen.
+# These are the "approved" rules that ship with the demo. The agent retrieves
+# them at runtime and never writes here directly; any rule it proposes lands
+# in the same dataset with status=pending until a human approves it.
+#
+# Schema lives in rule_models.Rule (pydantic DataPoint subclass).
+
+version: 1
+author: Alex Chen
+rules:
+
+  - rule_id: R1_live_coding
+    domain: scheduling
+    status: approved
+    source: alex_playbook
+    trigger: >
+      Scheduling an interview loop for any Staff-level engineering role.
+    action: >
+      Propose a single 90-minute live coding block over video.
+      Do not propose a take-home assignment.
+    rationale: >
+      Ledgerline analyzed take-home scores against on-the-job performance
+      and found no correlation. Take-homes also add 2-3 weeks of delay and
+      we lose candidates in the gap.
+
+  - rule_id: R2_panel_footprint
+    domain: scheduling
+    status: approved
+    source: alex_playbook
+    trigger: >
+      Scheduling any Staff-level interview loop.
+    action: >
+      Book at least 4 hours of interview time across at least 3 distinct
+      panelists. Do not go below either floor.
+    rationale: >
+      Shorter loops missed a collaboration red flag in the Daniel M. case
+      (summer 2024). 4h / 3+ panelists is a hard floor, not a suggestion.
+
+  - rule_id: R3_cto_on_panel
+    domain: scheduling
+    status: approved
+    source: alex_playbook
+    trigger: >
+      Composing a panel for any Staff-level role where an offer may follow.
+    action: >
+      Include Sam (CTO) on the interview panel. Schedule the loop around
+      Sam's availability; if Sam is travelling, push the loop.
+    rationale: >
+      No Staff offer goes out without Sam having been on the panel. This is
+      a firm policy, not a preference.
+
+  - rule_id: R4_noncompete_screen
+    domain: screening
+    status: approved
+    source: alex_playbook
+    trigger: >
+      Candidate's prior_company is Stripe, Plaid, or Adyen.
+    action: >
+      During the initial screen, ask the candidate to disclose any
+      non-compete restrictions. Include a one-line question in the screen
+      invite such as "any non-compete we should know about?".
+    rationale: >
+      Stripe, Plaid, and Adyen enforce non-competes. Two 2024 offers fell
+      through because candidates raised it only at offer stage. We catch
+      it at screen time now.
+
+  - rule_id: R5_staff_backend_floor
+    domain: offer
+    status: approved
+    source: alex_playbook
+    trigger: >
+      Drafting an offer for a Staff Backend Engineer role.
+    action: >
+      Open base salary at no less than $180,000. Negotiate upward from
+      there. Do not open below $180k even if the candidate's stated target
+      is lower.
+    rationale: >
+      $180k is the Staff Backend floor. Under-offering because a candidate
+      would accept less erodes trust and has backfired.
+
+  - rule_id: R6_one_counter
+    domain: offer
+    status: approved
+    source: alex_playbook
+    trigger: >
+      Candidate has counter-offered our initial offer at least once.
+    action: >
+      Issue at most one counter-offer. If the candidate walks after our
+      second offer, move on. Do not issue a third counter.
+    rationale: >
+      Holding the line at one counter has worked for ~18 months. Third
+      counters have always been regret decisions post-hoc.

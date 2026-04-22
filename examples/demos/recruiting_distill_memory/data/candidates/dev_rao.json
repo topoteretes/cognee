@@ -1,0 +1,10 @@
+{
+  "candidate_id": "C001",
+  "name": "Dev Rao",
+  "role": "Staff Backend Engineer",
+  "prior_company": "Stripe",
+  "yoe": 8,
+  "target_comp_base": 170000,
+  "location": "Berlin",
+  "stack": ["Python", "Go", "Postgres", "Kafka"]
+}
