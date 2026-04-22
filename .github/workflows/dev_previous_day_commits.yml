@@ -1,12 +1,17 @@
 name: automation | Draft Docs PRs For Current Day Dev Merges
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       lookback_days:
         description: Number of UTC calendar days to look back when scanning merged commits
         required: false
         default: "1"
+      anchor_date:
+        description: Optional UTC date to scan, in YYYY-MM-DD format
+        required: false
+        default: ""
   schedule:
     - cron: "59 23 * * *"
 
@@ -38,10 +43,28 @@ jobs:
 
       - name: Prepare current day merged branches
         id: prepare
+        shell: bash
+        env:
+          INPUT_ANCHOR_DATE: ${{ github.event.inputs.anchor_date || '' }}
         run: |
-          python3 tools/prepare_merged_branches.py \
-            --branch origin/dev \
+          set -euo pipefail
+
+          args=(
+            --branch origin/dev
             --lookback-days "${lookback_days}"
+          )
+
+          anchor_date="${INPUT_ANCHOR_DATE}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            anchor_date="$(date -u -d 'yesterday' +%F)"
+          fi
+
+          if [ -n "${anchor_date}" ]; then
+            echo "Using anchor date ${anchor_date}"
+            args+=(--anchor-date "${anchor_date}")
+          fi
+
+          python3 tools/prepare_merged_branches.py "${args[@]}"
 
   create-docs-prs:
     needs:
@@ -152,6 +175,7 @@ jobs:
           token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
           ref: main
           path: docs-repo
+
       - name: Prepare docs branch
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         working-directory: docs-repo
@@ -415,6 +439,7 @@ jobs:
         if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
         working-directory: docs-repo
         run: git push --force-with-lease origin "${{ steps.assessment.outputs.docs_branch }}"
+
       - name: Create or update docs pull request
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: manage_pr

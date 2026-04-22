@@ -12,11 +12,11 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import shutil
+import subprocess
 import urllib.error
 import urllib.request
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -37,11 +37,55 @@ def parse_args() -> argparse.Namespace:
         help="Number of UTC calendar days to look back, including today",
     )
     parser.add_argument(
+        "--anchor-date",
+        default=None,
+        help="UTC date to anchor the scan window, in YYYY-MM-DD format",
+    )
+    parser.add_argument(
         "--repo",
         default=None,
         help="GitHub repository in owner/repo form. Defaults to parsing origin remote.",
     )
     return parser.parse_args()
+
+
+def parse_anchor_date(anchor_date: str | None) -> date | None:
+    if anchor_date is None:
+        return None
+
+    try:
+        return datetime.strptime(anchor_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid --anchor-date value {anchor_date!r}. Expected YYYY-MM-DD."
+        ) from exc
+
+
+def resolve_time_window(
+    lookback_days: int, anchor_date: str | None
+) -> tuple[datetime, datetime, str]:
+    effective_lookback = max(1, lookback_days)
+    anchor_day = parse_anchor_date(anchor_date)
+
+    if anchor_day is not None:
+        start_date = anchor_day - timedelta(days=effective_lookback - 1)
+        start = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+        end = datetime.combine(anchor_day, time(23, 59, 59), tzinfo=timezone.utc)
+        window_label = (
+            f"UTC day {anchor_day.isoformat()}"
+            if effective_lookback == 1
+            else f"last {effective_lookback} UTC days ending on {anchor_day.isoformat()}"
+        )
+        return start, end, window_label
+
+    now = datetime.now(timezone.utc)
+    start_date = now.date() - timedelta(days=effective_lookback - 1)
+    start = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+    end = now
+    window_label = (
+        "current UTC day" if effective_lookback == 1 else f"last {effective_lookback} UTC days"
+    )
+    return start, end, window_label
 
 
 def try_gh_head_ref(pr_number: str) -> str | None:
@@ -185,15 +229,11 @@ def get_branch_name(subject: str, body: str, merge_sha: str, repo: str | None) -
     )
 
 
-def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[str, Any]:
+def collect_merges(
+    branch: str, lookback_days: int, repo: str | None, anchor_date: str | None = None
+) -> dict[str, Any]:
     effective_lookback = max(1, lookback_days)
-    now = datetime.now(timezone.utc)
-    start_date = now.date() - timedelta(days=effective_lookback - 1)
-    start = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
-    end = now
-    window_label = (
-        "current UTC day" if effective_lookback == 1 else f"last {effective_lookback} UTC days"
-    )
+    start, end, window_label = resolve_time_window(effective_lookback, anchor_date)
 
     raw_log = git(
         "log",
@@ -227,7 +267,6 @@ def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[st
             )
 
         first_parent = parent_parts[0]
-        # For squash-merged PRs, diff the integrating commit against its direct parent.
         second_parent = parent_parts[1] if is_merge_commit else merge_sha
         merges.append(
             {
@@ -244,13 +283,11 @@ def collect_merges(branch: str, lookback_days: int, repo: str | None) -> dict[st
     merge_lines = [
         f"- {item['branch_name']} ({item['short_sha']}): {item['subject']}" for item in merges
     ]
-    if not merges:
-        raise RuntimeError(
-            f"No branches were merged into {branch} during the {window_label}; failing the workflow."
-        )
+
     return {
         "branch": branch,
         "lookback_days": effective_lookback,
+        "anchor_date": anchor_date,
         "start": start,
         "end": end,
         "window_label": window_label,
@@ -322,7 +359,12 @@ def print_console_summary(payload: dict[str, Any]) -> None:
 
 def main() -> None:
     args = parse_args()
-    payload = collect_merges(args.branch, args.lookback_days, get_github_repo(args.repo))
+    payload = collect_merges(
+        args.branch,
+        args.lookback_days,
+        get_github_repo(args.repo),
+        anchor_date=args.anchor_date,
+    )
     print_console_summary(payload)
     write_github_output(payload)
     write_github_summary(payload)
