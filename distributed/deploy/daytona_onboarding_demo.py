@@ -1,28 +1,33 @@
 """
-OpenClaw + Cognee on Daytona — Codebase Onboarding Demo
+Claude Code + Cognee on Daytona — Shared Memory Demo
 
-Spins up two Daytona sandboxes:
-  1. Cognee API server (memory backend)
-  2. OpenClaw agent with cognee-openclaw plugin (the onboarding agent)
+Spins up one Cognee sandbox (shared knowledge graph = public memory) and N
+Claude Code agent sandboxes. Each agent runs the cognee-memory plugin from
+cognee-integrations, which:
 
-The agent explores a target repository across multiple sessions. Between
-sessions the agent process is killed to simulate a crash. Because memory
-lives in Cognee (running in its own sandbox), the agent picks up where it
-left off — no context is lost.
+  * captures tool calls into a per-directory session cache (private memory)
+  * auto-injects relevant context on every UserPromptSubmit
+  * bridges session data into the permanent graph on SessionEnd
+
+Agents run sequentially so later agents can recall what earlier agents
+deposited into the shared graph. Each agent's session cache stays private
+to its own sandbox.
 
 Prerequisites:
     pip install daytona
 
     Set environment variables:
-        DAYTONA_API_KEY  — your Daytona API key (from https://app.daytona.io)
-        LLM_API_KEY      — your LLM provider API key
+        DAYTONA_API_KEY     — https://app.daytona.io
+        ANTHROPIC_API_KEY   — for Claude Code itself
+        LLM_API_KEY         — for Cognee (graph extraction, search)
 
 Usage:
     python distributed/deploy/daytona_onboarding_demo.py \\
         --repo https://github.com/topoteretes/cognee
 
-    # Or use defaults (onboards this repo):
-    python distributed/deploy/daytona_onboarding_demo.py
+    # Reuse an existing Cognee sandbox:
+    python distributed/deploy/daytona_onboarding_demo.py \\
+        --cognee-url https://<id>-8000.daytona.work
 """
 
 import argparse
@@ -30,11 +35,12 @@ import os
 import sys
 import time
 import asyncio
-import textwrap
+import shlex
 
-from daytona_sdk import (
+from daytona import (
     Daytona,
     DaytonaConfig,
+    DaytonaAuthorizationError,
     CreateSandboxFromImageParams,
     SessionExecuteRequest,
     Image,
@@ -43,22 +49,8 @@ from daytona_sdk import (
 
 DAYTONA_API_URL = "https://app.daytona.io/api"
 DEFAULT_REPO = "https://github.com/topoteretes/cognee"
-
-OPENCLAW_CONFIG_TEMPLATE = textwrap.dedent("""\
-    plugins:
-      entries:
-        cognee-openclaw:
-          enabled: true
-          config:
-            baseUrl: "{cognee_url}"
-            datasetName: "codebase-onboarding"
-            searchType: "GRAPH_COMPLETION"
-            autoRecall: true
-            autoIndex: true
-            autoCognify: true
-            maxResults: 10
-            maxTokens: 1024
-""")
+INTEGRATIONS_REPO = "https://github.com/topoteretes/cognee-integrations"
+PLUGIN_SUBPATH = "integrations/claude-code"
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +65,8 @@ def _get_daytona():
     return Daytona(DaytonaConfig(api_key=api_key, api_url=api_url))
 
 
-def _run_streamed(sandbox, session_id, command, label="", timeout=300):
-    """Run a command in a sandbox session, falling back to non-streaming on WS errors."""
+def _run_streamed(sandbox, session_id, command, label="", timeout=600):
+    """Run a command in a sandbox session, falling back to blocking exec on WS errors."""
     prefix = f"[{label}] " if label else ""
     try:
         cmd = sandbox.process.execute_session_command(
@@ -103,7 +95,7 @@ def _wait_for_health(sandbox, port=8000, retries=30, interval=3):
     """Poll a health endpoint until it responds."""
     sandbox.process.exec(
         "cat > /tmp/healthcheck.py << 'PYEOF'\n"
-        f"import urllib.request, sys\n"
+        f"import urllib.request\n"
         "try:\n"
         f"    urllib.request.urlopen('http://localhost:{port}/health', timeout=5)\n"
         "    print('OK')\n"
@@ -124,48 +116,53 @@ def _wait_for_health(sandbox, port=8000, retries=30, interval=3):
     return False
 
 
+def _print_tail(result, label, lines=5):
+    """Print the last N lines of a command result."""
+    if not result or not result.result:
+        return
+    for line in result.result.strip().splitlines()[-lines:]:
+        print(f"  [{label}] {line}", flush=True)
+
+
 # ---------------------------------------------------------------------------
-# Sandbox 1: Cognee API
+# Sandbox 1: Cognee API (shared public memory)
 # ---------------------------------------------------------------------------
 
 def deploy_cognee_sandbox():
-    """Deploy the Cognee API server in a Daytona sandbox.
-
-    Returns:
-        (sandbox, signed_url) — the sandbox object and its public API URL.
-    """
+    """Deploy the Cognee API server. Returns (sandbox, signed_url)."""
     llm_api_key = os.environ.get("LLM_API_KEY")
     if not llm_api_key:
         raise ValueError("LLM_API_KEY environment variable is required")
 
     daytona = _get_daytona()
 
-    print("=== Creating Cognee sandbox ===")
+    print("=== Creating Cognee sandbox (shared public memory) ===")
     sandbox = daytona.create(
         CreateSandboxFromImageParams(
             image=Image.debian_slim("3.12"),
             resources=Resources(cpu=2, memory=4, disk=10),
+            # Default is 15 min — Daytona idle-stopped the sandbox mid-demo
+            # last run, which made the plugin fall back to local storage.
+            # 0 disables auto-stop entirely.
+            auto_stop_interval=0,
             env_vars={
                 "LLM_API_KEY": llm_api_key,
                 "LLM_MODEL": os.environ.get("LLM_MODEL", "openai/gpt-4o-mini"),
                 "LLM_PROVIDER": os.environ.get("LLM_PROVIDER", "openai"),
                 "HOST": "0.0.0.0",
+                "CACHING": "true",
+                "REQUIRE_AUTHENTICATION": "False",
+                "ENABLE_BACKEND_ACCESS_CONTROL": "False",
             },
-            labels={"app": "cognee", "service": "api", "demo": "onboarding"},
+            labels={"app": "cognee", "service": "api", "demo": "shared-memory"},
         ),
     )
     print(f"  Sandbox ID: {sandbox.id}")
 
-    # Install Cognee (blocking exec — pip install is too slow for WS streaming)
     print("  Installing cognee (this may take a few minutes)...")
     result = sandbox.process.exec("pip install 'cognee[api]'", timeout=600)
-    if result.result:
-        # Print just the last few lines (success/error summary)
-        lines = result.result.strip().splitlines()
-        for line in lines[-5:]:
-            print(f"  [cognee] {line}", flush=True)
+    _print_tail(result, "cognee")
 
-    # Start API server
     print("\n  Starting Cognee API server...")
     sandbox.process.exec(
         "nohup python -m uvicorn cognee.api.client:app "
@@ -184,36 +181,98 @@ def deploy_cognee_sandbox():
 
     signed_url = sandbox.create_signed_preview_url(8000, expires_in_seconds=86400)
     print(f"  Cognee API ready: {signed_url.url}")
+
+    # Fail fast if auth wasn't actually disabled. The first pass of this demo
+    # spun up Cognee with auth still on (env var was added later); agents
+    # then fell back to local storage silently.
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{signed_url.url}/api/v1/datasets", timeout=10) as r:
+            if r.status != 200:
+                raise RuntimeError(f"unexpected status {r.status}")
+    except Exception as e:
+        raise RuntimeError(
+            f"Cognee /api/v1/datasets did not accept unauthenticated requests "
+            f"(REQUIRE_AUTHENTICATION not picked up?): {e}"
+        )
+    print("  Auth check: /api/v1/datasets accepts unauth'd requests.")
     return sandbox, signed_url.url
 
 
+def _remote_has_data(cognee_url):
+    """Poll Cognee for evidence that an agent actually wrote to the backend."""
+    import urllib.request
+    import json
+    try:
+        with urllib.request.urlopen(f"{cognee_url}/api/v1/datasets", timeout=10) as r:
+            data = json.loads(r.read())
+        return bool(data), data
+    except Exception as e:
+        return False, str(e)
+
+
 # ---------------------------------------------------------------------------
-# Sandbox 2: OpenClaw Agent
+# Sandbox N: Claude Code agent (private per-agent memory + shared graph)
 # ---------------------------------------------------------------------------
 
-def deploy_openclaw_sandbox(cognee_url, target_repo):
-    """Deploy an OpenClaw agent in a Daytona sandbox with cognee-openclaw plugin.
+def _create_with_quota_retry(daytona, params, retries=6, delay=20):
+    """Create a sandbox, retrying on the Daytona memory-quota error.
 
-    Args:
-        cognee_url: Public URL of the Cognee API sandbox.
-        target_repo: Git URL of the repo the agent will onboard onto.
-
-    Returns:
-        The sandbox object.
+    Daytona's delete is async: the concurrent-memory quota takes a short
+    while to release after a sandbox is destroyed. When we tear down one
+    agent and immediately create the next, the first attempt can still hit
+    "Total memory limit exceeded" even though we're under the cap.
     """
+    last_error = None
+    for attempt in range(retries):
+        try:
+            return daytona.create(params)
+        except DaytonaAuthorizationError as e:
+            last_error = e
+            if "memory limit" not in str(e).lower():
+                raise
+            print(f"  quota not yet released, retrying in {delay}s (attempt {attempt + 1}/{retries})...")
+            time.sleep(delay)
+    raise last_error if last_error else RuntimeError("sandbox create failed")
+
+
+def deploy_claude_code_agent(cognee_url, target_repo, label):
+    """Deploy a Claude Code sandbox with the cognee-memory plugin.
+
+    Each agent gets:
+      * its own Daytona sandbox (isolated filesystem, process space)
+      * a per-directory session ID (private session cache in Cognee)
+      * the shared Cognee backend at `cognee_url` (public graph)
+    """
+    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not anthropic_api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+
+    llm_api_key = os.environ.get("LLM_API_KEY")
+    if not llm_api_key:
+        raise ValueError("LLM_API_KEY environment variable is required")
+
     daytona = _get_daytona()
 
-    print("\n=== Creating OpenClaw agent sandbox ===")
-    sandbox = daytona.create(
+    print(f"\n=== Creating Claude Code agent sandbox: {label} ===")
+    sandbox = _create_with_quota_retry(daytona,
         CreateSandboxFromImageParams(
             image=Image.debian_slim("3.12"),
-            resources=Resources(cpu=2, memory=4, disk=10),
+            # 4 GiB was killed by the OOM killer when Claude Code + the
+            # cognee plugin + the cognee SDK all loaded at once. 6 GiB leaves
+            # the Cognee sandbox (4 GiB) exactly at the 10 GiB tier cap.
+            resources=Resources(cpu=2, memory=6, disk=10),
             env_vars={
-                "LLM_API_KEY": os.environ.get("LLM_API_KEY", ""),
+                "ANTHROPIC_API_KEY": anthropic_api_key,
+                "LLM_API_KEY": llm_api_key,
                 "LLM_MODEL": os.environ.get("LLM_MODEL", "openai/gpt-4o-mini"),
-                "COGNEE_API_URL": cognee_url,
+                "COGNEE_SERVICE_URL": cognee_url,
+                "COGNEE_PLUGIN_DATASET": "shared_codebase_memory",
+                "COGNEE_SESSION_STRATEGY": "per-directory",
+                "COGNEE_SESSION_PREFIX": label,
+                "CACHING": "true",
             },
-            labels={"app": "openclaw", "service": "agent", "demo": "onboarding"},
+            labels={"app": "claude-code", "agent": label, "demo": "shared-memory"},
         ),
     )
     print(f"  Sandbox ID: {sandbox.id}")
@@ -221,68 +280,64 @@ def deploy_openclaw_sandbox(cognee_url, target_repo):
     session_id = "agent-setup"
     sandbox.process.create_session(session_id)
 
-    # Install prerequisites + Node.js 22 via binary tarball
-    # (OpenClaw requires Node >= 22.14.0; apt only has Node 18)
     print("  Installing prerequisites...")
     sandbox.process.exec(
         "apt-get update -qq && apt-get install -y -qq curl git ca-certificates xz-utils",
-        timeout=120,
+        timeout=180,
     )
 
+    # Node.js 22 via binary tarball — apt only ships Node 18.
     print("  Installing Node.js 22...")
     node_version = "v22.16.0"
     sandbox.process.exec(
         f"curl -fsSL https://nodejs.org/dist/{node_version}/node-{node_version}-linux-x64.tar.xz "
         f"| tar -xJ -C /usr/local --strip-components=1",
-        timeout=120,
+        timeout=180,
     )
-
     result = sandbox.process.exec("node --version && npm --version", timeout=10)
     node_info = result.result.strip()
     print(f"  {node_info}")
     if not node_info.startswith("v22"):
         raise RuntimeError(f"Expected Node 22 but got: {node_info}")
 
-    # Install OpenClaw CLI + plugin (blocking exec — npm install is too slow for WS streaming)
-    print("  Installing OpenClaw + cognee plugin (this may take a few minutes)...")
+    print("  Installing Claude Code CLI...")
     result = sandbox.process.exec(
-        "npm install -g openclaw@latest @cognee/cognee-openclaw 2>&1",
-        timeout=600,
+        "npm install -g @anthropic-ai/claude-code 2>&1", timeout=600
     )
-    if result.result:
-        lines = result.result.strip().splitlines()
-        for line in lines[-5:]:
-            print(f"  [openclaw] {line}", flush=True)
+    _print_tail(result, "claude")
 
-    # Run onboard to install daemon and resolve dependencies
-    print("  Running OpenClaw onboard...")
-    result = sandbox.process.exec("openclaw onboard --install-daemon 2>&1", timeout=120)
-    if result.result:
-        lines = result.result.strip().splitlines()
-        for line in lines[-5:]:
-            print(f"  [openclaw] {line}", flush=True)
+    # Plugin depends on the cognee Python SDK for its hooks/skills.
+    print("  Installing cognee SDK (plugin dependency)...")
+    result = sandbox.process.exec("pip install cognee", timeout=600)
+    _print_tail(result, "cognee-sdk")
 
-    # Write config
-    config_content = OPENCLAW_CONFIG_TEMPLATE.format(cognee_url=cognee_url)
+    print("  Cloning cognee-integrations (for the plugin)...")
     sandbox.process.exec(
-        f"mkdir -p ~/.openclaw && cat > ~/.openclaw/config.yaml << 'CFGEOF'\n"
-        f"{config_content}"
-        f"CFGEOF",
-        timeout=5,
+        f"git clone --depth 1 {INTEGRATIONS_REPO} /opt/cognee-integrations 2>&1",
+        timeout=60,
     )
-    print("\n  Plugin configured.")
 
-    # Clone target repo
-    print(f"  Cloning {target_repo}...")
+    print(f"  Cloning target repo {target_repo}...")
     _run_streamed(
         sandbox, session_id,
         f"git clone --depth 1 {target_repo} /workspace 2>&1",
         label="git",
     )
 
-    # Create memory directory
-    sandbox.process.exec("mkdir -p /workspace/memory", timeout=5)
-    print("\n  Agent sandbox ready.")
+    # Claude Code refuses --dangerously-skip-permissions when running as root.
+    # Create an unprivileged user and dump the sandbox env so it can source
+    # the provider keys + plugin config when we invoke claude as that user.
+    print("  Creating agent user...")
+    sandbox.process.exec(
+        "useradd -m -s /bin/bash agent && "
+        "chown -R agent:agent /workspace /opt/cognee-integrations && "
+        "env | grep -E '^(ANTHROPIC_API_KEY|LLM_|COGNEE_|CACHING)=' "
+        "| sed 's/^/export /' > /home/agent/env && "
+        "chown agent:agent /home/agent/env && chmod 600 /home/agent/env",
+        timeout=15,
+    )
+
+    print(f"  Agent sandbox {label} ready.\n")
     return sandbox
 
 
@@ -290,37 +345,34 @@ def deploy_openclaw_sandbox(cognee_url, target_repo):
 # Session orchestration
 # ---------------------------------------------------------------------------
 
-def run_onboarding_session(sandbox, session_name, prompt):
-    """Run one OpenClaw agent session with a given prompt.
+def run_agent_task(sandbox, label, prompt):
+    """Run one Claude Code task with the cognee-memory plugin loaded.
 
-    The cognee-openclaw plugin auto-recalls relevant memories before the
-    prompt runs and auto-indexes new memory files after it completes.
+    Uses `claude -p` (print mode) for a single non-interactive turn.
+    The plugin:
+      * searches session cache + shared graph on UserPromptSubmit (auto)
+      * captures tool calls into the session cache on PostToolUse (auto)
+      * bridges the session into the permanent graph on SessionEnd (auto)
     """
     print(f"\n{'=' * 60}")
-    print(f"  SESSION: {session_name}")
-    print(f"  PROMPT:  {prompt[:80]}...")
+    print(f"  AGENT:  {label}")
+    print(f"  PROMPT: {prompt[:80]}...")
     print(f"{'=' * 60}\n")
 
-    sandbox.process.create_session(session_name)
-    _run_streamed(
-        sandbox, session_name,
-        f'cd /workspace && openclaw run --prompt "{prompt}"',
-        label=session_name,
+    plugin_dir = f"/opt/cognee-integrations/{PLUGIN_SUBPATH}"
+    inner = (
+        f"set -a && . /home/agent/env && set +a && "
+        f"cd /workspace && "
+        f"claude --plugin-dir {shlex.quote(plugin_dir)} "
+        f"--dangerously-skip-permissions "
+        f"-p {shlex.quote(prompt)} < /dev/null"
     )
-    print(f"\n  [{session_name}] complete.\n")
+    cmd = f"runuser -u agent -- bash -c {shlex.quote(inner)}"
 
-
-def simulate_restart(sandbox):
-    """Kill agent processes to simulate a crash."""
-    print("\n" + "~" * 60)
-    print("  SIMULATING AGENT CRASH / RESTART")
-    print("  (killing agent process, memory persists in Cognee)")
-    print("~" * 60 + "\n")
-    try:
-        sandbox.process.exec("pkill -f openclaw || true", timeout=5)
-    except Exception:
-        pass
-    time.sleep(2)
+    session_name = f"task-{label}"
+    sandbox.process.create_session(session_name)
+    _run_streamed(sandbox, session_name, cmd, label=label, timeout=1800)
+    print(f"\n  [{label}] complete.\n")
 
 
 # ---------------------------------------------------------------------------
@@ -329,26 +381,25 @@ def simulate_restart(sandbox):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="OpenClaw + Cognee on Daytona: Codebase Onboarding Demo"
+        description="Claude Code + Cognee on Daytona: shared public memory demo"
     )
     parser.add_argument(
         "--repo",
         default=os.environ.get("TARGET_REPO", DEFAULT_REPO),
-        help="Git URL of the repository to onboard (default: cognee itself)",
+        help="Git URL of the repository the agents will explore",
     )
     parser.add_argument(
         "--cognee-url",
-        default=os.environ.get("COGNEE_API_URL"),
+        default=os.environ.get("COGNEE_SERVICE_URL"),
         help="Reuse an existing Cognee API URL instead of deploying a new sandbox",
     )
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  CODEBASE ONBOARDING DEMO")
+    print("  CLAUDE CODE + COGNEE SHARED MEMORY DEMO")
     print(f"  Target repo: {args.repo}")
     print("=" * 60 + "\n")
 
-    # Deploy or reuse Cognee sandbox
     cognee_sandbox = None
     if args.cognee_url:
         cognee_url = args.cognee_url
@@ -356,42 +407,69 @@ def main():
     else:
         cognee_sandbox, cognee_url = deploy_cognee_sandbox()
 
-    agent_sandbox = deploy_openclaw_sandbox(cognee_url, args.repo)
+    # Three agents, three roles. Each has private per-directory session memory;
+    # all share the Cognee backend for the permanent graph.
+    agents = [
+        (
+            "arch",
+            "Explore this codebase. Map the project structure, key entry "
+            "points, main modules, and overall architecture. Use "
+            "/cognee-memory:cognee-remember to store the most important "
+            "findings in the shared knowledge graph under the 'project' "
+            "category so other agents can read them.",
+        ),
+        (
+            "api",
+            "Before exploring, use /cognee-memory:cognee-search to recall "
+            "anything the architecture agent stored in the shared graph. "
+            "Then describe the API layer — routes, middleware, auth, request "
+            "handling. Store your findings with /cognee-memory:cognee-remember.",
+        ),
+        (
+            "tests",
+            "Use /cognee-memory:cognee-search to pull in what the architecture "
+            "and API agents already learned. Then describe the testing strategy — "
+            "which suites exist, what they cover, and any gaps. Store findings "
+            "with /cognee-memory:cognee-remember.",
+        ),
+    ]
 
-    # --- Session 1: Architecture Discovery ---
-    run_onboarding_session(
-        agent_sandbox, "session-1",
-        "Explore this codebase. Understand the project structure, "
-        "key entry points, main modules, and overall architecture. "
-        "Write your findings to memory/architecture.md",
-    )
+    # Run agents one at a time and tear each down before the next: Daytona's
+    # default tier caps total concurrent memory at 10 GiB (Cognee = 4 GiB,
+    # each agent = 4 GiB). Personal session memory already lives on the
+    # Cognee backend, so destroying the sandbox doesn't lose anything.
+    daytona = _get_daytona()
+    ran = []
+    for label, prompt in agents:
+        sandbox = deploy_claude_code_agent(cognee_url, args.repo, label)
+        try:
+            run_agent_task(sandbox, label, prompt)
+            ran.append((label, sandbox.id))
+        finally:
+            try:
+                daytona.delete(sandbox)
+                print(f"  [{label}] sandbox {sandbox.id} destroyed.")
+            except Exception as e:
+                print(f"  [{label}] WARNING: failed to delete sandbox: {e}")
 
-    # --- Simulate crash ---
-    simulate_restart(agent_sandbox)
+        # Fail fast if nothing reached the shared backend — previously the
+        # plugin fell back to local SDK mode silently, so all three agents
+        # "succeeded" while the remote stayed empty.
+        has_data, payload = _remote_has_data(cognee_url)
+        print(f"  Remote check after {label}: datasets={payload}")
+        if not has_data and label == "arch":
+            raise RuntimeError(
+                "Cognee backend still has no datasets after arch — plugin did "
+                "not reach the remote. Aborting before burning agent credits."
+            )
 
-    # --- Session 2: API Deep Dive (should recall Session 1) ---
-    run_onboarding_session(
-        agent_sandbox, "session-2",
-        "What is the API layer structure? Explore routes, middleware, "
-        "authentication, and request handling patterns. "
-        "Write your findings to memory/api-layer.md",
-    )
-
-    # --- Session 3: Cross-cutting Concerns (should recall 1+2) ---
-    run_onboarding_session(
-        agent_sandbox, "session-3",
-        "What error handling and logging patterns are used across "
-        "the codebase? Are they consistent? "
-        "Write your findings to memory/error-handling.md",
-    )
-
-    # Summary
     print("\n" + "=" * 60)
     print("  DEMO COMPLETE")
     print(f"  Cognee API:      {cognee_url}")
     if cognee_sandbox:
         print(f"  Cognee sandbox:  {cognee_sandbox.id}")
-    print(f"  Agent sandbox:   {agent_sandbox.id}")
+    for label, sandbox_id in ran:
+        print(f"  Agent {label:<6} ran in: {sandbox_id} (destroyed)")
     print(f"  Datasets:        {cognee_url}/api/v1/datasets")
     print(f"  Swagger:         {cognee_url}/docs")
     print("=" * 60)
