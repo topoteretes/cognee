@@ -3,7 +3,6 @@
 import inspect
 import os
 from numbers import Number
-from typing import Any, cast
 
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
