@@ -19,7 +19,7 @@ Options (all have sensible defaults):
     --cycles N             Rounds of (small + large), 1–20 (default: 3).
                            Total cycles executed = 2 × N.
     --lru-cache-size N     DATABASE_MAX_LRU_CACHE_SIZE (default: 2).
-    --kuzu-buffer-mb N     Kuzu buffer pool size in MiB (default: 16).
+    --kuzu-buffer-mb N     Kuzu buffer pool size in MiB (default: 32).
     --kuzu-num-threads N   Max threads for Kuzu queries (default: 1).
     --subprocess, --no-subprocess
                            Toggle the subprocess-backed adapters for both
@@ -72,7 +72,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--kuzu-buffer-mb",
         type=int,
         default=32,
-        help="Kuzu buffer pool size in MiB (default: 16).",
+        help="Kuzu buffer pool size in MiB (default: 32).",
     )
     parser.add_argument(
         "--kuzu-num-threads",

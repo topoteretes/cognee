@@ -12,7 +12,7 @@ OP_OPEN_TABLE = 112           # args: (name,); returns handle
 OP_DROP_TABLE = 113           # args: (name,)
 
 OP_TABLE_COUNT_ROWS = 120     # handle_id
-OP_TABLE_TO_ARROW = 121       # handle_id; returns pickled pa.Table (via bytes)
+OP_TABLE_TO_ARROW = 121       # handle_id; returns pa.Table serialized as IPC stream bytes
 OP_TABLE_ADD = 122            # handle_id; args: (records: list[dict])
 OP_TABLE_DELETE = 123         # handle_id; args: (where: str)
 OP_TABLE_RELEASE = 124        # handle_id; release the table handle (no-op if already gone)

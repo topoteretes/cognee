@@ -1,6 +1,7 @@
 """Get the LLM client."""
 
 from enum import Enum
+from typing import Optional
 
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
@@ -48,18 +49,30 @@ class LLMProvider(Enum):
 _LLM_CLIENT_CACHE: dict = {}
 
 
+def _secret_fingerprint(secret) -> Optional[str]:
+    """Hash secrets so rotated keys partition the cache without ever storing
+    the raw secret in the key tuple (which would surface in repr / crash
+    dumps / logging of the global cache dict).
+    """
+    if secret is None or secret == "":
+        return None
+    import hashlib
+
+    return hashlib.sha256(str(secret).encode("utf-8")).hexdigest()
+
+
 def _llm_client_cache_key(llm_config, raise_api_key_error: bool) -> tuple:
     return (
         getattr(llm_config, "llm_provider", None),
         getattr(llm_config, "llm_model", None),
         getattr(llm_config, "llm_endpoint", None),
         getattr(llm_config, "llm_api_version", None),
-        getattr(llm_config, "llm_api_key", None),
+        _secret_fingerprint(getattr(llm_config, "llm_api_key", None)),
         getattr(llm_config, "llm_max_completion_tokens", None),
         getattr(llm_config, "llm_instructor_mode", None),
         getattr(llm_config, "llm_streaming", None),
         getattr(llm_config, "fallback_model", None),
-        getattr(llm_config, "fallback_api_key", None),
+        _secret_fingerprint(getattr(llm_config, "fallback_api_key", None)),
         getattr(llm_config, "fallback_endpoint", None),
         bool(raise_api_key_error),
     )

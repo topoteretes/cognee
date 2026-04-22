@@ -63,10 +63,6 @@ def test_kuzu_worker_does_not_import_cognee():
     )
 
 
-@pytest.mark.skipif(
-    "lancedb" not in _run_probe.__globals__ and False,
-    reason="lancedb is optional",
-)
 def test_lancedb_worker_does_not_import_cognee():
     # Skip gracefully if lancedb isn't installed in this environment.
     try:

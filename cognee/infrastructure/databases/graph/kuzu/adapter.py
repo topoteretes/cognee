@@ -113,7 +113,6 @@ class KuzuAdapter(GraphDBInterface):
             else:
                 self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
-        self._connection_change_lock = asyncio.Lock()
         self._connection_lock = asyncio.Lock()
 
     def _ensure_schema(self) -> None:
@@ -324,13 +323,7 @@ class KuzuAdapter(GraphDBInterface):
             params = params or {}
 
             def blocking_query(connection):
-                lock_acquired = False
                 try:
-                    if cache_config.shared_kuzu_lock:
-                        assert self.redis_lock is not None
-                        self.redis_lock.acquire_lock()
-                        lock_acquired = True
-
                     result = connection.execute(query, params)
                     rows = []
 
@@ -347,10 +340,6 @@ class KuzuAdapter(GraphDBInterface):
                 except Exception as e:
                     logger.error(f"Query execution failed: {str(e)}")
                     raise
-                finally:
-                    if cache_config.shared_kuzu_lock and lock_acquired:
-                        assert self.redis_lock is not None
-                        self.redis_lock.release_lock()
 
             try:
                 # Hold _connection_lock only for initialization, not for the
@@ -359,14 +348,26 @@ class KuzuAdapter(GraphDBInterface):
                     connection = self.get_or_init_connection()
 
                 if cache_config.shared_kuzu_lock:
+                    # Acquire + release the Redis lock around the query. The
+                    # release MUST happen after ``_drop_native_resources`` so
+                    # the next holder of the Redis lock can open Kuzu without
+                    # fighting this process over the on-disk file lock.
+                    # ``_drop_native_resources`` is transient: the adapter
+                    # reinitializes on the next query.
+                    assert self.redis_lock is not None
+                    self.redis_lock.acquire_lock()
                     self.open_connections += 1
                     logger.info(f"Open connections after open: {self.open_connections}")
                     try:
-                        result = blocking_query(connection)
+                        result = await loop.run_in_executor(
+                            self.executor, blocking_query, connection
+                        )
                     finally:
                         self.open_connections -= 1
                         logger.info(f"Open connections after close: {self.open_connections}")
-                        await self.close()
+                        async with self._connection_lock:
+                            self._drop_native_resources()
+                        self.redis_lock.release_lock()
                 else:
                     result = await loop.run_in_executor(
                         self.executor, blocking_query, connection
@@ -400,33 +401,49 @@ class KuzuAdapter(GraphDBInterface):
         assert self.connection is not None
         return self.connection
 
-    async def close(self):
-        """Close the database and connection, releasing native resources.
+    def _drop_native_resources(self) -> None:
+        """Synchronously drop the native Kuzu Database + Connection handles.
 
-        Holds ``_connection_lock`` to prevent closing while a query is
-        initializing or using the connection. In subprocess-proxy mode, also
-        tears down the worker session.
+        Does **not** latch ``_permanently_closed`` and does **not** touch the
+        subprocess session. Used by the shared_kuzu_lock per-query path (where
+        we want to release the on-disk file lock between queries) and by
+        ``delete_graph`` (which needs the file handles closed before removing
+        the db directory). The adapter remains reusable — a subsequent query
+        will lazily re-initialize via ``get_or_init_connection``.
         """
-        async with self._connection_lock:
-            if self.connection:
-                try:
-                    self.connection.close()
-                except Exception as e:
-                    logger.warning(f"Error closing Kuzu connection: {e}")
-                self.connection = None
-            if self.db:
-                try:
-                    self.db.close()
-                except Exception as e:
-                    logger.warning(f"Error closing Kuzu database: {e}")
-                self.db = None
-            if self._session is not None:
-                try:
-                    self._session.shutdown()
-                except Exception as e:
-                    logger.warning(f"Error shutting down Kuzu subprocess: {e}")
-                self._session = None
-            self._permanently_closed = True
+        if self.connection is not None:
+            try:
+                self.connection.close()
+            except Exception as e:
+                logger.warning(f"Error closing Kuzu connection: {e}")
+            self.connection = None
+        if self.db is not None:
+            try:
+                self.db.close()
+            except Exception as e:
+                logger.warning(f"Error closing Kuzu database: {e}")
+            self.db = None
+
+    async def close(self):
+        """Permanently close the adapter, releasing native resources and (in
+        subprocess mode) shutting down the worker process.
+
+        Intentionally does **not** hold ``_connection_lock``: that lock is an
+        ``asyncio.Lock`` bound to the loop on which the adapter was created.
+        LRU eviction may invoke ``close()`` from a different loop (for
+        example via ``asyncio.run`` in ``closing_lru_cache._close_value``),
+        and awaiting a foreign-loop lock raises "got Future attached to a
+        different loop". After this call the adapter is not reusable — see
+        ``_drop_native_resources`` if you want a transient drop.
+        """
+        self._drop_native_resources()
+        if self._session is not None:
+            try:
+                self._session.shutdown()
+            except Exception as e:
+                logger.warning(f"Error shutting down Kuzu subprocess: {e}")
+            self._session = None
+        self._permanently_closed = True
         logger.info("Kuzu database closed successfully")
 
     @asynccontextmanager
@@ -2145,7 +2162,12 @@ class KuzuAdapter(GraphDBInterface):
         It raises exceptions for failures occurring during deletion processes.
         """
         try:
-            await self.close()
+            # Transient drop: release the file handles so we can delete the
+            # db files, but do NOT latch ``_permanently_closed`` — callers
+            # expect to keep using this adapter after ``delete_graph`` and
+            # have the store lazily reinitialize.
+            async with self._connection_lock:
+                self._drop_native_resources()
 
             db_dir = os.path.dirname(self.db_path)
             db_name = os.path.basename(self.db_path)

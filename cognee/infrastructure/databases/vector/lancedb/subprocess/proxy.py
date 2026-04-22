@@ -196,13 +196,13 @@ class RemoteLanceDBTable:
 
     async def count_rows(self) -> int:
         resp = await self._session.call_async(
-            Request(op=OP_TABLE_COUNT_ROWS, handle_id=self._handle_id)
+            Request(op=OP_TABLE_COUNT_ROWS, handle_id=self.handle_id)
         )
         return int(resp.result)
 
     async def to_arrow(self) -> pa.Table:
         resp = await self._session.call_async(
-            Request(op=OP_TABLE_TO_ARROW, handle_id=self._handle_id)
+            Request(op=OP_TABLE_TO_ARROW, handle_id=self.handle_id)
         )
         buf = resp.result
         reader = pa.ipc.open_stream(pa.py_buffer(buf))
@@ -210,25 +210,25 @@ class RemoteLanceDBTable:
 
     async def add(self, records: list) -> None:
         await self._session.call_async(
-            Request(op=OP_TABLE_ADD, handle_id=self._handle_id, args=(records,))
+            Request(op=OP_TABLE_ADD, handle_id=self.handle_id, args=(records,))
         )
 
     async def delete(self, where_expr: str) -> None:
         await self._session.call_async(
-            Request(op=OP_TABLE_DELETE, handle_id=self._handle_id, args=(where_expr,))
+            Request(op=OP_TABLE_DELETE, handle_id=self.handle_id, args=(where_expr,))
         )
 
     def query(self) -> RemoteQuery:
-        return RemoteQuery(self._session, self._handle_id, OP_TABLE_QUERY_EXECUTE, ())
+        return RemoteQuery(self._session, self.handle_id, OP_TABLE_QUERY_EXECUTE, ())
 
     def vector_search(self, vector: list) -> RemoteVectorSearch:
         return RemoteVectorSearch(
-            self._session, self._handle_id, OP_TABLE_VECTOR_SEARCH_EXECUTE, (vector,)
+            self._session, self.handle_id, OP_TABLE_VECTOR_SEARCH_EXECUTE, (vector,)
         )
 
     def merge_insert(self, key: str) -> RemoteMergeInsert:
         return RemoteMergeInsert(
-            self._session, self._handle_id, OP_TABLE_MERGE_INSERT_EXECUTE, (key,)
+            self._session, self.handle_id, OP_TABLE_MERGE_INSERT_EXECUTE, (key,)
         )
 
     # Parity with lancedb's context manager protocol (used as `with table:` in

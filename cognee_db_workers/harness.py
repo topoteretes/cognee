@@ -15,6 +15,7 @@ import queue as std_queue
 import signal
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -179,6 +180,17 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
     t.start()
 
 
+# Serializes all ``spawn_without_main`` enter/exit transitions. The
+# mutation is on a single, process-global object (``sys.modules["__main__"]``),
+# so two threads entering concurrently would race: thread B would capture
+# thread A's already-cleared ``None`` as "saved", then on exit restore it,
+# permanently breaking the main module for the rest of the process. A
+# threading lock is sufficient because ``Process.start()`` blocks on the
+# child reading its pickled state, so holding this lock for the duration of
+# the spawn is fine.
+_MAIN_MODULE_MUTATION_LOCK = threading.Lock()
+
+
 class spawn_without_main:
     """Temporarily hide ``__main__.__spec__`` / ``__main__.__file__`` so that
     ``multiprocessing``'s spawn bootstrap does not re-execute the parent's main
@@ -188,33 +200,41 @@ class spawn_without_main:
     """
 
     def __enter__(self):
-        main_mod = sys.modules.get("__main__")
-        self._main = main_mod
-        self._saved_spec = getattr(main_mod, "__spec__", None) if main_mod else None
-        self._saved_file = getattr(main_mod, "__file__", None) if main_mod else None
-        if main_mod is not None:
-            try:
-                main_mod.__spec__ = None
-            except Exception:
-                pass
-            try:
-                main_mod.__file__ = None
-            except Exception:
-                pass
+        _MAIN_MODULE_MUTATION_LOCK.acquire()
+        try:
+            main_mod = sys.modules.get("__main__")
+            self._main = main_mod
+            self._saved_spec = getattr(main_mod, "__spec__", None) if main_mod else None
+            self._saved_file = getattr(main_mod, "__file__", None) if main_mod else None
+            if main_mod is not None:
+                try:
+                    main_mod.__spec__ = None
+                except Exception:
+                    pass
+                try:
+                    main_mod.__file__ = None
+                except Exception:
+                    pass
+        except BaseException:
+            _MAIN_MODULE_MUTATION_LOCK.release()
+            raise
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._main is None:
+        try:
+            if self._main is None:
+                return False
+            try:
+                self._main.__spec__ = self._saved_spec
+            except Exception:
+                pass
+            try:
+                self._main.__file__ = self._saved_file
+            except Exception:
+                pass
             return False
-        try:
-            self._main.__spec__ = self._saved_spec
-        except Exception:
-            pass
-        try:
-            self._main.__file__ = self._saved_file
-        except Exception:
-            pass
-        return False
+        finally:
+            _MAIN_MODULE_MUTATION_LOCK.release()
 
 
 Dispatcher = Callable[[HandleRegistry, Request], Any]
@@ -448,14 +468,14 @@ class SubprocessSession:
         """
         attempts_left = self._max_retries
         while True:
-            deadline = self._resolve_deadline(timeout)
+            deadline, effective_timeout = self._resolve_deadline(timeout)
             req_to_send = self._apply_remap(req)
             try:
                 with self._sync_rpc_lock:
                     self._check_alive()
                     self.touch()
                     self._req_q.put(req_to_send)
-                    resp = self._wait_response(deadline)
+                    resp = self._wait_response(deadline, effective_timeout)
                     return self._handle_response(resp)
             except (SubprocessTransportError, TimeoutError):
                 if attempts_left <= 0 or not self._can_respawn():
@@ -467,7 +487,7 @@ class SubprocessSession:
         """Async counterpart of ``call`` with identical retry semantics."""
         attempts_left = self._max_retries
         while True:
-            deadline = self._resolve_deadline(timeout)
+            deadline, effective_timeout = self._resolve_deadline(timeout)
             req_to_send = self._apply_remap(req)
             try:
                 async with self._rpc_lock:
@@ -475,7 +495,9 @@ class SubprocessSession:
                     self.touch()
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(None, self._req_q.put, req_to_send)
-                    resp = await loop.run_in_executor(None, self._wait_response, deadline)
+                    resp = await loop.run_in_executor(
+                        None, self._wait_response, deadline, effective_timeout
+                    )
                     return self._handle_response(resp)
             except (SubprocessTransportError, TimeoutError):
                 if attempts_left <= 0 or not self._can_respawn():
@@ -501,13 +523,21 @@ class SubprocessSession:
 
         return _replace(req, handle_id=new_id)
 
-    def _resolve_deadline(self, timeout) -> Optional[float]:
-        """Collapse (``...``, ``None``, float) into an absolute deadline."""
+    def _resolve_deadline(self, timeout) -> tuple:
+        """Collapse (``...``, ``None``, float) into ``(deadline, effective_timeout)``.
+
+        ``deadline`` is an absolute monotonic-ish timestamp (``None`` = no
+        deadline). ``effective_timeout`` is the numeric timeout actually in
+        effect for this call after collapsing the ``...`` sentinel to the
+        session default; it's used for diagnostic error messages so timeout
+        errors report the value the caller actually got, not the session
+        default.
+        """
         if timeout is ...:
             timeout = self._call_timeout
         if timeout is None:
-            return None
-        return time.time() + float(timeout)
+            return (None, None)
+        return (time.time() + float(timeout), float(timeout))
 
     def _handle_response(self, resp: Response) -> Response:
         if resp.exception is not None:
@@ -516,7 +546,11 @@ class SubprocessSession:
             raise RuntimeError(resp.error)
         return resp
 
-    def _wait_response(self, deadline: Optional[float] = None) -> Response:
+    def _wait_response(
+        self,
+        deadline: Optional[float] = None,
+        effective_timeout: Optional[float] = None,
+    ) -> Response:
         while True:
             remaining = _PROCESS_CHECK_INTERVAL
             if deadline is not None:
@@ -526,7 +560,7 @@ class SubprocessSession:
                     # fail fast and the caller can rebuild an adapter.
                     self._closed = True
                     raise TimeoutError(
-                        f"Subprocess call exceeded {self._call_timeout}s deadline; "
+                        f"Subprocess call exceeded {effective_timeout}s deadline; "
                         f"session marked closed"
                     )
             try:
@@ -598,9 +632,24 @@ class SubprocessSession:
                     old_id = step.apply_new_handle(resp.new_handle_id)
                     if old_id is not None:
                         new_remap[old_id] = resp.new_handle_id
-            # Merge replay's remap with any prior one (handles can be remapped
-            # across multiple successive respawns).
-            self._handle_remap = new_remap
+            # Compose this respawn's remap with the accumulated one so that
+            # in-flight Requests carrying a handle id from *any* previous
+            # incarnation (not just the immediately preceding one) get
+            # rewritten to the current generation's id.
+            #
+            # Illustration across two respawns:
+            #   prior self._handle_remap = {original -> id_A}   (after respawn #1)
+            #   this respawn's new_remap = {id_A -> id_B}       (replay promoted id_A to id_B)
+            # We want the composed remap to route both ``original`` and
+            # ``id_A`` to ``id_B``. Overwriting with ``new_remap`` alone would
+            # strand ``original`` — it would keep pointing at the now-dead
+            # ``id_A``.
+            composed: "dict[int, int]" = {}
+            for orig, intermediate in self._handle_remap.items():
+                composed[orig] = new_remap.get(intermediate, intermediate)
+            for old, new in new_remap.items():
+                composed.setdefault(old, new)
+            self._handle_remap = composed
 
     def _raw_call_locked(self, req: Request) -> Response:
         """Single-shot RPC without retry or rpc_lock (caller holds
@@ -609,7 +658,8 @@ class SubprocessSession:
         self._check_alive()
         self.touch()
         self._req_q.put(req)
-        resp = self._wait_response(self._resolve_deadline(...))
+        deadline, effective_timeout = self._resolve_deadline(...)
+        resp = self._wait_response(deadline, effective_timeout)
         return self._handle_response(resp)
 
     def shutdown(self, timeout: Optional[float] = None) -> None:

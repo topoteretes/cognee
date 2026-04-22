@@ -4,7 +4,7 @@ proxy. Pure stdlib.
 
 from __future__ import annotations
 
-OP_OPEN_DATABASE = 1           # kwargs: db_path, buffer_pool_size, max_num_threads, max_db_size
+OP_OPEN_DATABASE = 1           # kwargs: database_path, buffer_pool_size, max_num_threads, max_db_size
 OP_DB_INIT = 2                 # handle_id = database
 OP_DB_CLOSE = 3                # handle_id = database
 
