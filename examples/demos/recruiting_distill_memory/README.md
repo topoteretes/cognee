@@ -56,19 +56,21 @@ tool calls.
 
 ```
 data/
-  alex_playbook.md           prose rulebook (LLM context at retrieval time)
-  seed_rules.yaml            hand-authored Rule records (source of truth)
-  candidates/dev_rao.json    demo input
-rule_models.py               Rule, ProposedRule, tool-output models
-ingest_human_memory.py       ingest rulebook → human_memory dataset
-agent_tools.py               three @agent_memory-decorated tools
-_run.py                      shared plan runner
-run_naive.py                 with_memory=False → output/naive_plan.json
-run_grounded.py              with_memory=True  → output/grounded_plan.json
-check_rule_compliance.py     5-row PASS/FAIL table across both plans
-link_traces_to_rules.py      trace → Rule edges in the agent_memory graph
-review_pending_rules.py      human approval CLI for agent-proposed rules
-output/                      generated plan JSONs (gitignored)
+  alex_playbook.md                  prose rulebook (LLM context at retrieval)
+  seed_rules.yaml                   hand-authored Rule records
+  candidates/dev_rao.json           main demo input (ex-Stripe, R4 triggers)
+  candidates/maria_cruz.json        edge-case input (ex-Revolut, R4 skipped)
+rule_models.py                      Rule, ProposedRule, tool-output models
+ingest_human_memory.py              ingest rulebook → human_memory dataset
+agent_tools.py                      three @agent_memory-decorated tools
+_run.py                             shared plan runner (reads candidate via env)
+run_naive.py                        with_memory=False → output/naive_plan.json
+run_grounded.py                     with_memory=True  → output/grounded_plan.json
+run_grounded_edge.py                edge case: Maria Cruz (ex-Revolut)
+check_rule_compliance.py            5-row PASS/FAIL table across both plans
+link_traces_to_rules.py             trace → Rule edges in agent_memory graph
+review_pending_rules.py             human approval CLI for agent-proposed rules
+output/                             generated plan JSONs (gitignored)
 ```
 
 ## Prerequisites
@@ -108,6 +110,25 @@ python -m examples.demos.recruiting_distill_memory.review_pending_rules
 #    applied_rule cross-edges between agent_memory and human_memory
 cognee-cli -ui
 ```
+
+### Edge-case run: trigger-matching correctness
+
+To verify that R4's trigger (only Stripe/Plaid/Adyen) keeps it out of an
+unrelated candidate's screen invite:
+
+```bash
+python -m examples.demos.recruiting_distill_memory.run_grounded_edge
+python -m examples.demos.recruiting_distill_memory.link_traces_to_rules \
+  --session-id recruiting-demo-grounded-maria
+```
+
+Maria Cruz is ex-Revolut. Expected behavior: `compose_screen_invite`
+does **not** apply R4 (Revolut isn't in R4's enumerated list), even
+though Revolut is a fintech and a human might argue it's relevant. This
+is trigger-matching working correctly — and it's the counterpart to
+Dev Rao's run, where R4 does fire. Any "extend R4 to cover Revolut"
+decision is deferred to a human via `review_pending_rules.py` rather
+than made implicitly by the LLM.
 
 ## Expected payoff
 

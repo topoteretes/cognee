@@ -7,6 +7,7 @@ Imported by run_naive.py / run_grounded.py *after* they set the env flags
 
 import datetime as dt
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +21,14 @@ from examples.demos.recruiting_distill_memory.agent_tools import (
 )
 
 HERE = Path(__file__).parent
-CANDIDATE_PATH = HERE / "data" / "candidates" / "dev_rao.json"
+CANDIDATES_DIR = HERE / "data" / "candidates"
 OUTPUT_DIR = HERE / "output"
 
 
 async def run_plan(output_filename: str) -> dict[str, Any]:
-    candidate = json.loads(CANDIDATE_PATH.read_text())
+    candidate_name = os.environ.get("RECRUITING_CANDIDATE", "dev_rao")
+    candidate_path = CANDIDATES_DIR / f"{candidate_name}.json"
+    candidate = json.loads(candidate_path.read_text())
     summary = format_candidate(candidate)
 
     mode = "grounded" if WITH_MEMORY else "naive"

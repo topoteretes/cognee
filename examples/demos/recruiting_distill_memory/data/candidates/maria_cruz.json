@@ -1,0 +1,10 @@
+{
+  "candidate_id": "C002",
+  "name": "Maria Cruz",
+  "role": "Staff Backend Engineer",
+  "prior_company": "Revolut",
+  "yoe": 7,
+  "target_comp_base": 175000,
+  "location": "London",
+  "stack": ["Python", "Go", "Postgres", "Redis"]
+}
