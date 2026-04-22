@@ -33,6 +33,15 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     async def on_after_register(self, user: User, request: Optional[Request] = None):
         logger.info("User %s has registered.", user.id)
 
+        # Auto-verify and promote agent users (@cognee.agent emails).
+        # Agents register programmatically and don't go through email
+        # verification. They need verified+superuser status to access
+        # protected endpoints (remember, cognify, etc.).
+        if user.email and user.email.endswith("@cognee.agent"):
+            user_update = {"is_verified": True, "is_superuser": True}
+            await self.update(user_update, user)
+            logger.info("Agent %s auto-verified and promoted.", user.email)
+
     async def on_after_forgot_password(
         self, user: User, token: str, request: Optional[Request] = None
     ):
