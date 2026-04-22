@@ -1,13 +1,13 @@
 """
 Scenario test: subprocess-backed Kuzu + LanceDB with a tight LRU cache.
 
-Runs 3×N add → cognify → search cycles, each in its own dataset, in three
-phases:
-    Phase 1 — N cycles on a small inline snippet.
-    Phase 2 — N cycles on distinct large public-domain texts lazily
-              downloaded from Project Gutenberg to the system temp dir
-              (one text per cycle, up to 15).
-    Phase 3 — N cycles on the small snippet again.
+Repeats the following ``N`` times, each pair in its own two fresh datasets:
+    1. An add → cognify → search cycle on a small inline snippet.
+    2. An add → cognify → search cycle on a distinct large public-domain
+       text lazily downloaded from Project Gutenberg to the system temp dir.
+
+Total cycles executed = 2 × N. At ``--cycles 20`` that's 40 cycles drawing
+from 20 distinct large texts.
 
 After every cycle, prints the RSS of the main process and all of its
 children (the subprocess DB workers).
@@ -16,8 +16,8 @@ Usage:
     python ./cognee/tests/test_subprocess_rss.py [options]
 
 Options (all have sensible defaults):
-    --cycles N             Cycles per phase, 1–15 (default: 3). Total cycles
-                           executed = 3 × N.
+    --cycles N             Rounds of (small + large), 1–20 (default: 3).
+                           Total cycles executed = 2 × N.
     --lru-cache-size N     DATABASE_MAX_LRU_CACHE_SIZE (default: 2).
     --kuzu-buffer-mb N     Kuzu buffer pool size in MiB (default: 16).
     --kuzu-num-threads N   Max threads for Kuzu queries (default: 1).
@@ -41,9 +41,9 @@ def _cycles_type(raw: str) -> int:
         n = int(raw)
     except ValueError:
         raise argparse.ArgumentTypeError(f"--cycles must be an integer, got {raw!r}")
-    if not 1 <= n <= 15:
+    if not 1 <= n <= 20:
         raise argparse.ArgumentTypeError(
-            f"--cycles must be between 1 and 15 inclusive, got {n}"
+            f"--cycles must be between 1 and 20 inclusive, got {n}"
         )
     return n
 
@@ -57,9 +57,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=_cycles_type,
         default=3,
         help=(
-            "Cycles per phase, 1–15 (default: 3). Phase 1 and 3 each run N "
-            "small-text cycles; phase 2 runs N distinct large-text cycles. "
-            "Total cycles = 3 × N."
+            "Rounds of (small + large), 1–20 (default: 3). Each round runs "
+            "one small-text cycle followed by one large-text cycle in a fresh "
+            "dataset each. Total cycles = 2 × N."
         ),
     )
     parser.add_argument(
@@ -114,8 +114,8 @@ from cognee.modules.search.types import SearchType
 from cognee_db_workers.harness import collect_garbage_in_all_workers
 
 
-# Fifteen distinct public-domain Gutenberg books (each roughly 400 KB – 1.5 MB).
-# One is used per large-phase cycle; with ``--cycles 15`` we use all of them.
+# Twenty distinct public-domain Gutenberg books (each roughly 400 KB – 1.5 MB).
+# One is used per large-round cycle; with ``--cycles 20`` we use all of them.
 LARGE_TEXTS: list[tuple[str, str]] = [
     ("pride_and_prejudice.txt", "https://www.gutenberg.org/cache/epub/1342/pg1342.txt"),
     ("frankenstein.txt", "https://www.gutenberg.org/cache/epub/84/pg84.txt"),
@@ -132,6 +132,11 @@ LARGE_TEXTS: list[tuple[str, str]] = [
     ("treasure_island.txt", "https://www.gutenberg.org/cache/epub/120/pg120.txt"),
     ("war_of_the_worlds.txt", "https://www.gutenberg.org/cache/epub/36/pg36.txt"),
     ("metamorphosis.txt", "https://www.gutenberg.org/cache/epub/5200/pg5200.txt"),
+    ("little_women.txt", "https://www.gutenberg.org/cache/epub/514/pg514.txt"),
+    ("anne_of_green_gables.txt", "https://www.gutenberg.org/cache/epub/45/pg45.txt"),
+    ("tom_sawyer.txt", "https://www.gutenberg.org/cache/epub/74/pg74.txt"),
+    ("emma.txt", "https://www.gutenberg.org/cache/epub/158/pg158.txt"),
+    ("the_iliad.txt", "https://www.gutenberg.org/cache/epub/6130/pg6130.txt"),
 ]
 
 SMALL_TEXT = (
@@ -283,11 +288,11 @@ async def run_cycle(
 
 async def main() -> None:
     buffer_pool_bytes = max(1, ARGS.kuzu_buffer_mb) * 1024 * 1024
-    cycles_per_phase = ARGS.cycles
-    total_cycles = 3 * cycles_per_phase
+    rounds = ARGS.cycles
+    total_cycles = 2 * rounds
 
     print(
-        f"Running with: cycles={cycles_per_phase} per phase (total={total_cycles}), "
+        f"Running with: rounds={rounds} of (small + large) = {total_cycles} cycles total, "
         f"lru_cache_size={ARGS.lru_cache_size}, "
         f"kuzu_buffer_mb={ARGS.kuzu_buffer_mb}, "
         f"kuzu_num_threads={ARGS.kuzu_num_threads}, "
@@ -318,8 +323,8 @@ async def main() -> None:
         str(base_dir / ".cognee_system" / "test_subprocess_rss")
     )
 
-    # Lazy-download exactly the N large texts we need for phase 2.
-    selected_texts = LARGE_TEXTS[:cycles_per_phase]
+    # Lazy-download exactly the N large texts we need — one per round.
+    selected_texts = LARGE_TEXTS[:rounds]
     large_text_paths = [
         download_text(LARGE_TEXT_CACHE_DIR / filename, url)
         for filename, url in selected_texts
@@ -331,21 +336,14 @@ async def main() -> None:
     print_rss("baseline (after prune)")
 
     cycle = 0
-
-    # Phase 1: small text
-    for i in range(1, cycles_per_phase + 1):
+    for i in range(1, rounds + 1):
+        # Small cycle first, then the matching large text for this round,
+        # each in its own fresh dataset.
         cycle += 1
-        await run_cycle(cycle, total_cycles, f"small_a_{i}", SMALL_TEXT)
+        await run_cycle(cycle, total_cycles, f"small_{i}", SMALL_TEXT)
 
-    # Phase 2: one distinct large text per cycle
-    for i, text_path in enumerate(large_text_paths, start=1):
         cycle += 1
-        await run_cycle(cycle, total_cycles, f"large_{i}", [text_path])
-
-    # Phase 3: small text again
-    for i in range(1, cycles_per_phase + 1):
-        cycle += 1
-        await run_cycle(cycle, total_cycles, f"small_b_{i}", SMALL_TEXT)
+        await run_cycle(cycle, total_cycles, f"large_{i}", [large_text_paths[i - 1]])
 
     print("\nAll cycles complete.", flush=True)
 
