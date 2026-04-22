@@ -71,7 +71,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--kuzu-buffer-mb",
         type=int,
-        default=42,
+        default=32,
         help="Kuzu buffer pool size in MiB (default: 16).",
     )
     parser.add_argument(
