@@ -109,6 +109,16 @@ jobs:
   integration-other:
     name: Integration - Deletion & Misc
     runs-on: ubuntu-22.04
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
       ENV: 'dev'
@@ -122,6 +132,7 @@ jobs:
       EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
       EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+      CACHE_HOST: redis
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -132,7 +143,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          extra-dependencies: "scraping"
+          extra-dependencies: "scraping redis"
 
       - name: Run Deletion & Misc Tests
         run: uv run pytest cognee/tests/integration/test_delete_edge_cases.py cognee/tests/integration/shared/

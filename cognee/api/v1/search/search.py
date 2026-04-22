@@ -43,7 +43,23 @@ async def search(
     feedback_influence: float = 0.0,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = None,
 ) -> List[SearchResult]:
+    if neighborhood_depth is not None and (
+        not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
+    ):
+        raise CogneeValidationError(
+            message="neighborhood_depth must be a positive integer.",
+            name="InvalidNeighborhoodDepth",
+        )
+    if neighborhood_seed_top_k is not None and (
+        not isinstance(neighborhood_seed_top_k, int) or neighborhood_seed_top_k < 1
+    ):
+        raise CogneeValidationError(
+            message="neighborhood_seed_top_k must be a positive integer.",
+            name="InvalidNeighborhoodSeedTopK",
+        )
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -186,6 +202,13 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+    # Route to remote instance if connected via serve()
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.search(query_text, search_type=query_type, datasets=datasets)
+
     with new_span("cognee.api.search") as span:
         span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
         span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))
@@ -244,6 +267,8 @@ async def search(
             feedback_influence=feedback_influence,
             verbose=verbose,
             retriever_specific_config=retriever_specific_config,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
 
         n = len(filtered_search_results) if filtered_search_results else 0

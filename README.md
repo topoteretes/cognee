@@ -70,6 +70,15 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 
 :star: _Help us reach more developers and grow the cognee community. Star this repo!_
 
+:books: _Check our detailed [documentation](https://docs.cognee.ai/getting-started/installation#environment-configuration) for setup and configuration._
+
+:crab: _Available as a plugin for your OpenClaw — [cognee-openclaw](https://www.npmjs.com/package/@cognee/cognee-openclaw)_
+
+✴️ _Available as a plugin for your Claude Code — [claude-code-plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code)_
+
+
+Cognee memory plugin
+
 
 ### Why use Cognee:
 
@@ -77,7 +86,11 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 - Persistent and Learning Agents - learn from feedback, context management, cross-agent knowledge sharing
 - Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
 
+### Product Features
 
+<p align="center">
+  <img src="assets/cognee_products.png" alt="Cognee Products" width="80%" />
+</p>
 
 ## Basic Usage & Feature Guide
 
@@ -87,7 +100,7 @@ To learn more, [check out this short, end-to-end Colab walkthrough](https://cola
 
 ## Quickstart
 
-Let’s try Cognee in just a few lines of code. For detailed setup and configuration, see the [Cognee Docs](https://docs.cognee.ai/getting-started/installation#environment-configuration).
+Let’s try Cognee in just a few lines of code.
 
 ### Prerequisites
 
@@ -112,29 +125,32 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 ### Step 3: Run the Pipeline
 
-Cognee will take your documents, load them into the knowledge angine and search combined vector/graph relationships.
-
-Now, run a minimal pipeline:
+Cognee's API gives you four operations — `remember`, `recall`, `forget`, and `improve`:
 
 ```python
 import cognee
 import asyncio
-from pprint import pprint
 
 
 async def main():
-    # Add text to cognee
-    await cognee.add("Cognee turns documents into AI memory.")
+    # Store permanently in the knowledge graph (runs add + cognify + improve)
+    await cognee.remember("Cognee turns documents into AI memory.")
 
-    # Add to knowledge engine
-    await cognee.cognify()
+    # Store in session memory (fast cache, syncs to graph in background)
+    await cognee.remember("User prefers detailed explanations.", session_id="chat_1")
 
-    # Query the knowledge graph
-    results = await cognee.search("What does Cognee do?")
-
-    # Display the results
+    # Query with auto-routing (picks best search strategy automatically)
+    results = await cognee.recall("What does Cognee do?")
     for result in results:
-        pprint(result)
+        print(result)
+
+    # Query session memory first, fall through to graph if needed
+    results = await cognee.recall("What does the user prefer?", session_id="chat_1")
+    for result in results:
+        print(result)
+
+    # Delete when done
+    await cognee.forget(dataset="main_dataset")
 
 
 if __name__ == '__main__':
@@ -142,24 +158,14 @@ if __name__ == '__main__':
 
 ```
 
-As you can see, the output is generated from the document we previously stored in Cognee:
-
-```bash
-  Cognee turns documents into AI memory.
-```
-
 ### Use the Cognee CLI
 
-As an alternative, you can get started with these essential commands:
-
 ```bash
-cognee-cli add "Cognee turns documents into AI memory."
+cognee-cli remember "Cognee turns documents into AI memory."
 
-cognee-cli cognify
+cognee-cli recall "What does Cognee do?"
 
-cognee-cli search "What does Cognee do?"
-cognee-cli delete --all
-
+cognee-cli forget --all
 ```
 
 To open the local UI, run:
@@ -167,11 +173,136 @@ To open the local UI, run:
 cognee-cli -ui
 ```
 
-## Demos & Examples
+## Use with AI Agents
 
-See Cognee in action:
+### Claude Code
 
-### Persistent Agent Memory
+Install the [Cognee memory plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to give Claude Code persistent memory across sessions. The plugin automatically captures tool calls into session memory via hooks and syncs to the permanent knowledge graph at session end.
+
+**Setup:**
+
+```bash
+# Install cognee
+pip install cognee
+
+# Configure
+export LLM_API_KEY="your-openai-key"
+
+# Clone the plugin
+git clone https://github.com/topoteretes/cognee-integrations.git
+
+# Enable it (add to ~/.zshrc for permanent use)
+claude --plugin-dir ./cognee-integrations/integrations/claude-code
+```
+
+Or connect to Cognee Cloud instead of running locally:
+
+```bash
+export COGNEE_SERVICE_URL="https://your-instance.cognee.ai"
+export COGNEE_API_KEY="ck_..."
+```
+
+The plugin hooks into Claude Code's lifecycle — `SessionStart` initializes memory, `PostToolUse` captures actions, `UserPromptSubmit` injects relevant context, `PreCompact` preserves memory across context resets, and `SessionEnd` bridges session data into the permanent graph.
+
+### Hermes Agent
+
+Enable Cognee as the memory provider in [Hermes Agent](https://github.com/NousResearch/hermes-agent) for session-aware knowledge graph memory with auto-routing recall.
+
+**Setup:**
+
+```yaml
+# ~/.hermes/config.yaml
+memory:
+  provider: cognee
+```
+
+```bash
+export LLM_API_KEY="your-openai-key"
+hermes  # start chatting — session memory and graph persistence are automatic
+```
+
+Or run `hermes memory setup` and select Cognee. For Cognee Cloud, set `COGNEE_SERVICE_URL` and `COGNEE_API_KEY` in `~/.hermes/.env`.
+
+
+### Connect to Cognee Cloud
+
+Point any Python agent at a managed Cognee instance — all SDK calls route to the cloud:
+
+```python
+import cognee
+
+await cognee.serve(url="https://your-instance.cognee.ai", api_key="ck_...")
+
+await cognee.remember("important context")
+results = await cognee.recall("what happened?")
+
+await cognee.disconnect()
+```
+
+## Examples
+
+Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations.
+
+**Use Case 1 — Customer Support Agent**
+
+```python
+Goal: Resolve customer issues using their personal data across finance, support, and product history.
+
+User: "My invoice looks wrong and the issue is still not resolved."
+
+Cognee tracks: past interactions, failed actions, resolved cases, product history
+
+# Agent response:
+Agent: "I found 2 similar billing cases resolved last month.
+        The issue was caused by a sync delay between payment
+        and invoice systems — a fix was applied on your account."
+
+# What happens under the hood:
+- Unifies data sources from various company channels
+- Reconstructs the interaction timeline and tracks outcomes
+- Retrieves similar resolved cases
+- Maps to the best resolution strategy
+- Updates memory after execution so the agent never repeats the same mistake
+```
+
+**Use Case 2 — Expert Knowledge Distillation (SQL Copilot)**
+
+```python
+Goal: Help junior analysts solve tasks by reusing expert-level queries, patterns, and reasoning.
+
+User: "How do I calculate customer retention for this dataset?"
+
+Cognee tracks: expert SQL queries, workflow patterns, schema structures, successful implementations
+
+# Agent response:
+Agent: "Here's how senior analysts solved a similar retention query.
+        Cognee matched your schema to a known structure and adapted
+        the expert's logic to fit your dataset."
+
+# What happens under the hood:
+- Extracts and stores patterns from expert SQL queries and workflows
+- Maps the current schema to previously seen structures
+- Retrieves similar tasks and their successful implementations
+- Adapts expert reasoning to the current context
+- Updates memory with new successful patterns so junior analysts perform at near-expert level
+```
+
+## Deploy Cognee
+
+Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or self-host with one of the 1-click deployment configurations below.
+
+| Platform | Best For | Command |
+|----------|----------|---------|
+| **Cognee Cloud** | Managed service, no infrastructure to maintain | [Sign up](https://www.cognee.ai) or `await cognee.serve()` |
+| **Modal** | Serverless, auto-scaling, GPU workloads | `bash distributed/deploy/modal-deploy.sh` |
+| **Railway** | Simplest PaaS, native Postgres | `railway init && railway up` |
+| **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
+| **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
+| **Daytona** | Cloud sandboxes (SDK or CLI) | See `distributed/deploy/daytona_sandbox.py` |
+
+See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
+
+## Latest News
 
 [![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 

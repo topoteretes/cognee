@@ -55,10 +55,12 @@ async def get_memory_fragment(
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     graph_engine=None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = 10,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
-        properties_to_project = ["id", "description", "name", "type", "text"]
+        properties_to_project = ["id", "description", "name", "type", "text", "importance_weight"]
 
     node_properties_to_project = list(properties_to_project)
     edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
@@ -74,17 +76,36 @@ async def get_memory_fragment(
     try:
         if graph_engine is None:
             graph_engine = await get_graph_engine()
-        await memory_fragment.project_graph_from_db(
-            graph_engine,
-            node_properties_to_project=node_properties_to_project,
-            edge_properties_to_project=edge_properties_to_project,
-            node_type=node_type,
-            node_name=node_name,
-            node_name_filter_operator=node_name_filter_operator,
-            relevant_ids_to_filter=relevant_ids_to_filter,
-            triplet_distance_penalty=triplet_distance_penalty,
-            feedback_influence=feedback_influence,
-        )
+
+        if neighborhood_depth is not None and relevant_ids_to_filter:
+            # Use neighborhood-based projection with seed nodes
+            seed_ids = relevant_ids_to_filter[:neighborhood_seed_top_k]
+            await memory_fragment.project_neighborhood_from_db(
+                graph_engine,
+                node_properties_to_project=node_properties_to_project,
+                edge_properties_to_project=edge_properties_to_project,
+                seed_node_ids=seed_ids,
+                depth=neighborhood_depth,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+            )
+        elif neighborhood_depth is not None and not relevant_ids_to_filter:
+            raise ValueError(
+                "neighborhood_depth requires seed node IDs from vector search "
+                "(set wide_search_top_k to a positive integer)"
+            )
+        else:
+            await memory_fragment.project_graph_from_db(
+                graph_engine,
+                node_properties_to_project=node_properties_to_project,
+                edge_properties_to_project=edge_properties_to_project,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
+                relevant_ids_to_filter=relevant_ids_to_filter,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+            )
     except EntityNotFoundError:
         pass
     except Exception as e:
@@ -106,6 +127,8 @@ async def _get_top_triplet_importances(
     top_k: int,
     query_list_length: Optional[int] = None,
     graph_engine=None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = 10,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
@@ -114,6 +137,10 @@ async def _get_top_triplet_importances(
             When None, node_distances/edge_distances are flat lists; when set, they are list-of-lists.
         graph_engine: Optional pre-created graph engine to pass through to
             ``get_memory_fragment()``.
+        neighborhood_depth: If set, extract a k-hop neighborhood around seed nodes
+            instead of projecting the full or ID-filtered graph.
+        neighborhood_seed_top_k: Maximum number of seed nodes to use for neighborhood
+            extraction. (default 10)
 
     Returns:
         List[Edge]: For single-query mode (query_list_length is None).
@@ -134,7 +161,41 @@ async def _get_top_triplet_importances(
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
             graph_engine=graph_engine,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
         )
+
+        # Re-score expansion nodes discovered via neighborhood traversal.
+        # These nodes have no vector scores yet — run an ID-filtered vector
+        # search so they participate in triplet ranking instead of getting
+        # the default penalty score.
+        if (
+            neighborhood_depth is not None
+            and relevant_node_ids
+            and vector_search.query_vector is not None
+        ):
+            seed_set = set(relevant_node_ids)
+            expansion_ids = [nid for nid in memory_fragment.nodes if nid not in seed_set]
+            if expansion_ids:
+                for collection_name in list(vector_search.node_distances.keys()):
+                    try:
+                        extra_scores = await vector_search.vector_engine.search(
+                            collection_name=collection_name,
+                            query_vector=vector_search.query_vector,
+                            limit=len(expansion_ids),
+                            node_name=expansion_ids,
+                        )
+                        if extra_scores:
+                            if vector_search.query_list_length is None:
+                                vector_search.node_distances[collection_name].extend(extra_scores)
+                            else:
+                                for qi, per_query in enumerate(extra_scores):
+                                    if qi < len(vector_search.node_distances[collection_name]):
+                                        vector_search.node_distances[collection_name][qi].extend(
+                                            per_query
+                                        )
+                    except CollectionNotFoundError:
+                        pass
 
     await memory_fragment.map_vector_distances_to_graph_nodes(
         node_distances=vector_search.node_distances, query_list_length=query_list_length
@@ -164,6 +225,8 @@ async def brute_force_triplet_search(
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     unified_engine: Optional[UnifiedStoreEngine] = None,
+    neighborhood_depth: Optional[int] = None,
+    neighborhood_seed_top_k: Optional[int] = 10,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -263,6 +326,8 @@ async def brute_force_triplet_search(
                 top_k,
                 query_list_length=query_list_length,
                 graph_engine=graph_engine,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)

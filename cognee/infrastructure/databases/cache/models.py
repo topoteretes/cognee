@@ -1,5 +1,10 @@
-from typing import Dict, List, Optional
-from pydantic import BaseModel, field_validator
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, field_validator
+from cognee.modules.agent_memory.sanitization import (
+    MAX_SERIALIZED_VALUE_LENGTH,
+    sanitize_value,
+    truncate_text,
+)
 
 
 def _validate_list_of_str(value: object, key: str) -> List[str]:
@@ -78,3 +83,62 @@ class SessionQAEntry(BaseModel):
                 raise ValueError("memify_metadata may only have string keys and bool values")
             out[key] = val
         return out if out else None
+
+
+class SessionAgentTraceEntry(BaseModel):
+    """
+    Canonical format for one agent trace step stored in session cache.
+
+    Fields:
+        trace_id: Unique identifier for the trace step.
+        origin_function: Agent method/function that produced the step.
+        status: Execution status for the step.
+        memory_query: Optional memory lookup query used by the step.
+        memory_context: Optional memory context returned to the step.
+        method_params: Serialized method parameters for the step.
+        method_return_value: Serialized method return value for the step.
+        error_message: Error details for failed steps.
+        session_feedback: Per-step feedback generated from the step only.
+    """
+
+    trace_id: str
+    origin_function: str
+    status: str
+    memory_query: str = ""
+    memory_context: str = ""
+    method_params: Dict[str, Any] = Field(default_factory=dict)
+    method_return_value: Any = None
+    error_message: str = ""
+    session_feedback: str = ""
+
+    @field_validator("trace_id", "origin_function", "status")
+    @classmethod
+    def required_non_empty_string(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("value must be a string")
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("value must be a non-empty string")
+        return truncate_text(stripped, MAX_SERIALIZED_VALUE_LENGTH)
+
+    @field_validator("memory_query", "memory_context", "error_message", "session_feedback")
+    @classmethod
+    def normalize_optional_text_fields(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("value must be a string")
+        return truncate_text(v.strip(), MAX_SERIALIZED_VALUE_LENGTH)
+
+    @field_validator("method_params")
+    @classmethod
+    def sanitize_method_params(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(v, dict):
+            raise ValueError("method_params must be a dict")
+        sanitized = sanitize_value(v)
+        if not isinstance(sanitized, dict):
+            raise ValueError("method_params must sanitize to a dict")
+        return sanitized
+
+    @field_validator("method_return_value")
+    @classmethod
+    def sanitize_method_return_value(cls, v: Any) -> Any:
+        return sanitize_value(v)

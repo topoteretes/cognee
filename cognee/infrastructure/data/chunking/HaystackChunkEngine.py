@@ -1,3 +1,8 @@
+from collections.abc import Iterable
+
+from cognee.shared.data_models import ChunkStrategy
+
+
 class HaystackChunkEngine:
     """
     Manage chunking of source data using specified strategies and parameters.
@@ -8,7 +13,13 @@ class HaystackChunkEngine:
     is chunked.
     """
 
-    def __init__(self, chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None):
+    def __init__(
+        self,
+        chunk_strategy: ChunkStrategy | None = None,
+        source_data: Iterable[str] | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+    ) -> None:
         self.chunk_strategy = chunk_strategy
         self.source_data = source_data
         self.chunk_size = chunk_size

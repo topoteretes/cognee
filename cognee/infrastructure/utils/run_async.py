@@ -1,9 +1,20 @@
 import asyncio
-from functools import partial
 import inspect
+from collections.abc import Callable
+from concurrent.futures import Executor
+from functools import partial
+from typing import Any, TypeVar
+
+T = TypeVar("T")
 
 
-async def run_async(func, *args, loop=None, executor=None, **kwargs):
+async def run_async(
+    func: Callable[..., T],
+    *args: Any,
+    loop: asyncio.AbstractEventLoop | None = None,
+    executor: Executor | None = None,
+    **kwargs: Any,
+) -> T:
     if loop is None:
         try:
             loop = asyncio.get_running_loop()

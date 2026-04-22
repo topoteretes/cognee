@@ -1,9 +1,10 @@
 import os
-from typing import List
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from typing import Any
+
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 
 
 class ImageLoader(LoaderInterface):
@@ -11,8 +12,10 @@ class ImageLoader(LoaderInterface):
     Core image file loader that handles basic image file formats.
     """
 
+    loader_name = "image_loader"
+
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Supported text file extensions."""
         return [
             "png",
@@ -37,7 +40,7 @@ class ImageLoader(LoaderInterface):
         ]
 
     @property
-    def supported_mime_types(self) -> List[str]:
+    def supported_mime_types(self) -> list[str]:
         """Supported MIME types for text content."""
         return [
             "image/png",
@@ -58,11 +61,6 @@ class ImageLoader(LoaderInterface):
             "image/avif",
         ]
 
-    @property
-    def loader_name(self) -> str:
-        """Unique identifier for this loader."""
-        return "image_loader"
-
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """
         Check if this loader can handle the given file.
@@ -79,7 +77,7 @@ class ImageLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, **kwargs):
+    async def load(self, file_path: str, **kwargs: Any) -> str:
         """
         Load and process the image file.
 
@@ -104,6 +102,9 @@ class ImageLoader(LoaderInterface):
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
         result = await LLMGateway.transcribe_image(file_path)
+
+        if not kwargs.get("persist", True):
+            return result.choices[0].message.content
 
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]

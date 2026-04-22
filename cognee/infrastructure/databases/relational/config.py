@@ -1,8 +1,9 @@
-import os
 import json
-import pydantic
-from typing import Union
+import os
 from functools import lru_cache
+from typing import Union
+
+import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.base_config import get_base_config
@@ -35,29 +36,25 @@ class RelationalConfig(BaseSettings):
 
         # Parse database_connect_args if provided as JSON string
         if self.database_connect_args and isinstance(self.database_connect_args, str):
-            try:
-                parsed_args = json.loads(self.database_connect_args)
-                if isinstance(parsed_args, dict):
-                    # Note: For caching purposes, database_connect_args is stored as a sorted tuple of key-value pairs in the config
-                    #       It is later returned to a dictionary format
-                    self.database_connect_args = tuple(sorted(parsed_args.items()))
-                else:
-                    self.database_connect_args = {}
-            except json.JSONDecodeError:
-                self.database_connect_args = {}
+            parsed_args = json.loads(self.database_connect_args)
+            if isinstance(parsed_args, dict):
+                # Note: For caching purposes, database_connect_args is stored as a sorted tuple of key-value pairs in the config
+                #       It is later returned to a dictionary format
+                self.database_connect_args = tuple(sorted(parsed_args.items()))
+            else:
+                raise ValueError(
+                    "DATABASE_CONNECT_ARGS must be a JSON string representing a dictionary"
+                )
 
         # Parse pool_args if provided as JSON string
         if self.pool_args and isinstance(self.pool_args, str):
-            try:
-                parsed_args = json.loads(self.pool_args)
-                if isinstance(parsed_args, dict):
-                    # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
-                    #       It is later returned to a dictionary format
-                    self.pool_args = tuple(sorted(parsed_args.items()))
-                else:
-                    self.pool_args = {}
-            except json.JSONDecodeError:
-                self.pool_args = {}
+            parsed_args = json.loads(self.pool_args)
+            if isinstance(parsed_args, dict):
+                # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
+                #       It is later returned to a dictionary format
+                self.pool_args = tuple(sorted(parsed_args.items()))
+            else:
+                raise ValueError("POOL_ARGS must be a JSON string representing a dictionary")
 
         return self
 
@@ -86,7 +83,7 @@ class RelationalConfig(BaseSettings):
 
 
 @lru_cache
-def get_relational_config():
+def get_relational_config() -> RelationalConfig:
     """
     Cache and return the relational database configuration.
 

@@ -68,11 +68,12 @@ async def index_graph_edges(
             logger.warning(
                 "Your graph edge embedding is deprecated, please pass edges to the index_graph_edges directly."
             )
-    except Exception as e:
-        logger.error("Failed to initialize engines: %s", e)
-        raise RuntimeError("Initialization error") from e
 
-    edge_type_datapoints = create_edge_type_datapoints(edges_data)
-    await index_data_points(edge_type_datapoints, vector_engine=vector_engine)
+        edge_type_datapoints = create_edge_type_datapoints(edges_data)
+
+        await index_data_points(edge_type_datapoints, vector_engine=vector_engine)
+    except Exception as e:
+        logger.error("Failed to index graph edges: %s", e)
+        raise RuntimeError("Graph edge indexing error") from e
 
     return None

@@ -73,8 +73,9 @@ async def main():
 
     graph_engine = await get_graph_engine()
     initial_nodes, initial_edges = await graph_engine.get_graph_data()
-    assert len(initial_nodes) >= 14 and len(initial_edges) >= 18, (
-        "Number of nodes and edges is not correct."
+    initial_data_nodes = [n for n in initial_nodes if n[1].get("type") != "EdgeType"]
+    assert len(initial_data_nodes) >= 14 and len(initial_edges) >= 18, (
+        f"Expected >= 14 data nodes and >= 18 edges, got {len(initial_data_nodes)} and {len(initial_edges)}"
     )
 
     initial_nodes_by_vector_collection = {}

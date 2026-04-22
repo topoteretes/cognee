@@ -10,8 +10,10 @@ from cognee.infrastructure.databases.exceptions import MissingQueryParameterErro
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.modules.storage.utils import copy_model, get_own_properties
+from cognee.modules.storage.utils import copy_model
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
+from cognee.shared.logging_utils import get_logger
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -23,6 +25,8 @@ from cognee.modules.observability.tracing import (
     COGNEE_VECTOR_COLLECTION,
     COGNEE_VECTOR_RESULT_COUNT,
 )
+
+logger = get_logger("LanceDBAdapter")
 
 
 class IndexSchema(DataPoint):
@@ -187,8 +191,10 @@ class LanceDBAdapter(VectorDBInterface):
             payload: PayloadSchema
 
         def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
-            properties = get_own_properties(data_point)
-            properties["id"] = str(properties["id"])
+            payload_model = self.get_data_point_schema(type(data_point))
+            properties = payload_model.model_validate(
+                serialize_data(data_point.model_dump())
+            ).model_dump()
 
             return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
                 id=str(data_point.id),
@@ -203,13 +209,343 @@ class LanceDBAdapter(VectorDBInterface):
 
         lance_data_points = list({dp.id: dp for dp in lance_data_points}.values())
 
-        async with self.VECTOR_DB_LOCK:
-            await (
-                collection.merge_insert("id")
-                .when_matched_update_all()
-                .when_not_matched_insert_all()
-                .execute(lance_data_points)
+        try:
+            async with self.VECTOR_DB_LOCK:
+                await (
+                    collection.merge_insert("id")
+                    .when_matched_update_all()
+                    .when_not_matched_insert_all()
+                    .execute(lance_data_points)
+                )
+        except (ValueError, OSError, RuntimeError) as e:
+            if "not found in target schema" not in str(e):
+                raise
+            logger.warning(
+                "Schema mismatch detected for collection '%s', migrating table: %s",
+                collection_name,
+                e,
             )
+            await self._migrate_collection_schema(
+                collection_name, collection, payload_schema, lance_data_points
+            )
+
+    async def _migrate_collection_schema(
+        self,
+        collection_name: str,
+        old_collection,
+        payload_schema: type,
+        new_lance_data_points: list,
+    ):
+        """Migrate a LanceDB table to a new schema, preserving existing data."""
+        rows = (await old_collection.to_arrow()).to_pylist()
+
+        vector_size = self.embedding_engine.get_vector_size()
+        schema_model = self.get_data_point_schema(payload_schema)
+        data_point_types = get_type_hints(schema_model)
+        valid_payload_fields = set(schema_model.model_fields.keys())
+        defaults = self._get_payload_defaults(payload_schema)
+
+        class MigrationLanceDataPoint(LanceModel):
+            id: data_point_types["id"]
+            vector: Vector(vector_size)
+            payload: schema_model
+
+        new_ids = {dp.id for dp in new_lance_data_points}
+        typed_old_rows = []
+        skipped = 0
+        for row in rows:
+            if row.get("id") in new_ids:
+                continue
+
+            raw_payload = row.get("payload")
+            if raw_payload is None or not isinstance(raw_payload, dict):
+                raw_payload = dict(defaults)
+
+            # Strip to only fields in the new schema and fill defaults
+            raw_payload = {k: v for k, v in raw_payload.items() if k in valid_payload_fields}
+            for key, val in defaults.items():
+                raw_payload.setdefault(key, val)
+
+            # Convert to typed LanceModel instances to ensure exact Arrow
+            # type compatibility. Using collection.add(dicts) causes LanceDB
+            # to infer Arrow types from Python values, which can differ from
+            # the schema's declared types and cause Rust panics on subsequent
+            # vector searches.
+            try:
+                validated_payload = schema_model.model_validate(raw_payload).model_dump()
+                typed_old_rows.append(
+                    MigrationLanceDataPoint(
+                        id=row["id"],
+                        vector=row["vector"],
+                        payload=validated_payload,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    "Skipping row %s during migration (validation failed): %s",
+                    row.get("id", "?"),
+                    e,
+                )
+                skipped += 1
+
+        if skipped:
+            logger.warning(
+                "Migration of '%s': skipped %d rows due to validation errors",
+                collection_name,
+                skipped,
+            )
+
+        async with self.VECTOR_DB_LOCK:
+            connection = await self.get_connection()
+            await connection.drop_table(collection_name)
+            await connection.create_table(
+                name=collection_name,
+                schema=MigrationLanceDataPoint,
+            )
+            collection = await connection.open_table(collection_name)
+
+            if typed_old_rows:
+                await collection.add(typed_old_rows)
+
+            if new_lance_data_points:
+                await (
+                    collection.merge_insert("id")
+                    .when_matched_update_all()
+                    .when_not_matched_insert_all()
+                    .execute(new_lance_data_points)
+                )
+
+        logger.info(
+            "Migrated collection '%s' schema (%d existing rows preserved)",
+            collection_name,
+            len(typed_old_rows),
+        )
+
+    @staticmethod
+    def _all_datapoint_subclasses():
+        seen = set()
+        stack = list(DataPoint.__subclasses__())
+        subclasses = []
+
+        while stack:
+            subclass = stack.pop()
+            if subclass in seen:
+                continue
+            seen.add(subclass)
+            subclasses.append(subclass)
+            stack.extend(subclass.__subclasses__())
+
+        return subclasses
+
+    @staticmethod
+    def _warm_up_common_datapoint_models():
+        # Import commonly indexed data points so they are present in __subclasses__.
+        # Imports are best-effort to avoid hard dependency on optional modules.
+
+        # TODO: Hard-coded for now, might be cumbersome
+        modules_to_import = [
+            "cognee.modules.chunking.models",
+            "cognee.tasks.summarization.models",
+            "cognee.modules.engine.models",
+            "cognee.modules.data.processing.document_types",
+            "cognee.modules.graph.models.EdgeType",
+        ]
+
+        for module_name in modules_to_import:
+            try:
+                __import__(module_name)
+            except Exception:
+                logger.debug("Skipping optional datapoint import during migration: %s", module_name)
+
+    @classmethod
+    def _resolve_collection_payload_schema(cls, collection_name: str):
+        if "_" not in collection_name:
+            return None
+        # Important note: Depends on naming convention (e.g. DocumentChunk_text)
+        type_name, _, index_field = collection_name.rpartition("_")
+        if not type_name or not index_field:
+            return None
+
+        cls._warm_up_common_datapoint_models()
+        for data_point_cls in cls._all_datapoint_subclasses():
+            if data_point_cls.__name__ != type_name:
+                continue
+
+            metadata_field = data_point_cls.model_fields.get("metadata")
+            metadata_default = metadata_field.default if metadata_field else None
+            if isinstance(metadata_default, dict):
+                index_fields = metadata_default.get("index_fields", [])
+                if index_fields and index_field not in index_fields:
+                    continue
+
+            return data_point_cls
+
+        return None
+
+    @staticmethod
+    def _normalize_arrow_type(arrow_type):
+        """
+        Convert Arrow type objects into a recursive comparable structure.
+        This allows deep comparison of field names, nullability, and nested types.
+        """
+        if hasattr(arrow_type, "num_fields"):
+            return {
+                "kind": type(arrow_type).__name__,
+                "fields": [
+                    {
+                        "name": arrow_type.field(i).name,
+                        "nullable": getattr(arrow_type.field(i), "nullable", True),
+                        "type": LanceDBAdapter._normalize_arrow_type(arrow_type.field(i).type),
+                    }
+                    for i in range(arrow_type.num_fields)
+                ],
+            }
+
+        value_field = getattr(arrow_type, "value_field", None)
+        if value_field is not None:
+            return {
+                "kind": type(arrow_type).__name__,
+                "value_nullable": getattr(value_field, "nullable", True),
+                "value_type": LanceDBAdapter._normalize_arrow_type(value_field.type),
+            }
+
+        key_type = getattr(arrow_type, "key_type", None)
+        item_type = getattr(arrow_type, "item_type", None)
+        if key_type is not None and item_type is not None:
+            return {
+                "kind": type(arrow_type).__name__,
+                "key_type": LanceDBAdapter._normalize_arrow_type(key_type),
+                "item_type": LanceDBAdapter._normalize_arrow_type(item_type),
+            }
+
+        return {"kind": type(arrow_type).__name__, "repr": str(arrow_type)}
+
+    def _get_target_payload_arrow_type(self, payload_schema: type):
+        """
+        Build a probe LanceModel and extract the expected Arrow type of the payload field.
+        """
+        vector_size = self.embedding_engine.get_vector_size()
+        schema_model = self.get_data_point_schema(payload_schema)
+        data_point_types = get_type_hints(schema_model)
+
+        class SchemaProbeDataPoint(LanceModel):
+            id: data_point_types["id"]
+            vector: Vector(vector_size)
+            payload: schema_model
+
+        to_arrow_schema = getattr(SchemaProbeDataPoint, "to_arrow_schema", None)
+        if not callable(to_arrow_schema):
+            return None
+
+        try:
+            target_schema = to_arrow_schema()
+        except TypeError:
+            # Models with complex Union types (e.g. List[Union[Entity, Event,
+            # tuple[Edge, Entity]]]) can't be converted to Arrow. Fall back to
+            # field-name comparison in _is_payload_schema_compatible.
+            return None
+        payload_field_index = target_schema.get_field_index("payload")
+        if payload_field_index < 0:
+            return None
+
+        return target_schema.field(payload_field_index).type
+
+    def _is_payload_schema_compatible(self, existing_payload_type, payload_schema: type) -> bool:
+        """
+        Check compatibility via deep Arrow type comparison.
+        Falls back to field-name comparison if target Arrow type can't be derived.
+        """
+        target_payload_type = self._get_target_payload_arrow_type(payload_schema)
+        if target_payload_type is None:
+            if not hasattr(existing_payload_type, "num_fields"):
+                return False
+
+            existing_payload_fields = {
+                existing_payload_type.field(i).name for i in range(existing_payload_type.num_fields)
+            }
+            target_schema_model = self.get_data_point_schema(payload_schema)
+            target_payload_fields = set(target_schema_model.model_fields.keys())
+            return existing_payload_fields == target_payload_fields
+
+        normalized_existing = self._normalize_arrow_type(existing_payload_type)
+        normalized_target = self._normalize_arrow_type(target_payload_type)
+        return normalized_existing == normalized_target
+
+    async def run_migrations(self):
+        """
+        Proactively migrates all LanceDB collections that map to known DataPoint schemas.
+        This is intended for startup/readiness checks so searches don't hit legacy schemas.
+        """
+        connection = await self.get_connection()
+        collection_names = await connection.table_names()
+
+        migrated_collections = []
+        checked_collections = []
+        skipped_collections = []
+
+        for collection_name in collection_names:
+            payload_schema = self._resolve_collection_payload_schema(collection_name)
+            if payload_schema is None:
+                skipped_collections.append(collection_name)
+                continue
+
+            checked_collections.append(collection_name)
+            collection = await self.get_collection(collection_name)
+            table = await collection.to_arrow()
+            payload_field_index = table.schema.get_field_index("payload")
+
+            if payload_field_index < 0:
+                skipped_collections.append(collection_name)
+                continue
+
+            payload_field_type = table.schema.field(payload_field_index).type
+            if not hasattr(payload_field_type, "num_fields"):
+                skipped_collections.append(collection_name)
+                continue
+
+            if self._is_payload_schema_compatible(payload_field_type, payload_schema):
+                continue
+
+            logger.info(
+                "Proactive LanceDB migration for '%s' due to payload schema mismatch",
+                collection_name,
+            )
+            try:
+                await self._migrate_collection_schema(
+                    collection_name=collection_name,
+                    old_collection=collection,
+                    payload_schema=payload_schema,
+                    new_lance_data_points=[],
+                )
+                migrated_collections.append(collection_name)
+            except TypeError as e:
+                # Models with fields that LanceDB can't convert to Arrow
+                # (e.g. List[tuple], complex Unions) can't be migrated
+                # proactively. The reactive migration in create_data_points
+                # will handle them on the next write.
+                logger.warning(
+                    "Skipping proactive migration for '%s' (unsupported type): %s",
+                    collection_name,
+                    e,
+                )
+                skipped_collections.append(collection_name)
+
+        return {
+            "checked_collections": checked_collections,
+            "migrated_collections": migrated_collections,
+            "skipped_collections": skipped_collections,
+        }
+
+    def _get_payload_defaults(self, payload_schema: type) -> dict:
+        """Extract default values from the Pydantic payload model."""
+        schema_model = self.get_data_point_schema(payload_schema)
+        defaults = {}
+        for name, field_info in schema_model.model_fields.items():
+            if field_info.default is not None and not (
+                hasattr(field_info, "is_required") and field_info.is_required()
+            ):
+                defaults[name] = field_info.default
+        return defaults
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         try:
@@ -396,6 +732,7 @@ class LanceDBAdapter(VectorDBInterface):
 
     def get_data_point_schema(self, model_type: BaseModel):
         related_models_fields = []
+
         for field_name, field_config in model_type.model_fields.items():
             if hasattr(field_config, "model_fields"):
                 related_models_fields.append(field_name)
@@ -426,6 +763,7 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
+                "belongs_to_set": (Optional[List[str]], None),
             },
             exclude_fields=["metadata"] + related_models_fields,
         )

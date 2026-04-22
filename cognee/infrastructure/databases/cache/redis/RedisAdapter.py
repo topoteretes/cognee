@@ -7,7 +7,7 @@ import redis.asyncio as aioredis
 from contextlib import contextmanager
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
-from cognee.infrastructure.databases.cache.models import SessionQAEntry
+from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
 from pydantic import ValidationError
 
 from cognee.infrastructure.databases.exceptions import (
@@ -20,6 +20,8 @@ logger = get_logger("RedisAdapter")
 
 
 class RedisAdapter(CacheDBInterface):
+    """Redis-backed cache adapter for session QA, trace storage, and coordination."""
+
     def __init__(
         self,
         host,
@@ -33,6 +35,7 @@ class RedisAdapter(CacheDBInterface):
         connection_timeout=30,
         session_ttl_seconds: int | None = 604800,
     ):
+        """Initialize sync/async Redis clients and validate connectivity up front."""
         super().__init__(host, port, lock_name, log_key)
 
         self.host = host
@@ -84,7 +87,13 @@ class RedisAdapter(CacheDBInterface):
 
     @staticmethod
     def _session_key(user_id: str, session_id: str) -> str:
+        """Build the Redis key for QA session entries."""
         return f"agent_sessions:{user_id}:{session_id}"
+
+    @staticmethod
+    def _agent_trace_key(user_id: str, session_id: str) -> str:
+        """Build the Redis key for agent trace entries."""
+        return f"agent_traces:{user_id}:{session_id}"
 
     @staticmethod
     def _build_qa_entry_dump(
@@ -97,6 +106,7 @@ class RedisAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
     ) -> dict:
+        """Serialize one QA entry into the normalized Redis payload shape."""
         entry = SessionQAEntry(
             time=datetime.utcnow().isoformat(),
             question=question,
@@ -110,19 +120,49 @@ class RedisAdapter(CacheDBInterface):
         )
         return entry.model_dump()
 
-    async def _load_entries(self, session_key: str) -> list:
-        raw = await self.async_redis.lrange(session_key, 0, -1)
+    @staticmethod
+    def _build_agent_trace_entry_dump(
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> dict:
+        """Serialize one agent-trace step into the normalized Redis payload shape."""
+        entry = SessionAgentTraceEntry(
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            memory_query=memory_query,
+            memory_context=memory_context,
+            method_params=method_params or {},
+            method_return_value=method_return_value,
+            error_message=error_message,
+            session_feedback=session_feedback,
+        )
+        return entry.model_dump()
+
+    async def _load_entries(self, session_key: str, start: int = 0, end: int = -1) -> list:
+        """Load and deserialize a Redis list slice for the given key."""
+        raw = await self.async_redis.lrange(session_key, start, end)
         return [json.loads(e) for e in raw] if raw else []
 
     async def _write_entry_at(self, session_key: str, index: int, entry_dump: dict) -> None:
+        """Overwrite a single serialized entry in-place within a Redis list."""
         await self.async_redis.lset(session_key, index, json.dumps(entry_dump))
 
     async def _rewrite_entries(self, session_key: str, entries: list) -> None:
+        """Replace the full Redis list contents for a session key."""
         await self.async_redis.delete(session_key)
         for entry in entries:
             await self.async_redis.rpush(session_key, json.dumps(entry))
 
     async def _apply_session_ttl(self, session_key: str) -> None:
+        """Refresh the configured TTL for a session-scoped Redis key."""
         if self.session_ttl_seconds and self.session_ttl_seconds > 0:
             await self.async_redis.expire(session_key, self.session_ttl_seconds)
 
@@ -137,6 +177,7 @@ class RedisAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
     ) -> dict:
+        """Merge partial QA updates into an existing serialized entry."""
         merged = {**entry}
         if question is not None:
             merged["question"] = question
@@ -160,10 +201,12 @@ class RedisAdapter(CacheDBInterface):
 
     @staticmethod
     def _merge_entry_clear_feedback(entry: dict) -> dict:
+        """Return a copy of the entry with feedback fields cleared."""
         return {**entry, "feedback_text": None, "feedback_score": None}
 
     @staticmethod
     def _validate_entry_dict(entry_dict: dict) -> dict:
+        """Validate one serialized QA entry and return its normalized dump."""
         try:
             return SessionQAEntry.model_validate(entry_dict).model_dump()
         except ValidationError as e:
@@ -173,6 +216,7 @@ class RedisAdapter(CacheDBInterface):
 
     @staticmethod
     def _find_index_by_qa_id(entries: list, qa_id: str) -> int | None:
+        """Return the list index for a QA entry id, or None when absent."""
         for i, entry in enumerate(entries):
             if entry.get("qa_id") == qa_id:
                 return i
@@ -376,13 +420,15 @@ class RedisAdapter(CacheDBInterface):
 
     async def delete_session(self, user_id: str, session_id: str) -> bool:
         """
-        Delete the entire session and all its QA entries.
-        Returns True if deleted, False if session did not exist.
+        Delete the entire session and all its session-scoped artifacts.
+        Returns True if any session data existed, False otherwise.
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            deleted = await self.async_redis.delete(session_key)
-            return deleted > 0
+            trace_key = self._agent_trace_key(user_id, session_id)
+            deleted_sessions = await self.async_redis.delete(session_key)
+            deleted_traces = await self.async_redis.delete(trace_key)
+            return (deleted_sessions + deleted_traces) > 0
 
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting session: {str(e)}"
@@ -392,6 +438,66 @@ class RedisAdapter(CacheDBInterface):
             error_msg = f"Unexpected error while deleting session from Redis: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
+
+    async def append_agent_trace_step(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> None:
+        """Append one trace step to the Redis list for this trace session."""
+        try:
+            trace_key = self._agent_trace_key(user_id, session_id)
+            trace_entry = self._build_agent_trace_entry_dump(
+                trace_id=trace_id,
+                origin_function=origin_function,
+                status=status,
+                memory_query=memory_query,
+                memory_context=memory_context,
+                method_params=method_params,
+                method_return_value=method_return_value,
+                error_message=error_message,
+                session_feedback=session_feedback,
+            )
+            await self.async_redis.rpush(trace_key, json.dumps(trace_entry))
+            await self._apply_session_ttl(trace_key)
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while appending agent trace step: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while appending agent trace step to Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[dict]:
+        """Retrieve stored trace steps for the given session."""
+        trace_key = self._agent_trace_key(user_id, session_id)
+        if last_n is not None:
+            return await self._load_entries(trace_key, -last_n, -1)
+        return await self._load_entries(trace_key)
+
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
+        """Retrieve ordered per-step feedback for the given trace session."""
+        entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
+        return [entry.get("session_feedback", "") for entry in entries]
+
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """Return the number of stored trace steps for the given session."""
+        trace_key = self._agent_trace_key(user_id, session_id)
+        return await self.async_redis.llen(trace_key)
 
     async def prune(self) -> None:
         """
