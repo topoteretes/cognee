@@ -74,11 +74,13 @@ ALL_PLANS = [f"plan-{i}" for i in range(1, 11)]
     volumes={"/results": vol},
     secrets=[
         modal.Secret.from_name("eval_secrets"),
-        modal.Secret.from_dict({
-            "COGNEE_SKIP_CONNECTION_TEST": "true",
-            "LITELLM_LOG": "ERROR",
-            "LLM_MAX_CONCURRENT": "40",
-        }),
+        modal.Secret.from_dict(
+            {
+                "COGNEE_SKIP_CONNECTION_TEST": "true",
+                "LITELLM_LOG": "ERROR",
+                "LLM_MAX_CONCURRENT": "40",
+            }
+        ),
     ],
 )
 async def run_beam_10m_conversation(
@@ -138,9 +140,7 @@ async def run_beam_10m_conversation(
     # accumulates across plans but memory stays bounded.
     for plan_idx, plan_name in enumerate(selected_plans):
         if plan_name in completed_plans:
-            logger.info(
-                f"[conv {conversation_index}] Skipping {plan_name} (already done)"
-            )
+            logger.info(f"[conv {conversation_index}] Skipping {plan_name} (already done)")
             continue
 
         is_first = plan_idx == 0 and not completed_plans
@@ -157,7 +157,7 @@ async def run_beam_10m_conversation(
             answering_questions=False,
             evaluating_answers=False,
             evaluating_contexts=False,
-            evaluation_engine="DeepEval",
+            evaluation_engine="BeamEval",
             evaluation_metrics=["beam_rubric", "kendall_tau"],
             task_getter_type="Default",
             calculate_metrics=False,
@@ -184,10 +184,13 @@ async def run_beam_10m_conversation(
         completed_plans.add(plan_name)
         all_done = [p for p in selected_plans if p in completed_plans]
         remaining = [p for p in selected_plans if p not in completed_plans]
-        _save_checkpoint(f"cognified_{plan_name}", {
-            "plans_completed": all_done,
-            "plans_remaining": remaining,
-        })
+        _save_checkpoint(
+            f"cognified_{plan_name}",
+            {
+                "plans_completed": all_done,
+                "plans_remaining": remaining,
+            },
+        )
 
     # Step 2: Load and optionally filter questions
     questions_path = f"beam10m_questions_conv{conversation_index}.json"
@@ -222,10 +225,13 @@ async def run_beam_10m_conversation(
         json.dump(answers, f, ensure_ascii=False, indent=4)
 
     # Checkpoint after answering — this is the expensive part
-    _save_checkpoint("answered", {
-        "plans_completed": selected_plans,
-        "num_answers": len(answers),
-    })
+    _save_checkpoint(
+        "answered",
+        {
+            "plans_completed": selected_plans,
+            "num_answers": len(answers),
+        },
+    )
 
     # Step 4: Evaluate
     eval_params = EvalConfig(
@@ -236,7 +242,7 @@ async def run_beam_10m_conversation(
         answering_questions=False,
         evaluating_answers=True,
         evaluating_contexts=False,
-        evaluation_engine="DeepEval",
+        evaluation_engine="BeamEval",
         evaluation_metrics=["beam_rubric", "kendall_tau"],
         task_getter_type="Default",
         calculate_metrics=True,
@@ -354,9 +360,7 @@ async def orchestrate_beam_10m(
 
     avg_per_type = {}
     for qtype, metrics in sorted(type_scores.items()):
-        avg_per_type[qtype] = {
-            m: sum(s) / len(s) if s else None for m, s in metrics.items()
-        }
+        avg_per_type[qtype] = {m: sum(s) / len(s) if s else None for m, s in metrics.items()}
 
     combined = {
         "dataset": "BEAM-10M",
@@ -383,7 +387,9 @@ async def orchestrate_beam_10m(
         json.dump(combined, f, indent=2)
     vol.commit()
 
-    logger.info(f"\n=== BEAM-10M Results ({len(all_aggregate)} conversations, {len(failed)} failed) ===")
+    logger.info(
+        f"\n=== BEAM-10M Results ({len(all_aggregate)} conversations, {len(failed)} failed) ==="
+    )
     for qtype, metrics in avg_per_type.items():
         beam_rubric = metrics.get("beam_rubric")
         kendall = metrics.get("kendall_tau")
@@ -431,7 +437,7 @@ async def main(
     batches = max_batches_per_plan if max_batches_per_plan > 0 else None
     plans_list = [p.strip() for p in plans.split(",") if p.strip()] or None
 
-    print(f"Looking up deployed orchestrator...")
+    print("Looking up deployed orchestrator...")
 
     # Look up the DEPLOYED function so it runs under the persistent app,
     # not this ephemeral `modal run` app.
@@ -439,7 +445,7 @@ async def main(
         "beam-10m-benchmark-eval", "orchestrate_beam_10m"
     )
 
-    print(f"Spawning orchestrator on deployed app...")
+    print("Spawning orchestrator on deployed app...")
     print(f"  conversations={num_conversations}, max_parallel={max_parallel}")
     print(f"  plans={plans_list or 'ALL'}")
     print(f"  question_types={types_list or 'ALL'}")

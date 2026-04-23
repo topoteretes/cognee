@@ -2,8 +2,10 @@
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any, Optional
 
 from cognee.eval_framework.beam.presets import (
@@ -35,6 +37,7 @@ BEAM_COMBINED_SUMMARY = "beam_sweep_combined.json"
 BEAM_BEST_BY_QUESTION_TYPE_SUMMARY = "beam_sweep_best_by_question_type.json"
 BEAM_RUBRIC_METRIC = "beam_rubric"
 BEAM_ARTIFACT_PREFIX = "beam"
+BEAM_RUN_INFO_FILENAME = "run_info.json"
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,65 @@ class BeamSweepRunParams:
     max_batches: Optional[int]
     conversation_json: Optional[str]
     sweep: RetrieverSweepSettings
+    cli_args: tuple[str, ...]
+
+
+def _serialize_run_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _serialize_run_value(inner) for key, inner in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_serialize_run_value(item) for item in value]
+    if isinstance(value, type):
+        return value.__name__
+    return str(value)
+
+
+def _build_run_info_payload(
+    params: BeamSweepRunParams,
+    retriever_configs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    sweep = params.sweep
+    conversation_json = (
+        str(Path(params.conversation_json).resolve()) if params.conversation_json else None
+    )
+
+    return {
+        "entrypoint": "cognee/eval_framework/run_beam_retriever_sweep.py",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "raw_cli_args": list(params.cli_args),
+        "resolved_run": {
+            "split": params.split,
+            "num_conversations": params.num_conversations,
+            "max_batches": params.max_batches,
+            "conversation_json": conversation_json,
+            "dataset_source": "local_json" if params.conversation_json else "beam_huggingface",
+            "chunker": "ConversationChunker",
+            "question_types": sweep.question_types,
+            "num_runs": sweep.num_runs,
+            "max_concurrent_questions": sweep.max_concurrent_questions,
+            "primary_metric_name": sweep.primary_metric_name,
+            "artifact_prefix": sweep.artifact_prefix,
+            "combined_summary_filename": sweep.combined_summary_filename,
+            "summary_tags": _serialize_run_value(sweep.summary_tags),
+            "output_dir": str(sweep.output_dir),
+        },
+        "retriever_configs": [_serialize_run_value(config) for config in retriever_configs],
+    }
+
+
+def _write_run_info(
+    output_dir: Path,
+    params: BeamSweepRunParams,
+    retriever_configs: list[dict[str, Any]],
+) -> None:
+    run_info_path = output_dir / BEAM_RUN_INFO_FILENAME
+    run_info = _build_run_info_payload(params, retriever_configs)
+    write_json(str(run_info_path), run_info)
+    logger.info("Wrote run manifest to %s", run_info_path)
 
 
 async def _run_beam_conversation(
@@ -96,6 +158,7 @@ async def run_beam_sweep(params: BeamSweepRunParams) -> dict[str, Any]:
 
     retriever_configs = apply_beam_prompt_policy(get_default_beam_sweep_configs(params.split))
     validate_retriever_configs(retriever_configs)
+    _write_run_info(sweep.output_dir, params, retriever_configs)
 
     conversation_summaries = []
     for conversation_index in range(params.num_conversations):
@@ -219,6 +282,7 @@ def _parse_args() -> BeamSweepRunParams:
         max_batches=(args.max_batches if args.max_batches > 0 else None),
         conversation_json=conversation_json,
         sweep=sweep,
+        cli_args=tuple(sys.argv[1:]),
     )
 
 

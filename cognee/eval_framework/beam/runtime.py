@@ -38,7 +38,7 @@ def build_beam_eval_params(
         answering_questions=answering_questions,
         evaluating_answers=True,
         evaluating_contexts=False,
-        evaluation_engine="DeepEval",
+        evaluation_engine="BeamEval",
         evaluation_metrics=["beam_rubric", "kendall_tau"],
         task_getter_type="Default",
         calculate_metrics=True,

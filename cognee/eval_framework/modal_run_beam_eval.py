@@ -74,7 +74,7 @@ async def run_beam_conversation(
         answering_questions=True,
         evaluating_answers=True,
         evaluating_contexts=False,
-        evaluation_engine="DeepEval",
+        evaluation_engine="BeamEval",
         evaluation_metrics=["beam_rubric", "kendall_tau"],
         task_getter_type="Default",
         calculate_metrics=True,
