@@ -258,6 +258,13 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - limit (int): The maximum number of results to return from the search.
             - with_vector (bool): Whether to return the vector representations with search
               results, this is not supported for Neptune Analytics backend at the moment.
+            - include_payload (bool): When True, fetch full node properties and populate
+              ``ScoredResult.payload``. When False (default), only node IDs are returned and
+              ``payload`` is set to None, reducing data transfer.
+            - node_name (Optional[List[str]]): Optional list of set names to filter results
+              by ``belongs_to_set`` membership.
+            - node_name_filter_operator (str): ``"OR"`` (default) matches nodes belonging to
+              any of the ``node_name`` values; ``"AND"`` requires membership in all of them.
 
         Returns:
         --------
@@ -328,15 +335,10 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         CALL neptune.algo.vectors.get(n)
         YIELD embedding
         """
-            if include_payload:
-                query_string += "RETURN node as payload, score, embedding"
-            else:
-                query_string += "RETURN id(node) as node_id, score, embedding"
-        else:
-            if include_payload:
-                query_string += "RETURN node as payload, score"
-            else:
-                query_string += "RETURN id(node) as node_id, score"
+
+        payload_part = "node as payload" if include_payload else "id(node) as node_id"
+        embedding_part = ", embedding" if with_vector else ""
+        query_string += f"RETURN {payload_part}, score{embedding_part}"
 
         try:
             query_response = self._client.query(query_string, params)
