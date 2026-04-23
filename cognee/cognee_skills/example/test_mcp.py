@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv, find_dotenv
+
 load_dotenv(find_dotenv())
 
 SKILLS_DIR = str(Path(__file__).parent / "skills")
@@ -55,9 +56,13 @@ async def main():
             prune_result = await call_tool(session, "prune", {})
             print(f"  Pruned: {prune_result}" if isinstance(prune_result, str) else "  Pruned")
 
-            ingest_result = await call_tool(session, "ingest_skills", {
-                "skills_folder": SKILLS_DIR,
-            })
+            ingest_result = await call_tool(
+                session,
+                "ingest_skills",
+                {
+                    "skills_folder": SKILLS_DIR,
+                },
+            )
             if isinstance(ingest_result, str):
                 print(f"  {ingest_result}")
             else:
@@ -78,18 +83,20 @@ async def main():
             tasks = [
                 "Write a status update for the platform team. We shipped the new "
                 "search API, fixed a caching bug, and started work on the admin dashboard.",
-
                 "Write an incident report. The search API was down for 20 minutes "
                 "because of a bad regex in the query parser. Alice found it, Bob deployed the fix.",
-
                 "Write an announcement that we're moving to biweekly releases starting March 24.",
             ]
 
             for i, task in enumerate(tasks, 1):
-                result = await call_tool(session, "run_skill", {
-                    "task_text": task,
-                    "auto_amendify": False,
-                })
+                result = await call_tool(
+                    session,
+                    "run_skill",
+                    {
+                        "task_text": task,
+                        "auto_amendify": False,
+                    },
+                )
                 print(f"\n  Run {i}:")
                 if isinstance(result, dict):
                     print(f"    Quality: {result.get('quality_score', 'N/A')}")
@@ -103,11 +110,15 @@ async def main():
             print("\n=== STEP 3: Inspect the skill ===")
 
             skill_id = skill_list[0]["skill_id"] if isinstance(skill_list, list) else "team-comms"
-            inspection = await call_tool(session, "inspect_skill", {
-                "skill_id": skill_id,
-                "min_runs": 1,
-                "score_threshold": 0.8,
-            })
+            inspection = await call_tool(
+                session,
+                "inspect_skill",
+                {
+                    "skill_id": skill_id,
+                    "min_runs": 1,
+                    "score_threshold": 0.8,
+                },
+            )
 
             if isinstance(inspection, dict):
                 print(f"  Category:   {inspection.get('failure_category')}")
@@ -121,11 +132,15 @@ async def main():
             # ──────────────────────────────────────────────────────────────
             print("\n=== STEP 4: Preview the fix ===")
 
-            amendment = await call_tool(session, "preview_amendify_skill", {
-                "skill_id": skill_id,
-                "min_runs": 1,
-                "score_threshold": 0.8,
-            })
+            amendment = await call_tool(
+                session,
+                "preview_amendify_skill",
+                {
+                    "skill_id": skill_id,
+                    "min_runs": 1,
+                    "score_threshold": 0.8,
+                },
+            )
 
             amendment_id = None
             if isinstance(amendment, dict):
@@ -135,9 +150,9 @@ async def main():
                 print(f"  Confidence:  {amendment.get('amendment_confidence')}")
 
                 print(f"\n  --- ORIGINAL INSTRUCTIONS ---")
-                print(amendment.get('original_instructions', 'N/A'))
+                print(amendment.get("original_instructions", "N/A"))
                 print(f"\n  --- PROPOSED INSTRUCTIONS ---")
-                print(amendment.get('amended_instructions', 'N/A'))
+                print(amendment.get("amended_instructions", "N/A"))
             else:
                 print(f"  {amendment}")
 
@@ -147,9 +162,13 @@ async def main():
                 # ──────────────────────────────────────────────────────────
                 print("\n=== STEP 5: Apply the fix ===")
 
-                apply_result = await call_tool(session, "amendify_skill", {
-                    "amendment_id": amendment_id,
-                })
+                apply_result = await call_tool(
+                    session,
+                    "amendify_skill",
+                    {
+                        "amendment_id": amendment_id,
+                    },
+                )
                 if isinstance(apply_result, dict):
                     print(f"  Applied: {apply_result.get('success')}")
                 else:
@@ -160,9 +179,13 @@ async def main():
                 # ──────────────────────────────────────────────────────────
                 print("\n=== STEP 6: Run the same task again (after fix) ===")
 
-                result_after = await call_tool(session, "run_skill", {
-                    "task_text": tasks[0],
-                })
+                result_after = await call_tool(
+                    session,
+                    "run_skill",
+                    {
+                        "task_text": tasks[0],
+                    },
+                )
                 if isinstance(result_after, dict):
                     print(f"  Quality: {result_after.get('quality_score', 'N/A')}")
                     print(f"  Output:\n{result_after.get('output', '')}")

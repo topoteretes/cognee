@@ -11,6 +11,7 @@ Prerequisites:
 import asyncio
 from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
+
 load_dotenv(find_dotenv())
 
 SKILLS_DIR = Path(__file__).parent / "skills"
@@ -41,10 +42,8 @@ async def main():
     tasks = [
         "Write a status update for the platform team. We shipped the new search API, "
         "fixed a caching bug, and started work on the admin dashboard.",
-
         "Write an incident report. The search API was down for 20 minutes "
         "because of a bad regex in the query parser. Alice found it, Bob deployed the fix.",
-
         "Write an announcement that we're moving to biweekly releases starting March 24.",
     ]
 
@@ -91,9 +90,9 @@ async def main():
         print(f"  Confidence:    {amendment['amendment_confidence']}")
 
         print(f"\n  --- ORIGINAL INSTRUCTIONS ---")
-        print(amendment['original_instructions'])
+        print(amendment["original_instructions"])
         print(f"\n  --- PROPOSED INSTRUCTIONS ---")
-        print(amendment['amended_instructions'])
+        print(amendment["amended_instructions"])
 
         # ──────────────────────────────────────────────────────────────
         # STEP 5: Apply the fix

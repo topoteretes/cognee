@@ -128,9 +128,7 @@ class TestExecuteSkill(unittest.TestCase):
 
         from cognee.cognee_skills.execute import evaluate_output
 
-        result = asyncio.run(
-            evaluate_output(skill=SAMPLE_SKILL, task_text="task", output="output")
-        )
+        result = asyncio.run(evaluate_output(skill=SAMPLE_SKILL, task_text="task", output="output"))
 
         assert result["score"] == 1.0
         assert "Evaluation failed" in result["reason"]
@@ -144,9 +142,7 @@ class TestExecuteSkill(unittest.TestCase):
 
         from cognee.cognee_skills.execute import evaluate_output
 
-        result = asyncio.run(
-            evaluate_output(skill=SAMPLE_SKILL, task_text="task", output="output")
-        )
+        result = asyncio.run(evaluate_output(skill=SAMPLE_SKILL, task_text="task", output="output"))
 
         assert result["score"] == 1.0
 
@@ -178,9 +174,18 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value="summarize:compress-text"):
+                with patch.object(
+                    client,
+                    "_resolve_pattern",
+                    new_callable=AsyncMock,
+                    return_value="summarize:compress-text",
+                ):
                     with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
-                        with patch("cognee.cognee_skills.client.evaluate_output", new_callable=AsyncMock, return_value=MOCK_EVALUATION):
+                        with patch(
+                            "cognee.cognee_skills.client.evaluate_output",
+                            new_callable=AsyncMock,
+                            return_value=MOCK_EVALUATION,
+                        ):
                             result = await client.execute("summarize", "do something")
                             return result, mock_observe
 
@@ -207,9 +212,15 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch("cognee.cognee_skills.client.evaluate_output", new_callable=AsyncMock, return_value=MOCK_EVALUATION):
+                with patch(
+                    "cognee.cognee_skills.client.evaluate_output",
+                    new_callable=AsyncMock,
+                    return_value=MOCK_EVALUATION,
+                ):
                     with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
-                        result = await client.execute("summarize", "do something", auto_observe=False)
+                        result = await client.execute(
+                            "summarize", "do something", auto_observe=False
+                        )
                         return result, mock_observe
 
         result, mock_observe = asyncio.run(_run())
@@ -231,7 +242,9 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
+                with patch.object(
+                    client, "_resolve_pattern", new_callable=AsyncMock, return_value=""
+                ):
                     with patch.object(client, "observe", new_callable=AsyncMock) as mock_observe:
                         result = await client.execute(
                             "summarize", "do something", auto_evaluate=False
@@ -265,7 +278,9 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
+                with patch.object(
+                    client, "_resolve_pattern", new_callable=AsyncMock, return_value=""
+                ):
                     with patch.object(client, "observe", new_callable=AsyncMock):
                         with patch.object(
                             client,
@@ -308,9 +323,15 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
+                with patch.object(
+                    client, "_resolve_pattern", new_callable=AsyncMock, return_value=""
+                ):
                     with patch.object(client, "observe", new_callable=AsyncMock):
-                        with patch("cognee.cognee_skills.client.evaluate_output", new_callable=AsyncMock, return_value=low_eval):
+                        with patch(
+                            "cognee.cognee_skills.client.evaluate_output",
+                            new_callable=AsyncMock,
+                            return_value=low_eval,
+                        ):
                             with patch.object(
                                 client,
                                 "auto_amendify",
@@ -345,9 +366,15 @@ class TestExecuteSkill(unittest.TestCase):
 
         async def _run():
             with patch.object(client, "load", new_callable=AsyncMock, return_value=SAMPLE_SKILL):
-                with patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""):
+                with patch.object(
+                    client, "_resolve_pattern", new_callable=AsyncMock, return_value=""
+                ):
                     with patch.object(client, "observe", new_callable=AsyncMock):
-                        with patch("cognee.cognee_skills.client.evaluate_output", new_callable=AsyncMock, return_value=MOCK_EVALUATION):
+                        with patch(
+                            "cognee.cognee_skills.client.evaluate_output",
+                            new_callable=AsyncMock,
+                            return_value=MOCK_EVALUATION,
+                        ):
                             with patch.object(
                                 client, "auto_amendify", new_callable=AsyncMock
                             ) as mock_amendify:

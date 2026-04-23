@@ -43,10 +43,27 @@ RESOURCE_TYPE_MAP = {
 }
 
 BINARY_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg",
-    ".pdf", ".zip", ".tar", ".gz", ".bz2",
-    ".woff", ".woff2", ".ttf", ".eot",
-    ".pyc", ".pyo", ".so", ".dylib", ".dll",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".svg",
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".dylib",
+    ".dll",
 }
 
 # Frontmatter key aliases → canonical field name
@@ -92,6 +109,7 @@ def _classify_resource(path: Path, skill_dir: Path) -> str:
 # Frontmatter parsing
 # ---------------------------------------------------------------------------
 
+
 def _parse_frontmatter(text: str) -> tuple[Dict[str, Any], str]:
     """Split YAML frontmatter and markdown body.
 
@@ -124,6 +142,7 @@ def _pop_first(d: Dict[str, Any], aliases: tuple) -> Any:
 # ---------------------------------------------------------------------------
 # Field extractors
 # ---------------------------------------------------------------------------
+
 
 def _extract_name(frontmatter: Dict[str, Any], fallback: str) -> str:
     val = _pop_first(frontmatter, _NAME_ALIASES)
@@ -215,7 +234,7 @@ def _extract_triggers(frontmatter: Dict[str, Any], description: str, body: str) 
         )
         if when_match:
             parts = re.split(r"[,;]|(?:\bor\b)", when_match.group(1))
-            return [p.strip().strip('"\'') for p in parts if p.strip()][:8]
+            return [p.strip().strip("\"'") for p in parts if p.strip()][:8]
 
     return []
 
@@ -243,6 +262,7 @@ def _detect_complexity(body: str) -> str:
 # ---------------------------------------------------------------------------
 # File / folder discovery
 # ---------------------------------------------------------------------------
+
 
 def _find_skill_file(skill_dir: Path) -> Optional[Path]:
     """Return the skill entry file inside a directory, trying multiple names."""
@@ -283,6 +303,7 @@ def _scan_resources(skill_dir: Path, entry_file: Path) -> List[SkillResource]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def parse_skill_file(
     skill_md: Path,
@@ -333,10 +354,21 @@ def parse_skill_file(
     resources = _scan_resources(skill_dir, skill_md) if skill_md.parent != skill_md else []
 
     # Preserve any remaining unknown frontmatter fields as extra_metadata
-    known_keys = set(_NAME_ALIASES) | set(_DESCRIPTION_ALIASES) | set(_TAGS_ALIASES) | {
-        "triggers", "activation", "allowed-tools", "allowed_tools",
-        "license", "compatibility", "homepage", "metadata",
-    }
+    known_keys = (
+        set(_NAME_ALIASES)
+        | set(_DESCRIPTION_ALIASES)
+        | set(_TAGS_ALIASES)
+        | {
+            "triggers",
+            "activation",
+            "allowed-tools",
+            "allowed_tools",
+            "license",
+            "compatibility",
+            "homepage",
+            "metadata",
+        }
+    )
     extra = {k: v for k, v in frontmatter.items() if k not in known_keys} or None
 
     return Skill(

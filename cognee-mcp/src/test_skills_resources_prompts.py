@@ -89,7 +89,9 @@ async def run_tests():
     print("\n=== Resource: skill://agent-guide ===")
 
     guide_content = await mcp_server.read_resource("skill://agent-guide")
-    guide_text = guide_content[0].content if hasattr(guide_content[0], "content") else str(guide_content[0])
+    guide_text = (
+        guide_content[0].content if hasattr(guide_content[0], "content") else str(guide_content[0])
+    )
 
     if "Cognee Skill Routing" in guide_text:
         ok("agent-guide returns markdown with expected heading")
@@ -107,7 +109,9 @@ async def run_tests():
     print("\n=== Resource: skill://index (empty state) ===")
 
     index_content = await mcp_server.read_resource("skill://index")
-    index_text = index_content[0].content if hasattr(index_content[0], "content") else str(index_content[0])
+    index_text = (
+        index_content[0].content if hasattr(index_content[0], "content") else str(index_content[0])
+    )
     index_data = json.loads(index_text)
 
     if isinstance(index_data.get("skills"), list):
@@ -126,7 +130,11 @@ async def run_tests():
     print("\n=== Resource: skill://nonexistent-skill ===")
 
     detail_content = await mcp_server.read_resource("skill://nonexistent-skill")
-    detail_text = detail_content[0].content if hasattr(detail_content[0], "content") else str(detail_content[0])
+    detail_text = (
+        detail_content[0].content
+        if hasattr(detail_content[0], "content")
+        else str(detail_content[0])
+    )
     detail_data = json.loads(detail_text)
 
     if "error" in detail_data:
@@ -139,7 +147,9 @@ async def run_tests():
     # ------------------------------------------------------------------
     print("\n=== Prompt: route-task ===")
 
-    route_result = await mcp_server.get_prompt("route-task", {"task_description": "summarize a document"})
+    route_result = await mcp_server.get_prompt(
+        "route-task", {"task_description": "summarize a document"}
+    )
     messages = route_result.messages
 
     if len(messages) == 1 and messages[0].role == "user":

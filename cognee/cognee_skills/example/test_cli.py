@@ -18,9 +18,7 @@ SKILLS_DIR = Path(__file__).parent / "skills"
 
 def run(cmd: str) -> str:
     """Run a CLI command and return stdout."""
-    result = subprocess.run(
-        cmd, shell=True, capture_output=True, text=True, timeout=300
-    )
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
     if result.returncode != 0 and "Error" in (result.stderr or ""):
         print(f"  [stderr] {result.stderr.strip()[:200]}")
     return result.stdout.strip()
@@ -58,10 +56,8 @@ def main():
     tasks = [
         "Write a status update for the platform team. We shipped the new search API, "
         "fixed a caching bug, and started work on the admin dashboard.",
-
         "Write an incident report. The search API was down for 20 minutes "
         "because of a bad regex in the query parser. Alice found it, Bob deployed the fix.",
-
         "Write an announcement that we're moving to biweekly releases starting March 24.",
     ]
 
@@ -77,9 +73,7 @@ def main():
     print("\n=== STEP 3: Inspect the skill ===")
 
     skill_id = skills_list[0]["skill_id"]
-    inspection = run_json(
-        f'cognee-cli skills inspect {skill_id} --score-threshold 0.8 -f json'
-    )
+    inspection = run_json(f"cognee-cli skills inspect {skill_id} --score-threshold 0.8 -f json")
     print(f"  Category:   {inspection.get('failure_category')}")
     print(f"  Root cause: {inspection.get('root_cause', '')[:200]}")
     print(f"  Severity:   {inspection.get('severity')}")
@@ -89,9 +83,7 @@ def main():
     # ──────────────────────────────────────────────────────────────────
     print("\n=== STEP 4: Preview the fix ===")
 
-    amendment = run_json(
-        f'cognee-cli skills preview {skill_id} --score-threshold 0.8 -f json'
-    )
+    amendment = run_json(f"cognee-cli skills preview {skill_id} --score-threshold 0.8 -f json")
     amendment_id = amendment.get("amendment_id")
     print(f"  Amendment:   {amendment_id}")
     print(f"  Explanation: {amendment.get('change_explanation', '')[:200]}")

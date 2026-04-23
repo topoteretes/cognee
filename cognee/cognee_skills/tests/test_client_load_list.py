@@ -389,17 +389,22 @@ class TestHappyPathExecute(unittest.TestCase):
 
         async def _go():
             with (
-                patch.object(client, "load", new_callable=AsyncMock, return_value={
-                    "skill_id": SKILL_ID,
-                    "name": "Summarize",
-                    "instructions": "Condense the input into 2-3 key bullet points.",
-                    "instruction_summary": "Summarizes text into bullet points.",
-                    "description": "Condense any text.",
-                    "tags": ["context-management"],
-                    "complexity": "simple",
-                    "source_path": "",
-                    "task_patterns": [],
-                }),
+                patch.object(
+                    client,
+                    "load",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "skill_id": SKILL_ID,
+                        "name": "Summarize",
+                        "instructions": "Condense the input into 2-3 key bullet points.",
+                        "instruction_summary": "Summarizes text into bullet points.",
+                        "description": "Condense any text.",
+                        "tags": ["context-management"],
+                        "complexity": "simple",
+                        "source_path": "",
+                        "task_patterns": [],
+                    },
+                ),
                 patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
@@ -431,19 +436,25 @@ class TestHappyPathExecute(unittest.TestCase):
 
         async def _go():
             with (
-                patch.object(client, "load", new_callable=AsyncMock, return_value={
-                    "skill_id": SKILL_ID,
-                    "name": "Summarize",
-                    "instructions": "Condense the input.",
-                    "instruction_summary": "",
-                    "description": "",
-                    "tags": [],
-                    "complexity": "simple",
-                    "source_path": "",
-                    "task_patterns": [],
-                }),
                 patch.object(
-                    client, "_resolve_pattern",
+                    client,
+                    "load",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "skill_id": SKILL_ID,
+                        "name": "Summarize",
+                        "instructions": "Condense the input.",
+                        "instruction_summary": "",
+                        "description": "",
+                        "tags": [],
+                        "complexity": "simple",
+                        "source_path": "",
+                        "task_patterns": [],
+                    },
+                ),
+                patch.object(
+                    client,
+                    "_resolve_pattern",
                     new_callable=AsyncMock,
                     return_value="summarize:compress-text",
                 ),
@@ -479,17 +490,22 @@ class TestHappyPathExecute(unittest.TestCase):
 
         async def _go():
             with (
-                patch.object(client, "load", new_callable=AsyncMock, return_value={
-                    "skill_id": SKILL_ID,
-                    "name": "Summarize",
-                    "instructions": "Condense the input.",
-                    "instruction_summary": "",
-                    "description": "",
-                    "tags": [],
-                    "complexity": "simple",
-                    "source_path": "",
-                    "task_patterns": [],
-                }),
+                patch.object(
+                    client,
+                    "load",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "skill_id": SKILL_ID,
+                        "name": "Summarize",
+                        "instructions": "Condense the input.",
+                        "instruction_summary": "",
+                        "description": "",
+                        "tags": [],
+                        "complexity": "simple",
+                        "source_path": "",
+                        "task_patterns": [],
+                    },
+                ),
                 patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
@@ -504,9 +520,7 @@ class TestHappyPathExecute(unittest.TestCase):
                 mock_cfg.return_value = MagicMock(
                     llm_model="openai/gpt-4o-mini", llm_api_key="test"
                 )
-                result = await client.execute(
-                    SKILL_ID, "Summarize this", auto_amendify=True
-                )
+                result = await client.execute(SKILL_ID, "Summarize this", auto_amendify=True)
                 return result, mock_aa
 
         result, mock_aa = self._run(_go())
@@ -523,17 +537,22 @@ class TestHappyPathExecute(unittest.TestCase):
 
         async def _go():
             with (
-                patch.object(client, "load", new_callable=AsyncMock, return_value={
-                    "skill_id": SKILL_ID,
-                    "name": "Summarize",
-                    "instructions": "Condense the input.",
-                    "instruction_summary": "",
-                    "description": "",
-                    "tags": [],
-                    "complexity": "simple",
-                    "source_path": "",
-                    "task_patterns": [],
-                }),
+                patch.object(
+                    client,
+                    "load",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "skill_id": SKILL_ID,
+                        "name": "Summarize",
+                        "instructions": "Condense the input.",
+                        "instruction_summary": "",
+                        "description": "",
+                        "tags": [],
+                        "complexity": "simple",
+                        "source_path": "",
+                        "task_patterns": [],
+                    },
+                ),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
                     "cognee.cognee_skills.execute.litellm.acompletion",
@@ -561,17 +580,22 @@ class TestHappyPathExecute(unittest.TestCase):
 
         async def _go():
             with (
-                patch.object(client, "load", new_callable=AsyncMock, return_value={
-                    "skill_id": SKILL_ID,
-                    "name": "Summarize",
-                    "instructions": "Condense.",
-                    "instruction_summary": "",
-                    "description": "",
-                    "tags": [],
-                    "complexity": "simple",
-                    "source_path": "",
-                    "task_patterns": [],
-                }),
+                patch.object(
+                    client,
+                    "load",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "skill_id": SKILL_ID,
+                        "name": "Summarize",
+                        "instructions": "Condense.",
+                        "instruction_summary": "",
+                        "description": "",
+                        "tags": [],
+                        "complexity": "simple",
+                        "source_path": "",
+                        "task_patterns": [],
+                    },
+                ),
                 patch.object(client, "_resolve_pattern", new_callable=AsyncMock, return_value=""),
                 patch("cognee.cognee_skills.execute.get_llm_config") as mock_cfg,
                 patch(
@@ -621,7 +645,8 @@ class TestHappyPathExecute(unittest.TestCase):
                     return_value=engine,
                 ),
                 patch.object(
-                    client, "_resolve_pattern",
+                    client,
+                    "_resolve_pattern",
                     new_callable=AsyncMock,
                     return_value="summarize:compress-text",
                 ),
@@ -677,15 +702,26 @@ class TestRun(unittest.TestCase):
         client = Skills()
 
         recs = [
-            {"skill_id": SKILL_ID, "name": SKILL_ID, "score": 0.95,
-             "vector_score": 0.9, "prefers_score": 0.05,
-             "instruction_summary": "", "task_pattern_id": "", "tags": []},
+            {
+                "skill_id": SKILL_ID,
+                "name": SKILL_ID,
+                "score": 0.95,
+                "vector_score": 0.9,
+                "prefers_score": 0.05,
+                "instruction_summary": "",
+                "task_pattern_id": "",
+                "tags": [],
+            },
         ]
         exec_result = {
-            "output": "- Bullet 1", "skill_id": SKILL_ID,
-            "model": "openai/gpt-4o-mini", "latency_ms": 100,
-            "success": True, "error": None,
-            "quality_score": 0.85, "quality_reason": "Good",
+            "output": "- Bullet 1",
+            "skill_id": SKILL_ID,
+            "model": "openai/gpt-4o-mini",
+            "latency_ms": 100,
+            "success": True,
+            "error": None,
+            "quality_score": 0.85,
+            "quality_reason": "Good",
         }
 
         async def _go():
@@ -710,18 +746,34 @@ class TestRun(unittest.TestCase):
         client = Skills()
 
         recs = [
-            {"skill_id": SKILL_ID, "name": "Summarize", "score": 0.9,
-             "vector_score": 0.9, "prefers_score": 0.0,
-             "instruction_summary": "", "task_pattern_id": "", "tags": []},
+            {
+                "skill_id": SKILL_ID,
+                "name": "Summarize",
+                "score": 0.9,
+                "vector_score": 0.9,
+                "prefers_score": 0.0,
+                "instruction_summary": "",
+                "task_pattern_id": "",
+                "tags": [],
+            },
         ]
 
         async def _go():
             with (
                 patch.object(client, "get_context", new_callable=AsyncMock, return_value=recs),
-                patch.object(client, "execute", new_callable=AsyncMock, return_value={
-                    "output": "", "skill_id": SKILL_ID, "model": "",
-                    "latency_ms": 0, "success": False, "error": "LLM error",
-                }) as mock_exec,
+                patch.object(
+                    client,
+                    "execute",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "output": "",
+                        "skill_id": SKILL_ID,
+                        "model": "",
+                        "latency_ms": 0,
+                        "success": False,
+                        "error": "LLM error",
+                    },
+                ) as mock_exec,
             ):
                 await client.run(
                     "Summarize this",
@@ -764,18 +816,34 @@ class TestRun(unittest.TestCase):
         client = Skills()
 
         recs = [
-            {"skill_id": SKILL_ID, "name": "Summarize", "score": 0.9,
-             "vector_score": 0.9, "prefers_score": 0.0,
-             "instruction_summary": "", "task_pattern_id": "", "tags": []},
+            {
+                "skill_id": SKILL_ID,
+                "name": "Summarize",
+                "score": 0.9,
+                "vector_score": 0.9,
+                "prefers_score": 0.0,
+                "instruction_summary": "",
+                "task_pattern_id": "",
+                "tags": [],
+            },
         ]
 
         async def _go():
             with (
                 patch.object(client, "get_context", new_callable=AsyncMock, return_value=recs),
-                patch.object(client, "execute", new_callable=AsyncMock, return_value={
-                    "output": "Done", "skill_id": SKILL_ID, "model": "",
-                    "latency_ms": 0, "success": True, "error": None,
-                }) as mock_exec,
+                patch.object(
+                    client,
+                    "execute",
+                    new_callable=AsyncMock,
+                    return_value={
+                        "output": "Done",
+                        "skill_id": SKILL_ID,
+                        "model": "",
+                        "latency_ms": 0,
+                        "success": True,
+                        "error": None,
+                    },
+                ) as mock_exec,
             ):
                 await client.run("Summarize this", context="The article is about AI.")
                 return mock_exec

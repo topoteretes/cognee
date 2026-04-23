@@ -86,6 +86,7 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
             assert looks_like_skill_source(str(folder))
         finally:
             import shutil
+
             shutil.rmtree(folder)
 
     # ------------------------------------------------------------------
@@ -97,6 +98,7 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
 
         folder = self._make_skills_dir(_SKILL_V1)
         try:
+
             async def _run():
                 with (
                     patch(
@@ -116,6 +118,7 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
                     # Capture parsed skills and pass them back as "to_persist".
                     async def diff_side_effect(parsed, node_set):
                         return (parsed, [], [])
+
                     mock_diff.side_effect = diff_side_effect
                     persisted = await add_skills(str(folder), enrich=False)
                     return persisted, mock_add
@@ -132,6 +135,7 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
 
             # Canonical class, not the old cognee_skills.models.skill.Skill.
             from cognee.modules.engine.models import Skill as CanonicalSkill
+
             assert isinstance(skill, CanonicalSkill)
 
             # Single add_data_points call with the persisted skills.
@@ -139,6 +143,7 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
             assert mock_add.await_args.args[0] == persisted
         finally:
             import shutil
+
             shutil.rmtree(folder)
 
     # ------------------------------------------------------------------
@@ -156,15 +161,16 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
             parsed = parse_skills_folder(folder)
             existing_hash = parsed[0].content_hash
             existing_nid = str(parsed[0].id)
-            fake_node = (existing_nid, {
-                "type": "Skill",
-                "name": "summarize",
-                "content_hash": existing_hash,
-            })
-            mock_engine = AsyncMock()
-            mock_engine.get_nodeset_subgraph = AsyncMock(
-                return_value=([fake_node], [])
+            fake_node = (
+                existing_nid,
+                {
+                    "type": "Skill",
+                    "name": "summarize",
+                    "content_hash": existing_hash,
+                },
             )
+            mock_engine = AsyncMock()
+            mock_engine.get_nodeset_subgraph = AsyncMock(return_value=([fake_node], []))
 
             async def _run():
                 with (
@@ -190,6 +196,7 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
             assert mock_add.await_count == 0
         finally:
             import shutil
+
             shutil.rmtree(folder)
 
     # ------------------------------------------------------------------
@@ -211,15 +218,16 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
             # Edit the skill body
             (folder / "summarize" / "SKILL.md").write_text(_SKILL_V2)
 
-            fake_node = (old_nid, {
-                "type": "Skill",
-                "name": "summarize",
-                "content_hash": old_hash,
-            })
-            mock_engine = AsyncMock()
-            mock_engine.get_nodeset_subgraph = AsyncMock(
-                return_value=([fake_node], [])
+            fake_node = (
+                old_nid,
+                {
+                    "type": "Skill",
+                    "name": "summarize",
+                    "content_hash": old_hash,
+                },
             )
+            mock_engine = AsyncMock()
+            mock_engine.get_nodeset_subgraph = AsyncMock(return_value=([fake_node], []))
             mock_engine.delete_nodes = AsyncMock()
             mock_vector_engine = MagicMock()
             mock_vector_engine.delete_data_points = AsyncMock()
@@ -260,12 +268,11 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
             # A SkillChangeEvent of type "updated" was emitted.
             event_batches = [c.args[0] for c in mock_add.await_args_list]
             flat = [item for batch in event_batches for item in batch]
-            change_events = [
-                x for x in flat if type(x).__name__ == "SkillChangeEvent"
-            ]
+            change_events = [x for x in flat if type(x).__name__ == "SkillChangeEvent"]
             assert any(e.change_type == "updated" for e in change_events)
         finally:
             import shutil
+
             shutil.rmtree(folder)
 
     # ------------------------------------------------------------------
@@ -277,9 +284,7 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
 
         # Ingest is NOT on the client (it moved to cognee.remember).
         for removed in ("ingest", "upsert", "ingest_meta_skill"):
-            assert not hasattr(skills, removed), (
-                f"skills.{removed} should have been removed"
-            )
+            assert not hasattr(skills, removed), f"skills.{removed} should have been removed"
 
         # Runtime methods are still there and callable.
         for method in (
@@ -297,9 +302,7 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
             "auto_amendify",
             "remove",
         ):
-            assert callable(getattr(skills, method)), (
-                f"skills.{method} should be callable"
-            )
+            assert callable(getattr(skills, method)), f"skills.{method} should be callable"
 
         # Meta-skill path discoverable + on disk.
         assert skills.META_SKILL_PATH.is_dir()
@@ -314,6 +317,4 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
         from cognee.api.v1.search import SearchType
 
         names = {t.name for t in SearchType}
-        assert "AGENTIC_COMPLETION" in names, (
-            f"AGENTIC_COMPLETION missing from SearchType: {names}"
-        )
+        assert "AGENTIC_COMPLETION" in names, f"AGENTIC_COMPLETION missing from SearchType: {names}"

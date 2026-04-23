@@ -71,7 +71,9 @@ class TestFieldAliases:
     def test_title_alias_for_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             f = Path(tmpdir) / "SKILL.md"
-            f.write_text("---\ntitle: My Skill\ndescription: Does stuff.\n---\n\n# Body\n\nDo things.")
+            f.write_text(
+                "---\ntitle: My Skill\ndescription: Does stuff.\n---\n\n# Body\n\nDo things."
+            )
             skill = parse_skill_file(f)
             assert skill is not None
             # ``name`` is the slug (parent dir name); the frontmatter
@@ -240,9 +242,7 @@ class TestEntryFileDiscovery:
             (d / "SKILL.md").write_text(
                 "---\nname: from-skill-md\ndescription: desc\n---\n\n# Body"
             )
-            (d / "README.md").write_text(
-                "---\nname: from-readme\ndescription: desc\n---\n\n# Body"
-            )
+            (d / "README.md").write_text("---\nname: from-readme\ndescription: desc\n---\n\n# Body")
             skill = parse_skill_folder(d)
             assert skill is not None
             assert skill.name == "prefer-skill"

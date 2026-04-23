@@ -46,7 +46,9 @@ MOCK_INSPECTION_RESULT = InspectionResult(
 class TestInspectSkill(unittest.TestCase):
     @patch("cognee.cognee_skills.inspect.add_data_points", new_callable=AsyncMock)
     @patch("cognee.cognee_skills.inspect.get_llm_config")
-    @patch("cognee.cognee_skills.inspect.LLMGateway.acreate_structured_output", new_callable=AsyncMock)
+    @patch(
+        "cognee.cognee_skills.inspect.LLMGateway.acreate_structured_output", new_callable=AsyncMock
+    )
     @patch("cognee.cognee_skills.inspect.get_graph_engine", new_callable=AsyncMock)
     def test_inspect_returns_inspection(self, mock_engine_fn, mock_llm, mock_config, mock_add_dp):
         skill_node = _make_skill_node()
@@ -88,7 +90,9 @@ class TestInspectSkill(unittest.TestCase):
 
     @patch("cognee.cognee_skills.inspect.add_data_points", new_callable=AsyncMock)
     @patch("cognee.cognee_skills.inspect.get_llm_config")
-    @patch("cognee.cognee_skills.inspect.LLMGateway.acreate_structured_output", new_callable=AsyncMock)
+    @patch(
+        "cognee.cognee_skills.inspect.LLMGateway.acreate_structured_output", new_callable=AsyncMock
+    )
     @patch("cognee.cognee_skills.inspect.get_graph_engine", new_callable=AsyncMock)
     def test_inspect_aggregates_multiple_runs(
         self, mock_engine_fn, mock_llm, mock_config, mock_add_dp

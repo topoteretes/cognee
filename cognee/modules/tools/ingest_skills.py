@@ -62,9 +62,7 @@ async def _diff_against_graph(
     from cognee.modules.engine.models.node_set import NodeSet
 
     engine = await get_graph_engine()
-    raw_nodes, _ = await engine.get_nodeset_subgraph(
-        node_type=NodeSet, node_name=[node_set]
-    )
+    raw_nodes, _ = await engine.get_nodeset_subgraph(node_type=NodeSet, node_name=[node_set])
     existing: Dict[str, Tuple[str, dict]] = {
         props.get("name"): (str(nid), props)
         for nid, props in raw_nodes
@@ -180,9 +178,7 @@ async def add_skills(
         await add_data_points(change_nodes)
 
     if not to_persist:
-        logger.info(
-            "No changes to persist for %s (all %d skill(s) unchanged)", source, len(parsed)
-        )
+        logger.info("No changes to persist for %s (all %d skill(s) unchanged)", source, len(parsed))
         return []
 
     if enrich:

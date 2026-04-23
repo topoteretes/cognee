@@ -55,9 +55,7 @@ Sub-commands:
         p_run.add_argument(
             "--no-evaluate", action="store_true", help="Skip output quality evaluation"
         )
-        p_run.add_argument(
-            "--no-amendify", action="store_true", help="Skip automatic self-repair"
-        )
+        p_run.add_argument("--no-amendify", action="store_true", help="Skip automatic self-repair")
         p_run.add_argument(
             "--output-format",
             "-f",
@@ -137,9 +135,7 @@ Sub-commands:
         )
 
         # --- evaluate ---
-        p_evaluate = sub.add_parser(
-            "evaluate", help="Compare before/after scores for an amendment"
-        )
+        p_evaluate = sub.add_parser("evaluate", help="Compare before/after scores for an amendment")
         p_evaluate.add_argument("amendment_id", help="Amendment ID to evaluate")
 
         # --- recommend ---
