@@ -107,31 +107,42 @@ async def run_vector_migrations():
         )
     else:
         for dataset_database in dataset_databases:
-            dataset_database = await resolve_dataset_database_connection_info(dataset_database)
+            dataset_id = getattr(dataset_database, "dataset_id", None)
+            try:
+                dataset_database = await resolve_dataset_database_connection_info(dataset_database)
 
-            connection_info = getattr(dataset_database, "vector_database_connection_info", {}) or {}
-            vector_engine = create_vector_engine(
-                vector_db_provider=dataset_database.vector_database_provider,
-                vector_db_url=dataset_database.vector_database_url,
-                vector_db_name=dataset_database.vector_database_name,
-                vector_db_port=str(connection_info.get("port", "") or ""),
-                vector_db_key=dataset_database.vector_database_key or "",
-                vector_dataset_database_handler=dataset_database.vector_dataset_database_handler
-                or "",
-                vector_db_username=connection_info.get("username", "") or "",
-                vector_db_password=connection_info.get("password", "") or "",
-                vector_db_host=connection_info.get("host", "") or "",
-            )
-
-            migrate_method = getattr(vector_engine, "run_migrations", None)
-            if migrate_method is None:
-                logger.warning(
-                    "Vector engine has no run_migrations method for dataset '%s'. Skipping.",
-                    dataset_database.dataset_id,
+                connection_info = (
+                    getattr(dataset_database, "vector_database_connection_info", {}) or {}
                 )
-                continue
+                vector_engine = create_vector_engine(
+                    vector_db_provider=dataset_database.vector_database_provider,
+                    vector_db_url=dataset_database.vector_database_url,
+                    vector_db_name=dataset_database.vector_database_name,
+                    vector_db_port=str(connection_info.get("port", "") or ""),
+                    vector_db_key=dataset_database.vector_database_key or "",
+                    vector_dataset_database_handler=dataset_database.vector_dataset_database_handler
+                    or "",
+                    vector_db_username=connection_info.get("username", "") or "",
+                    vector_db_password=connection_info.get("password", "") or "",
+                    vector_db_host=connection_info.get("host", "") or "",
+                )
 
-            migration_result = await migrate_method()
+                migrate_method = getattr(vector_engine, "run_migrations", None)
+                if migrate_method is None:
+                    logger.warning(
+                        "Vector engine has no run_migrations method for dataset '%s'. Skipping.",
+                        dataset_database.dataset_id,
+                    )
+                    continue
+
+                migration_result = await migrate_method()
+            except Exception:
+                logger.exception(
+                    "Vector startup migration failed for dataset '%s'; continuing with remaining datasets.",
+                    dataset_id,
+                )
+                migration_summaries.append({"dataset_id": str(dataset_id), "result": "failed"})
+                continue
             summary = {
                 "dataset_id": str(dataset_database.dataset_id),
                 "provider": dataset_database.vector_database_provider,
