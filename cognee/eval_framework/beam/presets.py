@@ -83,3 +83,14 @@ def get_default_beam_sweep_configs(split: str) -> list[dict[str, Any]]:
             strategy_kwargs={"top_k": 30},
         ),
     ]
+
+
+def apply_beam_prompt_policy(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Enable BEAM per-question-type prompts for fixed-retriever sweep configs."""
+    updated_configs = []
+    for config in configs:
+        updated_config = dict(config)
+        if updated_config.get("mode") == "fixed_retriever":
+            updated_config["use_beam_question_type_prompts"] = True
+        updated_configs.append(updated_config)
+    return updated_configs

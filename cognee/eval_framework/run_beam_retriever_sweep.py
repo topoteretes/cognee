@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from cognee.eval_framework.beam.presets import (
     BEAM_DEFAULT_SPLIT,
+    apply_beam_prompt_policy,
     get_default_beam_sweep_configs,
 )
 from cognee.eval_framework.beam.runtime import make_timestamped_output_dir, prepare_beam_questions
@@ -91,7 +92,7 @@ async def run_beam_sweep(params: BeamSweepRunParams) -> dict[str, Any]:
     sweep.output_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Writing sweep artifacts to %s", sweep.output_dir)
 
-    retriever_configs = get_default_beam_sweep_configs(params.split)
+    retriever_configs = apply_beam_prompt_policy(get_default_beam_sweep_configs(params.split))
     validate_retriever_configs(retriever_configs)
 
     conversation_summaries = []

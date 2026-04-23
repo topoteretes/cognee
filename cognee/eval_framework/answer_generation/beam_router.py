@@ -130,6 +130,11 @@ _TYPE_PROMPTS: Dict[str, str] = {
 }
 
 
+def get_beam_question_type_prompt(question_type: str) -> str:
+    """Return the BEAM system prompt for a question type."""
+    return _TYPE_PROMPTS.get(question_type, _DEFAULT_PROMPT)
+
+
 class BEAMRouter:
     """Routes BEAM probing questions to the appropriate retriever and prompt.
 
@@ -170,7 +175,7 @@ class BEAMRouter:
     def _make_retriever(self, question_type: str) -> BaseRetriever:
         """Create a fresh retriever instance for parallel use."""
         retriever_cls = _TYPE_RETRIEVERS.get(question_type, self._fallback_retriever)
-        prompt = _TYPE_PROMPTS.get(question_type, _DEFAULT_PROMPT)
+        prompt = get_beam_question_type_prompt(question_type)
         kwargs: Dict[str, Any] = {"system_prompt": prompt}
         top_k = self._get_top_k(question_type)
         if top_k is not None:
