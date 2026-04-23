@@ -15,7 +15,9 @@ class EvalConfig(BaseSettings):
 
     # Question answering params
     answering_questions: bool = True
-    qa_engine: str = "cognee_graph_completion"  # Options: 'cognee_completion', 'cognee_graph_completion', 'cognee_graph_completion_cot', 'cognee_graph_completion_context_extension', 'beam_router'
+    qa_engine: str = (
+        "cognee_graph_completion"  # See answer_generation.registry for supported strategies.
+    )
 
     # Evaluation params
     evaluating_answers: bool = True

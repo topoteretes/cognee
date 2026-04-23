@@ -3,7 +3,10 @@ import json
 from typing import List, Optional
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
-    retriever_options,
+)
+from cognee.eval_framework.answer_generation.registry import (
+    build_answering_strategy,
+    get_answering_strategy_spec,
 )
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
@@ -49,18 +52,21 @@ async def run_question_answering(
 
         logger.info(f"Loaded {len(questions)} questions from {params['questions_path']}")
 
-        if params["qa_engine"] == "beam_router":
-            from cognee.eval_framework.answer_generation.beam_router import BEAMRouter
-
-            router = BEAMRouter()
+        qa_engine = params["qa_engine"]
+        strategy_spec = get_answering_strategy_spec(qa_engine)
+        if strategy_spec.mode == "router":
+            router = build_answering_strategy(qa_engine)
             answers = await router.answer_questions(questions)
         else:
             answer_generator = AnswerGeneratorExecutor()
+            retriever_kwargs = {}
+            if system_prompt is not None:
+                retriever_kwargs["system_prompt_path"] = system_prompt
+            if top_k is not None:
+                retriever_kwargs["top_k"] = top_k
             answers = await answer_generator.question_answering_non_parallel(
                 questions=questions,
-                retriever=retriever_options[params["qa_engine"]](
-                    system_prompt_path=system_prompt, top_k=top_k
-                ),
+                retriever=build_answering_strategy(qa_engine, **retriever_kwargs),
             )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)

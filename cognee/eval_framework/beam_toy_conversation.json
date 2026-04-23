@@ -1,0 +1,125 @@
+{
+  "dataset": "beam",
+  "conversation_index": 0,
+  "corpus": "--- Session 1 ---\n[March-01-2024] User: I'm Craig and I'm building a small budget tracker in Python 3.11 with Flask and SQLite. I want local development on port 5000. For the MVP I want user login, expense tracking, and a monthly summary. Keep the stack lightweight and skip Docker for now.\nAssistant: A lightweight stack makes sense. Flask, SQLAlchemy, SQLite, and simple server-rendered pages are enough for the MVP.\nUser: Great. My first sprint ends on March 29, 2024.\n\n--- Session 2 ---\n[March-10-2024] User: Plan the work in this order: 1) initial setup, 2) auth plus transaction CRUD, 3) analytics plus docs. I also want to add two transaction columns: category and notes.\nAssistant: Noted. We'll keep that order and extend the transactions table with category and notes.\nUser: The dashboard API is around 420ms right now. I have not integrated Flask-Login yet.\n\n--- Session 3 ---\n[March-18-2024] User: Update: after caching, the dashboard API is now around 250ms. I replaced manual sessions with Flask-Login 0.6.3, switched password hashing to Argon2, and added account lockout after failed logins. If you suggest tools, keep them practical and lightweight.\nAssistant: Latest status noted: dashboard 250ms, Flask-Login is in place, Argon2 and account lockout were added, and recommendations should stay lightweight.",
+  "probing_questions": [
+    {
+      "question": "What did I decide about mobile push notifications for this app?",
+      "answer": "Based on the provided chat, there is no information about any decision on mobile push notifications.",
+      "question_type": "abstention",
+      "rubric": [
+        "LLM response should clearly state that mobile push notifications were not discussed"
+      ],
+      "difficulty": "easy",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "Have I integrated Flask-Login in this project?",
+      "answer": "There is contradictory information: earlier you said Flask-Login had not been integrated yet, but later you said you replaced manual sessions with Flask-Login 0.6.3. The latest update says Flask-Login is in place.",
+      "question_type": "contradiction_resolution",
+      "rubric": [
+        "LLM response should state that there is contradictory information",
+        "LLM response should mention that earlier the user said Flask-Login had not been integrated yet",
+        "LLM response should mention that later the user said manual sessions were replaced with Flask-Login 0.6.3",
+        "LLM response should mention that the latest update says Flask-Login is in place"
+      ],
+      "difficulty": "medium",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "What order did I want the work planned in? Mention exactly three items.",
+      "answer": "1) initial setup, 2) auth plus transaction CRUD, 3) analytics plus docs.",
+      "question_type": "event_ordering",
+      "rubric": [
+        "initial setup",
+        "auth plus transaction CRUD",
+        "analytics plus docs"
+      ],
+      "difficulty": "easy",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "When does my first sprint end?",
+      "answer": "March 29, 2024.",
+      "question_type": "information_extraction",
+      "rubric": [
+        "LLM response should state: March 29, 2024"
+      ],
+      "difficulty": "easy",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "List the agreed MVP stack in exactly three bullet points.",
+      "answer": "- Flask\n- SQLAlchemy\n- SQLite",
+      "question_type": "instruction_following",
+      "rubric": [
+        "LLM response should contain exactly three bullet points",
+        "LLM response should mention Flask",
+        "LLM response should mention SQLAlchemy",
+        "LLM response should mention SQLite"
+      ],
+      "difficulty": "medium",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "What is the latest dashboard API response time?",
+      "answer": "Around 250ms.",
+      "question_type": "knowledge_update",
+      "rubric": [
+        "LLM response should state: 250ms"
+      ],
+      "difficulty": "easy",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "Which two transaction columns did I add, and which two security upgrades did I mention later?",
+      "answer": "The two transaction columns were category and notes. The two later security upgrades were Argon2 password hashing and account lockout after failed logins.",
+      "question_type": "multi_session_reasoning",
+      "rubric": [
+        "LLM response should state: category and notes",
+        "LLM response should state: Argon2 password hashing",
+        "LLM response should state: account lockout after failed logins"
+      ],
+      "difficulty": "medium",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "If I ask for more tooling recommendations, what style of tools should you suggest?",
+      "answer": "You should suggest practical, lightweight tools and avoid unnecessary heavy additions like Docker for the MVP.",
+      "question_type": "preference_following",
+      "rubric": [
+        "LLM response should mention practical tools",
+        "LLM response should mention lightweight tools",
+        "LLM response should avoid recommending Docker for the MVP"
+      ],
+      "difficulty": "medium",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "Give me a concise summary of the project so far.",
+      "answer": "You are building a small budget tracker in Python 3.11 with Flask and SQLite for local development on port 5000. The MVP includes user login, expense tracking, and a monthly summary. The work was planned in three phases: initial setup, auth plus transaction CRUD, and analytics plus docs, while adding category and notes to transactions. Later updates improved the dashboard API to about 250ms and added Flask-Login, Argon2 password hashing, and account lockout.",
+      "question_type": "summarization",
+      "rubric": [
+        "LLM response should mention Python 3.11, Flask, and SQLite",
+        "LLM response should mention local development on port 5000",
+        "LLM response should mention the MVP features: user login, expense tracking, and monthly summary",
+        "LLM response should mention the work plan order",
+        "LLM response should mention the 250ms dashboard update and the security upgrades"
+      ],
+      "difficulty": "medium",
+      "conversation_id": "toy-1"
+    },
+    {
+      "question": "How many days are there between the March 1 kickoff and the March 29 sprint end?",
+      "answer": "28 days.",
+      "question_type": "temporal_reasoning",
+      "rubric": [
+        "LLM response should state: 28 days"
+      ],
+      "difficulty": "easy",
+      "conversation_id": "toy-1"
+    }
+  ],
+  "split": "100K",
+  "max_batches": 3
+}
