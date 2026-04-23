@@ -1,17 +1,29 @@
 """
-Claude Code + Cognee on Daytona — Shared Memory Demo
+Claude Code + Cognee on Daytona — Shared Memory Demo (Snapshot Edition)
 
-Spins up one Cognee sandbox (shared knowledge graph = public memory) and N
-Claude Code agent sandboxes. Each agent runs the cognee-memory plugin from
-cognee-integrations, which:
+Why no separate Cognee sandbox:
+    Daytona's public preview URL is served through a proxy that rejects
+    sandbox-to-sandbox traffic (Connection reset by peer), even with
+    public=True. A previous version of this script deployed Cognee in
+    its own sandbox; every agent silently fell back to local-SDK mode
+    and "succeeded" against an ephemeral local DB, so the shared graph
+    stayed empty across runs.
 
-  * captures tool calls into a per-directory session cache (private memory)
-  * auto-injects relevant context on every UserPromptSubmit
-  * bridges session data into the permanent graph on SessionEnd
+Why no direct volume-mounted DBs either:
+    Daytona volumes are mountpoint-s3 FUSE mounts. SQLite, Kuzu, and
+    LanceDB all need random writes + file locking, which mountpoint-s3
+    explicitly doesn't support ("disk I/O error" on CREATE TABLE). The
+    Daytona docs confirm: volumes are not suitable for block-level
+    database access.
 
-Agents run sequentially so later agents can recall what earlier agents
-deposited into the shared graph. Each agent's session cache stays private
-to its own sandbox.
+What works instead:
+    The volume is used as a snapshot bucket. Each agent runs cognee
+    against a LOCAL disk path. Before the agent starts, we extract the
+    latest shared snapshot from the volume into the local state dir.
+    After the agent finishes, we tar local state back into the volume
+    as a single object. Because agents run sequentially, there are no
+    concurrent writes, and whole-object S3 writes are exactly what
+    mountpoint-s3 is designed for.
 
 Prerequisites:
     pip install daytona
@@ -19,15 +31,11 @@ Prerequisites:
     Set environment variables:
         DAYTONA_API_KEY     — https://app.daytona.io
         ANTHROPIC_API_KEY   — for Claude Code itself
-        LLM_API_KEY         — for Cognee (graph extraction, search)
+        LLM_API_KEY         — for Cognee (graph extraction + search)
 
 Usage:
     python distributed/deploy/daytona_onboarding_demo.py \\
         --repo https://github.com/topoteretes/cognee
-
-    # Reuse an existing Cognee sandbox:
-    python distributed/deploy/daytona_onboarding_demo.py \\
-        --cognee-url https://<id>-8000.daytona.work
 """
 
 import argparse
@@ -45,12 +53,20 @@ from daytona import (
     SessionExecuteRequest,
     Image,
     Resources,
+    VolumeMount,
 )
 
 DAYTONA_API_URL = "https://app.daytona.io/api"
 DEFAULT_REPO = "https://github.com/topoteretes/cognee"
 INTEGRATIONS_REPO = "https://github.com/topoteretes/cognee-integrations"
 PLUGIN_SUBPATH = "integrations/claude-code"
+VOLUME_NAME = "cognee-shared-memory"
+MOUNT_PATH = "/shared-cognee"
+# Path inside each agent sandbox where cognee's local DBs live. This is on
+# the sandbox's real filesystem (block storage), so SQLite/Kuzu/LanceDB
+# work correctly. Snapshots of this dir are synced to/from the volume.
+LOCAL_STATE = "/var/cognee-state"
+SNAPSHOT_FILE = "state.tar.gz"
 
 
 # ---------------------------------------------------------------------------
@@ -91,31 +107,6 @@ def _run_streamed(sandbox, session_id, command, label="", timeout=600):
                 print(f"{prefix}{line}", flush=True)
 
 
-def _wait_for_health(sandbox, port=8000, retries=30, interval=3):
-    """Poll a health endpoint until it responds."""
-    sandbox.process.exec(
-        "cat > /tmp/healthcheck.py << 'PYEOF'\n"
-        f"import urllib.request\n"
-        "try:\n"
-        f"    urllib.request.urlopen('http://localhost:{port}/health', timeout=5)\n"
-        "    print('OK')\n"
-        "except Exception:\n"
-        "    print('WAITING')\n"
-        "PYEOF",
-        timeout=5,
-    )
-    for i in range(retries):
-        time.sleep(interval)
-        try:
-            result = sandbox.process.exec("python /tmp/healthcheck.py", timeout=10)
-            if "OK" in result.result.strip():
-                return True
-        except Exception:
-            pass
-        print(f"  ({i + 1}) waiting...", flush=True)
-    return False
-
-
 def _print_tail(result, label, lines=5):
     """Print the last N lines of a command result."""
     if not result or not result.result:
@@ -123,97 +114,6 @@ def _print_tail(result, label, lines=5):
     for line in result.result.strip().splitlines()[-lines:]:
         print(f"  [{label}] {line}", flush=True)
 
-
-# ---------------------------------------------------------------------------
-# Sandbox 1: Cognee API (shared public memory)
-# ---------------------------------------------------------------------------
-
-def deploy_cognee_sandbox():
-    """Deploy the Cognee API server. Returns (sandbox, signed_url)."""
-    llm_api_key = os.environ.get("LLM_API_KEY")
-    if not llm_api_key:
-        raise ValueError("LLM_API_KEY environment variable is required")
-
-    daytona = _get_daytona()
-
-    print("=== Creating Cognee sandbox (shared public memory) ===")
-    sandbox = daytona.create(
-        CreateSandboxFromImageParams(
-            image=Image.debian_slim("3.12"),
-            resources=Resources(cpu=2, memory=4, disk=10),
-            # Default is 15 min — Daytona idle-stopped the sandbox mid-demo
-            # last run, which made the plugin fall back to local storage.
-            # 0 disables auto-stop entirely.
-            auto_stop_interval=0,
-            env_vars={
-                "LLM_API_KEY": llm_api_key,
-                "LLM_MODEL": os.environ.get("LLM_MODEL", "openai/gpt-4o-mini"),
-                "LLM_PROVIDER": os.environ.get("LLM_PROVIDER", "openai"),
-                "HOST": "0.0.0.0",
-                "CACHING": "true",
-                "REQUIRE_AUTHENTICATION": "False",
-                "ENABLE_BACKEND_ACCESS_CONTROL": "False",
-            },
-            labels={"app": "cognee", "service": "api", "demo": "shared-memory"},
-        ),
-    )
-    print(f"  Sandbox ID: {sandbox.id}")
-
-    print("  Installing cognee (this may take a few minutes)...")
-    result = sandbox.process.exec("pip install 'cognee[api]'", timeout=600)
-    _print_tail(result, "cognee")
-
-    print("\n  Starting Cognee API server...")
-    sandbox.process.exec(
-        "nohup python -m uvicorn cognee.api.client:app "
-        "--host 0.0.0.0 --port 8000 > /tmp/cognee-server.log 2>&1 &",
-        timeout=10,
-    )
-
-    print("  Waiting for server...", flush=True)
-    if not _wait_for_health(sandbox, retries=40, interval=5):
-        try:
-            log = sandbox.process.exec("tail -30 /tmp/cognee-server.log", timeout=5)
-            print(f"\n  Server log:\n{log.result}")
-        except Exception:
-            pass
-        print("  WARNING: Cognee server may not be ready.")
-
-    signed_url = sandbox.create_signed_preview_url(8000, expires_in_seconds=86400)
-    print(f"  Cognee API ready: {signed_url.url}")
-
-    # Fail fast if auth wasn't actually disabled. The first pass of this demo
-    # spun up Cognee with auth still on (env var was added later); agents
-    # then fell back to local storage silently.
-    import urllib.request
-    try:
-        with urllib.request.urlopen(f"{signed_url.url}/api/v1/datasets", timeout=10) as r:
-            if r.status != 200:
-                raise RuntimeError(f"unexpected status {r.status}")
-    except Exception as e:
-        raise RuntimeError(
-            f"Cognee /api/v1/datasets did not accept unauthenticated requests "
-            f"(REQUIRE_AUTHENTICATION not picked up?): {e}"
-        )
-    print("  Auth check: /api/v1/datasets accepts unauth'd requests.")
-    return sandbox, signed_url.url
-
-
-def _remote_has_data(cognee_url):
-    """Poll Cognee for evidence that an agent actually wrote to the backend."""
-    import urllib.request
-    import json
-    try:
-        with urllib.request.urlopen(f"{cognee_url}/api/v1/datasets", timeout=10) as r:
-            data = json.loads(r.read())
-        return bool(data), data
-    except Exception as e:
-        return False, str(e)
-
-
-# ---------------------------------------------------------------------------
-# Sandbox N: Claude Code agent (private per-agent memory + shared graph)
-# ---------------------------------------------------------------------------
 
 def _create_with_quota_retry(daytona, params, retries=6, delay=20):
     """Create a sandbox, retrying on the Daytona memory-quota error.
@@ -236,13 +136,40 @@ def _create_with_quota_retry(daytona, params, retries=6, delay=20):
     raise last_error if last_error else RuntimeError("sandbox create failed")
 
 
-def deploy_claude_code_agent(cognee_url, target_repo, label):
-    """Deploy a Claude Code sandbox with the cognee-memory plugin.
+# ---------------------------------------------------------------------------
+# Shared volume (replaces the Cognee service sandbox)
+# ---------------------------------------------------------------------------
 
-    Each agent gets:
-      * its own Daytona sandbox (isolated filesystem, process space)
-      * a per-directory session ID (private session cache in Cognee)
-      * the shared Cognee backend at `cognee_url` (public graph)
+def ensure_shared_volume(daytona, retries=30, delay=2):
+    """Create (or reuse) the Daytona volume used as Cognee's shared storage.
+
+    Daytona creates volumes asynchronously; a newly-created volume sits in
+    `pending_create` for a few seconds before becoming `ready`. Mounting
+    it before then fails the sandbox create with a validation error, so
+    poll until it's ready.
+    """
+    print("=== Preparing shared volume ===")
+    vol = daytona.volume.get(VOLUME_NAME, create=True)
+    print(f"  Volume: {vol.name} ({vol.id}), state={vol.state}")
+    for _ in range(retries):
+        if str(vol.state).upper().endswith("READY"):
+            return vol
+        time.sleep(delay)
+        vol = daytona.volume.get(VOLUME_NAME, create=False)
+        print(f"  ...waiting, state={vol.state}")
+    raise RuntimeError(f"Volume {VOLUME_NAME} did not become ready: {vol.state}")
+
+
+# ---------------------------------------------------------------------------
+# Claude Code agent sandbox
+# ---------------------------------------------------------------------------
+
+def deploy_claude_code_agent(volume_id, target_repo, label):
+    """Deploy a Claude Code sandbox that shares Cognee storage via volume mount.
+
+    Each agent runs Cognee in-process. DATA/SYSTEM/CACHE_ROOT_DIRECTORY
+    all point at the mounted volume, so all agents share the same graph
+    and session cache across runs.
     """
     anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not anthropic_api_key:
@@ -258,15 +185,22 @@ def deploy_claude_code_agent(cognee_url, target_repo, label):
     sandbox = _create_with_quota_retry(daytona,
         CreateSandboxFromImageParams(
             image=Image.debian_slim("3.12"),
-            # 4 GiB was killed by the OOM killer when Claude Code + the
-            # cognee plugin + the cognee SDK all loaded at once. 6 GiB leaves
-            # the Cognee sandbox (4 GiB) exactly at the 10 GiB tier cap.
+            # 4 GiB was OOM-killed during claude+plugin+cognee SDK startup.
+            # 6 GiB leaves us at the 10 GiB tier cap with nothing else.
             resources=Resources(cpu=2, memory=6, disk=10),
+            volumes=[VolumeMount(volume_id=volume_id, mount_path=MOUNT_PATH)],
             env_vars={
                 "ANTHROPIC_API_KEY": anthropic_api_key,
                 "LLM_API_KEY": llm_api_key,
                 "LLM_MODEL": os.environ.get("LLM_MODEL", "openai/gpt-4o-mini"),
-                "COGNEE_SERVICE_URL": cognee_url,
+                "LLM_PROVIDER": os.environ.get("LLM_PROVIDER", "openai"),
+                # Cognee local storage — on the sandbox's real filesystem,
+                # NOT on the volume (mountpoint-s3 can't host SQLite/Kuzu).
+                # Synced to the volume before/after each agent's run.
+                "DATA_ROOT_DIRECTORY": f"{LOCAL_STATE}/data",
+                "SYSTEM_ROOT_DIRECTORY": f"{LOCAL_STATE}/system",
+                "CACHE_ROOT_DIRECTORY": f"{LOCAL_STATE}/cache",
+                # Plugin config. No COGNEE_SERVICE_URL -> plugin uses local mode.
                 "COGNEE_PLUGIN_DATASET": "shared_codebase_memory",
                 "COGNEE_SESSION_STRATEGY": "per-directory",
                 "COGNEE_SESSION_PREFIX": label,
@@ -286,7 +220,7 @@ def deploy_claude_code_agent(cognee_url, target_repo, label):
         timeout=180,
     )
 
-    # Node.js 22 via binary tarball — apt only ships Node 18.
+    # Node.js 22 via tarball — apt only ships Node 18, Claude Code needs >=22.
     print("  Installing Node.js 22...")
     node_version = "v22.16.0"
     sandbox.process.exec(
@@ -317,6 +251,14 @@ def deploy_claude_code_agent(cognee_url, target_repo, label):
         timeout=60,
     )
 
+    # Bump the plugin's SessionStart hook timeout. The default (15s) is
+    # shorter than a cognee cold import on first run.
+    sandbox.process.exec(
+        r"sed -i 's/\"timeout\": 15/\"timeout\": 90/g' "
+        "/opt/cognee-integrations/integrations/claude-code/hooks/hooks.json",
+        timeout=5,
+    )
+
     print(f"  Cloning target repo {target_repo}...")
     _run_streamed(
         sandbox, session_id,
@@ -325,13 +267,18 @@ def deploy_claude_code_agent(cognee_url, target_repo, label):
     )
 
     # Claude Code refuses --dangerously-skip-permissions when running as root.
-    # Create an unprivileged user and dump the sandbox env so it can source
-    # the provider keys + plugin config when we invoke claude as that user.
-    print("  Creating agent user...")
+    # Create the agent user and its local state dir (cognee DB lives here,
+    # on real block storage — see module docstring). We DO NOT chown the
+    # volume mount — it's mountpoint-s3 FUSE and chown fails "Operation
+    # not permitted". The mount is already rwxrwxrwx, so agent can still
+    # read/write snapshot tarballs on it.
+    print("  Creating agent user + local state dir...")
     sandbox.process.exec(
-        "useradd -m -s /bin/bash agent && "
-        "chown -R agent:agent /workspace /opt/cognee-integrations && "
-        "env | grep -E '^(ANTHROPIC_API_KEY|LLM_|COGNEE_|CACHING)=' "
+        f"useradd -m -s /bin/bash agent && "
+        f"mkdir -p {LOCAL_STATE}/data {LOCAL_STATE}/system {LOCAL_STATE}/cache && "
+        f"chown -R agent:agent /workspace /opt/cognee-integrations {LOCAL_STATE} && "
+        "env | grep -E '^(ANTHROPIC_API_KEY|LLM_|COGNEE_|CACHING|"
+        "DATA_ROOT_DIRECTORY|SYSTEM_ROOT_DIRECTORY|CACHE_ROOT_DIRECTORY)=' "
         "| sed 's/^/export /' > /home/agent/env && "
         "chown agent:agent /home/agent/env && chmod 600 /home/agent/env",
         timeout=15,
@@ -346,13 +293,13 @@ def deploy_claude_code_agent(cognee_url, target_repo, label):
 # ---------------------------------------------------------------------------
 
 def run_agent_task(sandbox, label, prompt):
-    """Run one Claude Code task with the cognee-memory plugin loaded.
+    """Run one Claude Code task with sync-in / run / sync-out around it.
 
-    Uses `claude -p` (print mode) for a single non-interactive turn.
-    The plugin:
-      * searches session cache + shared graph on UserPromptSubmit (auto)
-      * captures tool calls into the session cache on PostToolUse (auto)
-      * bridges the session into the permanent graph on SessionEnd (auto)
+    The cognee DBs live on local sandbox disk (block storage). Before the
+    agent runs we extract the latest shared snapshot from the volume into
+    LOCAL_STATE; after the agent finishes we tar LOCAL_STATE back into
+    the volume as a single object. Whole-object writes are what
+    mountpoint-s3 is built for.
     """
     print(f"\n{'=' * 60}")
     print(f"  AGENT:  {label}")
@@ -360,8 +307,23 @@ def run_agent_task(sandbox, label, prompt):
     print(f"{'=' * 60}\n")
 
     plugin_dir = f"/opt/cognee-integrations/{PLUGIN_SUBPATH}"
+    snapshot_path = f"{MOUNT_PATH}/{SNAPSHOT_FILE}"
+
+    # One bash block: sync-in, run claude, sync-out. The sync-out is in a
+    # trap so the snapshot gets written even if claude errors.
     inner = (
         f"set -a && . /home/agent/env && set +a && "
+        f"sync_out() {{ "
+        f"  tar -czf /tmp/new-state.tar.gz -C {LOCAL_STATE} . && "
+        f"  cp /tmp/new-state.tar.gz {shlex.quote(snapshot_path)} && "
+        f"  echo '[sync-out] wrote '$(stat -c%s /tmp/new-state.tar.gz)' bytes'; "
+        f"}}; trap sync_out EXIT; "
+        f"if [ -f {shlex.quote(snapshot_path)} ]; then "
+        f"  echo '[sync-in] found prior snapshot ('$(stat -c%s {shlex.quote(snapshot_path)})' bytes), extracting'; "
+        f"  tar -xzf {shlex.quote(snapshot_path)} -C {LOCAL_STATE}; "
+        f"else "
+        f"  echo '[sync-in] no prior snapshot, starting fresh'; "
+        f"fi; "
         f"cd /workspace && "
         f"claude --plugin-dir {shlex.quote(plugin_dir)} "
         f"--dangerously-skip-permissions "
@@ -376,12 +338,66 @@ def run_agent_task(sandbox, label, prompt):
 
 
 # ---------------------------------------------------------------------------
+# Graph inspection (post-run verification)
+# ---------------------------------------------------------------------------
+
+def inspect_shared_graph(daytona, volume_id):
+    """Mount the volume, extract the snapshot to local disk, and report
+    row counts from the SQLite DB. This is the proof that the shared
+    graph actually carries data across agents."""
+    print("\n=== Inspecting shared graph ===")
+    sandbox = _create_with_quota_retry(daytona,
+        CreateSandboxFromImageParams(
+            image=Image.debian_slim("3.12"),
+            resources=Resources(cpu=1, memory=2, disk=5),
+            volumes=[VolumeMount(volume_id=volume_id, mount_path=MOUNT_PATH)],
+            labels={"app": "cognee-inspector", "demo": "shared-memory"},
+        ),
+    )
+    try:
+        snapshot_path = f"{MOUNT_PATH}/{SNAPSHOT_FILE}"
+        # Extract snapshot, then SQLite query the cognee_db.
+        query = (
+            "import sqlite3, glob\n"
+            f"db_paths = glob.glob('{LOCAL_STATE}/system/databases/cognee_db') "
+            f"or glob.glob('{LOCAL_STATE}/system/**/cognee_db', recursive=True)\n"
+            "if not db_paths:\n"
+            "    print('no sqlite found in snapshot'); raise SystemExit\n"
+            "c = sqlite3.connect(db_paths[0]).cursor()\n"
+            "for t in ('datasets', 'data', 'pipeline_runs', 'users', 'nodes', 'edges'):\n"
+            "    try:\n"
+            "        n = c.execute(f'select count(*) from \"{t}\"').fetchone()[0]\n"
+            "        print(f'{t}: {n}')\n"
+            "    except Exception as e:\n"
+            "        print(f'{t}: err {e}')\n"
+        )
+        import base64
+        b64 = base64.b64encode(query.encode()).decode()
+        extract_and_query = (
+            f"mkdir -p {LOCAL_STATE} && "
+            f"if [ -f {shlex.quote(snapshot_path)} ]; then "
+            f"  echo 'snapshot size: '$(stat -c%s {shlex.quote(snapshot_path)})' bytes'; "
+            f"  tar -xzf {shlex.quote(snapshot_path)} -C {LOCAL_STATE}; "
+            f"  echo '---contents---'; find {LOCAL_STATE} -type f | head -20; "
+            f"  echo '---sqlite counts---'; "
+            f"  echo {b64} | base64 -d > /tmp/q.py && python /tmp/q.py; "
+            f"else "
+            f"  echo 'NO_SNAPSHOT at {snapshot_path}'; "
+            f"fi"
+        )
+        r = sandbox.process.exec(extract_and_query, timeout=60)
+        print(r.result or "(no output)")
+    finally:
+        daytona.delete(sandbox)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Claude Code + Cognee on Daytona: shared public memory demo"
+        description="Claude Code + Cognee on Daytona: shared-volume memory demo"
     )
     parser.add_argument(
         "--repo",
@@ -389,89 +405,90 @@ def main():
         help="Git URL of the repository the agents will explore",
     )
     parser.add_argument(
-        "--cognee-url",
-        default=os.environ.get("COGNEE_SERVICE_URL"),
-        help="Reuse an existing Cognee API URL instead of deploying a new sandbox",
+        "--keep-volume",
+        action="store_true",
+        help="Don't delete the shared volume at the end (useful for inspection)",
     )
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  CLAUDE CODE + COGNEE SHARED MEMORY DEMO")
+    print("  CLAUDE CODE + COGNEE SHARED MEMORY DEMO (volume)")
     print(f"  Target repo: {args.repo}")
     print("=" * 60 + "\n")
 
-    cognee_sandbox = None
-    if args.cognee_url:
-        cognee_url = args.cognee_url
-        print(f"  Reusing existing Cognee API: {cognee_url}\n")
-    else:
-        cognee_sandbox, cognee_url = deploy_cognee_sandbox()
+    daytona = _get_daytona()
+    volume = ensure_shared_volume(daytona)
 
-    # Three agents, three roles. Each has private per-directory session memory;
-    # all share the Cognee backend for the permanent graph.
+    # Three agents with increasingly broad prompts. Each agent's session
+    # cache is private (per-directory, scoped by COGNEE_SESSION_PREFIX);
+    # anything they /cognee-memory:cognee-remember or SessionEnd-bridge
+    # lands in the shared graph on the volume.
     agents = [
         (
             "arch",
             "Explore this codebase. Map the project structure, key entry "
             "points, main modules, and overall architecture. Use "
             "/cognee-memory:cognee-remember to store the most important "
-            "findings in the shared knowledge graph under the 'project' "
-            "category so other agents can read them.",
+            "findings so other agents can read them.",
         ),
         (
             "api",
             "Before exploring, use /cognee-memory:cognee-search to recall "
-            "anything the architecture agent stored in the shared graph. "
-            "Then describe the API layer — routes, middleware, auth, request "
-            "handling. Store your findings with /cognee-memory:cognee-remember.",
+            "anything the architecture agent stored. Then describe the API "
+            "layer — routes, middleware, auth, request handling. Store "
+            "your findings with /cognee-memory:cognee-remember.",
         ),
         (
             "tests",
-            "Use /cognee-memory:cognee-search to pull in what the architecture "
-            "and API agents already learned. Then describe the testing strategy — "
-            "which suites exist, what they cover, and any gaps. Store findings "
-            "with /cognee-memory:cognee-remember.",
+            "Use /cognee-memory:cognee-search to pull in what the "
+            "architecture and API agents already learned. Then describe "
+            "the testing strategy — which suites exist, what they cover, "
+            "and any gaps. Store findings with /cognee-memory:cognee-remember.",
         ),
     ]
 
-    # Run agents one at a time and tear each down before the next: Daytona's
-    # default tier caps total concurrent memory at 10 GiB (Cognee = 4 GiB,
-    # each agent = 4 GiB). Personal session memory already lives on the
-    # Cognee backend, so destroying the sandbox doesn't lose anything.
-    daytona = _get_daytona()
     ran = []
-    for label, prompt in agents:
-        sandbox = deploy_claude_code_agent(cognee_url, args.repo, label)
-        try:
-            run_agent_task(sandbox, label, prompt)
-            ran.append((label, sandbox.id))
-        finally:
+    try:
+        for label, prompt in agents:
+            sandbox = deploy_claude_code_agent(volume.id, args.repo, label)
             try:
-                daytona.delete(sandbox)
-                print(f"  [{label}] sandbox {sandbox.id} destroyed.")
-            except Exception as e:
-                print(f"  [{label}] WARNING: failed to delete sandbox: {e}")
+                run_agent_task(sandbox, label, prompt)
+                ran.append((label, sandbox.id))
 
-        # Fail fast if nothing reached the shared backend — previously the
-        # plugin fell back to local SDK mode silently, so all three agents
-        # "succeeded" while the remote stayed empty.
-        has_data, payload = _remote_has_data(cognee_url)
-        print(f"  Remote check after {label}: datasets={payload}")
-        if not has_data and label == "arch":
-            raise RuntimeError(
-                "Cognee backend still has no datasets after arch — plugin did "
-                "not reach the remote. Aborting before burning agent credits."
-            )
+                # Dump the plugin's resolved state so we can see whether
+                # SessionStart completed and what mode it picked.
+                try:
+                    dump = sandbox.process.exec(
+                        "cat /home/agent/.cognee-plugin/resolved.json 2>&1 || "
+                        "echo MISSING_RESOLVED_JSON",
+                        timeout=5,
+                    )
+                    if dump.result:
+                        print(f"  [{label}] resolved.json:\n{dump.result}")
+                except Exception:
+                    pass
+            finally:
+                try:
+                    daytona.delete(sandbox)
+                    print(f"  [{label}] sandbox {sandbox.id} destroyed.")
+                except Exception as e:
+                    print(f"  [{label}] WARNING: failed to delete sandbox: {e}")
+
+        inspect_shared_graph(daytona, volume.id)
+    finally:
+        if not args.keep_volume:
+            try:
+                daytona.volume.delete(volume)
+                print(f"\n  Shared volume {volume.name} deleted.")
+            except Exception as e:
+                print(f"\n  WARNING: failed to delete volume: {e}")
+        else:
+            print(f"\n  Shared volume {volume.name} ({volume.id}) kept.")
 
     print("\n" + "=" * 60)
     print("  DEMO COMPLETE")
-    print(f"  Cognee API:      {cognee_url}")
-    if cognee_sandbox:
-        print(f"  Cognee sandbox:  {cognee_sandbox.id}")
     for label, sandbox_id in ran:
         print(f"  Agent {label:<6} ran in: {sandbox_id} (destroyed)")
-    print(f"  Datasets:        {cognee_url}/api/v1/datasets")
-    print(f"  Swagger:         {cognee_url}/docs")
     print("=" * 60)
 
 
