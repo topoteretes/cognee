@@ -148,6 +148,41 @@ class LanceDBAdapter(VectorDBInterface):
                         schema=LanceDataPoint,
                         exist_ok=True,
                     )
+        else:
+            await self._ensure_schema_compatible(collection_name, LanceDataPoint)
+
+    async def _ensure_schema_compatible(self, collection_name: str, expected_model) -> None:
+        """Drop and recreate a table if its payload struct has fewer fields than expected."""
+        try:
+            collection = await self.get_collection(collection_name)
+            table_schema = await collection.schema()
+            expected_schema = expected_model.to_arrow_schema()
+
+            payload_idx = table_schema.get_field_index("payload")
+            expected_payload_idx = expected_schema.get_field_index("payload")
+            if payload_idx < 0 or expected_payload_idx < 0:
+                return
+
+            existing_names = {
+                table_schema.field(payload_idx).type.field(i).name
+                for i in range(table_schema.field(payload_idx).type.num_fields)
+            }
+            expected_names = {
+                expected_schema.field(expected_payload_idx).type.field(i).name
+                for i in range(expected_schema.field(expected_payload_idx).type.num_fields)
+            }
+
+            if not expected_names.issubset(existing_names):
+                async with self.VECTOR_DB_LOCK:
+                    connection = await self.get_connection()
+                    await connection.drop_table(collection_name)
+                    await connection.create_table(
+                        name=collection_name,
+                        schema=expected_model,
+                        exist_ok=True,
+                    )
+        except Exception:
+            pass
 
     async def get_collection(self, collection_name: str):
         if not await self.has_collection(collection_name):

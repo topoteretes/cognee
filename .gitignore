@@ -1,5 +1,7 @@
 .data
 .env
+.env.example
+cognee/cognee_skills/.env.example
 .local.env
 .prod.env
 cognee/.data/
@@ -204,3 +206,6 @@ SWE-bench_testsample/
 .chromadb_data/
 
 deployment/helm/values-local.yml
+
+# cognee skills generated artifacts
+cognee/skills/graph.html

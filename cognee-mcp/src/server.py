@@ -1288,6 +1288,457 @@ def load_class(model_file, model_name):
     return model_class
 
 
+# ---------------------------------------------------------------------------
+# Skills tools
+# ---------------------------------------------------------------------------
+
+try:
+    from cognee.cognee_skills.client import Skills
+
+    _skills_client = Skills()
+
+    @mcp.tool(
+        name="get_skill_context",
+        description="Get ranked skill recommendations for a task. Returns skills sorted by relevance with scores.",
+    )
+    async def get_skill_context(task_text: str, top_k: int = 5) -> list:
+        """Return the best-matching skills for a task description."""
+        recs = await _skills_client.get_context(task_text, top_k=top_k)
+        return [types.TextContent(type="text", text=json.dumps(recs, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="load_skill",
+        description="Load full details for a skill by its skill_id.",
+    )
+    async def load_skill(skill_id: str) -> list:
+        """Return the full skill definition including instruction summary and task patterns."""
+        result = await _skills_client.load(skill_id)
+        if result is None:
+            return [types.TextContent(type="text", text=f"Skill '{skill_id}' not found.")]
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="execute_skill",
+        description="Execute a skill against a task. Loads the skill, sends instructions + task to the LLM, and returns the result. Automatically records the run for learning.",
+    )
+    async def execute_skill_tool(
+        skill_id: str,
+        task_text: str,
+        context: str = "",
+        auto_observe: bool = True,
+        auto_evaluate: bool = True,
+    ) -> list:
+        """Execute a skill and return the LLM output."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.execute(
+                skill_id=skill_id,
+                task_text=task_text,
+                context=context or None,
+                auto_observe=auto_observe,
+                auto_evaluate=auto_evaluate,
+            )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="observe_skill_run",
+        description="Record a skill execution result. Required fields: task_text, selected_skill_id, success_score (0-1).",
+    )
+    async def observe_skill_run(run_payload: str) -> list:
+        """Record a skill run to the graph and update prefers weights."""
+        try:
+            payload = json.loads(run_payload)
+        except (json.JSONDecodeError, TypeError) as exc:
+            return [types.TextContent(type="text", text=f"Invalid JSON: {exc}")]
+
+        missing = [
+            f for f in ("task_text", "selected_skill_id", "success_score") if f not in payload
+        ]
+        if missing:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Missing required fields: {', '.join(missing)}",
+                )
+            ]
+
+        result = await _skills_client.observe(payload)
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Recorded run: skill={result.get('selected_skill_id')} score={result.get('success_score')}",
+            )
+        ]
+
+    @mcp.tool(
+        name="ingest_skills",
+        description="Parse SKILL.md files from a folder, enrich via LLM, and store in the knowledge graph. Use this to register new skills.",
+    )
+    async def ingest_skills_tool(
+        skills_folder: str,
+        dataset_name: str = "skills",
+        source_repo: str = "",
+        skip_enrichment: bool = False,
+        node_set: str = "skills",
+    ) -> list:
+        """Ingest all skills from a folder path."""
+        folder = Path(skills_folder).resolve()
+        if not folder.is_dir():
+            return [types.TextContent(type="text", text=f"Directory not found: {skills_folder}")]
+        await _skills_client.ingest(
+            skills_folder=str(folder),
+            dataset_name=dataset_name,
+            source_repo=source_repo,
+            skip_enrichment=skip_enrichment,
+            node_set=node_set,
+        )
+        return [types.TextContent(type="text", text=f"Ingested skills from {folder}")]
+
+    @mcp.tool(
+        name="upsert_skills",
+        description="Re-ingest skills from a folder: skip unchanged, update changed, remove deleted. Returns a summary of changes.",
+    )
+    async def upsert_skills_tool(
+        skills_folder: str,
+        dataset_name: str = "skills",
+        source_repo: str = "",
+        node_set: str = "skills",
+    ) -> list:
+        """Diff-based re-ingestion of a skills folder."""
+        folder = Path(skills_folder).resolve()
+        if not folder.is_dir():
+            return [types.TextContent(type="text", text=f"Directory not found: {skills_folder}")]
+        result = await _skills_client.upsert(
+            skills_folder=str(folder),
+            dataset_name=dataset_name,
+            source_repo=source_repo,
+            node_set=node_set,
+        )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="remove_skill",
+        description="Remove a single skill from the knowledge graph and vector stores by its skill_id.",
+    )
+    async def remove_skill_tool(skill_id: str) -> list:
+        """Remove a skill by its skill_id."""
+        removed = await _skills_client.remove(skill_id)
+        msg = f"Skill '{skill_id}' removed." if removed else f"Skill '{skill_id}' not found."
+        return [types.TextContent(type="text", text=msg)]
+
+    @mcp.tool(
+        name="list_skills",
+        description="List all skills currently ingested in the knowledge graph.",
+    )
+    async def list_skills_tool() -> list:
+        """Return all ingested skills with their metadata."""
+        results = await _skills_client.list()
+        return [types.TextContent(type="text", text=json.dumps(results, indent=2, cls=JSONEncoder))]
+
+    # -------------------------------------------------------------------
+    # Skills self-amendifying tools
+    # -------------------------------------------------------------------
+
+    @mcp.tool(
+        name="inspect_skill",
+        description="Analyze failed runs for a skill and inspect the root cause. Returns a structured inspection with failure category, root cause, severity, and improvement hypothesis.",
+    )
+    async def inspect_skill_tool(
+        skill_id: str,
+        min_runs: int = 1,
+        score_threshold: float = 0.5,
+        node_set: str = "skills",
+    ) -> list:
+        """Inspect why a skill is failing based on its run history."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.inspect(
+                skill_id=skill_id,
+                min_runs=min_runs,
+                score_threshold=score_threshold,
+                node_set=node_set,
+            )
+        if result is None:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"No inspection produced for skill '{skill_id}' (insufficient failed runs or skill not found).",
+                )
+            ]
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="preview_amendify_skill",
+        description="Preview a proposed amendment for a skill's instructions based on an inspection. If no inspection_id is given, runs inspection first.",
+    )
+    async def preview_amendify_skill_tool(
+        skill_id: str,
+        inspection_id: str = "",
+        min_runs: int = 1,
+        score_threshold: float = 0.5,
+        node_set: str = "skills",
+    ) -> list:
+        """Preview a proposed amendment to fix a failing skill."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.preview_amendify(
+                skill_id=skill_id,
+                inspection_id=inspection_id or None,
+                min_runs=min_runs,
+                score_threshold=score_threshold,
+                node_set=node_set,
+            )
+        if result is None:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"No amendment proposed for skill '{skill_id}' (inspection or amendment generation failed).",
+                )
+            ]
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="amendify_skill",
+        description="Apply a proposed amendment to a skill. Updates instructions in the graph, re-enriches the skill, and optionally writes to disk and validates.",
+    )
+    async def amendify_skill_tool(
+        amendment_id: str,
+        write_to_disk: bool = False,
+        validate: bool = False,
+        validation_task_text: str = "",
+        node_set: str = "skills",
+    ) -> list:
+        """Apply a proposed amendment by its amendment_id."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.amendify(
+                amendment_id=amendment_id,
+                write_to_disk=write_to_disk,
+                validate=validate,
+                validation_task_text=validation_task_text,
+                node_set=node_set,
+            )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="rollback_amendify_skill",
+        description="Rollback an applied amendment, restoring the skill's original instructions.",
+    )
+    async def rollback_amendify_skill_tool(
+        amendment_id: str,
+        write_to_disk: bool = False,
+        node_set: str = "skills",
+    ) -> list:
+        """Rollback an applied amendment by its amendment_id."""
+        with redirect_stdout(sys.stderr):
+            success = await _skills_client.rollback_amendify(
+                amendment_id=amendment_id,
+                write_to_disk=write_to_disk,
+                node_set=node_set,
+            )
+        msg = (
+            f"Amendment '{amendment_id}' rolled back."
+            if success
+            else f"Rollback failed for amendment '{amendment_id}'."
+        )
+        return [types.TextContent(type="text", text=msg)]
+
+    @mcp.tool(
+        name="evaluate_amendify_skill",
+        description="Evaluate an amendment by comparing pre- and post-amendment success scores. Returns improvement stats and a keep/rollback recommendation.",
+    )
+    async def evaluate_amendify_skill_tool(
+        amendment_id: str,
+        node_set: str = "skills",
+    ) -> list:
+        """Evaluate an amendment's effectiveness from post-apply run data."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.evaluate_amendify(
+                amendment_id=amendment_id,
+                node_set=node_set,
+            )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="auto_amendify_skill",
+        description="One-call self-amendifying: inspect a failing skill, propose an amendment, and apply it automatically. Promotes cached runs first.",
+    )
+    async def auto_amendify_skill_tool(
+        skill_id: str,
+        min_runs: int = 3,
+        score_threshold: float = 0.5,
+        write_to_disk: bool = False,
+        validate: bool = False,
+        validation_task_text: str = "",
+        node_set: str = "skills",
+    ) -> list:
+        """Automatically inspect, amend, and apply a fix for a failing skill."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.auto_amendify(
+                skill_id=skill_id,
+                min_runs=min_runs,
+                score_threshold=score_threshold,
+                write_to_disk=write_to_disk,
+                validate=validate,
+                validation_task_text=validation_task_text,
+                node_set=node_set,
+            )
+        if result is None:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Auto-amendify produced no result for skill '{skill_id}' (no failures or amendifying failed).",
+                )
+            ]
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="run_skill",
+        description="Find the best skill for a task and execute it in one call. Automatically routes to the highest-ranked skill, observes the run, and can self-repair on failure.",
+    )
+    async def run_skill_tool(
+        task_text: str,
+        context: str = "",
+        auto_evaluate: bool = True,
+        auto_amendify: bool = True,
+        amendify_min_runs: int = 3,
+        session_id: str = "default",
+        node_set: str = "skills",
+    ) -> list:
+        """Find and execute the best skill for a task automatically."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.run(
+                task_text=task_text,
+                context=context or None,
+                auto_evaluate=auto_evaluate,
+                auto_amendify=auto_amendify,
+                amendify_min_runs=amendify_min_runs,
+                session_id=session_id,
+                node_set=node_set,
+            )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    # -------------------------------------------------------------------
+    # Skills resources
+    # -------------------------------------------------------------------
+
+    @mcp.resource("skill://agent-guide")
+    async def agent_guide_resource() -> str:
+        """Return the agent_instructions.md content as markdown."""
+        # Try relative path first, then importlib.resources for installed packages
+        candidates = [
+            Path(__file__).resolve().parent.parent.parent
+            / "cognee"
+            / "cognee_skills"
+            / "agent_instructions.md",
+            Path(__file__).resolve().parent.parent.parent / "skills" / "agent_instructions.md",
+        ]
+        for p in candidates:
+            if p.is_file():
+                return p.read_text(encoding="utf-8")
+
+        try:
+            import importlib.resources as pkg_resources
+
+            ref = pkg_resources.files("cognee.cognee_skills").joinpath("agent_instructions.md")
+            return ref.read_text(encoding="utf-8")
+        except Exception:
+            pass
+
+        return "# agent_instructions.md not found\n\nCould not locate the agent instructions file."
+
+    @mcp.resource("skill://index")
+    async def skill_index_resource() -> str:
+        """Return a JSON list of all ingested skills."""
+        with redirect_stdout(sys.stderr):
+            results = await _skills_client.list()
+        if not results:
+            return json.dumps(
+                {
+                    "skills": [],
+                    "hint": "No skills ingested yet. Use ingest_skills to add skills from a folder.",
+                },
+                indent=2,
+            )
+        return json.dumps({"skills": results}, indent=2, cls=JSONEncoder)
+
+    @mcp.resource("skill://{skill_id}")
+    async def skill_detail_resource(skill_id: str) -> str:
+        """Return the full skill JSON for a given skill_id."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.load(skill_id)
+        if result is None:
+            return json.dumps({"error": f"Skill '{skill_id}' not found."}, indent=2)
+        return json.dumps(result, indent=2, cls=JSONEncoder)
+
+    # -------------------------------------------------------------------
+    # Skills prompts
+    # -------------------------------------------------------------------
+
+    @mcp.prompt("route-task")
+    async def route_task_prompt(task_description: str) -> list:
+        """Guide the agent through skill-based task routing."""
+        return [
+            types.PromptMessage(
+                role="user",
+                content=types.TextContent(
+                    type="text",
+                    text=(
+                        f"I need to complete this task:\n\n{task_description}\n\n"
+                        "Follow this workflow to find and use the best skill:\n\n"
+                        "1. Call `get_skill_context` with the task description to get ranked skill recommendations\n"
+                        "2. Review the results — higher `score` means better match, "
+                        "`prefers_score > 0` means the skill has worked before for similar tasks\n"
+                        "3. Call `load_skill` on the top result to read its full instructions\n"
+                        "4. Execute the chosen skill following its instructions\n"
+                        "5. After completing the task, call `observe_skill_run` with:\n"
+                        "   - task_text: the original task description\n"
+                        "   - selected_skill_id: which skill was used\n"
+                        "   - success_score: 0.0 (failed) to 1.0 (perfect)\n"
+                        "   - result_summary: brief description of what happened\n"
+                        "   Runs are persisted to the graph immediately and prefers weights update in real-time.\n\n"
+                        "If a skill keeps failing, you can use the self-amendifying tools:\n"
+                        "- `inspect_skill` to analyze why it fails\n"
+                        "- `preview_amendify_skill` to generate an improved version\n"
+                        "- `amendify_skill` to apply the fix\n"
+                        "- `evaluate_amendify_skill` to check if the fix helped\n"
+                        "- `rollback_amendify_skill` to revert if it didn't\n"
+                        "- `auto_amendify_skill` to do all of the above in one call"
+                    ),
+                ),
+            )
+        ]
+
+    @mcp.prompt("skill-setup")
+    async def skill_setup_prompt(skills_folder: str) -> list:
+        """Adaptive prompt: guide toward ingest or upsert based on current state."""
+        with redirect_stdout(sys.stderr):
+            existing = await _skills_client.list()
+
+        if existing:
+            guidance = (
+                f"Skills are already ingested ({len(existing)} found). "
+                f"To sync changes from `{skills_folder}`, call:\n\n"
+                f'```\nupsert_skills(skills_folder="{skills_folder}")\n```\n\n'
+                "This will skip unchanged skills, update modified ones, and remove deleted ones."
+            )
+        else:
+            guidance = (
+                f"No skills are ingested yet. To get started, call:\n\n"
+                f'```\ningest_skills(skills_folder="{skills_folder}")\n```\n\n'
+                "This will parse all SKILL.md files in the folder, enrich them via LLM, "
+                "and store them in the knowledge graph for routing."
+            )
+
+        return [
+            types.PromptMessage(
+                role="user",
+                content=types.TextContent(type="text", text=guidance),
+            )
+        ]
+
+    logger.info("Skills tools, resources, and prompts registered")
+
+except ImportError:
+    logger.debug("cognee.cognee_skills not available, skills tools not registered")
+
+
 async def main():
     global cognee_client
 

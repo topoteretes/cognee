@@ -101,6 +101,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.improve_command", "ImproveCommand"),
         ("cognee.cli.commands.forget_command", "ForgetCommand"),
         ("cognee.cli.commands.serve_command", "ServeCommand"),
+        ("cognee.cli.commands.skills_command", "SkillsCommand"),
     ]
 
     for module_path, class_name in command_modules:
