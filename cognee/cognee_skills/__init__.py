@@ -1,27 +1,28 @@
-"""cognee.cognee_skills — skill routing with learned preferences.
+"""cognee.cognee_skills — skill runtime (routing, execution, self-improvement).
+
+Skill ingestion lives on ``cognee.remember(path, enrich=...)`` — this
+package is the runtime side: finding the best skill for a task,
+executing it, scoring the output, and self-repairing the skill's
+instructions when scores drop.
 
 Primary API (via ``from cognee import skills``):
-    skills.ingest()              — parse SKILL.md files, enrich via LLM, store in graph + vector
-    skills.ingest_meta_skill()   — ingest the cognee-skills meta-skill (self-improvement loop guide)
-    skills.upsert()              — re-ingest, skipping unchanged, updating changed, removing deleted
+    skills.META_SKILL_PATH       — path to the bundled self-improvement meta-skill
     skills.remove()              — remove a single skill by id
     skills.get_context()         — ranked skill recommendations for a task
-    skills.load()                — full details (including full instructions) for a skill by id
-    skills.run()                 — find the best skill and execute it (one call does everything)
-    skills.execute()             — load a skill and execute it against a task via LLM
+    skills.load()                — full details for a skill by id
+    skills.run()                 — find the best skill and execute it
+    skills.execute()             — load a skill and execute it against a task
     skills.list()                — list all ingested skills with summaries
-    skills.observe()             — record a skill execution (persists to graph immediately)
-    skills.inspect()             — inspect why a skill fails
+    skills.observe()             — record a skill execution to the graph
+    skills.inspect()             — analyze why a skill fails
     skills.preview_amendify()    — preview a proposed amendment to fix a failing skill
     skills.amendify()            — apply a proposed amendment
     skills.rollback_amendify()   — rollback an applied amendment
     skills.evaluate_amendify()   — compare pre/post amendment success scores
-    skills.auto_amendify()       — fully automatic: inspect → preview → apply in one call
+    skills.auto_amendify()       — inspect → preview → apply in one call
     skills.execute(auto_amendify=True) — execute with automatic amendment on failure
 
 Lower-level API:
-    ingest_skills()              — parse SKILL.md files, enrich via LLM, store in graph + vector
-    upsert_skills()              — diff-based re-ingestion of a skills folder
     remove_skill()               — remove a single skill by id from graph + vector
     recommend_skills()           — semantic retrieval ranked by vector similarity + prefers weights
     execute_skill()              — execute a loaded skill dict against a task via LLM
@@ -37,9 +38,9 @@ Models:
     SkillResource, SkillInspection, SkillAmendment
 """
 
-from cognee.cognee_skills.client import Skills, skills
+from cognee.cognee_skills.client import META_SKILL_PATH, Skills, skills
 from cognee.cognee_skills.execute import evaluate_output, execute_skill
-from cognee.cognee_skills.pipeline import ingest_skills, upsert_skills, remove_skill
+from cognee.cognee_skills.pipeline import remove_skill
 from cognee.cognee_skills.retrieve import recommend_skills
 from cognee.cognee_skills.observe import record_skill_run
 from cognee.cognee_skills.inspect import inspect_skill
@@ -59,10 +60,9 @@ from cognee.cognee_skills.models import (
 )
 
 __all__ = [
+    "META_SKILL_PATH",
     "Skills",
     "skills",
-    "ingest_skills",
-    "upsert_skills",
     "remove_skill",
     "recommend_skills",
     "evaluate_output",

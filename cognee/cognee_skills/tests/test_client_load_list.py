@@ -23,10 +23,9 @@ OTHER_NID = uuid4()
 
 _SKILL_PROPS = {
     "type": "Skill",
-    "skill_id": SKILL_ID,
-    "name": "Summarize",
+    "name": SKILL_ID,
     "description": "Condense any text into bullet points.",
-    "instructions": "Condense the input into 2-3 key bullet points.",
+    "procedure": "Condense the input into 2-3 key bullet points.",
     "instruction_summary": "Summarizes text into bullet points.",
     "tags": ["context-management"],
     "complexity": "simple",
@@ -42,10 +41,9 @@ _TP_PROPS = {
 
 _OTHER_SKILL_PROPS = {
     "type": "Skill",
-    "skill_id": "code-review",
-    "name": "Code Review",
+    "name": "code-review",
     "description": "Review code for bugs.",
-    "instructions": "Check for bugs, style, and security issues.",
+    "procedure": "Check for bugs, style, and security issues.",
     "instruction_summary": "Reviews code for quality.",
     "tags": ["engineering"],
     "complexity": "workflow",
@@ -89,8 +87,8 @@ class TestSkillsLoad(unittest.TestCase):
 
         assert result is not None
         assert result["skill_id"] == SKILL_ID
-        assert result["name"] == "Summarize"
-        assert result["instructions"] == _SKILL_PROPS["instructions"]
+        assert result["name"] == "summarize"
+        assert result["instructions"] == _SKILL_PROPS["procedure"]
         assert result["instruction_summary"] == _SKILL_PROPS["instruction_summary"]
         assert result["description"] == _SKILL_PROPS["description"]
         assert result["tags"] == ["context-management"]
@@ -280,7 +278,7 @@ class TestSkillsList(unittest.TestCase):
         assert len(result) == 1
         skill = result[0]
         assert skill["skill_id"] == SKILL_ID
-        assert skill["name"] == "Summarize"
+        assert skill["name"] == "summarize"
         assert skill["instruction_summary"] == _SKILL_PROPS["instruction_summary"]
         assert skill["tags"] == ["context-management"]
         assert skill["complexity"] == "simple"
@@ -679,7 +677,7 @@ class TestRun(unittest.TestCase):
         client = Skills()
 
         recs = [
-            {"skill_id": SKILL_ID, "name": "Summarize", "score": 0.95,
+            {"skill_id": SKILL_ID, "name": SKILL_ID, "score": 0.95,
              "vector_score": 0.9, "prefers_score": 0.05,
              "instruction_summary": "", "task_pattern_id": "", "tags": []},
         ]
@@ -702,7 +700,7 @@ class TestRun(unittest.TestCase):
         assert result["success"] is True
         assert result["output"] == "- Bullet 1"
         assert result["skill_id"] == SKILL_ID
-        assert result["name"] == "Summarize"
+        assert result["name"] == "summarize"
         assert result["score"] == 0.95
 
     def test_run_passes_auto_evaluate_and_amendify_to_execute(self):

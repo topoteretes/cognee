@@ -1,27 +1,10 @@
-from typing import List
-from cognee.low_level import DataPoint
-from cognee.infrastructure.engine import Edge
+"""TaskPattern model re-export.
 
+Canonical location is ``cognee.modules.engine.models.Skill`` (grouped with
+``Skill`` + ``SkillResource`` to avoid circular forward references); this
+module keeps the historical import path working.
+"""
 
-class TaskPattern(DataPoint):
-    """A normalized intent/task category that skills can solve."""
+from cognee.modules.engine.models.Skill import TaskPattern
 
-    pattern_id: str
-    name: str = ""
-    pattern_key: str = ""
-    text: str  # LLM-generated intent description
-    category: str = ""
-
-    # Evidence / provenance
-    source_skill_ids: List[str] = []  # which skills proposed this pattern
-    examples: List[str] = []  # trigger phrases that led to this pattern
-    enrichment_model: str = ""
-    enrichment_confidence: float = 0.0
-
-    prefers: List[tuple[Edge, "Skill"]] = []
-    metadata: dict = {"index_fields": ["text"]}
-
-
-from .skill import Skill  # noqa: E402
-
-TaskPattern.model_rebuild()
+__all__ = ["TaskPattern"]

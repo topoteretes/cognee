@@ -85,10 +85,11 @@ async def inspect_skill(
     engine = await get_graph_engine()
     raw_nodes, _ = await engine.get_nodeset_subgraph(node_type=NodeSet, node_name=[node_set])
 
-    # Find the skill
+    # Find the skill — Skill.name is the canonical identifier; the
+    # "skill_id" arg is a pointer to it.
     skill_node = None
     for _, props in raw_nodes:
-        if props.get("type") == "Skill" and props.get("skill_id") == skill_id:
+        if props.get("type") == "Skill" and props.get("name") == skill_id:
             skill_node = props
             break
 
@@ -124,7 +125,7 @@ async def inspect_skill(
     runs_to_show = failed_runs[:10]
     formatted_runs = "\n\n".join(_format_run(r, i) for i, r in enumerate(runs_to_show))
 
-    instructions = skill_node.get("instructions", "")[:8000]
+    instructions = skill_node.get("procedure", "")[:8000]
     skill_name = skill_node.get("name", skill_id)
 
     user_prompt = USER_PROMPT_TEMPLATE.format(

@@ -11,12 +11,10 @@ class TestSkillModel:
     def test_minimal_skill(self):
         s = Skill(
             id=uuid4(),
-            skill_id="test-skill",
             name="Test Skill",
             description="A test skill.",
-            instructions="# Test\n\nDo the thing.",
+            procedure="# Test\n\nDo the thing.",
         )
-        assert s.skill_id == "test-skill"
         assert s.name == "Test Skill"
         assert s.complexity == ""
         assert s.tags == []
@@ -25,10 +23,9 @@ class TestSkillModel:
     def test_skill_with_enrichment(self):
         s = Skill(
             id=uuid4(),
-            skill_id="enriched",
             name="Enriched Skill",
             description="With LLM fields.",
-            instructions="# Enriched",
+            procedure="# Enriched",
             instruction_summary="A summary from LLM.",
             tags=["code", "testing"],
             complexity="workflow",

@@ -60,6 +60,9 @@ class RememberKwargs(TypedDict, total=False):
     user: object
     vector_db_config: dict
     graph_db_config: dict
+    # SKILL.md ingest only: run LLM enrichment + materialize task patterns
+    # after parsing. Ignored for non-skill sources.
+    enrich: bool
 
 
 # Kwarg routing: which RememberKwargs go to add(), cognify(), or both.
@@ -479,7 +482,9 @@ async def _remember_inner(
     from cognee.modules.tools import add_skills, looks_like_skill_source
 
     if looks_like_skill_source(data):
-        skills = await add_skills(data)
+        # Pop skill-ingest kwargs so they don't reach the chunk/extract path.
+        enrich = bool(kwargs.pop("enrich", False))
+        skills = await add_skills(data, enrich=enrich)
         result = RememberResult(
             status="completed",
             dataset_name=dataset_name,

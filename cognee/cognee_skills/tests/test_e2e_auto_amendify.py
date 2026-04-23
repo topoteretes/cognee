@@ -63,10 +63,9 @@ def _make_skill_node(
         {
             "type": "Skill",
             "id": str(nid),
-            "skill_id": skill_id,
-            "name": "Summarize",
+            "name": skill_id,
             "description": "Condense any text into bullet points.",
-            "instructions": "Condense the input into 2-3 key bullet points.",
+            "procedure": "Condense the input into 2-3 key bullet points.",
             "instruction_summary": "Summarizes text into bullet points.",
             "content_hash": "abc123",
             "source_path": "",
@@ -169,6 +168,7 @@ class TestE2EAutoAmendifyLoop(unittest.TestCase):
     # Step 1: ingest_skills()
     # ------------------------------------------------------------------
 
+    @unittest.skip("uses cognee_skills.pipeline.ingest_skills (removed; ingestion now lives on cognee.remember). Replaced by test_smoke_remember_to_amendify.py")
     def test_step1_ingest_skills(self):
         """ingest_skills() runs without error; the pipeline is invoked."""
         import tempfile
@@ -215,6 +215,7 @@ class TestE2EAutoAmendifyLoop(unittest.TestCase):
     # Step 2: execute_skill() — LLM fails
     # ------------------------------------------------------------------
 
+    @unittest.skip("uses cognee_skills.pipeline.ingest_skills (removed; ingestion now lives on cognee.remember). Replaced by test_smoke_remember_to_amendify.py")
     def test_step2_execute_returns_failure(self):
         """execute_skill() returns success=False when LLM raises."""
         from cognee.cognee_skills.execute import execute_skill
@@ -286,6 +287,7 @@ class TestE2EAutoAmendifyLoop(unittest.TestCase):
     # Step 4: inspect_skill() — uses skill node + failed runs from graph
     # ------------------------------------------------------------------
 
+    @unittest.skip("uses cognee_skills.pipeline.ingest_skills (removed; ingestion now lives on cognee.remember). Replaced by test_smoke_remember_to_amendify.py")
     def test_step4_inspect_returns_inspection(self):
         """inspect_skill() analyses failed runs and returns a SkillInspection."""
         from cognee.cognee_skills.inspect import inspect_skill
@@ -340,6 +342,7 @@ class TestE2EAutoAmendifyLoop(unittest.TestCase):
     # Step 5: preview_skill_amendify() — uses inspection to propose fix
     # ------------------------------------------------------------------
 
+    @unittest.skip("uses cognee_skills.pipeline.ingest_skills (removed; ingestion now lives on cognee.remember). Replaced by test_smoke_remember_to_amendify.py")
     def test_step5_preview_returns_amendment(self):
         """preview_skill_amendify() generates an amendment from an inspection."""
         from cognee.cognee_skills.preview_amendify import preview_skill_amendify
@@ -394,6 +397,7 @@ class TestE2EAutoAmendifyLoop(unittest.TestCase):
     # Step 6: amendify() — applies the proposed amendment
     # ------------------------------------------------------------------
 
+    @unittest.skip("uses cognee_skills.pipeline.ingest_skills (removed; ingestion now lives on cognee.remember). Replaced by test_smoke_remember_to_amendify.py")
     def test_step6_amendify_applies_amendment(self):
         """amendify() updates the skill node and emits a change event."""
         from cognee.cognee_skills.amendify import amendify
@@ -471,6 +475,7 @@ class TestE2EAutoAmendifyLoop(unittest.TestCase):
     # Full loop: auto_amendify() chains all steps in one call
     # ------------------------------------------------------------------
 
+    @unittest.skip("uses cognee_skills.pipeline.ingest_skills (removed; ingestion now lives on cognee.remember). Replaced by test_smoke_remember_to_amendify.py")
     def test_full_loop_auto_amendify_end_to_end(self):
         """Full loop: ingest → execute (fail) → observe → auto_amendify (inspect+preview+apply).
 

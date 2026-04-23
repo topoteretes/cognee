@@ -36,10 +36,9 @@ def _make_skill_node(skill_id="test-skill"):
     props = {
         "type": "Skill",
         "id": str(nid),
-        "skill_id": skill_id,
-        "name": "Test Skill",
+        "name": skill_id,
         "description": "A test skill.",
-        "instructions": "Do the thing step by step.",
+        "procedure": "Do the thing step by step.",
         "instruction_summary": "Does the thing.",
         "content_hash": "abc123",
         "source_path": "",

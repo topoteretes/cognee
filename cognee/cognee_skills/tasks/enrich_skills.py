@@ -68,7 +68,7 @@ async def _enrich_one(skill: Skill, llm_model_name: str) -> Skill:
     user_prompt = USER_PROMPT_TEMPLATE.format(
         name=skill.name,
         description=skill.description,
-        instructions=skill.instructions[:8000],
+        instructions=skill.procedure[:8000],
     )
 
     try:

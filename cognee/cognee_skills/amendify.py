@@ -53,11 +53,15 @@ async def _load_amendment_from_graph(amendment_id: str, node_set: str) -> Option
 
 
 async def _load_skill_from_graph(skill_id: str, node_set: str) -> Optional[tuple]:
-    """Load a Skill node from graph, returning (nid, props)."""
+    """Load a Skill node from graph, returning (nid, props).
+
+    The ``skill_id`` argument is a pointer to the Skill's canonical
+    ``name`` property.
+    """
     engine = await get_graph_engine()
     raw_nodes, _ = await engine.get_nodeset_subgraph(node_type=NodeSet, node_name=[node_set])
     for nid, props in raw_nodes:
-        if props.get("type") == "Skill" and props.get("skill_id") == skill_id:
+        if props.get("type") == "Skill" and props.get("name") == skill_id:
             return (str(nid), props)
     return None
 
@@ -154,10 +158,9 @@ async def amendify(
 
         skill_obj = Skill(
             id=uuid.UUID(str(skill_props.get("id", skill_nid))),
-            skill_id=skill_id,
             name=skill_name,
             description=skill_props.get("description", ""),
-            instructions=amended_instructions,
+            procedure=amended_instructions,
             content_hash=new_hash,
         )
 
@@ -176,10 +179,9 @@ async def amendify(
 
         skill_obj = Skill(
             id=uuid.UUID(str(skill_props.get("id", skill_nid))),
-            skill_id=skill_id,
             name=skill_name,
             description=skill_props.get("description", ""),
-            instructions=amended_instructions,
+            procedure=amended_instructions,
             content_hash=new_hash,
         )
         _tag_with_nodeset([skill_obj], node_set)
@@ -293,10 +295,9 @@ async def rollback_amendify(
 
         skill_obj = Skill(
             id=uuid.UUID(str(skill_props.get("id", skill_nid))),
-            skill_id=skill_id,
             name=skill_name,
             description=skill_props.get("description", ""),
-            instructions=original_instructions,
+            procedure=original_instructions,
             content_hash=new_hash,
         )
         enriched = await enrich_skills([skill_obj])
@@ -313,10 +314,9 @@ async def rollback_amendify(
 
         skill_obj = Skill(
             id=uuid.UUID(str(skill_props.get("id", skill_nid))),
-            skill_id=skill_id,
             name=skill_name,
             description=skill_props.get("description", ""),
-            instructions=original_instructions,
+            procedure=original_instructions,
             content_hash=new_hash,
         )
         _tag_with_nodeset([skill_obj], node_set)

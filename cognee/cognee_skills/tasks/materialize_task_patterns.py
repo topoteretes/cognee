@@ -106,7 +106,7 @@ async def materialize_task_patterns(
 
     for skill in skills:
         for slug in skill.task_pattern_candidates:
-            slug_to_skill_ids.setdefault(slug, []).append(skill.skill_id)
+            slug_to_skill_ids.setdefault(slug, []).append(skill.name)
             slug_to_skill_names.setdefault(slug, []).append(skill.name)
             for trigger in skill.triggers[:3]:
                 slug_to_examples.setdefault(slug, []).append(trigger)

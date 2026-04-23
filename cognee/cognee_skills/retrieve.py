@@ -84,10 +84,11 @@ async def recommend_skills(
         elif node_type == "SkillRun":
             run_nodes.append(props)
 
-    # Build skill_id -> node_id reverse map
+    # Build skill_id -> node_id reverse map. The "skill_id" key is the
+    # Skill's canonical ``name`` — stored on disk as props["name"].
     nid_to_skill_id: Dict[str, str] = {}
     for nid_str, props in skill_nodes.items():
-        sid = props.get("skill_id", "")
+        sid = props.get("name", "")
         if sid:
             nid_to_skill_id[nid_str] = sid
 
@@ -99,7 +100,7 @@ async def recommend_skills(
         src_str, tgt_str = str(src_id), str(tgt_id)
         if rel_name == "solves" and tgt_str in pattern_nodes and src_str in skill_nodes:
             tp = pattern_nodes[tgt_str]
-            sid = skill_nodes[src_str].get("skill_id", "")
+            sid = skill_nodes[src_str].get("name", "")
             if sid:
                 skill_to_patterns.setdefault(sid, []).append(
                     {
@@ -144,7 +145,7 @@ async def recommend_skills(
     for result in scored_results:
         nid_str = str(result.id)
         props = skill_nodes.get(nid_str, nodes_by_id.get(nid_str, {}))
-        skill_id = props.get("skill_id", "")
+        skill_id = props.get("name", "")  # Skill.name is the canonical id
         vector_score = max(0.0, 1.0 - result.score)
         prefers_score = skill_id_to_prefers.get(skill_id, 0.0)
         final_score = (1 - prefers_boost) * vector_score + prefers_boost * prefers_score

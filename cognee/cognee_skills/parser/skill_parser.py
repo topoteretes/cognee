@@ -309,7 +309,15 @@ def parse_skill_file(
         return None
 
     if skill_key is None:
-        skill_key = skill_md.parent.name
+        # For ``SKILL.md`` / ``skill.md`` / ``README.md`` in a ``<slug>/``
+        # folder, the slug is the parent directory name. For a flat
+        # ``<slug>.md`` file the slug is the file stem. Matches
+        # parse_skills_folder()'s Pass 1 vs Pass 2 split.
+        _folder_entries = {c.upper() for c in SKILL_ENTRY_CANDIDATES} | {"README.MD"}
+        if skill_md.name.upper() in _folder_entries:
+            skill_key = skill_md.parent.name
+        else:
+            skill_key = skill_md.stem
 
     frontmatter, body = _parse_frontmatter(raw_text)
 
@@ -333,14 +341,19 @@ def parse_skill_file(
 
     return Skill(
         id=_deterministic_id(f"skill:{skill_key}"),
-        skill_id=skill_key,
-        name=name,
+        # ``name`` holds the canonical slug identifier (folder name or
+        # explicit frontmatter ``skill_id:``), NOT the human-readable
+        # frontmatter ``name:`` value. This is what every downstream
+        # reader — client.load, resolve_skills, inspect, amendify —
+        # looks up by. The display name from frontmatter is preserved
+        # in ``description_raw`` and the enrichment pipeline.
+        name=skill_key,
         description=description,
-        instructions=body,
+        procedure=body,
+        declared_tools=tools,
         description_raw=description,
         triggers_raw=triggers,
         tags_raw=tags,
-        tools=tools,
         triggers=triggers,
         tags=tags,
         source_path=str(skill_md.parent),
@@ -401,7 +414,7 @@ def parse_skills_folder(
             continue
         skill = parse_skill_folder(child, source_repo=source_repo)
         if skill is not None:
-            seen_keys.add(skill.skill_id)
+            seen_keys.add(skill.name)
             skills.append(skill)
 
     # Pass 2: flat .md files at root (skip if already covered by a folder)

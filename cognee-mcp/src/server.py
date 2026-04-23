@@ -1371,49 +1371,25 @@ try:
 
     @mcp.tool(
         name="ingest_skills",
-        description="Parse SKILL.md files from a folder, enrich via LLM, and store in the knowledge graph. Use this to register new skills.",
+        description="Parse SKILL.md files from a folder and store them in the knowledge graph. Set enrich=true for LLM-backed enrichment (triggers, tags, task patterns).",
     )
     async def ingest_skills_tool(
         skills_folder: str,
-        dataset_name: str = "skills",
-        source_repo: str = "",
-        skip_enrichment: bool = False,
-        node_set: str = "skills",
+        enrich: bool = False,
     ) -> list:
-        """Ingest all skills from a folder path."""
-        folder = Path(skills_folder).resolve()
-        if not folder.is_dir():
-            return [types.TextContent(type="text", text=f"Directory not found: {skills_folder}")]
-        await _skills_client.ingest(
-            skills_folder=str(folder),
-            dataset_name=dataset_name,
-            source_repo=source_repo,
-            skip_enrichment=skip_enrichment,
-            node_set=node_set,
-        )
-        return [types.TextContent(type="text", text=f"Ingested skills from {folder}")]
+        """Ingest all skills from a folder path via ``cognee.remember``."""
+        import cognee
 
-    @mcp.tool(
-        name="upsert_skills",
-        description="Re-ingest skills from a folder: skip unchanged, update changed, remove deleted. Returns a summary of changes.",
-    )
-    async def upsert_skills_tool(
-        skills_folder: str,
-        dataset_name: str = "skills",
-        source_repo: str = "",
-        node_set: str = "skills",
-    ) -> list:
-        """Diff-based re-ingestion of a skills folder."""
         folder = Path(skills_folder).resolve()
         if not folder.is_dir():
             return [types.TextContent(type="text", text=f"Directory not found: {skills_folder}")]
-        result = await _skills_client.upsert(
-            skills_folder=str(folder),
-            dataset_name=dataset_name,
-            source_repo=source_repo,
-            node_set=node_set,
-        )
-        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+        result = await cognee.remember(str(folder), enrich=enrich)
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Ingested {result.items_processed} skill(s) from {folder} (enrich={enrich})",
+            )
+        ]
 
     @mcp.tool(
         name="remove_skill",

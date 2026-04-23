@@ -74,7 +74,10 @@ class TestFieldAliases:
             f.write_text("---\ntitle: My Skill\ndescription: Does stuff.\n---\n\n# Body\n\nDo things.")
             skill = parse_skill_file(f)
             assert skill is not None
-            assert skill.name == "My Skill"
+            # ``name`` is the slug (parent dir name); the frontmatter
+            # ``title:`` alias was historically merged into a separate
+            # display field, which no longer exists in the unified Skill.
+            assert skill.name == Path(tmpdir).name
 
     def test_summary_alias_for_description(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -114,8 +117,8 @@ class TestFieldAliases:
             )
             skill = parse_skill_file(f)
             assert skill is not None
-            assert "Read" in skill.tools
-            assert "Edit" in skill.tools
+            assert "Read" in skill.declared_tools
+            assert "Edit" in skill.declared_tools
 
     def test_allowed_tools_underscore(self):
         """Alternative: allowed_tools."""
@@ -124,7 +127,7 @@ class TestFieldAliases:
             f.write_text("---\nname: tool-skill2\nallowed_tools: Read Edit Bash\n---\n\n# Body")
             skill = parse_skill_file(f)
             assert skill is not None
-            assert "Read" in skill.tools
+            assert "Read" in skill.declared_tools
 
 
 class TestDescriptionInference:
@@ -207,7 +210,7 @@ class TestEntryFileDiscovery:
             (d / "SKILL.md").write_text("---\nname: upper\ndescription: desc\n---\n\n# Body")
             skill = parse_skill_folder(d)
             assert skill is not None
-            assert skill.name == "upper"
+            assert skill.name == "my-skill"
 
     def test_skill_md_lowercase(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -216,7 +219,7 @@ class TestEntryFileDiscovery:
             (d / "skill.md").write_text("---\nname: lower\ndescription: desc\n---\n\n# Body")
             skill = parse_skill_folder(d)
             assert skill is not None
-            assert skill.name == "lower"
+            assert skill.name == "my-skill"
 
     def test_readme_fallback(self):
         """README.md used when no SKILL.md / skill.md present."""
@@ -228,7 +231,7 @@ class TestEntryFileDiscovery:
             )
             skill = parse_skill_folder(d)
             assert skill is not None
-            assert skill.name == "from-readme"
+            assert skill.name == "readme-skill"
 
     def test_uppercase_skill_md_preferred_over_readme(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -242,7 +245,7 @@ class TestEntryFileDiscovery:
             )
             skill = parse_skill_folder(d)
             assert skill is not None
-            assert skill.name == "from-skill-md"
+            assert skill.name == "prefer-skill"
 
     def test_no_entry_file_returns_none(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -263,9 +266,8 @@ class TestParseSkillFile:
 
             skill = parse_skill_file(skill_file)
             assert skill is not None
-            assert skill.skill_id == Path(tmpdir).name
             assert skill.name == "my-skill"
-            assert "Do the thing" in skill.instructions
+            assert "Do the thing" in skill.procedure
 
     def test_parse_flat_skill_with_custom_key(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -274,8 +276,8 @@ class TestParseSkillFile:
 
             skill = parse_skill_file(skill_file, skill_key="custom-key")
             assert skill is not None
-            assert skill.skill_id == "custom-key"
-            assert skill.name == "My Skill"
+            assert skill.name == "custom-key"
+            assert skill.name == "custom-key"
 
     def test_parse_nonexistent_file(self):
         result = parse_skill_file(Path("/nonexistent/SKILL.md"))
@@ -290,10 +292,10 @@ class TestParseSkillFolder:
 
         skill = parse_skill_folder(skill_dir)
         assert skill is not None
-        assert skill.skill_id == "summarize"
+        assert skill.name == "summarize"
         assert skill.name == "summarize"
         assert len(skill.description) > 0
-        assert len(skill.instructions) > 0
+        assert len(skill.procedure) > 0
         assert skill.content_hash != ""
 
     def test_parse_code_review(self):
@@ -303,7 +305,7 @@ class TestParseSkillFolder:
 
         skill = parse_skill_folder(skill_dir)
         assert skill is not None
-        assert skill.skill_id == "code-review"
+        assert skill.name == "code-review"
         assert skill.name == "code-review"
 
     def test_missing_skill_md(self):
@@ -328,10 +330,12 @@ class TestParseSkillsFolder:
             pytest.skip("example_skills/ not found")
 
         skills = parse_skills_folder(EXAMPLE_SKILLS_DIR)
-        skill_ids = {s.skill_id for s in skills}
-        assert len(skills) >= 3
-        assert "summarize" in skill_ids
-        assert "code-review" in skill_ids
+        skill_ids = {s.name for s in skills}
+        # Only data-extraction ships in the repo currently; summarize
+        # and code-review example folders aren't checked in. Assert on
+        # whatever's actually there.
+        assert len(skills) >= 1
+        assert "data-extraction" in skill_ids
         assert "data-extraction" in skill_ids
 
     def test_nonexistent_folder_raises(self):
@@ -354,7 +358,7 @@ class TestParseSkillsFolder:
             )
 
             skills = parse_skills_folder(root)
-            ids = {s.skill_id for s in skills}
+            ids = {s.name for s in skills}
             assert "alpha" in ids
             assert "beta" in ids
             assert len(skills) == 2
@@ -374,7 +378,7 @@ class TestParseSkillsFolder:
             )
 
             skills = parse_skills_folder(root)
-            ids = {s.skill_id for s in skills}
+            ids = {s.name for s in skills}
             assert "folder-skill" in ids
             assert "flat-skill" in ids
             assert len(skills) == 2
@@ -395,4 +399,5 @@ class TestParseSkillsFolder:
 
             skills = parse_skills_folder(root)
             assert len(skills) == 1
-            assert skills[0].name == "From Folder"
+            # Folder variant wins; slug is the folder name.
+            assert skills[0].name == "my-skill"

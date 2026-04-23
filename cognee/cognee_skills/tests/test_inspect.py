@@ -12,9 +12,8 @@ def _make_skill_node(skill_id="test-skill", name="Test Skill"):
     nid = uuid4()
     props = {
         "type": "Skill",
-        "skill_id": skill_id,
-        "name": name,
-        "instructions": "Do the thing step by step.",
+        "name": skill_id,
+        "procedure": "Do the thing step by step.",
         "content_hash": "abc123",
     }
     return (nid, props)

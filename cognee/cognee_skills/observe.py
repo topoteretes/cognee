@@ -144,7 +144,7 @@ async def _update_prefers_weight(
         ntype = props.get("type", "")
         if ntype == "TaskPattern" and props.get("pattern_key") == task_pattern_id:
             tp_nid = str(nid)
-        elif ntype == "Skill" and props.get("skill_id") == skill_id:
+        elif ntype == "Skill" and props.get("name") == skill_id:
             sk_nid = str(nid)
         if tp_nid and sk_nid:
             break

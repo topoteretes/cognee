@@ -1,10 +1,16 @@
-"""Skills client — full skill routing loop with self-amendifying."""
+"""Skills client — post-ingest runtime: routing, execution, self-improvement.
+
+Skill ingestion lives on ``cognee.remember(path, enrich=...)``; this
+module is the runtime side: finding the best skill for a task, running
+it, evaluating the output, and — when scores drop — inspecting and
+amending the skill's instructions.
+"""
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -12,88 +18,45 @@ from cognee.modules.engine.models.node_set import NodeSet
 
 from cognee.cognee_skills.execute import evaluate_output, execute_skill
 from cognee.cognee_skills.observe import record_skill_run
-from cognee.cognee_skills.pipeline import ingest_skills, upsert_skills, remove_skill
+from cognee.cognee_skills.pipeline import remove_skill
 from cognee.cognee_skills.retrieve import recommend_skills
 
 logger = logging.getLogger(__name__)
 
 
+#: Path to the bundled meta-skill. Pass to ``cognee.remember()`` to teach
+#: agents how to use the self-improvement loop:
+#:
+#:    await cognee.remember(cognee.skills.META_SKILL_PATH, enrich=True)
+META_SKILL_PATH: Path = Path(__file__).parent / "meta-skill"
+
+
 class Skills:
-    """Skill router with learned preferences.
+    """Skill runtime: routing, execution, and self-improvement.
 
-    Usage::
+    Ingest skills via ``cognee.remember(path, enrich=...)`` — not via this
+    client. Once ingested, this client provides:
 
+    * Routing: :meth:`get_context`, :meth:`run`
+    * Execution: :meth:`execute`, :meth:`observe`, :meth:`load`, :meth:`list`
+    * Self-improvement: :meth:`inspect`, :meth:`preview_amendify`,
+      :meth:`amendify`, :meth:`rollback_amendify`,
+      :meth:`evaluate_amendify`, :meth:`auto_amendify`
+    * Cleanup: :meth:`remove`
+
+    Typical usage::
+
+        import cognee
         from cognee import skills
 
-        await skills.ingest("./my_skills")
-        recs = await skills.get_context("compress my conversation")
-        full = await skills.load("summarize")
-        result = await skills.execute("summarize", "compress this conversation")
-        await skills.observe({"task_text": "...", "selected_skill_id": "summarize", "success_score": 0.9})
+        await cognee.remember("./my_skills", enrich=True)
+        await cognee.remember(skills.META_SKILL_PATH, enrich=True)
+
+        result = await skills.run("Compress this conversation")
     """
 
-    async def ingest(
-        self,
-        skills_folder: Union[str, Path],
-        dataset_name: str = "skills",
-        source_repo: str = "",
-        skip_enrichment: bool = False,
-        node_set: str = "skills",
-    ) -> None:
-        """Parse SKILL.md files, enrich via LLM, and store in graph + vector index.
-
-        Args:
-            skills_folder: Path to directory containing skill subdirectories.
-            dataset_name: Cognee dataset name to store skills under.
-            source_repo: Provenance label (e.g. "my-org/skills").
-            skip_enrichment: If True, skip LLM enrichment (parser output only).
-            node_set: Tag for belongs_to_set (used for vector search scoping).
-        """
-        await ingest_skills(
-            skills_folder=skills_folder,
-            dataset_name=dataset_name,
-            source_repo=source_repo,
-            skip_enrichment=skip_enrichment,
-            node_set=node_set,
-        )
-
-    async def ingest_meta_skill(self) -> None:
-        """Ingest the cognee-skills meta-skill into the graph.
-
-        The meta-skill describes how to use the self-improvement loop
-        (run_skill, inspect_skill, preview_amendify_skill, amendify_skill,
-        rollback_amendify_skill). Once ingested, agents can route to it
-        automatically when a skill is failing or needs repair.
-
-        Drop-in for any skills folder — call once alongside ingest():
-
-            await skills.ingest("./my_skills")
-            await skills.ingest_meta_skill()
-        """
-        meta_skill_dir = Path(__file__).parent / "meta-skill"
-        await ingest_skills(skills_folder=meta_skill_dir, source_repo="cognee-skills")
-
-    async def upsert(
-        self,
-        skills_folder: Union[str, Path],
-        dataset_name: str = "skills",
-        source_repo: str = "",
-        node_set: str = "skills",
-    ) -> Dict[str, Any]:
-        """Re-ingest skills, skipping unchanged, updating changed, removing deleted.
-
-        Compares content hashes against existing graph nodes. Only changed or
-        new skills go through LLM enrichment. Removed skills are deleted from
-        both graph and vector stores.
-
-        Returns a summary dict with unchanged/updated/added/removed counts.
-        """
-        return await upsert_skills(
-            skills_folder=skills_folder,
-            dataset_name=dataset_name,
-            source_repo=source_repo,
-            node_set=node_set,
-        )
+    #: Path to the bundled meta-skill (also accessible at module level).
+    META_SKILL_PATH: Path = META_SKILL_PATH
 
     async def remove(self, skill_id: str) -> bool:
         """Remove a single skill from the graph and vector stores.
@@ -140,10 +103,12 @@ class Skills:
             node_type=NodeSet, node_name=[node_set]
         )
 
+        # Skill.name is the canonical identifier — the "skill_id" arg is
+        # a pointer to it (historical naming is kept on the public API).
         skill_node = None
         skill_nid = None
         for nid, props in raw_nodes:
-            if props.get("type") == "Skill" and props.get("skill_id") == skill_id:
+            if props.get("type") == "Skill" and props.get("name") == skill_id:
                 skill_node = props
                 skill_nid = str(nid)
                 break
@@ -165,9 +130,10 @@ class Skills:
                         )
 
         return {
-            "skill_id": skill_node.get("skill_id", ""),
+            # Public API keys are stable; sources are the canonical fields.
+            "skill_id": skill_node.get("name", ""),
             "name": skill_node.get("name", ""),
-            "instructions": skill_node.get("instructions", ""),
+            "instructions": skill_node.get("procedure", ""),
             "instruction_summary": skill_node.get("instruction_summary", ""),
             "description": skill_node.get("description", ""),
             "tags": skill_node.get("tags", []),
@@ -356,7 +322,7 @@ class Skills:
             if props.get("type") == "Skill":
                 results.append(
                     {
-                        "skill_id": props.get("skill_id", ""),
+                        "skill_id": props.get("name", ""),  # canonical identifier
                         "name": props.get("name", ""),
                         "instruction_summary": props.get("instruction_summary", ""),
                         "tags": props.get("tags", []),
