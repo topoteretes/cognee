@@ -22,6 +22,7 @@ COMMAND_DESCRIPTIONS = {
     "improve": "Enrich an existing knowledge graph with additional context and rules",
     "forget": "Remove data from the knowledge graph",
     "serve": "Connect to a Cognee instance (cloud or local)",
+    "skills": "Manage skills: list, load, execute, inspect, and amend SKILL.md-based procedures",
 }
 
 # Search type choices
