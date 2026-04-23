@@ -1,7 +1,7 @@
 """Render the human_memory graph (seed + agent-approved rules) as HTML.
 
 Runs inside a custom pipeline so the per-user ACL scope is active —
-same reason link_traces_to_rules.py and inspect_rulebook.py do this.
+same reason inspect_rulebook.py and review_pending_rules.py do this.
 Opens the output in the default browser when done.
 """
 

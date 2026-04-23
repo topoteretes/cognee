@@ -1,13 +1,16 @@
 """Edge-case grounded run — candidate outside R4's listed companies.
 
 Maria Cruz is ex-Revolut (a fintech, but not in R4's enumerated list of
-Stripe/Plaid/Adyen). So `compose_screen_invite` has no clearly triggering
-rule — it should either leave `applied_rule_ids` empty (→ `novel` bucket
-in the trace linker) or propose a new rule extending R4 to cover Revolut
-(→ `novel` bucket + something to review in `review_pending_rules.py`).
+Stripe/Plaid/Adyen). The tools have no rule that unambiguously fires on
+her profile, so the decorator's session-feedback summaries will describe
+what the tools actually did (e.g. "drafted a screening invite for an
+ex-Revolut candidate"). The post-loop memify pipeline then cognifies
+those summaries into `agent_proposed_rule` nodes, which a human reviews
+via `review_pending_rules.py` — the canonical "agent proposes, human
+approves" path.
 
-Uses a dedicated session_id so it doesn't collide with the main Dev Rao
-traces from run_grounded.py — run both linkers separately.
+Uses a dedicated session_id so the Maria traces don't mix with the main
+Dev Rao traces from run_grounded.py.
 """
 
 import asyncio
