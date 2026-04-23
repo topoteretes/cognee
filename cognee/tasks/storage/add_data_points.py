@@ -87,9 +87,8 @@ async def add_data_points(
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
     else:
-        await asyncio.gather(
-            graph_engine.add_nodes(nodes), index_data_points(nodes, vector_engine=vector_engine)
-        )
+        await graph_engine.add_nodes(nodes)
+        await index_data_points(nodes, vector_engine=vector_engine)
 
     if user and dataset and data_item:
         await upsert_nodes(
@@ -110,9 +109,8 @@ async def add_data_points(
     if use_hybrid:
         await graph_engine.add_edges_with_vectors(edges)
     else:
-        await asyncio.gather(
-            graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine)
-        )
+        await graph_engine.add_edges(edges)
+        await index_graph_edges(edges, vector_engine=vector_engine)
 
     if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
@@ -120,10 +118,8 @@ async def add_data_points(
         if use_hybrid:
             await graph_engine.add_edges_with_vectors(custom_edges)
         else:
-            await asyncio.gather(
-                graph_engine.add_edges(custom_edges),
-                index_graph_edges(custom_edges, vector_engine=vector_engine),
-            )
+            await graph_engine.add_edges(custom_edges)
+            await index_graph_edges(custom_edges, vector_engine=vector_engine)
 
         if user and dataset and data_item:
             await upsert_edges(
