@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
 
+from cognee.events import emit as emit_event, INGEST_AFTER, INGEST_BEFORE
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
@@ -214,6 +215,14 @@ async def add(
         ),
     ]
 
+    await emit_event(
+        INGEST_BEFORE,
+        dataset_name=dataset_name,
+        dataset_id=dataset_id,
+        node_set=node_set,
+        run_in_background=run_in_background,
+    )
+
     await setup()
 
     user, authorized_dataset = await resolve_authorized_user_dataset(
@@ -252,6 +261,13 @@ async def add(
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
-        return next(iter(result.values()))
+        result = next(iter(result.values()))
+
+    await emit_event(
+        INGEST_AFTER,
+        dataset_name=dataset_name,
+        dataset_id=getattr(authorized_dataset, "id", dataset_id),
+        run_in_background=run_in_background,
+    )
 
     return result

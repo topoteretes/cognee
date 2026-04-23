@@ -59,3 +59,14 @@ from cognee.modules.observability.trace_context import (
 
 # Agent memory
 from cognee.modules.agent_memory import agent_memory
+
+# Event hooks for external subscribers (audit sinks, metrics, loggers, etc.)
+from cognee.events import (
+    CogneeEvent,
+    subscribe,
+    emit,
+    INGEST_BEFORE,
+    INGEST_AFTER,
+    QUERY_BEFORE,
+    QUERY_AFTER,
+)
