@@ -9,26 +9,32 @@ when it acts. This demo shows that end-to-end on Cognee.
 1. Alex (senior recruiter) contributes a playbook and a rulebook. An ingest
    pipeline persists the rulebook as typed `Rule` graph nodes in a
    `human_memory` dataset.
-2. The agent replaces Alex for a narrow task — scheduling an interview loop
+2. The agent replaces Alex for a narrow task — drafting an interview loop
    for a new candidate. Its tools are wrapped with `@cognee.agent_memory`
-   against `human_memory`.
+   against `human_memory`. A tiny planner LLM picks which tool to call next.
 3. We run the agent **twice** on the same candidate (Dev Rao, ex-Stripe):
    once **naive** (no memory), once **grounded** (retrieves the rulebook).
    The naive plan violates Ledgerline's policies; the grounded plan follows
    them.
-4. A deterministic pass links the agent's trace steps to the rules they
-   cited — so the action → rule path is inspectable as a graph.
+4. After the grounded run, `cognee`'s built-in memify pipeline extracts
+   "learnings" from the decorator's session traces and persists them into
+   the graph under `node_set=['agent_proposed_rule']`. A human reviews
+   those nodes and promotes accepted ones into proper `Rule` entries.
 
-## Why this pattern (Mechanism A: pre-distilled rules)
+## Why this shape
 
-We extract Alex's knowledge into an explicit, typed rulebook *before* the
-agent runs, rather than having the agent retrieve from raw chunks at
-runtime, because:
-- The rulebook is an **inspectable artifact** stakeholders can read.
-- Rules have **stable IDs**, so trace → rule linking is deterministic
-  (no LLM judge).
-- Retrieval noise is lower: trigger-matching surfaces only relevant rules,
-  not whatever semantically-adjacent chunks happen to rank highly.
+- **Tools are unaware they're being observed.** They return pure domain
+  objects — no citation fields, no "propose a rule" language. Extraction
+  happens outside the agentic loop.
+- **The decorator does the trace capture and the memify.** Each call to
+  a `@cognee.agent_memory`-wrapped tool produces a trace entry with an
+  LLM-generated `session_feedback` summary. After the loop ends we call
+  `persist_agent_trace_feedbacks_in_knowledge_graph` — the exact memify
+  pipeline the decorator can auto-invoke — to cognify those summaries
+  into graph nodes tagged `agent_proposed_rule`.
+- **Humans gate writes to the rulebook.** `review_pending_rules.py`
+  surfaces every `agent_proposed_rule` node, and only explicitly approved
+  ones become `Rule` DataPoints on `node_set=['rule','approved','agent_authored']`.
 
 ## Scenario
 
@@ -37,7 +43,7 @@ runtime, because:
 - **Recruiter being replaced:** Alex Chen
 - **Demo candidate:** Dev Rao — 8 YOE, prior at Stripe, target base $170k
 
-The six rules in the rulebook (`data/seed_rules.yaml`):
+The six seed rules (`data/seed_rules.yaml`):
 
 | id                       | trigger                                              | action                                    |
 |--------------------------|------------------------------------------------------|-------------------------------------------|
@@ -60,16 +66,18 @@ data/
   seed_rules.yaml                   hand-authored Rule records
   candidates/dev_rao.json           main demo input (ex-Stripe, R4 triggers)
   candidates/maria_cruz.json        edge-case input (ex-Revolut, R4 skipped)
-rule_models.py                      Rule, ProposedRule, tool-output models
+rule_models.py                      Rule + plain domain tool-output models
 ingest_human_memory.py              ingest rulebook → human_memory dataset
-agent_tools.py                      three @agent_memory-decorated tools
-_run.py                             shared plan runner (reads candidate via env)
+agent_tools.py                      three @agent_memory-decorated tools (pure domain)
+agent_loop.py                       minimal planner loop: LLM picks next tool
+_run.py                             shared runner — loop + post-loop memify
 run_naive.py                        with_memory=False → output/naive_plan.json
 run_grounded.py                     with_memory=True  → output/grounded_plan.json
 run_grounded_edge.py                edge case: Maria Cruz (ex-Revolut)
 check_rule_compliance.py            5-row PASS/FAIL table across both plans
-link_traces_to_rules.py             trace → Rule edges in agent_memory graph
-review_pending_rules.py             human approval CLI for agent-proposed rules
+review_pending_rules.py             human approval CLI for agent-proposed nodes
+inspect_rulebook.py                 prints all Rule nodes in the graph
+visualize.py                        renders human_memory graph HTML
 output/                             generated plan JSONs (gitignored)
 ```
 
@@ -79,8 +87,8 @@ output/                             generated plan JSONs (gitignored)
 2. `.env` at the repo root with `LLM_API_KEY` / `LLM_MODEL` set. Defaults
    (OpenAI + local Kuzu/LanceDB/SQLite) are fine.
 3. `ENABLE_BACKEND_ACCESS_CONTROL` at default (`true`): per-user storage
-   isolation matters here — the linker needs to read from the same scope
-   the grounded run wrote into.
+   isolation matters — review/inspection scripts run inside
+   `run_custom_pipeline` so they share the scope the grounded run wrote to.
 
 ## Run the demo
 
@@ -94,57 +102,49 @@ python -m examples.demos.recruiting_distill_memory.ingest_human_memory
 python -m examples.demos.recruiting_distill_memory.run_naive
 
 # 3. Grounded run — agent retrieves rulebook, plan satisfies rules,
-#    traces persisted via SessionManager
+#    session traces are memified into agent_proposed_rule nodes
 python -m examples.demos.recruiting_distill_memory.run_grounded
 
 # 4. The payoff table: 5 rules × naive/grounded PASS/FAIL
 python -m examples.demos.recruiting_distill_memory.check_rule_compliance
 
-# 5. Link each grounded trace step to the rules it cited, in the graph
-python -m examples.demos.recruiting_distill_memory.link_traces_to_rules
-
-# 6. (Optional) Review any agent-proposed rules. No-ops for Dev Rao.
+# 5. Review agent-proposed nodes — approve any worth codifying
 python -m examples.demos.recruiting_distill_memory.review_pending_rules
 
-# 7. (Optional) Visual verification — both graphs side by side with
-#    applied_rule cross-edges between agent_memory and human_memory
-cognee-cli -ui
+# 6. (Optional) Inspect the rulebook state
+python -m examples.demos.recruiting_distill_memory.inspect_rulebook
+
+# 7. (Optional) Visualize the human_memory graph
+python -m examples.demos.recruiting_distill_memory.visualize
 ```
 
 ### Edge-case run: agent proposes, human approves
 
-Maria Cruz is ex-Revolut — similar fintech non-compete exposure as
+Maria Cruz is ex-Revolut — a fintech with similar non-compete exposure as
 Stripe/Plaid/Adyen, but not in R4's enumerated list. Running her through
-the grounded agent exercises the full human-in-the-loop path:
+the grounded agent exercises the human-in-the-loop path:
 
 ```bash
 python -m examples.demos.recruiting_distill_memory.run_grounded_edge
-python -m examples.demos.recruiting_distill_memory.link_traces_to_rules \
-  --session-id recruiting-demo-grounded-maria
-python -m examples.demos.recruiting_distill_memory.review_pending_rules \
-  --plan grounded_plan_maria.json
+python -m examples.demos.recruiting_distill_memory.review_pending_rules
 ```
 
 Expected behavior:
-1. `compose_screen_invite` returns `applied_rule_ids=[]` and
-   `compliance_notes='novel'` — no retrieved rule clearly applies. Linker
-   buckets this step as `novel`.
-2. One or more tool calls populate `proposed_new_rules` — the agent
-   notices the Revolut non-compete gap and coins
-   `proposed_R*_revolut_noncompete`, proposes timezone-aware scheduling,
-   etc.
-3. `review_pending_rules.py` prints each proposal with its origin and
-   prompts `[a]pprove / [r]eject / [s]kip`. Approved proposals become
-   `Rule` DataPoints (`status='approved'`, `source='agent_proposal:<origin>'`)
-   in `human_memory`, so the next grounded run retrieves them.
-
-This is the second payoff of the demo: distilled human memory **guides**
-agentic behavior, and every rule the agent wants to add to that memory
-requires explicit human approval before it lands in the graph.
+1. The grounded tools run without any proposal-flavored prompts — they
+   just act. The decorator captures their traces regardless.
+2. The post-loop memify pipeline extracts entities from the session
+   feedback summaries (e.g. "screening invite for a Revolut candidate",
+   "non-compete probing") and adds them as graph nodes tagged
+   `agent_proposed_rule`.
+3. `review_pending_rules.py` surfaces each of those nodes. On `[a]pprove`,
+   an LLM structures the node into a proper `Rule` (trigger / action /
+   rationale) and it's ingested into `human_memory` under
+   `belongs_to_set=['rule','approved','agent_authored']`. Subsequent
+   grounded runs retrieve it alongside Alex's seed rules.
 
 ## Expected payoff
 
-After step 4 you should see:
+After step 4 you should see something like:
 
 ```
 Rule                             Naive      Grounded
@@ -159,47 +159,84 @@ TOTAL                            3/5        5/5
 ```
 
 The base model's pretrained knowledge is enough for some generic best
-practices (having a panel, meeting a duration floor, including the CTO by
-coincidence) but not for Ledgerline-specific policy: it picks the wrong
-interview format and misses the Stripe-non-compete probe entirely. Memory
-closes the gap.
+practices (panel size, duration floor, sometimes-CTO) but not for
+Ledgerline-specific policy: it picks the wrong format and misses the
+Stripe non-compete probe. Memory closes the gap.
 
-After step 5:
+## Rules after one grounded run + auto-approve
 
-```
-propose_interview_format       bucket=grounded_in_rule   applied=['R1_live_coding']
-schedule_panel                 bucket=grounded_in_rule   applied=['R1_live_coding', 'R2_panel_footprint', 'R3_cto_on_panel']
-compose_screen_invite          bucket=grounded_in_rule   applied=['R4_noncompete_screen']
-```
+After `run_grounded.py` followed by `review_pending_rules.py --auto-approve`,
+the `human_memory` rulebook looks like this (6 seed + 10 agent-proposed).
+The `source` field distinguishes them deterministically, and
+`belongs_to_set` tags agent-authored ones with `agent_authored` on top of
+`rule,approved`.
 
-The linker will occasionally log a hallucinated rule ID — the summarizer
-LLM that formats `memory_context` sometimes drifts (e.g. citing
-`R5_salary_floor_backend` instead of the real `R5_staff_backend_floor`).
-The linker skips these so only real citations become graph edges; the
-hallucinations get printed for inspection.
+| rule_id                              | author | domain     | source                       |
+|--------------------------------------|--------|------------|------------------------------|
+| `R1_live_coding`                     | human  | scheduling | `alex_playbook`              |
+| `R2_panel_footprint`                 | human  | scheduling | `alex_playbook`              |
+| `R3_cto_on_panel`                    | human  | scheduling | `alex_playbook`              |
+| `R4_noncompete_screen`               | human  | screening  | `alex_playbook`              |
+| `R5_staff_backend_floor`             | human  | offer      | `alex_playbook`              |
+| `R6_one_counter`                     | human  | offer      | `alex_playbook`              |
+| `R7_screening_email_staff_backend`   | agent  | screening  | `agent_proposal:<node_uuid>` |
+| `R8_live_coding_panel_cto`           | agent  | scheduling | `agent_proposal:<node_uuid>` |
+| `R9_90min_live_coding`               | agent  | scheduling | `agent_proposal:<node_uuid>` |
+| `R10_vp_engineering_panel`           | agent  | scheduling | `agent_proposal:<node_uuid>` |
+| `R11_staff_backend_panel`            | agent  | scheduling | `agent_proposal:<node_uuid>` |
+| `R12_staff_backend_rule`             | agent  | scheduling | `agent_proposal:<node_uuid>` |
+| `R13_senior_product_manager_panel`   | agent  | scheduling | `agent_proposal:<node_uuid>` |
+| `R14_senior_product_manager_salary`  | agent  | offer      | `agent_proposal:<node_uuid>` |
+| `R15_invitation_email_staff_backend` | agent  | screening  | `agent_proposal:<node_uuid>` |
+| `R16_staff_backend_screening`        | agent  | screening  | `agent_proposal:<node_uuid>` |
+
+A real human reviewer would reject most of the agent-authored proposals:
+- **R8 / R9 / R12 / R16** are duplicates of Alex's R1–R3 at varying specificity.
+- **R10 / R11 / R13** latched onto panelists in the screenshot as if they
+  were a candidate attribute — a classic trace-summary artefact.
+- **R14** is an outright hallucination — it invented a "Senior Product
+  Manager salary floor" with fabricated numbers from the fact that Ravi
+  (a panelist) has that title.
+- **R7 / R15** are reasonable generalizations of the screening-invite
+  behaviour and plausibly worth keeping.
+
+That's the point of the review gate: the memify pipeline does not
+silently append to the rulebook. `--auto-approve` exists for CI and
+demos; in production, every row in the second half of that table would
+require an explicit `[a]` keypress.
+
+## How the agentic loop works
+
+`agent_loop.run_agentic_plan(candidate)` runs a small planner loop:
+
+1. Build a `candidate_summary` string.
+2. The planner LLM sees the candidate + any tools already called + a
+   one-sentence description of each remaining tool. It returns
+   `next_tool ∈ {propose_interview_format, schedule_panel,
+   compose_screen_invite, done}` plus one-sentence reasoning.
+3. If `next_tool == 'done'`, return. Otherwise call the tool (through
+   `@cognee.agent_memory`, so memory is retrieved and the trace is saved)
+   and append the result. Go back to step 2. Max 8 steps as a safety cap.
+
+The tools themselves are pure domain functions — they have no idea the
+planner chose them, no idea the decorator wraps them, no idea the traces
+they leave behind will be mined for new rules.
 
 ## Troubleshooting
 
-**`link_traces_to_rules.py` says "No traces found"**
-  You're running it outside the per-user storage scope. The script now
-  executes its work inside a `run_custom_pipeline` task so the ACL scope
-  is active — make sure you ran `run_grounded.py` first in the same
-  installation (same `SYSTEM_ROOT_DIRECTORY` / `DATA_ROOT_DIRECTORY`).
+**`review_pending_rules.py` finds no nodes**
+  Either the grounded run hasn't happened in this installation, or the
+  memify pipeline didn't tag its output. Check `run_grounded.py` output
+  for the "Memifying session traces" log line. The review script filters
+  by `belongs_to_set` containing `agent_proposed_rule`.
 
-**Grounded run still fails a rule**
-  Inspect `memory_context` in that step's trace. Usually the summarizer
-  dropped the full rule_id prefix (`R1_live_coding` → just `R1`). The
-  `_MEMORY_SYSTEM_PROMPT` in `agent_tools.py` is tightened to discourage
-  this, but if you swap models it may regress. Raising `memory_top_k` or
-  widening the system-prompt wording helps.
+**Grounded run still fails a compliance rule**
+  Inspect the raw session trace (SessionManager stores it under your
+  user's ACL scope). Usually the summarizer dropped the full rule_id
+  prefix or the planner skipped a tool. Raising `memory_top_k` in
+  `agent_tools.py` helps.
 
 **Naive run passes everything**
-  The base model occasionally picks "live coding" or the right panel size
-  unprompted. Tighten the tool's system prompt in `agent_tools.py` to
-  emphasize Ledgerline-specific policy over generic best practice so
-  there's no free-lunch from pretraining.
-
-**Proposed rules show up in grounded plan**
-  The agent occasionally proposes a new rule (`proposed_new_rules` list
-  in the JSON output). Run `review_pending_rules.py` to promote accepted
-  ones to `Rule` nodes in `human_memory`.
+  The base model occasionally picks "live coding" unprompted. Tighten the
+  tool's system prompt to emphasize Ledgerline-specific policy over
+  generic best practice so there's no free-lunch from pretraining.

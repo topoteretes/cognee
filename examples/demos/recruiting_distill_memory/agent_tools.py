@@ -1,18 +1,22 @@
 """Three @cognee.agent_memory-wrapped tools for Staff Backend interview scheduling.
 
-Each tool takes a plain-text `candidate_summary` so the decorator can use it
-verbatim as the retrieval query (`memory_query_from_method="candidate_summary"`),
-reads relevant rules from `human_memory` when `with_memory=True`, asks the LLM
-for a pydantic-structured plan, and returns `applied_rule_ids` +
-`proposed_new_rules` on the output so the trace → rule linker doesn't need
-any LLM judging.
+Tools are plain domain functions. They return pure domain objects. They do
+NOT know they're being observed — no proposal fields, no compliance_notes,
+no applied_rule_ids. The decorator transparently:
+  - retrieves relevant rules from `human_memory` (when with_memory=True)
+    and prepends them to the LLM system prompt,
+  - saves a structured trace entry per call via SessionManager,
+  - asks the LLM for a one-sentence `session_feedback` summary of the return
+    value (session_trace_summary=True, default).
+
+Learning extraction happens after the agentic loop finishes, via the
+memify pipeline `persist_agent_trace_feedbacks_in_knowledge_graph` that
+reads those stored session_feedback summaries.
 
 Env vars read at import time:
   RECRUITING_WITH_MEMORY   "true" (default) / "false" — flips naive vs grounded
-  RECRUITING_SESSION_ID    session id for trace persistence (default: "recruiting-demo")
+  RECRUITING_SESSION_ID    session id for trace persistence
   RECRUITING_MEMORY_TOP_K  retrieval breadth (default: "6")
-
-run_naive.py / run_grounded.py set these before importing this module.
 """
 
 import os
@@ -37,38 +41,12 @@ MEMORY_TOP_K = int(os.environ.get("RECRUITING_MEMORY_TOP_K", "6"))
 
 
 _ALEX_PERSONA = (
-    "You are Alex Chen, a senior recruiter at Ledgerline (a 40-person payments "
-    "fintech). You are drafting decisions for a Staff Backend Engineer hire. "
-    "If an 'Additional Memory Context' block is present above the user input, "
-    "it contains Ledgerline-specific rules. Follow every rule whose trigger "
-    "matches this candidate; list those rule IDs in `applied_rule_ids` "
-    "(format: 'R1_live_coding'). "
-    "\n\n"
-    "IMPORTANT — proposing new rules. You are actively responsible for "
-    "spotting gaps in the rulebook. Populate `proposed_new_rules` whenever "
-    "ANY of these hold:\n"
-    "  (a) A retrieved rule's trigger lists specific items (e.g. companies) "
-    "      and the candidate has a similar-but-not-listed item — propose "
-    "      extending the trigger to include it.\n"
-    "  (b) The candidate has a recruiting-relevant attribute (location/visa, "
-    "      seniority, counter-offer posture, tech stack, relocation, clearance) "
-    "      that no retrieved rule addresses and that a future candidate will "
-    "      plausibly share.\n"
-    "  (c) You made a judgment call that a future recruiter should repeat — "
-    "      bottle it as a rule.\n"
-    "Each proposal needs rule_id='proposed_R<N>_<slug>' (e.g. "
-    "'proposed_R7_fintech_noncompete'), a domain, a concrete trigger, a "
-    "concrete action, and a rationale. A human reviews every proposal before "
-    "it joins the rulebook — so err on the side of proposing; overproposing "
-    "is cheap, under-proposing is expensive.\n\n"
-    "Set `compliance_notes` to one of: 'followed-as-is' (pure rule application), "
-    "'extended' (applied a rule but also proposed an extension), 'novel' (no "
-    "rule applied, proposed one or decided unaided), 'overrode' (had to deviate "
-    "from a rule — explain why).\n\n"
-    "If no memory context is available, decide from general best practice, "
-    "leave `applied_rule_ids` empty, and set compliance_notes='novel'. "
-    "Never invent rule IDs for `applied_rule_ids` — only cite IDs that appear "
-    "in the memory context."
+    "You are a senior recruiter at Ledgerline (a 40-person payments fintech) "
+    "drafting decisions for a Staff Backend Engineer hire. If an 'Additional "
+    "Memory Context' block is present above the user input, it contains "
+    "Ledgerline-specific guidance — follow it whenever it applies. Otherwise "
+    "draw on general recruiting best practice. Respond only with the structured "
+    "fields requested."
 )
 
 
@@ -90,16 +68,18 @@ _SCREEN_PROMPT = (
     _ALEX_PERSONA
     + "\n\nTask: draft a screening-call invite email. Fields: "
     "`subject` (email subject line), `body` (2–4 sentences), "
-    "`disclosure_questions` (list of questions the recruiter should ask on the screen)."
+    "`disclosure_questions` (list of questions the recruiter should ask on the screen). "
+    "If the memory context contains a rule whose action calls for probing or "
+    "disclosing a candidate attribute (e.g. non-compete exposure, visa, notice "
+    "period, counter-offers), add one direct `disclosure_questions` entry that "
+    "probes it explicitly — name the attribute verbatim (e.g. 'non-compete' must "
+    "appear in that question)."
 )
 
 
 _MEMORY_SYSTEM_PROMPT = (
     "Return every Ledgerline rule whose trigger matches the candidate described in "
-    "the query. CRITICAL: every rule has a rule_id string of the form "
-    "'R<number>_<slug>' (e.g. R1_live_coding, R2_panel_footprint, R4_noncompete_screen). "
-    "Always quote the rule_id EXACTLY as stored — never shorten to just the number. "
-    "For each match, include the full rule_id, the trigger, and the action verbatim. "
+    "the query. Include the full rule_id, the trigger, and the action verbatim. "
     "Skip rules whose trigger clearly does not apply."
 )
 
