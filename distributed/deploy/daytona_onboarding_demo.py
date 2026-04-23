@@ -1,5 +1,5 @@
 """
-Claude Code + Cognee on Daytona — Shared Memory Demo (Snapshot Edition)
+Claude Code + Cognee + Moss on Daytona: Shared Memory Demo
 
 Why no separate Cognee sandbox:
     Daytona's public preview URL is served through a proxy that rejects
@@ -17,21 +17,21 @@ Why no direct volume-mounted DBs either:
     database access.
 
 What works instead:
-    The volume is used as a snapshot bucket. Each agent runs cognee
-    against a LOCAL disk path. Before the agent starts, we extract the
-    latest shared snapshot from the volume into the local state dir.
-    After the agent finishes, we tar local state back into the volume
-    as a single object. Because agents run sequentially, there are no
-    concurrent writes, and whole-object S3 writes are exactly what
-    mountpoint-s3 is designed for.
+    Each agent runs Cognee in-process with Moss as its vector DB backend
+    (via cognee-community-vector-adapter-moss). Moss has cloud sync,
+    so every agent writes to, and reads from, the same vector store
+    automatically. No volume mounts, no snapshot tarballs, no cross-
+    sandbox networking required.
 
 Prerequisites:
     pip install daytona
 
     Set environment variables:
-        DAYTONA_API_KEY     — https://app.daytona.io
-        ANTHROPIC_API_KEY   — for Claude Code itself
-        LLM_API_KEY         — for Cognee (graph extraction + search)
+        DAYTONA_API_KEY     - https://app.daytona.io
+        ANTHROPIC_API_KEY   - for Claude Code itself
+        LLM_API_KEY         - for Cognee (graph extraction + search)
+        MOSS_PROJECT_ID     - https://moss.dev
+        MOSS_PROJECT_KEY    - https://moss.dev
 
 Usage:
     python distributed/deploy/daytona_onboarding_demo.py \\
@@ -53,20 +53,12 @@ from daytona import (
     SessionExecuteRequest,
     Image,
     Resources,
-    VolumeMount,
 )
 
 DAYTONA_API_URL = "https://app.daytona.io/api"
 DEFAULT_REPO = "https://github.com/topoteretes/cognee"
 INTEGRATIONS_REPO = "https://github.com/topoteretes/cognee-integrations"
 PLUGIN_SUBPATH = "integrations/claude-code"
-VOLUME_NAME = "cognee-shared-memory"
-MOUNT_PATH = "/shared-cognee"
-# Path inside each agent sandbox where cognee's local DBs live. This is on
-# the sandbox's real filesystem (block storage), so SQLite/Kuzu/LanceDB
-# work correctly. Snapshots of this dir are synced to/from the volume.
-LOCAL_STATE = "/var/cognee-state"
-SNAPSHOT_FILE = "state.tar.gz"
 
 
 # ---------------------------------------------------------------------------
@@ -137,39 +129,16 @@ def _create_with_quota_retry(daytona, params, retries=6, delay=20):
 
 
 # ---------------------------------------------------------------------------
-# Shared volume (replaces the Cognee service sandbox)
+# Agent sandbox
 # ---------------------------------------------------------------------------
 
-def ensure_shared_volume(daytona, retries=30, delay=2):
-    """Create (or reuse) the Daytona volume used as Cognee's shared storage.
+def deploy_claude_code_agent(target_repo, label):
+    """Deploy a Claude Code sandbox with Cognee using Moss as vector backend.
 
-    Daytona creates volumes asynchronously; a newly-created volume sits in
-    `pending_create` for a few seconds before becoming `ready`. Mounting
-    it before then fails the sandbox create with a validation error, so
-    poll until it's ready.
-    """
-    print("=== Preparing shared volume ===")
-    vol = daytona.volume.get(VOLUME_NAME, create=True)
-    print(f"  Volume: {vol.name} ({vol.id}), state={vol.state}")
-    for _ in range(retries):
-        if str(vol.state).upper().endswith("READY"):
-            return vol
-        time.sleep(delay)
-        vol = daytona.volume.get(VOLUME_NAME, create=False)
-        print(f"  ...waiting, state={vol.state}")
-    raise RuntimeError(f"Volume {VOLUME_NAME} did not become ready: {vol.state}")
-
-
-# ---------------------------------------------------------------------------
-# Claude Code agent sandbox
-# ---------------------------------------------------------------------------
-
-def deploy_claude_code_agent(volume_id, target_repo, label):
-    """Deploy a Claude Code sandbox that shares Cognee storage via volume mount.
-
-    Each agent runs Cognee in-process. DATA/SYSTEM/CACHE_ROOT_DIRECTORY
-    all point at the mounted volume, so all agents share the same graph
-    and session cache across runs.
+    Installing cognee-community-vector-adapter-moss and writing a
+    sitecustomize.py ensures the adapter auto-registers for every Python
+    process in the sandbox, including the hook subprocesses spawned by
+    the cognee-memory plugin.
     """
     anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not anthropic_api_key:
@@ -178,6 +147,14 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
     llm_api_key = os.environ.get("LLM_API_KEY")
     if not llm_api_key:
         raise ValueError("LLM_API_KEY environment variable is required")
+
+    moss_project_id = os.environ.get("MOSS_PROJECT_ID")
+    if not moss_project_id:
+        raise ValueError("MOSS_PROJECT_ID environment variable is required")
+
+    moss_project_key = os.environ.get("MOSS_PROJECT_KEY")
+    if not moss_project_key:
+        raise ValueError("MOSS_PROJECT_KEY environment variable is required")
 
     daytona = _get_daytona()
 
@@ -188,18 +165,16 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
             # 4 GiB was OOM-killed during claude+plugin+cognee SDK startup.
             # 6 GiB leaves us at the 10 GiB tier cap with nothing else.
             resources=Resources(cpu=2, memory=6, disk=10),
-            volumes=[VolumeMount(volume_id=volume_id, mount_path=MOUNT_PATH)],
             env_vars={
                 "ANTHROPIC_API_KEY": anthropic_api_key,
                 "LLM_API_KEY": llm_api_key,
                 "LLM_MODEL": os.environ.get("LLM_MODEL", "openai/gpt-4o-mini"),
                 "LLM_PROVIDER": os.environ.get("LLM_PROVIDER", "openai"),
-                # Cognee local storage — on the sandbox's real filesystem,
-                # NOT on the volume (mountpoint-s3 can't host SQLite/Kuzu).
-                # Synced to the volume before/after each agent's run.
-                "DATA_ROOT_DIRECTORY": f"{LOCAL_STATE}/data",
-                "SYSTEM_ROOT_DIRECTORY": f"{LOCAL_STATE}/system",
-                "CACHE_ROOT_DIRECTORY": f"{LOCAL_STATE}/cache",
+                # Tell Cognee to use Moss as its vector DB.
+                "VECTOR_DB_PROVIDER": "moss",
+                "VECTOR_DB_KEY": moss_project_key,
+                "VECTOR_DB_NAME": moss_project_id,
+                "VECTOR_DATASET_DATABASE_HANDLER": "moss",
                 # Plugin config. No COGNEE_SERVICE_URL -> plugin uses local mode.
                 "COGNEE_PLUGIN_DATASET": "shared_codebase_memory",
                 "COGNEE_SESSION_STRATEGY": "per-directory",
@@ -241,9 +216,35 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
     _print_tail(result, "claude")
 
     # Plugin depends on the cognee Python SDK for its hooks/skills.
-    print("  Installing cognee SDK (plugin dependency)...")
-    result = sandbox.process.exec("pip install cognee", timeout=600)
+    # Moss adapter lets Cognee use Moss as its vector backend.
+    print("  Installing cognee SDK + Moss adapter (plugin dependencies)...")
+    result = sandbox.process.exec(
+        "pip install cognee cognee-community-vector-adapter-moss",
+        timeout=600,
+    )
     _print_tail(result, "cognee-sdk")
+
+    # Write a sitecustomize.py so the Moss adapter auto-registers for every
+    # Python process in the sandbox, including the hook subprocesses fired
+    # by the cognee-memory plugin. sitecustomize is imported by Python before
+    # any user code, making this the most reliable registration point.
+    print("  Registering Moss adapter for all Python processes...")
+    site_packages = sandbox.process.exec(
+        "python -c \"import site; print(site.getsitepackages()[0])\"",
+        timeout=10,
+    ).result.strip()
+    sandbox.process.exec(
+        f"cat > {site_packages}/sitecustomize.py << 'EOF'\n"
+        "import sys\n"
+        "try:\n"
+        "    # Importing this submodule runs its top-level use_vector_adapter\n"
+        "    # and use_dataset_database_handler calls, which is the registration.\n"
+        "    from cognee_community_vector_adapter_moss import register  # noqa: F401\n"
+        "except Exception as e:\n"
+        "    print(f'[moss-adapter] register failed: {e!r}', file=sys.stderr)\n"
+        "EOF",
+        timeout=5,
+    )
 
     print("  Cloning cognee-integrations (for the plugin)...")
     sandbox.process.exec(
@@ -267,18 +268,11 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
     )
 
     # Claude Code refuses --dangerously-skip-permissions when running as root.
-    # Create the agent user and its local state dir (cognee DB lives here,
-    # on real block storage — see module docstring). We DO NOT chown the
-    # volume mount — it's mountpoint-s3 FUSE and chown fails "Operation
-    # not permitted". The mount is already rwxrwxrwx, so agent can still
-    # read/write snapshot tarballs on it.
-    print("  Creating agent user + local state dir...")
+    print("  Creating agent user...")
     sandbox.process.exec(
-        f"useradd -m -s /bin/bash agent && "
-        f"mkdir -p {LOCAL_STATE}/data {LOCAL_STATE}/system {LOCAL_STATE}/cache && "
-        f"chown -R agent:agent /workspace /opt/cognee-integrations {LOCAL_STATE} && "
-        "env | grep -E '^(ANTHROPIC_API_KEY|LLM_|COGNEE_|CACHING|"
-        "DATA_ROOT_DIRECTORY|SYSTEM_ROOT_DIRECTORY|CACHE_ROOT_DIRECTORY)=' "
+        "useradd -m -s /bin/bash agent && "
+        "chown -R agent:agent /workspace /opt/cognee-integrations && "
+        "env | grep -E '^(ANTHROPIC_API_KEY|LLM_|COGNEE_|CACHING|VECTOR_)=' "
         "| sed 's/^/export /' > /home/agent/env && "
         "chown agent:agent /home/agent/env && chmod 600 /home/agent/env",
         timeout=15,
@@ -293,13 +287,10 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
 # ---------------------------------------------------------------------------
 
 def run_agent_task(sandbox, label, prompt):
-    """Run one Claude Code task with sync-in / run / sync-out around it.
+    """Run one Claude Code task with the cognee-memory plugin.
 
-    The cognee DBs live on local sandbox disk (block storage). Before the
-    agent runs we extract the latest shared snapshot from the volume into
-    LOCAL_STATE; after the agent finishes we tar LOCAL_STATE back into
-    the volume as a single object. Whole-object writes are what
-    mountpoint-s3 is built for.
+    No snapshot sync needed; Cognee writes directly to Moss (cloud),
+    so the shared vector index is available to the next agent immediately.
     """
     print(f"\n{'=' * 60}")
     print(f"  AGENT:  {label}")
@@ -307,23 +298,9 @@ def run_agent_task(sandbox, label, prompt):
     print(f"{'=' * 60}\n")
 
     plugin_dir = f"/opt/cognee-integrations/{PLUGIN_SUBPATH}"
-    snapshot_path = f"{MOUNT_PATH}/{SNAPSHOT_FILE}"
 
-    # One bash block: sync-in, run claude, sync-out. The sync-out is in a
-    # trap so the snapshot gets written even if claude errors.
     inner = (
         f"set -a && . /home/agent/env && set +a && "
-        f"sync_out() {{ "
-        f"  tar -czf /tmp/new-state.tar.gz -C {LOCAL_STATE} . && "
-        f"  cp /tmp/new-state.tar.gz {shlex.quote(snapshot_path)} && "
-        f"  echo '[sync-out] wrote '$(stat -c%s /tmp/new-state.tar.gz)' bytes'; "
-        f"}}; trap sync_out EXIT; "
-        f"if [ -f {shlex.quote(snapshot_path)} ]; then "
-        f"  echo '[sync-in] found prior snapshot ('$(stat -c%s {shlex.quote(snapshot_path)})' bytes), extracting'; "
-        f"  tar -xzf {shlex.quote(snapshot_path)} -C {LOCAL_STATE}; "
-        f"else "
-        f"  echo '[sync-in] no prior snapshot, starting fresh'; "
-        f"fi; "
         f"cd /workspace && "
         f"claude --plugin-dir {shlex.quote(plugin_dir)} "
         f"--dangerously-skip-permissions "
@@ -338,91 +315,27 @@ def run_agent_task(sandbox, label, prompt):
 
 
 # ---------------------------------------------------------------------------
-# Graph inspection (post-run verification)
-# ---------------------------------------------------------------------------
-
-def inspect_shared_graph(daytona, volume_id):
-    """Mount the volume, extract the snapshot to local disk, and report
-    row counts from the SQLite DB. This is the proof that the shared
-    graph actually carries data across agents."""
-    print("\n=== Inspecting shared graph ===")
-    sandbox = _create_with_quota_retry(daytona,
-        CreateSandboxFromImageParams(
-            image=Image.debian_slim("3.12"),
-            resources=Resources(cpu=1, memory=2, disk=5),
-            volumes=[VolumeMount(volume_id=volume_id, mount_path=MOUNT_PATH)],
-            labels={"app": "cognee-inspector", "demo": "shared-memory"},
-        ),
-    )
-    try:
-        snapshot_path = f"{MOUNT_PATH}/{SNAPSHOT_FILE}"
-        # Extract snapshot, then SQLite query the cognee_db.
-        query = (
-            "import sqlite3, glob\n"
-            f"db_paths = glob.glob('{LOCAL_STATE}/system/databases/cognee_db') "
-            f"or glob.glob('{LOCAL_STATE}/system/**/cognee_db', recursive=True)\n"
-            "if not db_paths:\n"
-            "    print('no sqlite found in snapshot'); raise SystemExit\n"
-            "c = sqlite3.connect(db_paths[0]).cursor()\n"
-            "for t in ('datasets', 'data', 'pipeline_runs', 'users', 'nodes', 'edges'):\n"
-            "    try:\n"
-            "        n = c.execute(f'select count(*) from \"{t}\"').fetchone()[0]\n"
-            "        print(f'{t}: {n}')\n"
-            "    except Exception as e:\n"
-            "        print(f'{t}: err {e}')\n"
-        )
-        import base64
-        b64 = base64.b64encode(query.encode()).decode()
-        extract_and_query = (
-            f"mkdir -p {LOCAL_STATE} && "
-            f"if [ -f {shlex.quote(snapshot_path)} ]; then "
-            f"  echo 'snapshot size: '$(stat -c%s {shlex.quote(snapshot_path)})' bytes'; "
-            f"  tar -xzf {shlex.quote(snapshot_path)} -C {LOCAL_STATE}; "
-            f"  echo '---contents---'; find {LOCAL_STATE} -type f | head -20; "
-            f"  echo '---sqlite counts---'; "
-            f"  echo {b64} | base64 -d > /tmp/q.py && python /tmp/q.py; "
-            f"else "
-            f"  echo 'NO_SNAPSHOT at {snapshot_path}'; "
-            f"fi"
-        )
-        r = sandbox.process.exec(extract_and_query, timeout=60)
-        print(r.result or "(no output)")
-    finally:
-        daytona.delete(sandbox)
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Claude Code + Cognee on Daytona: shared-volume memory demo"
+        description="Claude Code + Cognee on Daytona: shared memory demo"
     )
     parser.add_argument(
         "--repo",
         default=os.environ.get("TARGET_REPO", DEFAULT_REPO),
         help="Git URL of the repository the agents will explore",
     )
-    parser.add_argument(
-        "--keep-volume",
-        action="store_true",
-        help="Don't delete the shared volume at the end (useful for inspection)",
-    )
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  CLAUDE CODE + COGNEE SHARED MEMORY DEMO (volume)")
+    print("  CLAUDE CODE + COGNEE SHARED MEMORY DEMO")
     print(f"  Target repo: {args.repo}")
     print("=" * 60 + "\n")
 
     daytona = _get_daytona()
-    volume = ensure_shared_volume(daytona)
 
-    # Three agents with increasingly broad prompts. Each agent's session
-    # cache is private (per-directory, scoped by COGNEE_SESSION_PREFIX);
-    # anything they /cognee-memory:cognee-remember or SessionEnd-bridge
-    # lands in the shared graph on the volume.
     agents = [
         (
             "arch",
@@ -448,42 +361,30 @@ def main():
     ]
 
     ran = []
-    try:
-        for label, prompt in agents:
-            sandbox = deploy_claude_code_agent(volume.id, args.repo, label)
-            try:
-                run_agent_task(sandbox, label, prompt)
-                ran.append((label, sandbox.id))
+    for label, prompt in agents:
+        sandbox = deploy_claude_code_agent(args.repo, label)
+        try:
+            run_agent_task(sandbox, label, prompt)
+            ran.append((label, sandbox.id))
 
-                # Dump the plugin's resolved state so we can see whether
-                # SessionStart completed and what mode it picked.
-                try:
-                    dump = sandbox.process.exec(
-                        "cat /home/agent/.cognee-plugin/resolved.json 2>&1 || "
-                        "echo MISSING_RESOLVED_JSON",
-                        timeout=5,
-                    )
-                    if dump.result:
-                        print(f"  [{label}] resolved.json:\n{dump.result}")
-                except Exception:
-                    pass
-            finally:
-                try:
-                    daytona.delete(sandbox)
-                    print(f"  [{label}] sandbox {sandbox.id} destroyed.")
-                except Exception as e:
-                    print(f"  [{label}] WARNING: failed to delete sandbox: {e}")
-
-        inspect_shared_graph(daytona, volume.id)
-    finally:
-        if not args.keep_volume:
+            # Dump the plugin's resolved state so we can see whether
+            # SessionStart completed and what mode it picked.
             try:
-                daytona.volume.delete(volume)
-                print(f"\n  Shared volume {volume.name} deleted.")
+                dump = sandbox.process.exec(
+                    "cat /home/agent/.cognee-plugin/resolved.json 2>&1 || "
+                    "echo MISSING_RESOLVED_JSON",
+                    timeout=5,
+                )
+                if dump.result:
+                    print(f"  [{label}] resolved.json:\n{dump.result}")
+            except Exception:
+                pass
+        finally:
+            try:
+                daytona.delete(sandbox)
+                print(f"  [{label}] sandbox {sandbox.id} destroyed.")
             except Exception as e:
-                print(f"\n  WARNING: failed to delete volume: {e}")
-        else:
-            print(f"\n  Shared volume {volume.name} ({volume.id}) kept.")
+                print(f"  [{label}] WARNING: failed to delete sandbox: {e}")
 
     print("\n" + "=" * 60)
     print("  DEMO COMPLETE")
