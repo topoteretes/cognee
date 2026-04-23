@@ -448,6 +448,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with_vectors: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -460,6 +461,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     with_vector=with_vectors,
                     include_payload=include_payload,
                     node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
                 )
                 for query_vector in query_vectors
             ]

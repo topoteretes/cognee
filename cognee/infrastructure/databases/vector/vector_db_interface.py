@@ -123,6 +123,7 @@ class VectorDBInterface(Protocol):
         with_vectors: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -138,6 +139,10 @@ class VectorDBInterface(Protocol):
             - include_payload (bool): Whether to include the payload data with search. Search is faster when set to False.
               Payload contains metadata about the data point, useful for searches that are only based on embedding distances
               like the RAG_COMPLETION search type, but not needed when search also contains graph data.
+            - node_name (Optional[List[str]]): An optional list of names of nodes. Search results are filtered
+              based on these, and only data which has at least one of the names in its "belongs_to_set" field is returned.
+            - node_name_filter_operator (str): Logical operator for node_name filtering. ``"OR"`` (default)
+              returns results matching any name; ``"AND"`` requires all names to match.
         """
         raise NotImplementedError
 

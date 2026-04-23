@@ -1,7 +1,7 @@
 import json
 import asyncio
 from uuid import UUID
-from typing import List, Optional
+from typing import List, Literal, Optional
 from chromadb import AsyncHttpClient, Settings
 from pydantic import BaseModel
 
@@ -352,6 +352,30 @@ class ChromaDBAdapter(VectorDBInterface):
             for id, metadata in zip(results["ids"], results["metadatas"])
         ]
 
+    @staticmethod
+    def _build_where_filter(
+        node_name: Optional[List[str]],
+        node_name_filter_operator: "Literal['OR', 'AND']",
+    ) -> Optional[dict]:
+        """Build a ChromaDB ``where`` filter dict from node_name constraints."""
+        if not node_name:
+            return None
+        if node_name_filter_operator == "AND":
+            return {"$and": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
+        if len(node_name) == 1:
+            return {"belongs_to_set": {"$eq": node_name[0]}}
+        return {"$or": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
+
+    @staticmethod
+    def _build_include_list(include_payload: bool, with_vector: bool) -> List[str]:
+        """Build the ChromaDB ``include`` list based on caller requirements."""
+        include = ["distances"]
+        if include_payload:
+            include.append("metadatas")
+        if with_vector:
+            include.append("embeddings")
+        return include
+
     async def search(
         self,
         collection_name: str,
@@ -361,7 +385,7 @@ class ChromaDBAdapter(VectorDBInterface):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
-        node_name_filter_operator: str = "OR",
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ):
         """
         Search for items in a collection using either a text or a vector query.
@@ -376,11 +400,27 @@ class ChromaDBAdapter(VectorDBInterface):
               query_text is provided. (default None)
             - limit (int): The maximum number of results to return; defaults to 15. (default 15)
             - with_vector (bool): Whether to include vectors in the results. (default False)
+            - include_payload (bool): When True, fetches metadatas from ChromaDB and populates
+              ``ScoredResult.payload``. When False (default), metadatas are omitted from the
+              query to reduce memory and network overhead; ``payload`` will be None.
+            - node_name (Optional[List[str]]): Filter results to nodes whose
+              ``belongs_to_set`` field matches one of the provided names.
+              No filter is applied when None. (default None)
+            - node_name_filter_operator (Literal["OR", "AND"]): Logical operator applied to
+              ``node_name`` entries. ``"OR"`` (default) accepts nodes matching any name;
+              ``"AND"`` requires all names to be present in ``belongs_to_set``.
+
         Returns:
         --------
 
             Returns a list of ScoredResult instances representing the search results.
         """
+        if node_name_filter_operator not in ("OR", "AND"):
+            raise ValueError(
+                f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
+                "Expected 'OR' or 'AND'."
+            )
+
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
 
@@ -397,27 +437,8 @@ class ChromaDBAdapter(VectorDBInterface):
             if limit <= 0:
                 return []
 
-            # Build node_name where filter if provided
-            where_filter = None
-            if node_name:
-                if node_name_filter_operator == "AND":
-                    where_filter = {
-                        "$and": [{"belongs_to_set": {"$eq": name}} for name in node_name]
-                    }
-                else:
-                    if len(node_name) == 1:
-                        where_filter = {"belongs_to_set": {"$eq": node_name[0]}}
-                    else:
-                        where_filter = {
-                            "$or": [{"belongs_to_set": {"$eq": name}} for name in node_name]
-                        }
-
-            # Build include list: omit metadatas when payload is not needed
-            include_list = ["distances"]
-            if include_payload:
-                include_list.append("metadatas")
-            if with_vector:
-                include_list.append("embeddings")
+            where_filter = self._build_where_filter(node_name, node_name_filter_operator)
+            include_list = self._build_include_list(include_payload, with_vector)
 
             query_kwargs = {
                 "query_embeddings": [query_vector],
@@ -471,7 +492,7 @@ class ChromaDBAdapter(VectorDBInterface):
         with_vectors: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
-        node_name_filter_operator: str = "OR",
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ):
         """
         Perform multiple searches in a single request for efficiency, returning results for each
@@ -491,37 +512,26 @@ class ChromaDBAdapter(VectorDBInterface):
               (default False)
             - node_name (Optional[List[str]]): Filter results to nodes matching these names.
               (default None)
-            - node_name_filter_operator (str): Logical operator for node_name filter, "OR" or
-              "AND". (default "OR")
+            - node_name_filter_operator (Literal["OR", "AND"]): Logical operator for
+              node_name filter, ``"OR"`` or ``"AND"``. (default "OR")
 
         Returns:
         --------
 
             Returns a list of lists of ScoredResult instances for each query's results.
         """
+        if node_name_filter_operator not in ("OR", "AND"):
+            raise ValueError(
+                f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
+                "Expected 'OR' or 'AND'."
+            )
+
         query_vectors = await self.embed_data(query_texts)
 
         collection = await self.get_collection(collection_name)
 
-        # Build node_name where filter if provided
-        where_filter = None
-        if node_name:
-            if node_name_filter_operator == "AND":
-                where_filter = {"$and": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
-            else:
-                if len(node_name) == 1:
-                    where_filter = {"belongs_to_set": {"$eq": node_name[0]}}
-                else:
-                    where_filter = {
-                        "$or": [{"belongs_to_set": {"$eq": name}} for name in node_name]
-                    }
-
-        # Build include list: omit metadatas when payload is not needed
-        include_list = ["distances"]
-        if include_payload:
-            include_list.append("metadatas")
-        if with_vectors:
-            include_list.append("embeddings")
+        where_filter = self._build_where_filter(node_name, node_name_filter_operator)
+        include_list = self._build_include_list(include_payload, with_vectors)
 
         query_kwargs = {
             "query_embeddings": query_vectors,

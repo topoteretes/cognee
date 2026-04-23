@@ -5,7 +5,7 @@ node_name filtering support added in issue #2353.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 chromadb = pytest.importorskip("chromadb", reason="ChromaDB tests require chromadb")
@@ -167,6 +167,8 @@ async def test_search_node_name_and_operator_uses_dollar_and():
     assert "where" in call_kwargs
     where = call_kwargs["where"]
     assert "$and" in where
+    names = {clause["belongs_to_set"]["$eq"] for clause in where["$and"]}
+    assert names == {"Alice", "Bob"}
 
 
 @pytest.mark.asyncio

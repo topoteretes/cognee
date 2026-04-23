@@ -229,6 +229,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         with_vectors: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         return await self._vector.batch_search(
             collection_name,
@@ -237,6 +238,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             with_vectors,
             include_payload,
             node_name,
+            node_name_filter_operator,
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
