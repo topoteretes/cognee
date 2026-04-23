@@ -219,7 +219,8 @@ def deploy_claude_code_agent(target_repo, label):
     # Moss adapter lets Cognee use Moss as its vector backend.
     print("  Installing cognee SDK + Moss adapter (plugin dependencies)...")
     result = sandbox.process.exec(
-        "pip install cognee cognee-community-vector-adapter-moss",
+        "pip install cognee==1.0.2 inferedge-moss-core==0.4.1 python-dotenv && "
+        "pip install --no-deps moss cognee-community-vector-adapter-moss==0.1.0",
         timeout=600,
     )
     _print_tail(result, "cognee-sdk")
