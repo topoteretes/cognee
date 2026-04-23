@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import { useFilter } from "@/ui/Layout/FilterContext";
+import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
 import searchDataset from "@/modules/datasets/searchDataset";
 import addData from "@/modules/ingestion/addData";
@@ -325,7 +325,7 @@ export default function OverviewPage() {
 
       {/* Onboarding strip */}
       <div style={{ display: "flex", alignItems: "center", background: "#FFFFFF", border: "1px solid #E4E4E7", borderRadius: 12, padding: 4 }}>
-        <OnboardingItem title="Python SDK" subtitle="pip install cognee" icon={<SdkIcon />} />
+        <OnboardingItem title="Python SDK" subtitle="pip install cognee" icon={<SdkIcon />} onClick={() => { navigator.clipboard.writeText("pip install cognee"); }} highlightSubtitle />
         <OnboardingItem title="API key" subtitle="Open API Keys →" icon={<KeyIconSm />} href="/api-keys" />
         <OnboardingItem title="Upload data" subtitle="Build more memory →" icon={<UploadIconSm />} accent onClick={() => uploadInputRef.current?.click()} loading={isUploading} />
       </div>
