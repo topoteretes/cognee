@@ -186,6 +186,10 @@ class NodeEdgeVectorSearch:
 
     async def _embed_query(self, query: str):
         """Embeds the query and stores the resulting vector."""
+        if not isinstance(query, str):
+            raise TypeError(
+                f"query must be a string, got {type(query).__name__}: {query!r}"
+            )
         with new_span("cognee.retrieval.embed_query") as span:
             span.set_attribute("cognee.vector.query_length", len(query))
             query_embeddings = await self.vector_engine.embedding_engine.embed_text([query])

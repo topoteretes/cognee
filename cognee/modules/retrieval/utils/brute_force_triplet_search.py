@@ -346,7 +346,7 @@ async def brute_force_triplet_search(
 
             logger.error(
                 "Error during brute force search for query: %s. Error: %s",
-                query_batch if query_list_length else [query],
+                query_batch if query_list_length else query,
                 error,
             )
             raise error
