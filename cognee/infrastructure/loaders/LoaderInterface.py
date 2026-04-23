@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Any
+from typing import Any, ClassVar
 
 
 class LoaderInterface(ABC):
@@ -10,9 +10,12 @@ class LoaderInterface(ABC):
     ensuring consistent behavior across all loader implementations.
     """
 
+    # Unique name identifier for this loader.
+    loader_name: ClassVar[str]
+
     @property
     @abstractmethod
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """
         List of file extensions this loader supports.
 
@@ -23,23 +26,12 @@ class LoaderInterface(ABC):
 
     @property
     @abstractmethod
-    def supported_mime_types(self) -> List[str]:
+    def supported_mime_types(self) -> list[str]:
         """
         List of MIME types this loader supports.
 
         Returns:
             List of MIME type strings (e.g., ['text/plain', 'application/pdf'])
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def loader_name(self) -> str:
-        """
-        Unique name identifier for this loader.
-
-        Returns:
-            String identifier used for registration and configuration
         """
         pass
 
@@ -58,7 +50,7 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    async def load(self, file_path: str, **kwargs):
+    async def load(self, file_path: str, **kwargs: Any) -> str:
         """
         Load and process the file, returning standardized result.
 

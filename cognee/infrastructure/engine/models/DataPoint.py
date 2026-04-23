@@ -1,12 +1,12 @@
 import logging
-from uuid import UUID, NAMESPACE_OID, uuid4, uuid5
-from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
+from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import NotRequired, TypedDict
 
-from cognee.infrastructure.engine.models.FieldAnnotations import _Embeddable, _Dedup
+from cognee.infrastructure.engine.models.FieldAnnotations import _Dedup, _Embeddable
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class MetaData(TypedDict):
     Represent a metadata structure with type and index fields.
     """
 
-    type: str
+    type: NotRequired[str]
     index_fields: list[str]
     identity_fields: NotRequired[list[str]]
 
@@ -50,17 +50,17 @@ class DataPoint(BaseModel):
     )
     ontology_valid: bool = False
     version: int = 1  # Default version
-    topological_rank: Optional[int] = 0
-    metadata: Optional[MetaData] = {"index_fields": []}
+    topological_rank: int | None = 0
+    metadata: MetaData = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
-    belongs_to_set: Optional[List["DataPoint"] | List[str]] = None
-    source_pipeline: Optional[str] = None
-    source_task: Optional[str] = None
-    source_node_set: Optional[str] = None
-    source_user: Optional[str] = None
-    source_content_hash: Optional[str] = None
+    belongs_to_set: "list[DataPoint] | list[str] | None" = None
+    source_pipeline: str | None = None
+    source_task: str | None = None
+    source_node_set: str | None = None
+    source_user: str | None = None
+    source_content_hash: str | None = None
     feedback_weight: float = 0.5
-    importance_weight: Optional[float] = 0.5
+    importance_weight: float | None = 0.5
 
     def __init__(self, **data: Any) -> None:
         explicit_id = "id" in data
@@ -76,7 +76,7 @@ class DataPoint(BaseModel):
                     object.__setattr__(self, "id", identity_id)
 
     @classmethod
-    def _get_identity_fields(cls) -> Optional[list[str]]:
+    def _get_identity_fields(cls) -> list[str] | None:
         """Get identity_fields from the class's metadata field default, if defined.
 
         Walks the MRO to detect if a parent class defined identity_fields that a
@@ -104,7 +104,7 @@ class DataPoint(BaseModel):
     @classmethod
     def _generate_identity_id(
         cls, identity_fields: list[str], data: dict, class_name: str
-    ) -> Optional[UUID]:
+    ) -> UUID | None:
         """Generate a deterministic UUID5 from identity field values.
 
         Returns None if any identity field is missing from both data
@@ -131,7 +131,7 @@ class DataPoint(BaseModel):
         return uuid5(NAMESPACE_OID, identity_string)
 
     @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs):
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-derive metadata index_fields and identity_fields from Annotated markers.
 
         If a subclass uses Annotated[str, Embeddable()] or Annotated[str, Dedup()]
@@ -162,7 +162,7 @@ class DataPoint(BaseModel):
             cls.model_fields["metadata"].default = new_metadata
 
     @classmethod
-    def get_embeddable_data(self, data_point: "DataPoint"):
+    def get_embeddable_data(cls, data_point: "DataPoint") -> Any | None:
         """
         Retrieve embeddable data from the data point object based on index fields.
 
@@ -193,7 +193,7 @@ class DataPoint(BaseModel):
             return attribute
 
     @classmethod
-    def get_embeddable_properties(self, data_point: "DataPoint"):
+    def get_embeddable_properties(cls, data_point: "DataPoint") -> list[Any | None]:
         """
         Retrieve a list of embeddable properties from the data point.
 
@@ -219,7 +219,7 @@ class DataPoint(BaseModel):
         return []
 
     @classmethod
-    def get_embeddable_property_names(self, data_point: "DataPoint"):
+    def get_embeddable_property_names(cls, data_point: "DataPoint") -> list[str]:
         """
         Retrieve the names of embeddable properties defined in the metadata.
 
@@ -239,7 +239,7 @@ class DataPoint(BaseModel):
         """
         return data_point.metadata["index_fields"] or []
 
-    def update_version(self):
+    def update_version(self) -> None:
         """
         Increment the version number of the data point and update the timestamp.
 
@@ -265,7 +265,7 @@ class DataPoint(BaseModel):
         return self.model_dump_json()
 
     @classmethod
-    def from_json(self, json_str: str):
+    def from_json(cls, json_str: str) -> "DataPoint":
         """
         Deserialize a DataPoint instance from a JSON string.
 
@@ -283,9 +283,9 @@ class DataPoint(BaseModel):
 
             A new DataPoint instance created from the JSON data.
         """
-        return self.model_validate_json(json_str)
+        return cls.model_validate_json(json_str)
 
-    def to_dict(self, **kwargs) -> Dict[str, Any]:
+    def to_dict(self, **kwargs: Any) -> dict[str, Any]:
         """
         Convert the DataPoint instance to a dictionary representation.
 
@@ -305,7 +305,7 @@ class DataPoint(BaseModel):
         return self.model_dump(**kwargs)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DataPoint":
+    def from_dict(cls, data: dict[str, Any]) -> "DataPoint":
         """
         Instantiate a DataPoint from a dictionary of attribute values.
 

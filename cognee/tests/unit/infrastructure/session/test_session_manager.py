@@ -80,6 +80,7 @@ class TestSessionManager:
         cache.append_agent_trace_step = AsyncMock()
         cache.get_agent_trace_session = AsyncMock(return_value=[])
         cache.get_agent_trace_feedback = AsyncMock(return_value=[])
+        cache.get_agent_trace_count = AsyncMock(return_value=0)
         cache.update_qa_entry = AsyncMock(return_value=True)
         cache.delete_feedback = AsyncMock(return_value=True)
         cache.delete_qa_entry = AsyncMock(return_value=True)
@@ -421,7 +422,7 @@ class TestSessionManager:
         entries = await sm.get_agent_trace_session(user_id="u1", session_id="s1")
         assert len(entries) == 1
         assert entries[0]["trace_id"] == "t1"
-        mock_cache.get_agent_trace_session.assert_called_once_with("u1", "s1")
+        mock_cache.get_agent_trace_session.assert_called_once_with("u1", "s1", last_n=None)
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_session_unavailable_returns_empty(self, sm_unavailable):
@@ -440,12 +441,37 @@ class TestSessionManager:
             "plan_trip succeeded.",
             "book_hotel failed. Reason: No availability.",
         ]
-        mock_cache.get_agent_trace_feedback.assert_called_once_with("u1", "s1")
+        mock_cache.get_agent_trace_feedback.assert_called_once_with("u1", "s1", last_n=None)
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_feedback_passes_last_n_to_cache(self, sm, mock_cache):
+        """get_agent_trace_feedback forwards last_n to cache."""
+        mock_cache.get_agent_trace_feedback.return_value = ["book_hotel failed."]
+
+        feedback = await sm.get_agent_trace_feedback(user_id="u1", session_id="s1", last_n=1)
+
+        assert feedback == ["book_hotel failed."]
+        mock_cache.get_agent_trace_feedback.assert_called_once_with("u1", "s1", last_n=1)
 
     @pytest.mark.asyncio
     async def test_get_agent_trace_feedback_unavailable_returns_empty(self, sm_unavailable):
         """get_agent_trace_feedback returns empty list when cache unavailable."""
         assert await sm_unavailable.get_agent_trace_feedback(user_id="u1", session_id="s1") == []
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_count_calls_cache(self, sm, mock_cache):
+        """get_agent_trace_count delegates to cache."""
+        mock_cache.get_agent_trace_count.return_value = 3
+
+        count = await sm.get_agent_trace_count(user_id="u1", session_id="s1")
+
+        assert count == 3
+        mock_cache.get_agent_trace_count.assert_called_once_with("u1", "s1")
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_count_unavailable_returns_zero(self, sm_unavailable):
+        """get_agent_trace_count returns zero when cache unavailable."""
+        assert await sm_unavailable.get_agent_trace_count(user_id="u1", session_id="s1") == 0
 
     @pytest.mark.asyncio
     async def test_update_qa_calls_cache(self, sm, mock_cache):

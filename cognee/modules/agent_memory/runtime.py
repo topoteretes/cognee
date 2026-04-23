@@ -26,21 +26,30 @@ MAX_MEMORY_CONTEXT_LENGTH = 4000
 
 @dataclass(slots=True)
 class AgentMemoryConfig:
+    """Validated decorator configuration used for one wrapped agent invocation."""
+
     with_memory: bool
     with_session_memory: bool
-    save_traces: bool
+    save_session_traces: bool
     memory_query_fixed: Optional[str]
     memory_query_from_method: Optional[str]
     memory_system_prompt: Optional[str]
     memory_top_k: int
+    memory_only_context: bool
     session_memory_last_n: int
     session_id: Optional[str]
     user: Optional[User]
     dataset_name: Optional[str]
+    session_trace_summary: bool
+    persist_session_trace_after: Optional[int]
+    persist_session_trace_raw_content: bool
+    persist_session_trace_node_set_name: Optional[str]
 
 
 @dataclass(slots=True)
 class AgentScope:
+    """Authorized dataset scope resolved for Cognee-backed memory retrieval."""
+
     user: User
     dataset_name: str
     dataset_id: UUID
@@ -48,6 +57,8 @@ class AgentScope:
 
 @dataclass(slots=True)
 class AgentMemoryContext:
+    """Per-call execution state shared across retrieval, wrapped call, and trace persistence."""
+
     origin_function: str
     config: AgentMemoryConfig
     method_params: dict[str, Any]
@@ -88,23 +99,46 @@ def validate_agent_memory_config(
     *,
     with_memory: bool,
     with_session_memory: bool,
-    save_traces: bool,
+    save_session_traces: bool,
     memory_query_fixed: Optional[str],
     memory_query_from_method: Optional[str],
     memory_system_prompt: Optional[str],
     memory_top_k: int,
+    memory_only_context: bool,
     session_memory_last_n: int,
     session_id: Optional[str],
     user: Optional[User],
     dataset_name: Optional[str],
+    session_trace_summary: bool,
+    persist_session_trace_after: Optional[int],
+    persist_session_trace_raw_content: bool,
+    persist_session_trace_node_set_name: Optional[str],
 ) -> AgentMemoryConfig:
     """Validate and normalize the public decorator configuration."""
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+
     if not isinstance(with_memory, bool):
         raise CogneeValidationError("with_memory must be a boolean.", log=False)
     if not isinstance(with_session_memory, bool):
         raise CogneeValidationError("with_session_memory must be a boolean.", log=False)
-    if not isinstance(save_traces, bool):
-        raise CogneeValidationError("save_traces must be a boolean.", log=False)
+    if not isinstance(save_session_traces, bool):
+        raise CogneeValidationError("save_session_traces must be a boolean.", log=False)
+    if not isinstance(memory_only_context, bool):
+        raise CogneeValidationError("memory_only_context must be a boolean.", log=False)
+    if not isinstance(session_trace_summary, bool):
+        raise CogneeValidationError("session_trace_summary must be a boolean.", log=False)
+    if not isinstance(persist_session_trace_raw_content, bool):
+        raise CogneeValidationError(
+            "persist_session_trace_raw_content must be a boolean.",
+            log=False,
+        )
+    if persist_session_trace_node_set_name is not None and not isinstance(
+        persist_session_trace_node_set_name, str
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_node_set_name must be a string when provided.",
+            log=False,
+        )
     if memory_query_fixed is not None and not isinstance(memory_query_fixed, str):
         raise CogneeValidationError("memory_query_fixed must be a string when provided.", log=False)
     if memory_query_from_method is not None and not isinstance(memory_query_from_method, str):
@@ -132,6 +166,14 @@ def validate_agent_memory_config(
             "memory_system_prompt must not be blank when provided.",
             log=False,
         )
+    if (
+        persist_session_trace_node_set_name is not None
+        and not persist_session_trace_node_set_name.strip()
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_node_set_name must not be blank when provided.",
+            log=False,
+        )
     if memory_query_fixed is not None and memory_query_from_method is not None:
         raise CogneeValidationError(
             "Only one of memory_query_fixed or memory_query_from_method can be provided to cognee.agent_memory.",
@@ -140,6 +182,52 @@ def validate_agent_memory_config(
     if not isinstance(session_memory_last_n, int) or session_memory_last_n < 1:
         raise CogneeValidationError(
             "session_memory_last_n must be a positive integer.",
+            log=False,
+        )
+    if persist_session_trace_after is not None and (
+        not isinstance(persist_session_trace_after, int) or persist_session_trace_after < 1
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_after must be a positive integer when provided.",
+            log=False,
+        )
+    if persist_session_trace_after is not None and not save_session_traces:
+        raise CogneeValidationError(
+            "persist_session_trace_after requires save_session_traces=True.",
+            log=False,
+        )
+    cache_config = get_cache_config()
+    if not cache_config.caching and (
+        with_session_memory or save_session_traces or persist_session_trace_after is not None
+    ):
+        raise CogneeValidationError(
+            (
+                "Caching must be enabled to use with_session_memory, save_session_traces, "
+                "or persist_session_trace_after with cognee.agent_memory."
+            ),
+            log=False,
+        )
+    if persist_session_trace_after is not None and (
+        not isinstance(persist_session_trace_after, int) or persist_session_trace_after < 1
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_after must be a positive integer when provided.",
+            log=False,
+        )
+    if persist_session_trace_after is not None and not save_session_traces:
+        raise CogneeValidationError(
+            "persist_session_trace_after requires save_session_traces=True.",
+            log=False,
+        )
+    cache_config = get_cache_config()
+    if not cache_config.caching and (
+        with_session_memory or save_session_traces or persist_session_trace_after is not None
+    ):
+        raise CogneeValidationError(
+            (
+                "Caching must be enabled to use with_session_memory, save_session_traces, "
+                "or persist_session_trace_after with cognee.agent_memory."
+            ),
             log=False,
         )
     if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
@@ -158,7 +246,7 @@ def validate_agent_memory_config(
     return AgentMemoryConfig(
         with_memory=with_memory,
         with_session_memory=with_session_memory,
-        save_traces=save_traces,
+        save_session_traces=save_session_traces,
         memory_query_fixed=(
             memory_query_fixed.strip() if isinstance(memory_query_fixed, str) else None
         ),
@@ -169,10 +257,19 @@ def validate_agent_memory_config(
             memory_system_prompt.strip() if isinstance(memory_system_prompt, str) else None
         ),
         memory_top_k=memory_top_k,
+        memory_only_context=memory_only_context,
         session_memory_last_n=session_memory_last_n,
         session_id=session_id.strip() if isinstance(session_id, str) else None,
         user=user,
         dataset_name=dataset_name.strip() if isinstance(dataset_name, str) else None,
+        session_trace_summary=session_trace_summary,
+        persist_session_trace_after=persist_session_trace_after,
+        persist_session_trace_raw_content=persist_session_trace_raw_content,
+        persist_session_trace_node_set_name=(
+            persist_session_trace_node_set_name.strip()
+            if isinstance(persist_session_trace_node_set_name, str)
+            else None
+        ),
     )
 
 
@@ -326,6 +423,7 @@ async def retrieve_cognee_memory_context(context: AgentMemoryContext) -> str:
                 dataset_ids=[context.scope.dataset_id],
                 system_prompt=context.config.memory_system_prompt,
                 top_k=context.config.memory_top_k,
+                only_context=context.config.memory_only_context,
             )
         except Exception as error:
             logger.warning(
@@ -354,6 +452,7 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
         feedback_values = await session_manager.get_agent_trace_feedback(
             user_id=str(context.user.id),
             session_id=context.config.session_id,
+            last_n=context.config.session_memory_last_n,
         )
     except Exception as error:
         logger.warning(
@@ -364,10 +463,9 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
         )
         return ""
 
-    recent_feedback = feedback_values[-context.config.session_memory_last_n :]
     normalized_feedback = [
         normalized
-        for value in recent_feedback
+        for value in feedback_values
         if (normalized := normalize_optional_text(value)) is not None
     ]
     if not normalized_feedback:
@@ -378,18 +476,20 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
 
 async def persist_trace(context: AgentMemoryContext) -> None:
     """Persist one agent trace step into session-backed storage."""
-    if not context.config.save_traces or context.user is None:
+    if not context.config.save_session_traces or context.user is None:
         return
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
     session_manager = get_session_manager()
+    user_id = str(context.user.id)
     try:
         await session_manager.add_agent_trace_step(
-            user_id=str(context.user.id),
+            user_id=user_id,
             session_id=context.config.session_id,
             origin_function=context.origin_function,
             status=context.status,
+            generate_feedback_with_llm=context.config.session_trace_summary,
             memory_query=context.memory_query,
             memory_context=context.memory_context,
             method_params=context.method_params,
@@ -399,6 +499,46 @@ async def persist_trace(context: AgentMemoryContext) -> None:
     except Exception as error:
         logger.warning(
             "Agent trace persistence failed for %s: %s",
+            context.origin_function,
+            error,
+            exc_info=False,
+        )
+        return
+
+    if context.config.persist_session_trace_after is None:
+        return
+
+    resolved_session_id = context.config.session_id or session_manager.default_session_id
+
+    try:
+        trace_count = await session_manager.get_agent_trace_count(
+            user_id=user_id,
+            session_id=resolved_session_id,
+        )
+        if trace_count == 0 or trace_count % context.config.persist_session_trace_after != 0:
+            return
+
+        from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
+            persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
+        )
+
+        persist_kwargs = {
+            "user": context.user,
+            "session_ids": [resolved_session_id],
+            "dataset": context.config.dataset_name or "main_dataset",
+            "raw_trace_content": context.config.persist_session_trace_raw_content,
+            "last_n_steps": context.config.persist_session_trace_after,
+            "run_in_background": False,
+        }
+        if context.config.persist_session_trace_node_set_name is not None:
+            persist_kwargs["node_set_name"] = context.config.persist_session_trace_node_set_name
+
+        await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
+            **persist_kwargs,
+        )
+    except Exception as error:
+        logger.warning(
+            "Agent trace memify persistence failed for %s: %s",
             context.origin_function,
             error,
             exc_info=False,

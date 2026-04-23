@@ -119,16 +119,57 @@ async def improve(
 
         feedback_alpha = kwargs.pop("feedback_alpha", 0.1)
 
+        # Mutex: single-session improves serialize on the session's
+        # lock so auto-improve + idle-watcher + SessionEnd don't
+        # duplicate work. Multi-session improves skip the lock — the
+        # pattern is rare and locking N sessions at once is messy.
+        acquired_lock_for: Optional[str] = None
+        if session_ids and len(session_ids) == 1:
+            from cognee.infrastructure.locks import (
+                release_improve_lock,
+                try_acquire_improve_lock,
+            )
+
+            sole_session = session_ids[0]
+            if not await try_acquire_improve_lock(sole_session):
+                logger.info(
+                    "improve: session '%s' already being improved, skipping",
+                    sole_session,
+                )
+                return {}
+            acquired_lock_for = sole_session
+        else:
+            release_improve_lock = None  # type: ignore[assignment]
+
         # Stage 1 & 2: bridge sessions into the permanent graph
         if session_ids:
-            await _bridge_sessions(
-                dataset=dataset,
-                session_ids=session_ids,
-                user=user,
-                feedback_alpha=feedback_alpha,
-                run_in_background=run_in_background,
-            )
-            stages_run.extend(["feedback_weights", "persist_sessions"])
+            try:
+                await _bridge_sessions(
+                    dataset=dataset,
+                    session_ids=session_ids,
+                    user=user,
+                    feedback_alpha=feedback_alpha,
+                    run_in_background=run_in_background,
+                )
+                stages_run.extend(["feedback_weights", "persist_sessions"])
+
+                # Stage 2b: persist agent trace steps (tool calls with
+                # per-step feedback) into the graph. Without this, the
+                # plugin's trace activity never reaches permanent
+                # memory — only QA entries do.
+                await _persist_session_traces(
+                    dataset=dataset,
+                    session_ids=session_ids,
+                    user=user,
+                    run_in_background=run_in_background,
+                )
+                stages_run.append("persist_trace_steps")
+            except Exception:
+                if acquired_lock_for:
+                    from cognee.infrastructure.locks import release_improve_lock
+
+                    await release_improve_lock(acquired_lock_for)
+                raise
 
         # Stage 3: default enrichment (triplet embeddings)
         from cognee.modules.memify import memify
@@ -158,6 +199,12 @@ async def improve(
             stages_run.append("sync_graph_to_sessions")
 
         span.set_attribute(COGNEE_IMPROVE_STAGES, ",".join(stages_run))
+
+        if acquired_lock_for:
+            from cognee.infrastructure.locks import release_improve_lock
+
+            await release_improve_lock(acquired_lock_for)
+
         return result
 
 
@@ -223,6 +270,47 @@ async def _bridge_sessions(
         logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
     except Exception as e:
         logger.warning("improve: session persistence failed (non-fatal): %s", e)
+
+
+async def _persist_session_traces(
+    dataset: Union[str, UUID],
+    session_ids: List[str],
+    user,
+    run_in_background: bool,
+):
+    """Cognify per-step agent trace feedbacks into the knowledge graph.
+
+    Without this step, the Claude Code plugin's tool-call activity
+    (the bulk of session data — hundreds of Bash/Edit/Read/Write trace
+    steps per session) never makes it into permanent memory. Only QA
+    entries do via ``persist_sessions_in_knowledge_graph_pipeline``.
+
+    Runs the dedicated ``persist_agent_trace_feedbacks_in_knowledge_graph_pipeline``
+    that extracts per-step ``session_feedback`` from the cache and
+    cognifies it into the ``agent_trace_feedbacks`` node-set.
+    """
+    dataset_name = await _resolve_dataset_name(dataset, user)
+
+    try:
+        from cognee.memify_pipelines.persist_agent_trace_feedbacks_in_knowledge_graph import (
+            persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
+        )
+
+        await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
+            user=user,
+            session_ids=session_ids,
+            dataset=dataset_name,
+            node_set_name="agent_trace_feedbacks",
+            raw_trace_content=False,
+            last_n_steps=None,  # persist all stored steps on demand
+            run_in_background=run_in_background,
+        )
+        logger.info(
+            "improve: agent trace steps persisted from %d session(s)",
+            len(session_ids),
+        )
+    except Exception as e:
+        logger.warning("improve: trace persistence failed (non-fatal): %s", e)
 
 
 async def _sync_graph_to_sessions(
