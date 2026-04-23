@@ -17,6 +17,7 @@ async def main():
     Natural language processing (NLP) is an interdisciplinary
     subfield of computer science and information retrieval.
     """
+
     await cognee.add(text)
 
     await cognee.cognify()

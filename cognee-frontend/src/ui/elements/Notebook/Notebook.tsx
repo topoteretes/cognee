@@ -5,7 +5,7 @@ import classNames from "classnames";
 import { Fragment, MouseEvent, MutableRefObject, useCallback, useEffect, useRef, useState, memo } from "react";
 
 import { useModal } from "@/ui/elements/Modal";
-import { CaretIcon, CloseIcon, PlusIcon } from "@/ui/Icons";
+import { CaretIcon, CloseIcon, PlusIcon } from "@/ui/icons";
 import PopupMenu from "@/ui/elements/PopupMenu";
 import { IconButton, TextArea, Modal, GhostButton, CTAButton } from "@/ui/elements";
 import { GraphControlsAPI } from "@/app/(graph)/GraphControls";

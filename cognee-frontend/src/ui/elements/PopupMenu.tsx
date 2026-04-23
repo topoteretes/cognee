@@ -1,7 +1,7 @@
 "use client";
 
 import { useBoolean, useOutsideClick } from "@/utils";
-import { MenuIcon } from "@/ui/Icons";
+import { MenuIcon } from "@/ui/icons";
 import { IconButton } from "@/ui/elements";
 import classNames from 'classnames';
 
