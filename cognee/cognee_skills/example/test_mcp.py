@@ -19,8 +19,8 @@ load_dotenv(find_dotenv())
 
 SKILLS_DIR = str(Path(__file__).parent / "skills")
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession, StdioServerParameters  # noqa: E402
+from mcp.client.stdio import stdio_client  # noqa: E402
 
 
 async def call_tool(session: ClientSession, name: str, args: dict):
@@ -149,9 +149,9 @@ async def main():
                 print(f"  Explanation: {amendment.get('change_explanation', '')[:200]}")
                 print(f"  Confidence:  {amendment.get('amendment_confidence')}")
 
-                print(f"\n  --- ORIGINAL INSTRUCTIONS ---")
+                print("\n  --- ORIGINAL INSTRUCTIONS ---")
                 print(amendment.get("original_instructions", "N/A"))
-                print(f"\n  --- PROPOSED INSTRUCTIONS ---")
+                print("\n  --- PROPOSED INSTRUCTIONS ---")
                 print(amendment.get("amended_instructions", "N/A"))
             else:
                 print(f"  {amendment}")

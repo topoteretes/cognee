@@ -171,7 +171,6 @@ class TestE2EAutoAmendifyLoop(unittest.TestCase):
     )
     def test_step1_ingest_skills(self):
         """ingest_skills() runs without error; the pipeline is invoked."""
-        import tempfile
 
         tmpdir = tempfile.mkdtemp()
         skill_dir = Path(tmpdir) / SKILL_ID

@@ -13,8 +13,8 @@ load_dotenv(find_dotenv())
 
 SKILLS_DIR = Path(__file__).parent / "skills"
 
-import cognee
-from cognee import skills
+import cognee  # noqa: E402
+from cognee import skills  # noqa: E402
 
 
 async def main():
@@ -90,9 +90,9 @@ async def main():
         print(f"  Explanation:   {amendment['change_explanation']}")
         print(f"  Confidence:    {amendment['amendment_confidence']}")
 
-        print(f"\n  --- ORIGINAL INSTRUCTIONS ---")
+        print("\n  --- ORIGINAL INSTRUCTIONS ---")
         print(amendment["original_instructions"])
-        print(f"\n  --- PROPOSED INSTRUCTIONS ---")
+        print("\n  --- PROPOSED INSTRUCTIONS ---")
         print(amendment["amended_instructions"])
 
         # ──────────────────────────────────────────────────────────────

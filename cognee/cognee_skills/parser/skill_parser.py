@@ -342,7 +342,10 @@ def parse_skill_file(
 
     frontmatter, body = _parse_frontmatter(raw_text)
 
-    name = _extract_name(frontmatter, fallback=skill_key)
+    # ``_extract_name`` pops the ``name`` alias off so it isn't re-stored
+    # in extra_metadata. The unified Skill uses skill_key as ``name``; the
+    # frontmatter display name survives in description_raw.
+    _extract_name(frontmatter, fallback=skill_key)
     description = _extract_description(frontmatter, body)
     tags = _extract_tags(frontmatter, body)
     triggers = _extract_triggers(frontmatter, description, body)
@@ -350,7 +353,6 @@ def parse_skill_file(
     complexity = _detect_complexity(body)
 
     skill_dir = skill_md.parent
-    is_flat = skill_dir == skill_md.parent and skill_md.parent == skill_md.parent
     resources = _scan_resources(skill_dir, skill_md) if skill_md.parent != skill_md else []
 
     # Preserve any remaining unknown frontmatter fields as extra_metadata

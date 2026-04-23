@@ -89,9 +89,9 @@ def main():
     print(f"  Explanation: {amendment.get('change_explanation', '')[:200]}")
     print(f"  Confidence:  {amendment.get('amendment_confidence')}")
 
-    print(f"\n  --- ORIGINAL INSTRUCTIONS ---")
+    print("\n  --- ORIGINAL INSTRUCTIONS ---")
     print(amendment.get("original_instructions", "N/A"))
-    print(f"\n  --- PROPOSED INSTRUCTIONS ---")
+    print("\n  --- PROPOSED INSTRUCTIONS ---")
     print(amendment.get("amended_instructions", "N/A"))
 
     # ──────────────────────────────────────────────────────────────────

@@ -18,8 +18,8 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
-import cognee
-from cognee import skills
+import cognee  # noqa: E402
+from cognee import skills  # noqa: E402
 
 
 # Dedicated folder containing only the meta-skill SKILL.md

@@ -352,9 +352,9 @@ Sub-commands:
             fmt.echo(f"  Confidence:   {result['amendment_confidence']}")
             fmt.echo(f"  Explanation:  {result['change_explanation']}")
 
-            fmt.echo(f"\n--- ORIGINAL INSTRUCTIONS ---")
+            fmt.echo("\n--- ORIGINAL INSTRUCTIONS ---")
             fmt.echo(result.get("original_instructions", "N/A"))
-            fmt.echo(f"\n--- PROPOSED INSTRUCTIONS ---")
+            fmt.echo("\n--- PROPOSED INSTRUCTIONS ---")
             fmt.echo(result.get("amended_instructions", "N/A"))
 
             fmt.note(f"\nTo apply: cognee-cli skills amendify {result['amendment_id']}")

@@ -280,7 +280,6 @@ class TestSmokeRememberToAmendify(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_self_improvement_runtime_surface_is_callable(self):
         """``cognee.skills`` exposes the full runtime API — no ingest methods."""
-        from cognee import skills
 
         # Ingest is NOT on the client (it moved to cognee.remember).
         for removed in ("ingest", "upsert", "ingest_meta_skill"):
