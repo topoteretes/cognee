@@ -88,7 +88,11 @@ async def add_data_points(
         await graph_engine.add_nodes_with_vectors(nodes)
     else:
         await asyncio.gather(
-            graph_engine.add_nodes(nodes), index_data_points(nodes, vector_engine=vector_engine)
+            graph_engine.add_nodes(nodes),
+            index_data_points(
+                [node.model_copy(deep=True) for node in nodes],
+                vector_engine=vector_engine,
+            ),
         )
 
     if user and dataset and data_item:
