@@ -413,7 +413,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         vector_list = []
 
-        # Extract distances and find min/max for normalization
+        # Extract raw cosine distances — no per-collection normalization so scores
+        # remain comparable across collections in multi-collection searches.
         for vector in closest_items.all():
             vector_list.append(
                 {
