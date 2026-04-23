@@ -1258,6 +1258,66 @@ async def cognify_status(dataset_name: str = "main_dataset") -> list:
             return [types.TextContent(type="text", text=error_msg)]
 
 
+# MCP App: interactive graph visualization UI. Rendered by MCP Apps-capable
+# hosts (Cursor, Claude Desktop) via the _meta.ui.resourceUri contract.
+_VISUALIZE_APP_URI = "ui://cognee-visualize/graph.html"
+
+
+@mcp.resource(
+    _VISUALIZE_APP_URI,
+    name="Cognee Graph Visualization UI",
+    description="Interactive MCP App UI that renders a Cognee knowledge graph.",
+    mime_type="text/html;profile=mcp-app",
+)
+def _visualize_graph_ui_resource() -> str:
+    bundle = Path(__file__).parent / "app_bundles" / "visualize-graph.html"
+    return bundle.read_text(encoding="utf-8")
+
+
+# Cognee's visualization template loads d3 from a CDN; MCP App hosts apply a
+# strict CSP to UI resources that blocks it. Inline d3 into the HTML so the
+# graph renders without network access. visualize_graph itself is unchanged.
+_D3_CDN_TAG = '<script src="https://d3js.org/d3.v7.min.js"></script>'
+_d3_source: str | None = None
+
+
+async def _inline_d3(html: str) -> str:
+    global _d3_source
+    if _D3_CDN_TAG not in html:
+        return html
+    if _d3_source is None:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get("https://d3js.org/d3.v7.min.js")
+            resp.raise_for_status()
+            _d3_source = resp.text.replace("</script>", "<\\/script>")
+    return html.replace(_D3_CDN_TAG, f"<script>{_d3_source}</script>")
+
+
+@mcp.tool(
+    name="visualize_graph_ui",
+    description=(
+        "Render the current Cognee knowledge graph as an interactive MCP App UI. "
+        "MCP Apps-capable hosts (Cursor, Claude Desktop, etc.) display the graph "
+        "inline in chat."
+    ),
+    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
+)
+@log_usage(function_name="MCP visualize_graph_ui", log_type="mcp_tool")
+async def visualize_graph_ui() -> types.CallToolResult:
+    from cognee.api.v1.visualize import visualize_graph
+
+    with redirect_stdout(sys.stderr):
+        html = await visualize_graph()
+    html = await _inline_d3(html)
+
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text="Cognee knowledge graph rendered.")],
+        structuredContent={"html": html},
+    )
+
+
 def node_to_string(node):
     node_data = ", ".join(
         [f'{key}: "{value}"' for key, value in node.items() if key in ["id", "name"]]
