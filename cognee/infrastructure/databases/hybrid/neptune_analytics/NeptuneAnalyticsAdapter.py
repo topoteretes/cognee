@@ -329,7 +329,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         if with_vector:
             query_string += """
-        WITH node, score, id(node) as node_id
+        WITH node, score
         MATCH (n)
         WHERE id(n) = id(node)
         CALL neptune.algo.vectors.get(n)

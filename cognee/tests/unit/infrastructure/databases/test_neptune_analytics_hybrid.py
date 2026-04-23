@@ -188,6 +188,7 @@ class _FakeSearchAdapter:
         self._COLLECTION_PREFIX = "collection"
         self._TOPK_LOWER_BOUND = 0
         self._TOPK_UPPER_BOUND = 100
+
         def _re_raise(e, q):
             raise e
 
@@ -223,9 +224,7 @@ async def test_search_include_payload_false_omits_node_properties():
 async def test_search_include_payload_true_returns_node_properties():
     """When include_payload=True, query uses node as payload and payload is populated."""
     node_id = str(uuid4())
-    fake_response = [
-        {"payload": {"~id": node_id, "~properties": {"name": "Alice"}}, "score": 0.8}
-    ]
+    fake_response = [{"payload": {"~id": node_id, "~properties": {"name": "Alice"}}, "score": 0.8}]
     adapter = _FakeSearchAdapter(query_response=fake_response)
 
     results = await adapter.search(
@@ -308,7 +307,7 @@ async def test_search_with_vector_true_include_payload_false_contains_embedding(
     assert results[0].vector == fake_embedding
 
     query_sent = adapter._client.query.call_args[0][0]
-    assert "embedding" in query_sent
+    assert ", embedding" in query_sent.split("RETURN", 1)[1]
     assert "neptune.algo.vectors.get" in query_sent
     assert "id(node) as node_id" in query_sent
     assert "node as payload" not in query_sent
