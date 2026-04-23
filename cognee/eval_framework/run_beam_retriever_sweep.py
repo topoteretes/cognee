@@ -13,6 +13,7 @@ from cognee.eval_framework.beam.presets import (
 )
 from cognee.eval_framework.beam.runtime import make_timestamped_output_dir, prepare_beam_questions
 from cognee.eval_framework.reporting.aggregations import (
+    build_best_retriever_by_question_type_report,
     build_combined_summary,
     build_empty_conversation_summary,
 )
@@ -31,6 +32,7 @@ NUM_RUNS = 1
 BEAM_MAX_BATCHES: Optional[int] = None
 MAX_CONCURRENT_QUESTIONS = 10
 BEAM_COMBINED_SUMMARY = "beam_sweep_combined.json"
+BEAM_BEST_BY_QUESTION_TYPE_SUMMARY = "beam_sweep_best_by_question_type.json"
 BEAM_RUBRIC_METRIC = "beam_rubric"
 BEAM_ARTIFACT_PREFIX = "beam"
 
@@ -113,6 +115,18 @@ async def run_beam_sweep(params: BeamSweepRunParams) -> dict[str, Any]:
     combined_summary_path = str(sweep.output_dir / sweep.combined_summary_filename)
     write_json(combined_summary_path, combined_summary)
     logger.info("Wrote combined summary to %s", combined_summary_path)
+
+    best_by_question_type_report = build_best_retriever_by_question_type_report(
+        conversation_summaries=conversation_summaries,
+        settings=sweep,
+        retriever_configs=retriever_configs,
+    )
+    best_by_question_type_path = str(sweep.output_dir / BEAM_BEST_BY_QUESTION_TYPE_SUMMARY)
+    write_json(best_by_question_type_path, best_by_question_type_report)
+    logger.info(
+        "Wrote best-by-question-type report to %s",
+        best_by_question_type_path,
+    )
     return combined_summary
 
 
