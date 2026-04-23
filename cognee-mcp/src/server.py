@@ -1298,9 +1298,8 @@ async def _inline_d3(html: str) -> str:
 @mcp.tool(
     name="visualize_graph_ui",
     description=(
-        "Render the current Cognee knowledge graph as an interactive MCP App UI. "
-        "MCP Apps-capable hosts (Cursor, Claude Desktop, etc.) display the graph "
-        "inline in chat."
+        "Open the Cognee workspace UI and render the current knowledge graph. "
+        "The UI also lets the user upload files to memory."
     ),
     meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
 )
@@ -1316,6 +1315,91 @@ async def visualize_graph_ui() -> types.CallToolResult:
         content=[types.TextContent(type="text", text="Cognee knowledge graph rendered.")],
         structuredContent={"html": html},
     )
+
+
+@mcp.tool(
+    name="upload_file_ui",
+    description=(
+        "Open the Cognee workspace UI so the user can upload files to memory. "
+        "The UI also shows the current knowledge graph."
+    ),
+    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
+)
+@log_usage(function_name="MCP upload_file_ui", log_type="mcp_tool")
+async def upload_file_ui() -> types.CallToolResult:
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text="Cognee workspace opened.")],
+    )
+
+
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+@mcp.tool(
+    name="cognify_file",
+    description=(
+        "Ingest an uploaded file into Cognee memory. Accepts the file as base64. "
+        "Runs add synchronously, then launches cognify in the background."
+    ),
+)
+@log_usage(function_name="MCP cognify_file", log_type="mcp_tool")
+async def cognify_file(
+    filename: str,
+    content_base64: str,
+    dataset_name: str = "main_dataset",
+) -> list:
+    import base64
+    import tempfile
+
+    try:
+        data = base64.b64decode(content_base64, validate=True)
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"Error: invalid base64 content ({e}).")]
+
+    if len(data) > _MAX_UPLOAD_BYTES:
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Error: file exceeds 10 MB limit ({len(data):,} bytes).",
+            )
+        ]
+
+    suffix = Path(filename).suffix or ".txt"
+
+    with redirect_stdout(sys.stderr):
+        tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=suffix, delete=False)
+        try:
+            tmp.write(data)
+            tmp.close()
+            await cognee_client.add(tmp.name, dataset_name=dataset_name)
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+    async def _cognify_bg():
+        with redirect_stdout(sys.stderr):
+            try:
+                await cognee_client.cognify(datasets=[dataset_name])
+                logger.info(f"cognify_file: background cognify finished for '{dataset_name}'.")
+            except Exception as e:
+                ts = datetime.now(timezone.utc).isoformat()
+                _task_errors.setdefault(dataset_name, []).append((ts, str(e)))
+                logger.error(f"cognify_file: background cognify failed for '{dataset_name}': {e}")
+
+    asyncio.create_task(_cognify_bg())
+
+    return [
+        types.TextContent(
+            type="text",
+            text=(
+                f"Ingested '{filename}' ({len(data):,} bytes) into dataset '{dataset_name}'. "
+                f"Cognify running in background — use cognify_status to track, "
+                f"or re-run visualize_graph_ui once it finishes."
+            ),
+        )
+    ]
 
 
 def node_to_string(node):
