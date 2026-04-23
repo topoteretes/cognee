@@ -376,6 +376,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             if node_name:
+                if node_name_filter_operator not in ("OR", "AND"):
+                    raise ValueError(
+                        f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
+                        "Expected 'OR' or 'AND'."
+                    )
                 if node_name_filter_operator == "AND":
                     filter_operator = "?&"
                 else:

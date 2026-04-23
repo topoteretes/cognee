@@ -451,7 +451,7 @@ class ChromaDBAdapter(VectorDBInterface):
             results = await collection.query(**query_kwargs)
 
             vector_list = []
-            metadatas = results.get("metadatas") or [[] * len(results["ids"][0])]
+            metadatas = results.get("metadatas")
             for i, (id, distance) in enumerate(zip(results["ids"][0], results["distances"][0])):
                 item = {
                     "id": parse_id(id),
@@ -544,9 +544,7 @@ class ChromaDBAdapter(VectorDBInterface):
         results = await collection.query(**query_kwargs)
 
         all_results = []
-        metadatas = results.get("metadatas") or [
-            [] * len(results["ids"][i]) for i in range(len(query_texts))
-        ]
+        metadatas = results.get("metadatas")
         for i in range(len(query_texts)):
             vector_list = []
 

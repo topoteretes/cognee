@@ -610,6 +610,11 @@ class LanceDBAdapter(VectorDBInterface):
             )
 
             if node_name:
+                if node_name_filter_operator not in ("OR", "AND"):
+                    raise ValueError(
+                        f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
+                        "Expected 'OR' or 'AND'."
+                    )
                 # Escape quotes to make this input safer, since it's coming from the user
                 # At the time of writing this, no specific binding instructions found on LanceDB docs
                 escaped_node_names = [name.replace("'", "''") for name in node_name]
