@@ -28,7 +28,9 @@ def _has_column(inspector: sa.Inspector, table_name: str, column_name: str) -> b
 
 
 def _has_foreign_key(inspector: sa.Inspector, table_name: str, fk_name: str) -> bool:
-    return any(foreign_key.get("name") == fk_name for foreign_key in inspector.get_foreign_keys(table_name))
+    return any(
+        foreign_key.get("name") == fk_name for foreign_key in inspector.get_foreign_keys(table_name)
+    )
 
 
 def upgrade() -> None:
@@ -62,10 +64,14 @@ def downgrade() -> None:
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
-    if TABLE_NAME not in inspector.get_table_names() or not _has_column(inspector, TABLE_NAME, COLUMN_NAME):
+    if TABLE_NAME not in inspector.get_table_names() or not _has_column(
+        inspector, TABLE_NAME, COLUMN_NAME
+    ):
         return
 
-    if op.get_context().dialect.name != "sqlite" and _has_foreign_key(inspector, TABLE_NAME, FK_NAME):
+    if op.get_context().dialect.name != "sqlite" and _has_foreign_key(
+        inspector, TABLE_NAME, FK_NAME
+    ):
         op.drop_constraint(FK_NAME, TABLE_NAME, type_="foreignkey")
 
     if op.get_context().dialect.name == "sqlite":
