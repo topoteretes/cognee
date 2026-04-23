@@ -59,9 +59,9 @@ uv run ruff check .
 uv run ruff format .
 ```
 
-- Optional static type checks (mypy):
+- Optional static type checks (ty):
 ```bash
-uv run mypy cognee/
+uv run ty check .
 ```
 
 MCP Server (`cognee-mcp/`):

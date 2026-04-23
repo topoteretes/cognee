@@ -37,6 +37,7 @@ def agent_memory(
     session_trace_summary: bool = True,
     persist_session_trace_after: Optional[int] = None,
     persist_session_trace_raw_content: bool = False,
+    persist_session_trace_node_set_name: Optional[str] = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorate an async agent entrypoint with optional Cognee memory and trace persistence.
@@ -62,6 +63,7 @@ def agent_memory(
         session_trace_summary=session_trace_summary,
         persist_session_trace_after=persist_session_trace_after,
         persist_session_trace_raw_content=persist_session_trace_raw_content,
+        persist_session_trace_node_set_name=persist_session_trace_node_set_name,
     )
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:

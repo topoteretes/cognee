@@ -43,6 +43,7 @@ class AgentMemoryConfig:
     session_trace_summary: bool
     persist_session_trace_after: Optional[int]
     persist_session_trace_raw_content: bool
+    persist_session_trace_node_set_name: Optional[str]
 
 
 @dataclass(slots=True)
@@ -111,6 +112,7 @@ def validate_agent_memory_config(
     session_trace_summary: bool,
     persist_session_trace_after: Optional[int],
     persist_session_trace_raw_content: bool,
+    persist_session_trace_node_set_name: Optional[str],
 ) -> AgentMemoryConfig:
     """Validate and normalize the public decorator configuration."""
     from cognee.infrastructure.databases.cache.config import get_cache_config
@@ -128,6 +130,13 @@ def validate_agent_memory_config(
     if not isinstance(persist_session_trace_raw_content, bool):
         raise CogneeValidationError(
             "persist_session_trace_raw_content must be a boolean.",
+            log=False,
+        )
+    if persist_session_trace_node_set_name is not None and not isinstance(
+        persist_session_trace_node_set_name, str
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_node_set_name must be a string when provided.",
             log=False,
         )
     if memory_query_fixed is not None and not isinstance(memory_query_fixed, str):
@@ -157,6 +166,14 @@ def validate_agent_memory_config(
             "memory_system_prompt must not be blank when provided.",
             log=False,
         )
+    if (
+        persist_session_trace_node_set_name is not None
+        and not persist_session_trace_node_set_name.strip()
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_node_set_name must not be blank when provided.",
+            log=False,
+        )
     if memory_query_fixed is not None and memory_query_from_method is not None:
         raise CogneeValidationError(
             "Only one of memory_query_fixed or memory_query_from_method can be provided to cognee.agent_memory.",
@@ -165,6 +182,29 @@ def validate_agent_memory_config(
     if not isinstance(session_memory_last_n, int) or session_memory_last_n < 1:
         raise CogneeValidationError(
             "session_memory_last_n must be a positive integer.",
+            log=False,
+        )
+    if persist_session_trace_after is not None and (
+        not isinstance(persist_session_trace_after, int) or persist_session_trace_after < 1
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_after must be a positive integer when provided.",
+            log=False,
+        )
+    if persist_session_trace_after is not None and not save_session_traces:
+        raise CogneeValidationError(
+            "persist_session_trace_after requires save_session_traces=True.",
+            log=False,
+        )
+    cache_config = get_cache_config()
+    if not cache_config.caching and (
+        with_session_memory or save_session_traces or persist_session_trace_after is not None
+    ):
+        raise CogneeValidationError(
+            (
+                "Caching must be enabled to use with_session_memory, save_session_traces, "
+                "or persist_session_trace_after with cognee.agent_memory."
+            ),
             log=False,
         )
     if persist_session_trace_after is not None and (
@@ -225,6 +265,11 @@ def validate_agent_memory_config(
         session_trace_summary=session_trace_summary,
         persist_session_trace_after=persist_session_trace_after,
         persist_session_trace_raw_content=persist_session_trace_raw_content,
+        persist_session_trace_node_set_name=(
+            persist_session_trace_node_set_name.strip()
+            if isinstance(persist_session_trace_node_set_name, str)
+            else None
+        ),
     )
 
 
@@ -477,13 +522,19 @@ async def persist_trace(context: AgentMemoryContext) -> None:
             persist_agent_trace_feedbacks_in_knowledge_graph_pipeline,
         )
 
+        persist_kwargs = {
+            "user": context.user,
+            "session_ids": [resolved_session_id],
+            "dataset": context.config.dataset_name or "main_dataset",
+            "raw_trace_content": context.config.persist_session_trace_raw_content,
+            "last_n_steps": context.config.persist_session_trace_after,
+            "run_in_background": False,
+        }
+        if context.config.persist_session_trace_node_set_name is not None:
+            persist_kwargs["node_set_name"] = context.config.persist_session_trace_node_set_name
+
         await persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
-            user=context.user,
-            session_ids=[resolved_session_id],
-            dataset=context.config.dataset_name or "main_dataset",
-            raw_trace_content=context.config.persist_session_trace_raw_content,
-            last_n_steps=context.config.persist_session_trace_after,
-            run_in_background=False,
+            **persist_kwargs,
         )
     except Exception as error:
         logger.warning(
