@@ -8,3 +8,5 @@ from .Timestamp import Timestamp
 from .Interval import Interval
 from .Event import Event
 from .Triplet import Triplet
+from .Skill import Skill
+from .Tool import Tool

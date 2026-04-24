@@ -696,6 +696,24 @@ async def _remember_inner(
     # writes, even when the API server was never started.
     await _ensure_migrations_run()
 
+    # Auto-dispatch: a SKILL.md file or directory of SKILL.md files is persisted
+    # as Skill DataPoints rather than run through the chunk+extract pipeline.
+    from cognee.modules.tools import add_skills, looks_like_skill_source
+
+    if looks_like_skill_source(data):
+        skills = await add_skills(data)
+        result = RememberResult(
+            status="completed",
+            dataset_name=dataset_name,
+            session_ids=None,
+        )
+        result.elapsed_seconds = time.monotonic() - result._started_at
+        result.items_processed = len(skills)
+        result.items = [
+            {"name": s.name, "kind": "skill", "declared_tools": s.declared_tools} for s in skills
+        ]
+        return result
+
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
