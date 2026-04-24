@@ -86,6 +86,11 @@ async def forget(
 
         from cognee.modules.users.methods import get_default_user
 
+        # In case there is no database, forget will fail when getting a user
+        from cognee.low_level import setup
+
+        await setup()
+
         if user is None:
             user = await get_default_user()
 

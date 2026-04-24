@@ -5,16 +5,18 @@ from cognee.api.v1.visualize.visualize import visualize_graph
 
 
 async def main():
-    await cognee.add(["Alice knows Bob.", "NLP is a subfield of CS."])
-    await cognee.cognify()
+    # Prune data and system metadata before running, only if we want "fresh" state.
+    await cognee.forget(everything=True)
+
+    await cognee.remember(
+        ["Alice knows Bob.", "NLP is a subfield of CS."],
+        self_improvement=False,
+    )
 
     visualize_graph_path = os.path.join(
-        os.path.dirname(__file__), ".artifacts", "graph_after_cognify.html"
+        os.path.dirname(__file__), ".artifacts", "graph_after_remember.html"
     )
     await visualize_graph(visualize_graph_path)
-
-    result = await cognee.search("In which cities did Andreas live?")
-    print(result)
 
 
 if __name__ == "__main__":
