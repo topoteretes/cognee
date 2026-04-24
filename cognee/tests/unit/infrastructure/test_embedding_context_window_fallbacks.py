@@ -62,14 +62,17 @@ async def test_ollama_embedding_raises_when_short_text_still_exceeds_context_win
 async def test_fastembed_splits_batch_on_context_window_error():
     pytest.importorskip("fastembed")
 
-    with patch(
-        "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
-        "FastembedEmbeddingEngine.get_tokenizer",
-        return_value=Mock(),
-    ), patch(
-        "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
-        "TextEmbedding",
-    ) as mock_text_embedding:
+    with (
+        patch(
+            "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
+            "FastembedEmbeddingEngine.get_tokenizer",
+            return_value=Mock(),
+        ),
+        patch(
+            "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
+            "TextEmbedding",
+        ) as mock_text_embedding,
+    ):
         embedding_model = Mock()
         mock_text_embedding.return_value = embedding_model
 
@@ -107,14 +110,17 @@ async def test_fastembed_splits_batch_on_context_window_error():
 async def test_fastembed_raises_when_short_text_still_exceeds_context_window():
     pytest.importorskip("fastembed")
 
-    with patch(
-        "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
-        "FastembedEmbeddingEngine.get_tokenizer",
-        return_value=Mock(),
-    ), patch(
-        "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
-        "TextEmbedding",
-    ) as mock_text_embedding:
+    with (
+        patch(
+            "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
+            "FastembedEmbeddingEngine.get_tokenizer",
+            return_value=Mock(),
+        ),
+        patch(
+            "cognee.infrastructure.databases.vector.embeddings.FastembedEmbeddingEngine."
+            "TextEmbedding",
+        ) as mock_text_embedding,
+    ):
         embedding_model = Mock()
         embedding_model.embed.side_effect = RuntimeError("context window exceeded")
         mock_text_embedding.return_value = embedding_model
