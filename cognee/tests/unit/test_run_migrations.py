@@ -45,6 +45,9 @@ class TestRunMigrations(unittest.TestCase):
         )
 
         module = importlib.import_module("cognee.run_migrations")
+        resolve_module = importlib.import_module(
+            "cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info"
+        )
 
         dataset_rows = [
             MagicMock(
@@ -79,8 +82,9 @@ class TestRunMigrations(unittest.TestCase):
                     "cognee.modules.data.methods.get_dataset_databases.get_dataset_databases",
                     new=AsyncMock(return_value=dataset_rows),
                 ),
-                patch(
-                    "cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info.resolve_dataset_database_connection_info",
+                patch.object(
+                    resolve_module,
+                    "resolve_dataset_database_connection_info",
                     new=AsyncMock(side_effect=lambda dataset_database: dataset_database),
                 ),
                 patch(
