@@ -59,3 +59,6 @@ from cognee.modules.observability.trace_context import (
 
 # Agent memory
 from cognee.modules.agent_memory import agent_memory
+
+# Relational DB models
+from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
