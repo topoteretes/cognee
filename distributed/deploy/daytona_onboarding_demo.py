@@ -1,5 +1,5 @@
 """
-Claude Code + Cognee + Moss on Daytona: Shared Memory Demo
+Claude Code + Cognee + Moss on Daytona — Shared Memory Demo (Snapshot Edition)
 
 Why no separate Cognee sandbox:
     Daytona's public preview URL is served through a proxy that rejects
@@ -17,11 +17,14 @@ Why no direct volume-mounted DBs either:
     database access.
 
 What works instead:
-    Each agent runs Cognee in-process with Moss as its vector DB backend
-    (via cognee-community-vector-adapter-moss). Moss has cloud sync,
-    so every agent writes to, and reads from, the same vector store
-    automatically. No volume mounts, no snapshot tarballs, no cross-
-    sandbox networking required.
+    The volume is used as a snapshot bucket. Each agent runs cognee
+    against a LOCAL disk path. Vectors are stored in and queried from
+    Moss (cloud index) in-process via cognee-community-vector-adapter-moss. Before the agent starts, we extract the
+    latest shared snapshot from the volume into the local state dir.
+    After the agent finishes, we tar local state back into the volume
+    as a single object. Because agents run sequentially, there are no
+    concurrent writes, and whole-object S3 writes are exactly what
+    mountpoint-s3 is designed for.
 
 Prerequisites:
     pip install daytona
@@ -61,10 +64,11 @@ DEFAULT_REPO = "https://github.com/topoteretes/cognee"
 INTEGRATIONS_REPO = "https://github.com/topoteretes/cognee-integrations"
 PLUGIN_SUBPATH = "integrations/claude-code"
 
-# Shared volume used as a snapshot bucket for Kuzu + SQLite. Vectors live
-# in Moss, so the tarball is tiny (graph + relational only).
 VOLUME_NAME = "cognee-shared-memory"
 MOUNT_PATH = "/shared-cognee"
+# Path inside each agent sandbox where cognee's local DBs live. This is on
+# the sandbox's real filesystem (block storage), so SQLite/Kuzu work
+# correctly. Vectors live in Moss; snapshots of this dir are synced to/from the volume.
 LOCAL_STATE = "/var/cognee-state"
 SNAPSHOT_FILE = "state.tar.gz"
 
@@ -141,8 +145,13 @@ def _create_with_quota_retry(daytona, params, retries=6, delay=20):
 # ---------------------------------------------------------------------------
 
 def ensure_shared_volume(daytona, retries=30, delay=2):
-    """Create (or reuse) the Daytona volume used as a snapshot bucket."""
-    from daytona_api_client.exceptions import NotFoundException
+    """Create (or reuse) the Daytona volume used as the Kuzu+SQLite snapshot bucket.
+
+    Daytona creates volumes asynchronously; a newly-created volume sits in
+    `pending_create` for a few seconds before becoming `ready`. Mounting
+    it before then fails the sandbox create with a validation error, so
+    poll until it's ready.
+    """
     print("=== Preparing shared volume ===")
     vol = daytona.volume.get(VOLUME_NAME, create=True)
     print(f"  Volume: {vol.name} ({vol.id}), state={vol.state}")
@@ -150,12 +159,7 @@ def ensure_shared_volume(daytona, retries=30, delay=2):
         if str(vol.state).upper().endswith("READY"):
             return vol
         time.sleep(delay)
-        try:
-            vol = daytona.volume.get(VOLUME_NAME, create=False)
-        except NotFoundException:
-            # Previous volume finished deleting — create a fresh one.
-            print(f"  ...previous volume deleted, creating new one")
-            vol = daytona.volume.get(VOLUME_NAME, create=True)
+        vol = daytona.volume.get(VOLUME_NAME, create=False)
         print(f"  ...waiting, state={vol.state}")
     raise RuntimeError(f"Volume {VOLUME_NAME} did not become ready: {vol.state}")
 
@@ -262,7 +266,7 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
     # Moss adapter is the stock PyPI release.
     print("  Installing cognee SDK + Moss adapter (plugin dependencies)...")
     result = sandbox.process.exec(
-        "pip install cognee==1.0.2 cognee-community-vector-adapter-moss==0.1.0",
+        "pip install cognee==1.0.2 cognee-community-vector-adapter-moss==0.1.1",
         timeout=600,
     )
     _print_tail(result, "cognee-sdk")
