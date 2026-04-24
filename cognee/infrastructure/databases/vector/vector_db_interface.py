@@ -143,7 +143,7 @@ class VectorDBInterface(Protocol):
               like the RAG_COMPLETION search type, but not needed when search also contains graph data.
             - node_name (Optional[List[str]]): An optional list of names of nodes. Search results are filtered
               based on these, and only data which has at least one of the names in its "belongs_to_set" field is returned.
-            - node_name_filter_operator (str): Logical operator for node_name filtering. ``"OR"`` (default)
+            - node_name_filter_operator (Literal["OR", "AND"]): Logical operator for node_name filtering. ``"OR"`` (default)
               returns results matching any name; ``"AND"`` requires all names to match.
         """
         raise NotImplementedError

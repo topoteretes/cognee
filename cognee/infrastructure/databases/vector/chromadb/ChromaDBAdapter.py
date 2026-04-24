@@ -360,10 +360,15 @@ class ChromaDBAdapter(VectorDBInterface):
         """Build a ChromaDB ``where`` filter dict from node_name constraints."""
         if not node_name:
             return None
-        if node_name_filter_operator == "AND":
-            return {"$and": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
+        if node_name_filter_operator not in ("OR", "AND"):
+            raise ValueError(
+                f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
+                "Expected 'OR' or 'AND'."
+            )
         if len(node_name) == 1:
             return {"belongs_to_set": {"$eq": node_name[0]}}
+        if node_name_filter_operator == "AND":
+            return {"$and": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
         return {"$or": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
 
     @staticmethod
@@ -415,12 +420,6 @@ class ChromaDBAdapter(VectorDBInterface):
 
             Returns a list of ScoredResult instances representing the search results.
         """
-        if node_name_filter_operator not in ("OR", "AND"):
-            raise ValueError(
-                f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
-                "Expected 'OR' or 'AND'."
-            )
-
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
 
@@ -520,12 +519,6 @@ class ChromaDBAdapter(VectorDBInterface):
 
             Returns a list of lists of ScoredResult instances for each query's results.
         """
-        if node_name_filter_operator not in ("OR", "AND"):
-            raise ValueError(
-                f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
-                "Expected 'OR' or 'AND'."
-            )
-
         query_vectors = await self.embed_data(query_texts)
 
         collection = await self.get_collection(collection_name)
