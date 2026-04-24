@@ -648,7 +648,9 @@ async def search(
                 raw_objects = [item.get("raw") for item in items if item.get("raw") is not None]
                 return retrieved_edges_to_string(raw_objects)
 
-            return json.dumps({"results": items, "total": envelope.get("total", len(items))}, cls=JSONEncoder)
+            return json.dumps(
+                {"results": items, "total": envelope.get("total", len(items))}, cls=JSONEncoder
+            )
 
     # Parse comma-separated datasets into list
     datasets_list = [d.strip() for d in datasets.split(",") if d.strip()] if datasets else None

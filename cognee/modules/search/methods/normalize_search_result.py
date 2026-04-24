@@ -49,7 +49,9 @@ def _coerce_to_dict(value: Any) -> dict:
             return {k: v for k, v in vars(value).items() if not k.startswith("_")}
         except TypeError:
             pass
-    return {"value": value if isinstance(value, (int, float, bool, str, type(None))) else str(value)}
+    return {
+        "value": value if isinstance(value, (int, float, bool, str, type(None))) else str(value)
+    }
 
 
 def _text_from_dict(payload: dict) -> str:
