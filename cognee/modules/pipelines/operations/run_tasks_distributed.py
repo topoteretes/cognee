@@ -25,6 +25,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
+from cognee.context_global_variables import set_database_global_context_variables
 from .run_tasks_data_item import run_tasks_data_item
 
 logger = get_logger("run_tasks_distributed()")
@@ -107,69 +108,71 @@ async def run_tasks_distributed(
         dataset_name=dataset.name,
         payload=data,
     )
-    # TODO: See if we need to set global context variables here
-    # async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-    try:
-        if not isinstance(data, list):
-            data = [data]
 
-        data = await resolve_data_directories(data)
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        try:
+            if not isinstance(data, list):
+                data = [data]
 
-        number_of_data_items = len(data) if isinstance(data, list) else 1
+            data = await resolve_data_directories(data)
 
-        data_item_tasks = [
-            data,
-            [dataset] * number_of_data_items,
-            [tasks] * number_of_data_items,
-            [pipeline_name] * number_of_data_items,
-            [pipeline_id] * number_of_data_items,
-            [pipeline_run_id] * number_of_data_items,
-            [None] * number_of_data_items,
-            [user] * number_of_data_items,
-            [incremental_loading] * number_of_data_items,
-        ]
+            number_of_data_items = len(data) if isinstance(data, list) else 1
 
-        results = []
-        async for result in run_tasks_on_modal.map.aio(*data_item_tasks):
-            if not result:
-                continue
-            results.append(result)
+            data_item_tasks = [
+                data,
+                [dataset] * number_of_data_items,
+                [tasks] * number_of_data_items,
+                [pipeline_name] * number_of_data_items,
+                [pipeline_id] * number_of_data_items,
+                [pipeline_run_id] * number_of_data_items,
+                [None] * number_of_data_items,
+                [user] * number_of_data_items,
+                [incremental_loading] * number_of_data_items,
+            ]
 
-        # Remove skipped results
-        results = [r for r in results if r]
+            results = []
+            async for result in run_tasks_on_modal.map.aio(*data_item_tasks):
+                if not result:
+                    continue
+                results.append(result)
 
-        # If any data item failed, raise PipelineRunFailedError
-        errored = [
-            r
-            for r in results
-            if r and r.get("run_info") and isinstance(r["run_info"], PipelineRunErrored)
-        ]
-        if errored:
-            raise PipelineRunFailedError("Pipeline run failed. Data item could not be processed.")
+            # Remove skipped results
+            results = [r for r in results if r]
 
-        await log_pipeline_run_complete(
-            pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
-        )
+            # If any data item failed, raise PipelineRunFailedError
+            errored = [
+                r
+                for r in results
+                if r and r.get("run_info") and isinstance(r["run_info"], PipelineRunErrored)
+            ]
+            if errored:
+                raise PipelineRunFailedError(
+                    "Pipeline run failed. Data item could not be processed."
+                )
 
-        yield PipelineRunCompleted(
-            pipeline_run_id=pipeline_run_id,
-            dataset_id=dataset.id,
-            dataset_name=dataset.name,
-            data_ingestion_info=results,
-        )
+            await log_pipeline_run_complete(
+                pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
+            )
 
-    except Exception as error:
-        await log_pipeline_run_error(
-            pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
-        )
+            yield PipelineRunCompleted(
+                pipeline_run_id=pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                data_ingestion_info=results,
+            )
 
-        yield PipelineRunErrored(
-            pipeline_run_id=pipeline_run_id,
-            payload=repr(error),
-            dataset_id=dataset.id,
-            dataset_name=dataset.name,
-            data_ingestion_info=locals().get("results"),
-        )
+        except Exception as error:
+            await log_pipeline_run_error(
+                pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
+            )
 
-        if not isinstance(error, PipelineRunFailedError):
-            raise
+            yield PipelineRunErrored(
+                pipeline_run_id=pipeline_run_id,
+                payload=repr(error),
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                data_ingestion_info=locals().get("results"),
+            )
+
+            if not isinstance(error, PipelineRunFailedError):
+                raise
