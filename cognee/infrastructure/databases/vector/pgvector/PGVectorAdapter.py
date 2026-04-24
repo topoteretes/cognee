@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Optional, get_type_hints
+from typing import List, Literal, Optional, get_type_hints
 from uuid import UUID
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
@@ -343,10 +343,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
-        node_name_filter_operator: str = "OR",
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
+
+        if node_name_filter_operator not in ("OR", "AND"):
+            raise ValueError(
+                f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
+                "Expected 'OR' or 'AND'."
+            )
 
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
@@ -376,11 +382,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             if node_name:
-                if node_name_filter_operator not in ("OR", "AND"):
-                    raise ValueError(
-                        f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
-                        "Expected 'OR' or 'AND'."
-                    )
                 if node_name_filter_operator == "AND":
                     filter_operator = "?&"
                 else:
@@ -453,7 +454,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with_vectors: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
-        node_name_filter_operator: str = "OR",
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 

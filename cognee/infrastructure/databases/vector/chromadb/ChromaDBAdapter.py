@@ -358,13 +358,13 @@ class ChromaDBAdapter(VectorDBInterface):
         node_name_filter_operator: "Literal['OR', 'AND']",
     ) -> Optional[dict]:
         """Build a ChromaDB ``where`` filter dict from node_name constraints."""
-        if not node_name:
-            return None
         if node_name_filter_operator not in ("OR", "AND"):
             raise ValueError(
                 f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
                 "Expected 'OR' or 'AND'."
             )
+        if not node_name:
+            return None
         if len(node_name) == 1:
             return {"belongs_to_set": {"$eq": node_name[0]}}
         if node_name_filter_operator == "AND":
