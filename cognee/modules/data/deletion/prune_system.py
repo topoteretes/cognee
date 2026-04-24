@@ -73,22 +73,10 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
         await db_engine.delete_database()
 
     if cache:
+        await delete_cache()
         cache_config = get_cache_config()
         if cache_config.caching or cache_config.usage_logging:
-            cache_engine = get_cache_engine()
-            if cache_engine:
-                await cache_engine.close()
-
             create_cache_engine.cache_clear()
-
-            await delete_cache()
-
             cache_engine = get_cache_engine()
             if cache_engine:
-                try:
-                    await cache_engine.prune()
-                finally:
-                    await cache_engine.close()
-                    create_cache_engine.cache_clear()
-        else:
-            await delete_cache()
+                await cache_engine.prune()
