@@ -107,7 +107,8 @@ async def run_tasks_distributed(
         dataset_name=dataset.name,
         payload=data,
     )
-
+    # TODO: See if we need to set global context variables here
+    # async with set_database_global_context_variables(dataset.id, dataset.owner_id):
     try:
         if not isinstance(data, list):
             data = [data]

@@ -88,13 +88,7 @@ async def run_pipeline_as_background_process(
             while True:
                 try:
                     pipeline_run_info = await anext(pipeline)
-
                     push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
-
-                    if isinstance(pipeline_run_info, PipelineRunCompleted) or isinstance(
-                        pipeline_run_info, PipelineRunErrored
-                    ):
-                        break
                 except StopAsyncIteration:
                     break
 
