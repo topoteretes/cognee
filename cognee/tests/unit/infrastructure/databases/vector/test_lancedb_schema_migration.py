@@ -245,6 +245,65 @@ async def test_migration_aborts_without_safe_default_and_preserves_rows(tmp_path
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_null_in_non_null_field_triggers_migration(tmp_path):
+    # Regression for #2702: the lance-file writer raises
+    # "contained null values even though the field is marked non-null" when an
+    # old-schema row is upserted against a newer schema that requires a field
+    # to be non-null. The message does not match "not found in target schema",
+    # so the auto-migration path was bypassed and the RuntimeError escaped.
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    col = "Test_text"
+    await _seed(adapter, col, [_make_point(str(uuid4()), "seed")])
+
+    # Wrap get_collection so we see every collection instance the adapter
+    # opens — the one used inside create_data_points is fetched after our
+    # hook runs, so we patch merge_insert on each one we hand back.
+    original_get_collection = adapter.get_collection
+    called = {"count": 0}
+
+    async def wrapped_get_collection(name):
+        collection = await original_get_collection(name)
+        original_merge_insert = collection.merge_insert
+
+        def patched_merge_insert(key):
+            builder = original_merge_insert(key)
+            original_execute = builder.execute
+
+            async def fail_once(data):
+                called["count"] += 1
+                if called["count"] == 1:
+                    raise RuntimeError(
+                        "lance error: Invalid user input: The field `feedback_weight` "
+                        "contained null values even though the field is marked non-null "
+                        "in the schema"
+                    )
+                return await original_execute(data)
+
+            builder.execute = fail_once
+            return builder
+
+        collection.merge_insert = patched_merge_insert
+        return collection
+
+    adapter.get_collection = wrapped_get_collection
+
+    new_id = str(uuid4())
+    await adapter.create_data_points(col, [_make_point(new_id, "after-drift")])
+
+    # Migration path ran (rebuilt the table via drop/create), so restore the
+    # real get_collection before reading back.
+    adapter.get_collection = original_get_collection
+
+    results = await adapter.retrieve(col, [new_id])
+    assert len(results) == 1
+    assert results[0].payload["text"] == "after-drift"
+    assert called["count"] >= 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_payload_preserves_inherited_datapoint_fields(tmp_path):
     adapter = LanceDBAdapter(
         url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
