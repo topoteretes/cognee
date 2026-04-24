@@ -1332,6 +1332,23 @@ async def upload_file_ui() -> types.CallToolResult:
     )
 
 
+@mcp.tool(
+    name="open_cognee_workspace",
+    description=(
+        "Open the Cognee workspace UI. Use for generic intents like "
+        "'run the cognee UI', 'show the cognee app', 'open cognee'. "
+        "The UI provides dataset management, file upload, text ingestion, "
+        "search, and graph visualization."
+    ),
+    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
+)
+@log_usage(function_name="MCP open_cognee_workspace", log_type="mcp_tool")
+async def open_cognee_workspace() -> types.CallToolResult:
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text="Cognee workspace opened.")],
+    )
+
+
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
@@ -1364,17 +1381,27 @@ async def cognify_file(
             )
         ]
 
-    suffix = Path(filename).suffix or ".txt"
+    # Sanitize to a basename with a fallback extension; preserves the original
+    # name so cognee's Data.name comes out as e.g. "alice_notes" rather than
+    # a tempfile slug like "tmp231sj_ac".
+    safe_name = Path(filename).name or "upload"
+    if not Path(safe_name).suffix:
+        safe_name += ".txt"
 
     with redirect_stdout(sys.stderr):
-        tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=suffix, delete=False)
+        tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
+        tmp_path = os.path.join(tmp_dir, safe_name)
         try:
-            tmp.write(data)
-            tmp.close()
-            await cognee_client.add(tmp.name, dataset_name=dataset_name)
+            with open(tmp_path, "wb") as f:
+                f.write(data)
+            await cognee_client.add(tmp_path, dataset_name=dataset_name)
         finally:
             try:
-                os.unlink(tmp.name)
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            try:
+                os.rmdir(tmp_dir)
             except OSError:
                 pass
 
@@ -1400,6 +1427,121 @@ async def cognify_file(
             ),
         )
     ]
+
+
+@mcp.tool(
+    name="list_datasets_json",
+    description=(
+        "List datasets as structured JSON for the Cognee workspace UI. "
+        "Returns {datasets: [{id, name}, ...]} in structuredContent."
+    ),
+)
+@log_usage(function_name="MCP list_datasets_json", log_type="mcp_tool")
+async def list_datasets_json() -> types.CallToolResult:
+    with redirect_stdout(sys.stderr):
+        raw = await cognee_client.list_datasets()
+
+    datasets = []
+    for ds in raw or []:
+        if isinstance(ds, dict):
+            datasets.append({"id": str(ds.get("id", "")), "name": ds.get("name", "")})
+        else:
+            datasets.append({"id": str(ds.id), "name": ds.name})
+
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=f"{len(datasets)} dataset(s).")],
+        structuredContent={"datasets": datasets},
+    )
+
+
+@mcp.tool(
+    name="list_dataset_data_json",
+    description=(
+        "List data items in a dataset as structured JSON for the Cognee workspace UI. "
+        "Returns {data: [{id, name}, ...]} in structuredContent."
+    ),
+)
+@log_usage(function_name="MCP list_dataset_data_json", log_type="mcp_tool")
+async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
+    from uuid import UUID
+    from cognee.modules.data.methods import get_dataset, get_dataset_data
+
+    if cognee_client.use_api:
+        return types.CallToolResult(
+            isError=True,
+            content=[
+                types.TextContent(
+                    type="text",
+                    text="Error: list_dataset_data_json is only available in direct mode.",
+                )
+            ],
+        )
+
+    try:
+        dataset_uuid = UUID(dataset_id)
+    except ValueError as e:
+        return types.CallToolResult(
+            isError=True,
+            content=[types.TextContent(type="text", text=f"Error: invalid dataset_id ({e}).")],
+        )
+
+    with redirect_stdout(sys.stderr):
+        user = await get_default_user()
+        dataset = await get_dataset(user.id, dataset_uuid)
+        if not dataset:
+            return types.CallToolResult(
+                isError=True,
+                content=[
+                    types.TextContent(type="text", text=f"Error: dataset not found: {dataset_id}.")
+                ],
+            )
+        items = await get_dataset_data(dataset.id)
+
+    data = [{"id": str(item.id), "name": item.name or "(unnamed)"} for item in items]
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=f"{len(data)} data item(s).")],
+        structuredContent={"data": data},
+    )
+
+
+@mcp.tool(
+    name="create_dataset_json",
+    description=(
+        "Create an empty dataset with the given name (idempotent). "
+        "Returns {dataset: {id, name}} in structuredContent."
+    ),
+)
+@log_usage(function_name="MCP create_dataset_json", log_type="mcp_tool")
+async def create_dataset_json(name: str) -> types.CallToolResult:
+    name = (name or "").strip()
+    if not name:
+        return types.CallToolResult(
+            isError=True,
+            content=[types.TextContent(type="text", text="Error: dataset name is required.")],
+        )
+    if cognee_client.use_api:
+        return types.CallToolResult(
+            isError=True,
+            content=[
+                types.TextContent(
+                    type="text",
+                    text="Error: create_dataset_json is only available in direct mode.",
+                )
+            ],
+        )
+
+    with redirect_stdout(sys.stderr):
+        from cognee.modules.data.methods.create_authorized_dataset import (
+            create_authorized_dataset,
+        )
+
+        user = await get_default_user()
+        dataset = await create_authorized_dataset(name, user)
+
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=f"Dataset '{dataset.name}' ready.")],
+        structuredContent={"dataset": {"id": str(dataset.id), "name": dataset.name}},
+    )
 
 
 def node_to_string(node):
