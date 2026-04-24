@@ -56,7 +56,7 @@ pre-commit install
 - **posthog** - PostHog analytics
 - **monitoring** - Sentry + Langfuse observability
 - **distributed** - Modal distributed execution
-- **dev** - All development tools (pytest, mypy, ruff, etc.)
+- **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
 
 ### Testing
@@ -94,11 +94,8 @@ ruff format .
 # Run both linting and formatting (pre-commit)
 pre-commit run --all-files
 
-# Type checking with mypy
-mypy cognee/
-
-# Run pylint
-pylint cognee/
+# Type checking with ty
+ty check .
 ```
 
 ### Running Cognee
@@ -435,7 +432,7 @@ git checkout -b feature/your-feature-name
 - **Line length**: 100 characters
 - **String quotes**: Use double quotes `"` not single quotes `'` (enforced by ruff-format)
 - **Pre-commit hooks**: Run ruff linting and formatting automatically
-- **Type hints**: Encouraged (mypy checks enabled)
+- **Type hints**: Encouraged (ty checks enabled)
 - **Important**: Always run `pre-commit run --all-files` before committing to catch formatting issues
 
 ## Testing Strategy
