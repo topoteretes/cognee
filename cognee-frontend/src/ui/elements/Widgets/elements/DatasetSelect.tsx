@@ -1,5 +1,5 @@
 import { Dataset } from "@/modules/ingestion/useDatasets";
-import { LoadingIndicator } from "@/ui/App";
+import { LoadingIndicator } from "@/ui/app";
 import {
   Center,
   Flex,
