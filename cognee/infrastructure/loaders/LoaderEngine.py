@@ -1,8 +1,11 @@
+from typing import Any
+
 import filetype
-from typing import Dict, List, Optional, Any
-from .LoaderInterface import LoaderInterface
+
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
 from cognee.shared.logging_utils import get_logger
+
+from .LoaderInterface import LoaderInterface
 
 logger = get_logger(__name__)
 
@@ -15,16 +18,16 @@ class LoaderEngine:
     providing a centralized system for file loading operations.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the loader engine.
 
         Args:
             default_loader_priority: Priority order for loader selection
         """
-        self._loaders: Dict[str, LoaderInterface] = {}
-        self._extension_map: Dict[str, List[LoaderInterface]] = {}
-        self._mime_type_map: Dict[str, List[LoaderInterface]] = {}
+        self._loaders: dict[str, LoaderInterface] = {}
+        self._extension_map: dict[str, list[LoaderInterface]] = {}
+        self._mime_type_map: dict[str, list[LoaderInterface]] = {}
 
         self.default_loader_priority = [
             "text_loader",
@@ -69,8 +72,8 @@ class LoaderEngine:
     def get_loader(
         self,
         file_path: str,
-        preferred_loaders: dict[str, dict[str, Any]],
-    ) -> Optional[LoaderInterface]:
+        preferred_loaders: dict[str, dict[str, Any]] | None,
+    ) -> LoaderInterface | None:
         """
         Get appropriate loader for a file.
 
@@ -83,7 +86,7 @@ class LoaderEngine:
         """
         from pathlib import Path
 
-        file_info = guess_file_type(file_path)
+        file_info = guess_file_type(file_path)  # ty:ignore[invalid-argument-type]
 
         path_extension = Path(file_path).suffix.lstrip(".")
 
@@ -121,9 +124,9 @@ class LoaderEngine:
     async def load_file(
         self,
         file_path: str,
-        preferred_loaders: dict[str, dict[str, Any]] = None,
-        **kwargs,
-    ):
+        preferred_loaders: dict[str, dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> str:
         """
         Load file using appropriate loader.
 
@@ -152,7 +155,7 @@ class LoaderEngine:
 
         return await loader.load(file_path, **merged_kwargs)
 
-    def get_available_loaders(self) -> List[str]:
+    def get_available_loaders(self) -> list[str]:
         """
         Get list of available loader names.
 
@@ -161,7 +164,7 @@ class LoaderEngine:
         """
         return list(self._loaders.keys())
 
-    def get_loader_info(self, loader_name: str) -> Dict[str, any]:
+    def get_loader_info(self, loader_name: str) -> dict[str, Any]:
         """
         Get information about a specific loader.
 

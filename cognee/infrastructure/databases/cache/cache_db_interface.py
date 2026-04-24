@@ -12,6 +12,7 @@ class CacheDBInterface(ABC):
     def __init__(
         self, host: str, port: int, lock_key: str = "default_lock", log_key: str = "usage_logs"
     ):
+        """Store shared cache/lock configuration for concrete adapter implementations."""
         self.host = host
         self.port = port
         self.lock_key = lock_key
@@ -173,16 +174,27 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_agent_trace_session(self, user_id: str, session_id: str) -> list[dict]:
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[dict]:
         """
-        Retrieve all agent trace steps for the given session.
+        Retrieve agent trace steps for the given session.
         """
         pass
 
     @abstractmethod
-    async def get_agent_trace_feedback(self, user_id: str, session_id: str) -> list[str]:
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
         """
-        Retrieve only per-step feedback strings for the given trace session.
+        Retrieve per-step feedback strings for the given trace session.
+        """
+        pass
+
+    @abstractmethod
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """
+        Retrieve the number of trace steps stored for the given trace session.
         """
         pass
 

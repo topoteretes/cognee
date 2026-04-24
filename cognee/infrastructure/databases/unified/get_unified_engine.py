@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
 
-HYBRID_PROVIDERS = {"neptune_analytics"}
+HYBRID_PROVIDERS = {}
 UNIFIED_PROVIDERS = {"pghybrid"}
 
 
