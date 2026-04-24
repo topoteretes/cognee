@@ -34,6 +34,10 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
 )
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    handle_embedding_response,
+    sanitize_embedding_text_inputs,
+)
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.logging_utils import get_logger
 
@@ -131,20 +135,24 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
             - List[List[float]]: A list of vectors representing the embedded texts.
         """
+        original_texts = text if isinstance(text, list) else [text]
+        sanitized_text = sanitize_embedding_text_inputs(original_texts)
+
         if self.mock:
-            return [[0.0] * (self.dimensions or 1) for _ in text]
+            embeddings = [[0.0] * (self.dimensions or 1) for _ in sanitized_text]
+            return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
         try:
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
                     self._client.embeddings.create(
                         model=self.model,
-                        input=text,
+                        input=sanitized_text,
                         encoding_format="float",
                     ),
                     timeout=30.0,
                 )
-            return [item.embedding for item in response.data]
+            embeddings = [item.embedding for item in response.data]
 
         except Exception as error:
             error_str = str(error).lower()
@@ -159,16 +167,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 "max tokens",
             )
             if any(pattern in error_str for pattern in context_error_patterns):
-                if isinstance(text, list) and len(text) > 1:
-                    mid = math.ceil(len(text) / 2)
+                if isinstance(original_texts, list) and len(original_texts) > 1:
+                    mid = math.ceil(len(original_texts) / 2)
                     left_vecs, right_vecs = await asyncio.gather(
-                        self.embed_text(text[:mid]),
-                        self.embed_text(text[mid:]),
+                        self.embed_text(original_texts[:mid]),
+                        self.embed_text(original_texts[mid:]),
                     )
-                    return left_vecs + right_vecs
+                    embeddings = left_vecs + right_vecs
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
-                if isinstance(text, list) and len(text) == 1:
-                    s = text[0]
+                if isinstance(original_texts, list) and len(original_texts) == 1:
+                    s = original_texts[0]
                     third = len(s) // 3
                     if third == 0:
                         raise EmbeddingException(
@@ -180,7 +189,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         self.embed_text([right_part]),
                     )
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
-                    return [pooled.tolist()]
+                    embeddings = [pooled.tolist()]
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
             if isinstance(error, asyncio.TimeoutError):
                 logger.error(
@@ -208,6 +218,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(
                 "Embedding failed. Verify EMBEDDING_ENDPOINT and server status."
             ) from error
+
+        return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
     def get_vector_size(self) -> int:
         """

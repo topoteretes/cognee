@@ -81,8 +81,8 @@ scraping = [
 ]
 
 fastembed = [
-    "fastembed<=0.6.0",
-    "onnxruntime<=1.22.1",
+    "fastembed<=0.8.0",
+    "onnxruntime<=1.23.2",
 ]
 
 neo4j = ["neo4j>=5.28.0,<6"]
@@ -123,7 +123,7 @@ docs = [
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
 ]
 codegraph = [
-    "fastembed<=0.6.0 ; python_version < '3.13'",
+    "fastembed<=0.8.0 ; python_version < '3.14'",
     "transformers>=4.46.3,<5",
     "tree-sitter>=0.24.0,<0.25",
     "tree-sitter-python>=0.23.6,<0.24",
