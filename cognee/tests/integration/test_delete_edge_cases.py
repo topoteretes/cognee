@@ -14,8 +14,9 @@ Test Coverage:
 
 import os
 import pathlib
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, update
 
 import cognee
@@ -106,7 +107,7 @@ async def test_last_accessed_updates_on_search():
         user=user,
     )
 
-    logger.info(f"Search returned {len(search_results)} results")
+    logger.info(f"Search returned {len(search_results.results)} results")
 
     # Check last_accessed after search
     async with db_engine.get_async_session() as session:
