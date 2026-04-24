@@ -216,7 +216,6 @@ class DatasetQueue:
         ds_key = f"ds:{dataset_id}" if dataset_id is not None else "ds:<none>"
 
         entry = self._task_slots.get(task_id, {}).get(ds_key)
-            return
 
         entry.depth -= 1
         if entry.depth > 0:
