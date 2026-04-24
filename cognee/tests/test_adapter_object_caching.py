@@ -7,6 +7,9 @@ from cognee.modules.search.types import SearchType
 
 
 async def main():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
     dataset_name = "simple_add_cognify_search"
     text = "Berlin is the capital of Germany."
 
