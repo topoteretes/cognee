@@ -242,5 +242,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         except Exception as error:
             logger.warning("Could not get tokenizer from HuggingFace due to: %s", error)
             logger.info("Switching to TikToken default tokenizer.")
-            tokenizer = TikTokenTokenizer(model=None, max_completion_tokens=self.max_completion_tokens)
+            tokenizer = TikTokenTokenizer(
+                model=None, max_completion_tokens=self.max_completion_tokens
+            )
         return tokenizer
