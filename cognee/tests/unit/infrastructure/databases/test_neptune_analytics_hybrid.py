@@ -175,6 +175,10 @@ async def test_add_edges_with_vectors_uses_edge_text_property_when_present():
 # ---------------------------------------------------------------------------
 
 
+def _re_raise_exception(e, _query):
+    raise e
+
+
 class _FakeSearchAdapter:
     """Minimal stand-in for NeptuneAnalyticsAdapter.search tests."""
 
@@ -188,11 +192,7 @@ class _FakeSearchAdapter:
         self._COLLECTION_PREFIX = "collection"
         self._TOPK_LOWER_BOUND = 0
         self._TOPK_UPPER_BOUND = 100
-
-        def _re_raise(e, q):
-            raise e
-
-        self._na_exception_handler = MagicMock(side_effect=_re_raise)
+        self._na_exception_handler = MagicMock(side_effect=_re_raise_exception)
         self._validate_embedding_engine = MagicMock()
 
 

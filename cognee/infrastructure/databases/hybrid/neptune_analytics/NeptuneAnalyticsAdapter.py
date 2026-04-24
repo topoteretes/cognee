@@ -342,15 +342,18 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         try:
             query_response = self._client.query(query_string, params)
-            return [
-                ScoredResult(
-                    id=item.get("payload").get("~id") if include_payload else item.get("node_id"),
-                    payload=item.get("payload").get("~properties") if include_payload else None,
-                    score=item.get("score", 0),
-                    vector=item.get("embedding") if with_vector else None,
+            results = []
+            for item in query_response:
+                payload_obj = item.get("payload") or {}
+                results.append(
+                    ScoredResult(
+                        id=payload_obj.get("~id") if include_payload else item.get("node_id"),
+                        payload=payload_obj.get("~properties") if include_payload else None,
+                        score=item.get("score", 0),
+                        vector=item.get("embedding") if with_vector else None,
+                    )
                 )
-                for item in query_response
-            ]
+            return results
         except Exception as e:
             self._na_exception_handler(e, query_string)
 
