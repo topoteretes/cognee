@@ -229,7 +229,14 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         try:
             result = self._client.query(query_string, params)
-            return [self._get_scored_result(item) for item in result]
+            return [
+                ScoredResult(
+                    id=(item.get("payload") or {}).get("~id"),
+                    payload=(item.get("payload") or {}).get("~properties"),
+                    score=0,
+                )
+                for item in result
+            ]
         except Exception as e:
             self._na_exception_handler(e, query_string)
 
@@ -479,20 +486,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         query_result = self._client.query(query)
         return len(query_result) == 0
-
-    @staticmethod
-    def _get_scored_result(
-        item: dict, with_vector: bool = False, with_score: bool = False
-    ) -> ScoredResult:
-        """
-        Util method to simplify the object creation of ScoredResult base on incoming NX payload response.
-        """
-        return ScoredResult(
-            id=item.get("payload").get("~id"),
-            payload=item.get("payload").get("~properties"),
-            score=item.get("score") if with_score else 0,
-            vector=item.get("embedding") if with_vector else None,
-        )
 
     def _na_exception_handler(self, ex, query_string: str):
         """
