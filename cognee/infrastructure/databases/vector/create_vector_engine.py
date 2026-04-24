@@ -72,6 +72,24 @@ def create_vector_engine(
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified_provider == "pghybrid":
+        from cognee.infrastructure.databases.relational import get_relational_config
+
+        embedding_engine = get_embedding_engine()
+        relational_config = get_relational_config()
+        connection_string = (
+            f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
+            f"@{relational_config.db_host}:{relational_config.db_port}"
+            f"/{relational_config.db_name}"
+        )
+
+        from .pgvector.PGVectorAdapter import PGVectorAdapter
+
+        return PGVectorAdapter(
+            connection_string,
+            vector_db_key,
+            embedding_engine,
+        )
 
     return _create_vector_engine(
         vector_db_provider,
@@ -83,7 +101,6 @@ def create_vector_engine(
         vector_db_username,
         vector_db_password,
         vector_db_host,
-        unified_provider,
     )
 
 
@@ -98,7 +115,6 @@ def _create_vector_engine(
     vector_db_username: str,
     vector_db_password: str,
     vector_db_host: str,
-    unified_provider: str,
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -136,25 +152,6 @@ def _create_vector_engine(
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
             database_name=vector_db_name,
-        )
-
-    if unified_provider == "pghybrid":
-        from cognee.infrastructure.databases.relational import get_relational_config
-
-        embedding_engine = get_embedding_engine()
-        relational_config = get_relational_config()
-        connection_string = (
-            f"postgresql+asyncpg://{relational_config.db_username}:{relational_config.db_password}"
-            f"@{relational_config.db_host}:{relational_config.db_port}"
-            f"/{relational_config.db_name}"
-        )
-
-        from .pgvector.PGVectorAdapter import PGVectorAdapter
-
-        return PGVectorAdapter(
-            connection_string,
-            vector_db_key,
-            embedding_engine,
         )
 
     if vector_db_provider.lower() == "pgvector":

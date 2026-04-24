@@ -94,6 +94,13 @@ def create_graph_engine(
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified_provider == "pghybrid":
+        from .postgres.adapter import PostgresAdapter
+        from cognee.infrastructure.databases.relational.get_relational_engine import (
+            get_relational_engine,
+        )
+
+        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
 
     return _create_graph_engine(
         graph_database_provider,
@@ -106,7 +113,6 @@ def create_graph_engine(
         graph_database_port,
         graph_database_key,
         graph_dataset_database_handler,
-        unified_provider,
     )
 
 
@@ -122,7 +128,6 @@ def _create_graph_engine(
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
-    unified_provider="",
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -163,14 +168,6 @@ def _create_graph_engine(
             graph_database_key=graph_database_key,
             database_name=graph_database_name,
         )
-
-    if unified_provider == "pghybrid":
-        from .postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.relational.get_relational_engine import (
-            get_relational_engine,
-        )
-
-        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
 
     if graph_database_provider == "neo4j":
         if not graph_database_url:
