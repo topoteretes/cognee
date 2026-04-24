@@ -356,8 +356,6 @@ class LanceDBAdapter(VectorDBInterface):
 
     @classmethod
     def _resolve_collection_payload_schema(cls, collection_name: str):
-        if "_" not in collection_name:
-            return None
         # Vector index collections store IndexSchema payloads regardless of the
         # source DataPoint type encoded in the collection name.
         return IndexSchema
