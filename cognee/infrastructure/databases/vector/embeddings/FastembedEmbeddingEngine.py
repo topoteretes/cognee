@@ -170,22 +170,6 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
         return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
-    async def _raw_embed_text(self, text: List[str]) -> List[List[float]]:
-        """Raw embedding without context handling."""
-        text_list = text if isinstance(text, list) else [text]
-        sanitized_text = sanitize_embedding_text_inputs(text_list)
-
-        if self.mock:
-            return [[0.0] * self.dimensions for _ in sanitized_text]
-
-        async with embedding_rate_limiter_context_manager():
-            embeddings = self.embedding_model.embed(
-                sanitized_text,
-                batch_size=len(sanitized_text),
-                parallel=None,
-            )
-        return list(embeddings)
-
     def get_vector_size(self) -> int:
         """
         Return the size of the embedding vector produced by this engine.

@@ -153,19 +153,6 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                 f"Failed to index data points using model {self.model}"
             ) from error
 
-    async def _raw_embed_text(self, text: List[str]) -> List[List[float]]:
-        """Raw embedding without context handling."""
-        text_list = text if isinstance(text, list) else [text]
-        sanitized_text = sanitize_embedding_text_inputs(text_list)
-
-        if self.mock:
-            return [[0.0] * self.dimensions for _ in sanitized_text]
-
-        embeddings = await asyncio.gather(
-            *[self._get_embedding(prompt) for prompt in sanitized_text]
-        )
-        return embeddings
-
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
