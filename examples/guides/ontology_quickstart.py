@@ -7,8 +7,7 @@ from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntolog
 
 async def main():
     # Prune data and system metadata before running, only if we want "fresh" state.
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     texts = ["Audi produces the R8 and e-tron.", "Apple develops iPhone and MacBook."]
 

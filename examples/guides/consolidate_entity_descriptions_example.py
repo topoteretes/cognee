@@ -23,8 +23,7 @@ graph_visualization_path_after_enrichment = path.join(
 
 async def main():
     # Prune data and system metadata before running, only if we want "fresh" state.
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
     await cognee.remember(
         [
             "Alice moved to Paris in 2010, while Bob has always lived in New York.",

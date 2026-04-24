@@ -4,8 +4,7 @@ import cognee
 
 async def main():
     # Start clean (optional in your app)
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
     # Prepare knowledge base
     await cognee.remember(
         [

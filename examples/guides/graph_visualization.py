@@ -6,8 +6,7 @@ from cognee.api.v1.visualize.visualize import visualize_graph
 
 async def main():
     # Prune data and system metadata before running, only if we want "fresh" state.
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     await cognee.remember(
         ["Alice knows Bob.", "NLP is a subfield of CS."],

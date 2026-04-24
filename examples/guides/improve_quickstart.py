@@ -6,8 +6,7 @@ SESSION = "demo_session"
 
 
 async def main():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     await cognee.remember(
         "Einstein developed general relativity.",

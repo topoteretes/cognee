@@ -3,8 +3,7 @@ import cognee
 
 
 async def main():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
     text = """
     In 1998 the project launched. In 2001 version 1.0 shipped. In 2004 the team merged
     with another group. In 2010 support for v1 ended.
