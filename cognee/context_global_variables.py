@@ -219,7 +219,8 @@ class DatabaseContextManager:
         from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
         # Release the slot for this dataset when exiting the context.
-        dataset_queue().release_slot_for(self._dataset)
+        if backend_access_control_enabled():
+            dataset_queue().release_slot_for(self._dataset)
         return None
 
 
