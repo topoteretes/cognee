@@ -1,17 +1,19 @@
 import os
 import pathlib
-import cognee
 import uuid
+
 import pytest
+
+import cognee
+from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
+    IndexSchema,
+    NeptuneAnalyticsAdapter,
+)
+from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-    NeptuneAnalyticsAdapter,
-    IndexSchema,
-)
 
 logger = get_logger()
 
@@ -60,24 +62,21 @@ async def main():
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
     )
-    assert len(search_results) != 0, "The search results list is empty."
+    assert len(search_results.results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     search_results = await cognee.search(query_type=SearchType.CHUNKS, query_text=random_node_name)
-    assert len(search_results) != 0, "The search results list is empty."
+    assert len(search_results.results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     search_results = await cognee.search(
         query_type=SearchType.SUMMARIES, query_text=random_node_name
     )
-    assert len(search_results) != 0, "Query related summaries don't exist."
+    assert len(search_results.results) != 0, "Query related summaries don't exist."
     print("\nExtracted summaries are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     user = await get_default_user()
     history = await get_history(user.id)

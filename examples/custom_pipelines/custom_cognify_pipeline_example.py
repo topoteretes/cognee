@@ -1,10 +1,11 @@
 import asyncio
+
 import cognee
-from cognee.modules.engine.operations.setup import setup
-from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import setup_logging, INFO
-from cognee.modules.pipelines import Task
 from cognee.api.v1.search import SearchType
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.pipelines import Task
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import INFO, setup_logging
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -70,8 +71,7 @@ async def main():
 
     print("Search results:")
     # Display results
-    for result_text in search_results:
-        print(result_text)
+    print(search_results)
 
 
 if __name__ == "__main__":

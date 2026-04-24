@@ -1,2 +1,4 @@
 from .SearchType import SearchType
-from .SearchResult import SearchResult, SearchResultDataset
+from .SearchResponse import SearchResponse, SearchResultItem, SearchResultKind
+
+__all__ = ["SearchType", "SearchResponse", "SearchResultItem", "SearchResultKind"]

@@ -42,7 +42,6 @@ class RecallKwargs(TypedDict, total=False):
     wide_search_top_k: int
     triplet_distance_penalty: float
     feedback_influence: float
-    verbose: bool
     retriever_specific_config: dict
     user: object
 
@@ -476,20 +475,18 @@ async def recall(
                 str(local_query_type.value) if local_query_type else "unknown",
             )
 
-            graph_results = await search(
+            graph_response = await search(
                 query_text=query_text,
                 query_type=local_query_type,
                 datasets=datasets,
                 top_k=top_k,
                 **kwargs,
             )
-            tagged = []
-            for r in graph_results:
-                if isinstance(r, dict):
-                    r["_source"] = "graph"
-                    tagged.append(r)
-                else:
-                    tagged.append(r)
+            tagged: list = []
+            for item in graph_response.results:
+                row = item.model_dump(mode="json")
+                row["_source"] = "graph"
+                tagged.append(row)
             return tagged
 
         runners = {

@@ -6,7 +6,7 @@ from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 
-from cognee.modules.search.types import SearchType, SearchResult
+from cognee.modules.search.types import SearchType
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.models import User
@@ -31,10 +31,9 @@ class RecallPayloadDTO(InDTO):
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(default=None, example=[])
+    node_name: Optional[list[str]] = Field(default=None)
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
-    verbose: bool = Field(default=False)
     session_id: Optional[str] = Field(default=None)
     scope: Optional[Union[str, list[str]]] = Field(
         default=None,
@@ -75,7 +74,7 @@ def get_recall_router() -> APIRouter:
                 content={"error": "An error occurred while fetching recall history."},
             )
 
-    @router.post("", response_model=Union[List[SearchResult], List])
+    @router.post("", response_model=List[dict])
     @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
     async def recall(payload: RecallPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
@@ -93,7 +92,6 @@ def get_recall_router() -> APIRouter:
         - **node_name** (Optional[List[str]]): Filter to specific node sets
         - **top_k** (Optional[int]): Maximum results (default: 10)
         - **only_context** (bool): Return only the LLM context
-        - **verbose** (bool): Verbose output
 
         ## Error Codes
         - **409 Conflict**: Error during recall
@@ -121,7 +119,6 @@ def get_recall_router() -> APIRouter:
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
-                verbose=payload.verbose,
                 only_context=payload.only_context,
                 session_id=payload.session_id,
                 scope=payload.scope,

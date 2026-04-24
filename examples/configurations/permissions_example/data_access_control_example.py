@@ -1,15 +1,14 @@
-import os
-import cognee
-import pathlib
 import asyncio
+import os
+import pathlib
 
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
+import cognee
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.search.types import SearchType
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 # ENABLE PERMISSIONS FEATURE
 # Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
@@ -64,8 +63,7 @@ async def data_access_control_example():
         dataset_ids=[ai_dataset_id],
     )
     print("\nSearch results as user_1 on dataset owned by user_1:")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     # But user_1 cant read the dataset owned by user_2 (QUANTUM dataset)
     print("\nSearch result as user_1 on the dataset owned by user_2:")
@@ -111,8 +109,7 @@ async def data_access_control_example():
         user=user_1,
         dataset_ids=[quantum_dataset_id],
     )
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     # If we'd like for user_1 to add new documents to the QUANTUM dataset owned by user_2, user_1 would have to get
     # "write" access permission, which user_1 currently does not have

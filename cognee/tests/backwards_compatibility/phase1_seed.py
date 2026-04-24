@@ -55,8 +55,8 @@ async def main():
         print("ERROR: Phase 1 search returned no results. Seeding failed.")
         sys.exit(1)
 
-    print(f"Phase 1 completed successfully. Got {len(results)} result(s):")
-    for result in results:
+    print(f"Phase 1 completed successfully. Got {len(results.results)} result(s):")
+    for result in results.results:
         print(f"  - {result}")
 
 

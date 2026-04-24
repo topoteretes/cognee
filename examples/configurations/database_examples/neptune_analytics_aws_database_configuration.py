@@ -1,11 +1,13 @@
+import asyncio
 import base64
 import json
 import os
 import pathlib
-import asyncio
+
+from dotenv import load_dotenv
+
 import cognee
 from cognee.modules.search.types import SearchType
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -82,24 +84,21 @@ async def main():
         query_type=SearchType.GRAPH_COMPLETION, query_text="Neptune Analytics"
     )
     print("\n========Insights about Neptune Analytics========:")
-    for result in insights_results:
-        print(f"- {result}")
+    print(insights_results)
 
     # 2. Search for text chunks related to "graph database"
     chunks_results = await cognee.search(
         query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name]
     )
     print("\n========Chunks about graph database========:")
-    for result in chunks_results:
-        print(f"- {result}")
+    print(chunks_results)
 
     # 3. Get graph completion related to databases
     graph_completion_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text="database"
     )
     print("\n========Graph completion for databases========:")
-    for result in graph_completion_results:
-        print(f"- {result}")
+    print(graph_completion_results)
 
     # Clean up (optional)
     await cognee.prune.prune_data()

@@ -1,18 +1,21 @@
-import pathlib
 import os
+import pathlib
+
+import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
-from cognee.modules.users.methods import get_default_user
+from cognee.infrastructure.databases.relational import (
+    create_db_and_tables as create_relational_db_and_tables,
+)
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
-    create_db_and_tables as create_relational_db_and_tables,
 )
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
-from cognee.tasks.ingestion import migrate_relational_database
+from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.search.types import SearchType
-import cognee
+from cognee.modules.users.methods import get_default_user
+from cognee.tasks.ingestion import migrate_relational_database
 
 TEST_DATASET_NAME = "migration_test_dataset"
 
@@ -63,7 +66,9 @@ async def relational_db_migration():
     print("Search results:", search_results)
 
     # 2. Assert that the search results contain "AC/DC"
-    assert any("AC/DC" in r for r in search_results), "AC/DC not found in search results!"
+    assert any("AC/DC" in r.text for r in search_results.results), (
+        "AC/DC not found in search results!"
+    )
 
     migration_db_provider = migration_engine.engine.dialect.name
     if migration_db_provider == "postgresql":
@@ -226,7 +231,7 @@ async def test_schema_only_migration():
         query_type=cognee.SearchType.GRAPH_COMPLETION,
         top_k=30,
     )
-    assert any("11" in r for r in search_results), (
+    assert any("11" in r for r in search_results.results), (
         "Number of tables in the database reported in search_results is either None or not equal to 11"
     )
 
@@ -327,7 +332,7 @@ async def test_search_result_quality():
 
             import ast
 
-            lst = ast.literal_eval(search_results[0])  # converts string -> Python list
+            lst = ast.literal_eval(search_results.results[0].text)  # converts string -> Python list
             # Transfrom both lists to int for comparison, sorting and type consistency
             lst = sorted([int(x) for x in lst])
             invoice_ids = sorted([int(x) for x in invoice_ids])

@@ -1,12 +1,11 @@
 from uuid import UUID
-from typing import Optional, Union, List, Any
+from typing import Optional
 from datetime import datetime
 from pydantic import Field
 from fastapi import Depends, APIRouter, status
 from fastapi.responses import JSONResponse
-from fastapi.encoders import jsonable_encoder
 
-from cognee.modules.search.types import SearchType, SearchResult
+from cognee.modules.search.types import SearchType, SearchResponse
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.models import User
@@ -30,10 +29,9 @@ class SearchPayloadDTO(InDTO):
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(default=None, example=[])
+    node_name: Optional[list[str]] = Field(default=None)
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
-    verbose: bool = Field(default=False)
 
 
 def get_search_router() -> APIRouter:
@@ -47,7 +45,7 @@ def get_search_router() -> APIRouter:
 
     @router.get(
         "",
-        response_model=Union[List[SearchResult], List],
+        response_model=list[SearchHistoryItem],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -92,7 +90,7 @@ def get_search_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Union[List[SearchResult], List],
+        response_model=SearchResponse,
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -143,7 +141,6 @@ def get_search_router() -> APIRouter:
                 "node_name": payload.node_name,
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
-                "verbose": payload.verbose,
                 "cognee_version": cognee_version,
             },
         )
@@ -162,11 +159,10 @@ def get_search_router() -> APIRouter:
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
-                verbose=payload.verbose,
                 only_context=payload.only_context,
             )
 
-            return jsonable_encoder(results)
+            return results
         except PermissionDeniedError as e:
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,

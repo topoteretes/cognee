@@ -9,15 +9,15 @@ session history; e2e for session SDK (get_session, add_feedback, delete_feedback
 """
 
 import os
-import cognee
 import pathlib
+from collections import Counter
 
+import cognee
 from cognee.infrastructure.databases.cache import get_cache_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.search.types import SearchType
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
-from collections import Counter
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -110,8 +110,8 @@ async def main():
         session_id=session_id_1,
     )
 
-    assert isinstance(result2, list) and len(result2) > 0, (
-        f"Second query should return non-empty list, got: {result2!r}"
+    assert isinstance(result2.results, list) and len(result2.results) > 0, (
+        f"Second query should return non-empty list, got: {result2.results!r}"
     )
 
     history2 = await cache_engine.get_latest_qa(str(user.id), session_id_1, last_n=10)
@@ -130,7 +130,7 @@ async def main():
         session_id=session_id_2,
     )
 
-    assert isinstance(result3, list) and len(result3) > 0, (
+    assert isinstance(result3.results, list) and len(result3.results) > 0, (
         f"Different session should return non-empty list, got: {result3!r}"
     )
 
@@ -144,7 +144,7 @@ async def main():
         session_id=None,
     )
 
-    assert isinstance(result4, list) and len(result4) > 0, (
+    assert isinstance(result4.results, list) and len(result4.results) > 0, (
         f"Default session should return non-empty list, got: {result4!r}"
     )
 
@@ -160,7 +160,7 @@ async def main():
         session_id=session_id_rag,
     )
 
-    assert isinstance(result_rag, list) and len(result_rag) > 0, (
+    assert isinstance(result_rag.results, list) and len(result_rag.results) > 0, (
         f"RAG_COMPLETION should return non-empty list, got: {result_rag!r}"
     )
 
@@ -177,10 +177,9 @@ async def main():
         session_id=session_id_decomposition,
     )
 
-    assert isinstance(result_decomposition, list) and len(result_decomposition) > 0, (
-        "GRAPH_COMPLETION_DECOMPOSITION should return non-empty list, "
-        f"got: {result_decomposition!r}"
-    )
+    assert (
+        isinstance(result_decomposition.results, list) and len(result_decomposition.results) > 0
+    ), f"GRAPH_COMPLETION_DECOMPOSITION should return non-empty list, got: {result_decomposition!r}"
 
     history_decomposition = await cache_engine.get_latest_qa(
         str(user.id), session_id_decomposition, last_n=10
@@ -203,7 +202,8 @@ async def main():
     )
 
     assert (
-        isinstance(result_decomposition_combined, list) and len(result_decomposition_combined) > 0
+        isinstance(result_decomposition_combined.results, list)
+        and len(result_decomposition_combined.results) > 0
     ), (
         "GRAPH_COMPLETION_DECOMPOSITION combined mode should return non-empty list, "
         f"got: {result_decomposition_combined!r}"
@@ -230,7 +230,7 @@ async def main():
         session_id=session_id_cot,
     )
 
-    assert isinstance(result_cot, list) and len(result_cot) > 0, (
+    assert isinstance(result_cot.results, list) and len(result_cot.results) > 0, (
         f"GRAPH_COMPLETION_COT should return non-empty list, got: {result_cot!r}"
     )
 
@@ -247,7 +247,7 @@ async def main():
         session_id=session_id_ext,
     )
 
-    assert isinstance(result_ext, list) and len(result_ext) > 0, (
+    assert isinstance(result_ext.results, list) and len(result_ext.results) > 0, (
         f"GRAPH_COMPLETION_CONTEXT_EXTENSION should return non-empty list, got: {result_ext!r}"
     )
 
@@ -264,7 +264,7 @@ async def main():
         session_id=session_id_summary,
     )
 
-    assert isinstance(result_summary, list) and len(result_summary) > 0, (
+    assert isinstance(result_summary.results, list) and len(result_summary.results) > 0, (
         f"GRAPH_SUMMARY_COMPLETION should return non-empty list, got: {result_summary!r}"
     )
 
@@ -283,7 +283,7 @@ async def main():
         session_id=session_id_temporal,
     )
 
-    assert isinstance(result_temporal, list) and len(result_temporal) > 0, (
+    assert isinstance(result_temporal.results, list) and len(result_temporal.results) > 0, (
         f"TEMPORAL should return non-empty list, got: {result_temporal!r}"
     )
 
@@ -304,7 +304,7 @@ async def main():
         session_id=session_id_triplet,
     )
 
-    assert isinstance(result_triplet, list) and len(result_triplet) > 0, (
+    assert isinstance(result_triplet.results, list) and len(result_triplet.results) > 0, (
         f"TRIPLET_COMPLETION should return non-empty list, got: {result_triplet!r}"
     )
 

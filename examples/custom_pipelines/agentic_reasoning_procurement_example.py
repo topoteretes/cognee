@@ -1,15 +1,15 @@
-import os
-import logging
-import cognee
 import asyncio
+import logging
+import os
 
+from dotenv import load_dotenv
+
+import cognee
+from cognee.api.v1.search import SearchType
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from dotenv import load_dotenv
-from cognee.api.v1.search import SearchType
 from cognee.modules.engine.models import NodeSet
 from cognee.shared.logging_utils import setup_logging
-
 
 load_dotenv()
 
@@ -126,7 +126,7 @@ class ProcurementMemorySystem:
                 node_name=[category],
                 top_k=30,
             )
-            results[category] = category_results
+            results[category] = category_results.results
 
         return results
 
@@ -169,11 +169,7 @@ async def run_procurement_example():
         for q in questions:
             print(f"Question: \n{q}")
             results = await procurement_system.search_memory(q, search_categories=[category])
-            top_answer = (
-                results[category][0]["search_result"][0]
-                if backend_access_control_enabled()
-                else results[category][0]
-            )
+            top_answer = results[category][0].text
             print(f"Answer: \n{top_answer}\n")
             research_notes[category].append({"question": q, "answer": top_answer})
 

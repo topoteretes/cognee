@@ -1,4 +1,5 @@
 import asyncio
+
 import cognee
 
 
@@ -19,8 +20,7 @@ async def main():
 
     # Make sure you've already run cognee.cognify(...) so the graph has content
     answers = await cognee.search(query_text="What are the main themes in my data?")
-    for answer in answers:
-        print(answer)
+    print(answers)
 
 
 if __name__ == "__main__":

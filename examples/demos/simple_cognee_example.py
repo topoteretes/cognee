@@ -1,7 +1,8 @@
 import asyncio
+
 import cognee
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -29,8 +30,7 @@ async def main():
         query_type=SearchType.GRAPH_COMPLETION, query_text=query_text
     )
 
-    for result_text in search_results:
-        print(result_text)
+    print(search_results)
 
 
 if __name__ == "__main__":

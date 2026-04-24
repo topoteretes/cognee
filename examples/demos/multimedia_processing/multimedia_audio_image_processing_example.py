@@ -1,10 +1,10 @@
-import os
 import asyncio
+import os
 import pathlib
-from cognee.shared.logging_utils import setup_logging, ERROR
 
 import cognee
 from cognee.api.v1.search import SearchType
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -41,8 +41,7 @@ async def main():
     )
 
     # Display search results
-    for result_text in search_results:
-        print(result_text)
+    print(search_results)
 
 
 if __name__ == "__main__":

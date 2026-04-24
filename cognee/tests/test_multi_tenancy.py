@@ -1,19 +1,14 @@
-import cognee
 import pytest
 
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.tenants.methods import select_tenant
-from cognee.modules.users.methods import get_user
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.users.roles.methods import add_user_to_role
-from cognee.modules.users.roles.methods import create_role
-from cognee.modules.users.tenants.methods import create_tenant
-from cognee.modules.users.tenants.methods import add_user_to_tenant
+import cognee
 from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
+from cognee.modules.search.types import SearchType
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import create_user, get_user
+from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.users.roles.methods import add_user_to_role, create_role
+from cognee.modules.users.tenants.methods import add_user_to_tenant, create_tenant, select_tenant
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 logger = get_logger()
 
@@ -113,8 +108,7 @@ async def main():
         user=user_2,
         dataset_ids=[ai_cognee_lab_dataset_id],
     )
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     # Let's test changing tenants
     tenant_id = await create_tenant("CogneeLab2", user_1.id)
@@ -131,14 +125,14 @@ async def main():
     )
 
     # Assert only AI_COGNEE_LAB dataset from CogneeLab2 tenant is visible as the currently selected tenant
-    assert len(search_results) == 1, (
+    assert len(search_results.results) == 1, (
         f"Search results must only contain one dataset from current tenant: {search_results}"
     )
-    assert search_results[0]["dataset_name"] == "AI_COGNEE_LAB", (
-        f"Dict must contain dataset name 'AI_COGNEE_LAB': {search_results[0]}"
+    assert search_results.results[0].dataset_name == "AI_COGNEE_LAB", (
+        f"Dict must contain dataset name 'AI_COGNEE_LAB': {search_results.results[0]}"
     )
-    assert search_results[0]["dataset_tenant_id"] == user_1.tenant_id, (
-        f"Dataset tenant_id must be same as user_1 tenant_id: {search_results[0]}"
+    assert search_results.results[0].dataset_tenant_id == str(user_1.tenant_id), (
+        f"Dataset tenant_id must be same as user_1 tenant_id: {search_results.results[0]}"
     )
 
     # Switch back to no tenant (default tenant)
@@ -150,11 +144,11 @@ async def main():
         query_text="What is in the document?",
         user=user_1,
     )
-    assert len(search_results) == 1, (
+    assert len(search_results.results) == 1, (
         f"Search results must only contain one dataset from default tenant: {search_results}"
     )
-    assert search_results[0]["dataset_name"] == "AI", (
-        f"Dict must contain dataset name 'AI': {search_results[0]}"
+    assert search_results.results[0].dataset_name == "AI", (
+        f"Dict must contain dataset name 'AI': {search_results.results[0]}"
     )
 
 

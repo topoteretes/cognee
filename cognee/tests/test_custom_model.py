@@ -1,11 +1,12 @@
 import os
 import pathlib
+
 import cognee
+from cognee.low_level import DataPoint
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.low_level import DataPoint
 
 logger = get_logger()
 
@@ -68,28 +69,26 @@ async def main():
 
     # Completion query that uses graph data to form context.
     completion = await cognee.search("What is python?", SearchType.GRAPH_COMPLETION)
-    assert len(completion) != 0, "Graph completion search didn't return any result."
+    assert len(completion.results) != 0, "Graph completion search didn't return any result."
     print("Graph completion result is:")
     print(completion)
 
     # Completion query that uses document chunks to form context.
     completion = await cognee.search("What is Python?", SearchType.RAG_COMPLETION)
-    assert len(completion) != 0, "Completion search didn't return any result."
+    assert len(completion.results) != 0, "Completion search didn't return any result."
     print("Completion result is:")
     print(completion)
 
     # Query all summaries related to query.
     summaries = await cognee.search("Python", SearchType.SUMMARIES)
-    assert len(summaries) != 0, "Summaries search didn't return any results."
+    assert len(summaries.results) != 0, "Summaries search didn't return any results."
     print("Summary results are:")
-    for summary in summaries:
-        print(summary)
+    print(summaries)
 
     chunks = await cognee.search("Python", SearchType.CHUNKS)
-    assert len(chunks) != 0, "Chunks search didn't return any results."
+    assert len(chunks.results) != 0, "Chunks search didn't return any results."
     print("Chunk results are:")
-    for chunk in chunks:
-        print(chunk)
+    print(chunks)
 
     user = await get_default_user()
     history = await get_history(user.id)

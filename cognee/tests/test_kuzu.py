@@ -1,15 +1,15 @@
 import os
-import shutil
-import cognee
 import pathlib
+import shutil
 
+import cognee
 from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -86,26 +86,23 @@ async def main():
         search_results = await cognee.search(
             query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
         )
-        assert len(search_results) != 0, "The search results list is empty."
+        assert len(search_results.results) != 0, "The search results list is empty."
         print("\n\nExtracted sentences are:\n")
-        for result in search_results:
-            print(f"{result}\n")
+        print(f"{search_results}\n")
 
         search_results = await cognee.search(
             query_type=SearchType.CHUNKS, query_text=random_node_name
         )
-        assert len(search_results) != 0, "The search results list is empty."
+        assert len(search_results.results) != 0, "The search results list is empty."
         print("\n\nExtracted chunks are:\n")
-        for result in search_results:
-            print(f"{result}\n")
+        print(f"{search_results}\n")
 
         search_results = await cognee.search(
             query_type=SearchType.SUMMARIES, query_text=random_node_name
         )
-        assert len(search_results) != 0, "Query related summaries don't exist."
+        assert len(search_results.results) != 0, "Query related summaries don't exist."
         print("\nExtracted summaries are:\n")
-        for result in search_results:
-            print(f"{result}\n")
+        print(f"{search_results}\n")
 
         user = await get_default_user()
         history = await get_history(user.id)

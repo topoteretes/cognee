@@ -1,16 +1,11 @@
 import cognee
-from cognee.modules.users.tenants.methods import select_tenant
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.users.roles.methods import add_user_to_role
-from cognee.modules.users.roles.methods import create_role
-from cognee.modules.users.tenants.methods import create_tenant
-from cognee.modules.users.tenants.methods import add_user_to_tenant
 from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
-from cognee.modules.users.methods import get_user
+from cognee.modules.search.types import SearchType
+from cognee.modules.users.methods import create_user, get_user
+from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.users.roles.methods import add_user_to_role, create_role
+from cognee.modules.users.tenants.methods import add_user_to_tenant, create_tenant, select_tenant
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 logger = get_logger()
 
@@ -87,8 +82,7 @@ async def tenant_and_role_setup_example():
         user=user_2,
         dataset_ids=[quantum_cognee_lab_dataset_id],
     )
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
 
 async def main():

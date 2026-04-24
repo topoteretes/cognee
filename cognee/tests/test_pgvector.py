@@ -1,19 +1,22 @@
 import os
 import pathlib
+
 import cognee
 from cognee.infrastructure.files.storage import get_storage_config
-from cognee.modules.search.operations import get_history
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.models import Data
+from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location, dataset_1_id, dataset_2_id):
-    from sqlalchemy import select
     import hashlib
+
+    from sqlalchemy import select
+
     from cognee.infrastructure.databases.relational import get_relational_engine
 
     engine = get_relational_engine()
@@ -294,34 +297,31 @@ async def main():
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
     )
-    assert len(search_results) != 0, "The search results list is empty."
+    assert len(search_results.results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     search_results = await cognee.search(
         query_type=SearchType.CHUNKS, query_text=random_node_name, datasets=[dataset_name_2]
     )
-    assert len(search_results) != 0, "The search results list is empty."
+    assert len(search_results.results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     graph_completion = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=random_node_name,
     )
-    assert len(graph_completion) != 0, "Completion result is empty."
+    assert len(graph_completion.results) != 0, "Completion result is empty."
     print("Completion result is:")
     print(graph_completion)
 
     search_results = await cognee.search(
         query_type=SearchType.SUMMARIES, query_text=random_node_name
     )
-    assert len(search_results) != 0, "Query related summaries don't exist."
+    assert len(search_results.results) != 0, "Query related summaries don't exist."
     print("\n\nExtracted summaries are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     user = await get_default_user()
     history = await get_history(user.id)

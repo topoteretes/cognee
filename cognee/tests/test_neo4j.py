@@ -1,13 +1,14 @@
 import os
 import pathlib
+
 import cognee
 from cognee.infrastructure.files.storage import get_storage_config
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.modules.engine.models import NodeSet
 
 logger = get_logger()
 
@@ -77,24 +78,21 @@ async def main():
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
     )
-    assert len(search_results) != 0, "The search results list is empty."
+    assert len(search_results.results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     search_results = await cognee.search(query_type=SearchType.CHUNKS, query_text=random_node_name)
-    assert len(search_results) != 0, "The search results list is empty."
+    assert len(search_results.results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     search_results = await cognee.search(
         query_type=SearchType.SUMMARIES, query_text=random_node_name
     )
-    assert len(search_results) != 0, "Query related summaries don't exist."
+    assert len(search_results.results) != 0, "Query related summaries don't exist."
     print("\nExtracted results are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     # NOTE: Due to the test failing often on weak LLM models we've removed this test for now
     # search_results = await cognee.search(

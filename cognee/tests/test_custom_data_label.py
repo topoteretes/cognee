@@ -1,7 +1,8 @@
 import asyncio
+
 import cognee
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 async def main():
@@ -34,8 +35,7 @@ async def main():
 
     print("Search results:")
     # Display results
-    for result_text in search_results:
-        print(result_text)
+    print(search_results)
 
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 

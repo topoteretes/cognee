@@ -6,14 +6,14 @@ DB_USERNAME=cognee, DB_PASSWORD=cognee, DB_NAME=cognee_db.
 """
 
 import os
+
 import pytest
 import pytest_asyncio
 
 from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
-from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
-
+from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 
 # -- Session-scoped event loop so async engines stay on a single loop.
 
@@ -257,7 +257,7 @@ async def test_combined_write_content_integrity(adapter):
     """Verify that data written via combined methods is stored correctly
     in both graph and vector tables, with matching IDs and intact contents.
     """
-    from uuid import uuid5, NAMESPACE_OID
+    from uuid import NAMESPACE_OID, uuid5
 
     # Generate stable UUIDs from names (pgvector tables require UUID IDs)
     id1 = str(uuid5(NAMESPACE_OID, "Quantum Computing"))
@@ -342,7 +342,7 @@ async def test_hybrid_payload_matches_separate_path(adapter):
     """Vector payloads from add_nodes_with_vectors + add_edges_with_vectors
     must be identical to what the separate add_nodes + index_data_points
     and add_edges + index_data_points paths produce."""
-    from uuid import uuid5, NAMESPACE_OID
+    from uuid import NAMESPACE_OID, uuid5
 
     # Build two parallel graphs with the same structure but different IDs
     def make_ids(prefix):

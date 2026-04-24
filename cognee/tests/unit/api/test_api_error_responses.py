@@ -204,15 +204,28 @@ class TestSearchEndpoint:
 
     def test_search_success_returns_200(self, client):
         import cognee.api.v1.search as search_pkg
+        from cognee.modules.search.types import (
+            SearchResponse,
+            SearchResultItem,
+            SearchResultKind,
+            SearchType,
+        )
 
         search_pkg.search = AsyncMock(
-            return_value=[
-                {
-                    "search_result": "Cognee is an AI memory platform.",
-                    "dataset_id": str(MOCK_DATASET_ID),
-                    "dataset_name": "test_dataset",
-                }
-            ]
+            return_value=SearchResponse(
+                query="What is Cognee?",
+                search_type=SearchType.GRAPH_COMPLETION,
+                results=[
+                    SearchResultItem(
+                        kind=SearchResultKind.GRAPH_COMPLETION,
+                        search_type=SearchType.GRAPH_COMPLETION,
+                        text="Cognee is an AI memory platform.",
+                        dataset_id=str(MOCK_DATASET_ID),
+                        dataset_name="test_dataset",
+                    )
+                ],
+                total=1,
+            )
         )
 
         resp = client.post(
@@ -224,8 +237,8 @@ class TestSearchEndpoint:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body) == 1
-        assert "Cognee" in body[0]["search_result"]
+        assert body["total"] == 1
+        assert "Cognee" in body["results"][0]["text"]
 
     def test_search_internal_error_returns_500(self, client):
         import cognee.api.v1.search as search_pkg
