@@ -1,4 +1,4 @@
-import { CogneeIcon } from "@/ui/Icons";
+import { CogneeIcon } from "@/ui/icons";
 import { Flex, Title } from "@mantine/core";
 import Link from "next/link";
 

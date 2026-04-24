@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import { useFilter } from "@/ui/Layout/FilterContext";
+import { useFilter } from "@/ui/layout/FilterContext";
 import { listSessions, getSessionDetail, type SessionRow, type SessionDetail, type TraceEntry } from "@/modules/sessions/getSessions";
 
 interface PipelineRun {
