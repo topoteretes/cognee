@@ -1,28 +1,30 @@
+import argparse
+import asyncio
+import importlib.util
 import json
 import os
 import re
-import sys
-import argparse
-import asyncio
 import subprocess
+import sys
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
-from cognee.modules.data.methods.get_last_added_data import get_last_added_data
-from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
-from cognee.shared.usage_logger import log_usage
-import importlib.util
-from contextlib import redirect_stdout
+
 import mcp.types as types
+import uvicorn
 from mcp.server import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from cognee.modules.storage.utils import JSONEncoder
-from starlette.responses import JSONResponse
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-import uvicorn
+from starlette.responses import JSONResponse
+
+from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
+from cognee.modules.data.methods.get_last_added_data import get_last_added_data
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_log_file_location, get_logger, setup_logging
+from cognee.shared.usage_logger import log_usage
 
 try:
     from .cognee_client import CogneeClient
@@ -635,7 +637,9 @@ async def search(
             items = envelope.get("results") or []
             items = strip_vectors(items)
 
-            upper_type = search_type.upper()
+            # If the input search type was "FEELING_LUCKY" the output search type
+            # could be "GRAPH_COMPLETION" or "RAG_COMPLETION" depending on the results
+            upper_type = str(envelope.get("search_type") or search_type)
             if upper_type in ("GRAPH_COMPLETION", "RAG_COMPLETION"):
                 lines = []
                 for item in items:
@@ -703,8 +707,8 @@ async def list_data(dataset_id: str = None) -> list:
                         )
                     ]
 
-                from cognee.modules.users.methods import get_default_user
                 from cognee.modules.data.methods import get_dataset, get_dataset_data
+                from cognee.modules.users.methods import get_default_user
 
                 logger.info(f"Listing data for dataset: {dataset_id}")
                 dataset_uuid = UUID(dataset_id)
@@ -817,9 +821,9 @@ async def delete_dataset(dataset_name: str) -> list:
                     )
                 ]
 
-            from cognee.modules.users.methods import get_default_user
             from cognee.modules.data.methods import delete_dataset as _delete_dataset
             from cognee.modules.data.methods import get_datasets
+            from cognee.modules.users.methods import get_default_user
 
             user = await get_default_user()
             datasets = await get_datasets(user.id)
