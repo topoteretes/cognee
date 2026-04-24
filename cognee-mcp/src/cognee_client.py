@@ -39,7 +39,6 @@ class CogneeClient:
         self.tenant_id: Optional[str] = None
         if self.api_url:
             import re
-
             match = re.search(r"tenant-([0-9a-f-]{36})", self.api_url)
             if match:
                 self.tenant_id = match.group(1)
@@ -377,10 +376,7 @@ class CogneeClient:
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             response = await self.client.post(
-                endpoint,
-                files=files,
-                data=form_data,
-                headers=self._get_headers(include_content_type=False),
+                endpoint, files=files, data=form_data, headers=self._get_headers(include_content_type=False)
             )
             response.raise_for_status()
             return response.json()
