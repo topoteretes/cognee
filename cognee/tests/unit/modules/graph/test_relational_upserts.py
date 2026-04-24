@@ -1,3 +1,4 @@
+from importlib import import_module
 from uuid import uuid4
 from unittest.mock import AsyncMock, patch
 
@@ -7,6 +8,9 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.modules.graph.methods.upsert_edges import upsert_edges
 from cognee.modules.graph.methods.upsert_nodes import upsert_nodes
+
+upsert_nodes_module = import_module("cognee.modules.graph.methods.upsert_nodes")
+upsert_edges_module = import_module("cognee.modules.graph.methods.upsert_edges")
 
 
 class RelationalPoint(DataPoint):
@@ -68,7 +72,7 @@ async def test_upsert_nodes_sanitizes_strings_before_insert():
     session = AsyncMock()
     statement = FakeInsertStatement()
 
-    with patch("cognee.modules.graph.methods.upsert_nodes.insert", return_value=statement):
+    with patch.object(upsert_nodes_module, "insert", return_value=statement):
         await upsert_nodes(
             [point],
             tenant_id=uuid4(),
@@ -106,7 +110,7 @@ async def test_upsert_edges_sanitizes_strings_before_insert():
         },
     )
 
-    with patch("cognee.modules.graph.methods.upsert_edges.insert", return_value=statement):
+    with patch.object(upsert_edges_module, "insert", return_value=statement):
         await upsert_edges(
             [edge],
             tenant_id=uuid4(),
@@ -144,7 +148,7 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
         },
     )
 
-    with patch("cognee.modules.graph.methods.upsert_edges.insert", return_value=statement):
+    with patch.object(upsert_edges_module, "insert", return_value=statement):
         await upsert_edges(
             [edge],
             tenant_id=uuid4(),
