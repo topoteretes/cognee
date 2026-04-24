@@ -46,6 +46,7 @@ from cognee.run_migrations import run_startup_migrations
 # V2 memory-oriented API
 # ---------------------------------------------------------------------------
 from .api.v1 import remember, RememberResult, recall, improve, forget, serve, disconnect, visualize
+from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
 
 # Tracing / Observability
 from cognee.modules.observability.trace_context import (
@@ -58,3 +59,6 @@ from cognee.modules.observability.trace_context import (
 
 # Agent memory
 from cognee.modules.agent_memory import agent_memory
+
+# Relational DB models
+from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord

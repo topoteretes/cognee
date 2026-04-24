@@ -7,7 +7,7 @@ import diskcache as dc
 from pydantic import ValidationError
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
-from cognee.infrastructure.databases.cache.models import SessionQAEntry
+from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions.exceptions import (
     CacheConnectionError,
     SessionQAEntryValidationError,
@@ -20,7 +20,10 @@ logger = get_logger("FSCacheAdapter")
 
 
 class FSCacheAdapter(CacheDBInterface):
+    """Filesystem-backed cache adapter for session QA and agent-trace storage."""
+
     def __init__(self, session_ttl_seconds: int | None = 604800):
+        """Initialize the disk-backed cache and eagerly evict expired entries."""
         default_key = "sessions_db"
 
         storage_config = get_storage_config()
@@ -36,7 +39,13 @@ class FSCacheAdapter(CacheDBInterface):
 
     @staticmethod
     def _session_key(user_id: str, session_id: str) -> str:
+        """Build the storage key for QA session entries."""
         return f"agent_sessions:{user_id}:{session_id}"
+
+    @staticmethod
+    def _agent_trace_key(user_id: str, session_id: str) -> str:
+        """Build the storage key for agent trace entries."""
+        return f"agent_traces:{user_id}:{session_id}"
 
     @staticmethod
     def _build_qa_entry_dump(
@@ -49,6 +58,7 @@ class FSCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
     ) -> dict:
+        """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
             time=datetime.utcnow().isoformat(),
             question=question,
@@ -62,7 +72,34 @@ class FSCacheAdapter(CacheDBInterface):
         )
         return entry.model_dump()
 
+    @staticmethod
+    def _build_agent_trace_entry_dump(
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> dict:
+        """Serialize one agent-trace step into the normalized cache payload shape."""
+        entry = SessionAgentTraceEntry(
+            trace_id=trace_id,
+            origin_function=origin_function,
+            status=status,
+            memory_query=memory_query,
+            memory_context=memory_context,
+            method_params=method_params or {},
+            method_return_value=method_return_value,
+            error_message=error_message,
+            session_feedback=session_feedback,
+        )
+        return entry.model_dump()
+
     def _load_entries(self, session_key: str) -> list:
+        """Load and deserialize all entries stored under the given cache key."""
         # Evict expired keys so stale sessions don't linger on disk
         self.cache.expire()
         value = self.cache.get(session_key)
@@ -71,6 +108,7 @@ class FSCacheAdapter(CacheDBInterface):
         return json.loads(value)
 
     def _save_entries(self, session_key: str, entries: list) -> None:
+        """Persist the full entry list or delete the key when it becomes empty."""
         if entries:
             expire = (
                 self.session_ttl_seconds
@@ -92,6 +130,7 @@ class FSCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
     ) -> dict:
+        """Merge partial QA updates into an existing entry payload."""
         merged = {**entry}
         if question is not None:
             merged["question"] = question
@@ -116,10 +155,12 @@ class FSCacheAdapter(CacheDBInterface):
 
     @staticmethod
     def _merge_entry_clear_feedback(entry: dict) -> dict:
+        """Return a copy of the entry with feedback fields cleared."""
         return {**entry, "feedback_text": None, "feedback_score": None}
 
     @staticmethod
     def _validate_entry_dict(entry_dict: dict) -> dict:
+        """Validate one serialized QA entry and return its normalized dump."""
         try:
             return SessionQAEntry.model_validate(entry_dict).model_dump()
         except ValidationError as e:
@@ -129,6 +170,7 @@ class FSCacheAdapter(CacheDBInterface):
 
     @staticmethod
     def _find_index_by_qa_id(entries: list, qa_id: str) -> int | None:
+        """Return the list index for a QA entry id, or None when absent."""
         for i, entry in enumerate(entries):
             if entry.get("qa_id") == qa_id:
                 return i
@@ -159,6 +201,7 @@ class FSCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
     ):
+        """Append one QA entry to the filesystem-backed session history."""
         try:
             session_key = self._session_key(user_id, session_id)
             qa_entry = self._build_qa_entry_dump(
@@ -171,15 +214,17 @@ class FSCacheAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
             )
-            entries = self._load_entries(session_key)
-            entries.append(qa_entry)
-            self._save_entries(session_key, entries)
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                entries.append(qa_entry)
+                self._save_entries(session_key, entries)
         except Exception as e:
             error_msg = f"Unexpected error while adding Q&A to diskcache: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
     async def get_latest_qa_entries(self, user_id: str, session_id: str, last_n: int = 5):
+        """Return the most recent QA entries stored for the given session."""
         session_key = self._session_key(user_id, session_id)
         entries = self._load_entries(session_key)
         if not entries:
@@ -187,6 +232,7 @@ class FSCacheAdapter(CacheDBInterface):
         return entries[-last_n:] if len(entries) > last_n else entries
 
     async def get_all_qa_entries(self, user_id: str, session_id: str):
+        """Return all QA entries stored for the given session."""
         session_key = self._session_key(user_id, session_id)
         return self._load_entries(session_key)
 
@@ -210,23 +256,24 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            merged = self._merge_entry_update(
-                entries[idx],
-                question,
-                context,
-                answer,
-                feedback_text,
-                feedback_score,
-                used_graph_element_ids=used_graph_element_ids,
-                memify_metadata=memify_metadata,
-            )
-            entries[idx] = self._validate_entry_dict(merged)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                merged = self._merge_entry_update(
+                    entries[idx],
+                    question,
+                    context,
+                    answer,
+                    feedback_text,
+                    feedback_score,
+                    used_graph_element_ids=used_graph_element_ids,
+                    memify_metadata=memify_metadata,
+                )
+                entries[idx] = self._validate_entry_dict(merged)
+                self._save_entries(session_key, entries)
+                return True
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
@@ -240,14 +287,15 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            merged = self._merge_entry_clear_feedback(entries[idx])
-            entries[idx] = self._validate_entry_dict(merged)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                merged = self._merge_entry_clear_feedback(entries[idx])
+                entries[idx] = self._validate_entry_dict(merged)
+                self._save_entries(session_key, entries)
+                return True
         except SessionQAEntryValidationError:
             raise
         except Exception as e:
@@ -262,13 +310,14 @@ class FSCacheAdapter(CacheDBInterface):
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            entries = self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            entries.pop(idx)
-            self._save_entries(session_key, entries)
-            return True
+            with self.cache.transact():
+                entries = self._load_entries(session_key)
+                idx = self._find_index_by_qa_id(entries, qa_id)
+                if idx is None:
+                    return False
+                entries.pop(idx)
+                self._save_entries(session_key, entries)
+                return True
         except Exception as e:
             error_msg = f"Unexpected error while deleting Q&A from diskcache: {str(e)}"
             logger.error(error_msg)
@@ -276,20 +325,83 @@ class FSCacheAdapter(CacheDBInterface):
 
     async def delete_session(self, user_id: str, session_id: str) -> bool:
         """
-        Delete the entire session and all its QA entries.
-        Returns True if deleted, False if session did not exist.
+        Delete the entire session and all its session-scoped artifacts.
+        Returns True if any session data existed, False otherwise.
         """
         try:
             session_key = self._session_key(user_id, session_id)
-            existed = self.cache.get(session_key) is not None
-            if existed:
+            trace_key = self._agent_trace_key(user_id, session_id)
+            qa_existed = self.cache.get(session_key) is not None
+            trace_existed = self.cache.get(trace_key) is not None
+            if qa_existed:
                 self.cache.delete(session_key)
-            return existed
+            if trace_existed:
+                self.cache.delete(trace_key)
+            return qa_existed or trace_existed
 
         except Exception as e:
             error_msg = f"Unexpected error while deleting session from diskcache: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
+
+    async def append_agent_trace_step(
+        self,
+        user_id: str,
+        session_id: str,
+        trace_id: str,
+        origin_function: str,
+        status: str,
+        memory_query: str = "",
+        memory_context: str = "",
+        method_params: dict | None = None,
+        method_return_value=None,
+        error_message: str = "",
+        session_feedback: str = "",
+    ) -> None:
+        """Append one trace step to the stored trace list for this session."""
+        try:
+            trace_key = self._agent_trace_key(user_id, session_id)
+            trace_entry = self._build_agent_trace_entry_dump(
+                trace_id=trace_id,
+                origin_function=origin_function,
+                status=status,
+                memory_query=memory_query,
+                memory_context=memory_context,
+                method_params=method_params,
+                method_return_value=method_return_value,
+                error_message=error_message,
+                session_feedback=session_feedback,
+            )
+            with self.cache.transact():
+                entries = self._load_entries(trace_key)
+                entries.append(trace_entry)
+                self._save_entries(trace_key, entries)
+        except Exception as e:
+            error_msg = f"Unexpected error while appending agent trace step to diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def get_agent_trace_session(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[dict]:
+        """Retrieve stored trace steps for the given session."""
+        trace_key = self._agent_trace_key(user_id, session_id)
+        entries = self._load_entries(trace_key)
+        if last_n is not None:
+            return entries[-last_n:]
+        return entries
+
+    async def get_agent_trace_feedback(
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
+        """Retrieve ordered per-step feedback for the given trace session."""
+        entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
+        return [entry.get("session_feedback", "") for entry in entries]
+
+    async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
+        """Return the number of stored trace steps for the given session."""
+        trace_key = self._agent_trace_key(user_id, session_id)
+        return len(self._load_entries(trace_key))
 
     async def prune(self) -> None:
         """
@@ -327,6 +439,7 @@ class FSCacheAdapter(CacheDBInterface):
         return []
 
     async def close(self):
+        """Flush diskcache expirations and close the underlying cache handle."""
         if self.cache is not None:
             self.cache.expire()
             self.cache.close()

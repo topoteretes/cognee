@@ -35,8 +35,19 @@ class CogneeClient:
         self.api_token = api_token
         self.use_api = bool(api_url)
 
+        # Extract tenant ID from tenant URL pattern: tenant-<uuid>.*.cognee.ai
+        self.tenant_id: Optional[str] = None
+        if self.api_url:
+            import re
+
+            match = re.search(r"tenant-([0-9a-f-]{36})", self.api_url)
+            if match:
+                self.tenant_id = match.group(1)
+
         if self.use_api:
             logger.info(f"Cognee client initialized in API mode: {self.api_url}")
+            if self.tenant_id:
+                logger.info(f"Tenant ID extracted from URL: {self.tenant_id}")
             self.client = httpx.AsyncClient(timeout=300.0)  # 5 minute timeout for long operations
         else:
             logger.info("Cognee client initialized in direct mode")
@@ -45,11 +56,21 @@ class CogneeClient:
 
             self.cognee = _cognee
 
-    def _get_headers(self) -> Dict[str, str]:
-        """Get headers for API requests."""
-        headers = {"Content-Type": "application/json"}
+    def _get_headers(self, include_content_type: bool = True) -> Dict[str, str]:
+        """Get headers for API requests.
+
+        Uses X-Api-Key + X-Tenant-Id for tenant APIs (cloud),
+        falls back to Bearer token for local/self-hosted backends.
+        """
+        headers: Dict[str, str] = {}
+        if include_content_type:
+            headers["Content-Type"] = "application/json"
         if self.api_token:
-            headers["Authorization"] = f"Bearer {self.api_token}"
+            if self.tenant_id:
+                headers["X-Api-Key"] = self.api_token
+                headers["X-Tenant-Id"] = self.tenant_id
+            else:
+                headers["Authorization"] = f"Bearer {self.api_token}"
         return headers
 
     async def add(
@@ -86,7 +107,7 @@ class CogneeClient:
                 endpoint,
                 files=files,
                 data=form_data,
-                headers={"Authorization": f"Bearer {self.api_token}"} if self.api_token else {},
+                headers=self._get_headers(include_content_type=False),
             )
             response.raise_for_status()
             return response.json()
@@ -355,9 +376,11 @@ class CogneeClient:
             form_data = {"datasetName": dataset_name}
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
-            headers = {"Authorization": f"Bearer {self.api_token}"} if self.api_token else {}
             response = await self.client.post(
-                endpoint, files=files, data=form_data, headers=headers
+                endpoint,
+                files=files,
+                data=form_data,
+                headers=self._get_headers(include_content_type=False),
             )
             response.raise_for_status()
             return response.json()

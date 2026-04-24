@@ -64,6 +64,7 @@ export default function ConnectionsPage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [shareDatasetId, setShareDatasetId] = useState<string | null>(null);
+  const [sharedDatasetIds, setSharedDatasetIds] = useState<Record<string, Set<string>>>({});
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
@@ -74,7 +75,6 @@ export default function ConnectionsPage() {
       const agentData = Array.isArray(a) ? a : [];
       setAgents(agentData);
       setDatasets(d);
-      // Auto-select first agent
       const firstAgent = agentData.find((x: Agent) => x.is_agent);
       if (firstAgent) setSelectedAgentId(firstAgent.id);
     }).finally(() => setLoading(false));
@@ -83,9 +83,10 @@ export default function ConnectionsPage() {
   const agentUsers = agents.filter((a) => a.is_agent);
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
 
-  // Agent's datasets (owned by agent)
+  // Agent's datasets (owned by agent OR shared with agent)
+  const agentSharedIds = selectedAgent ? (sharedDatasetIds[selectedAgent.id] || new Set<string>()) : new Set<string>();
   const agentDatasets = selectedAgent
-    ? datasets.filter((d) => d.ownerId === selectedAgent.id)
+    ? datasets.filter((d) => d.ownerId === selectedAgent.id || agentSharedIds.has(d.id))
     : [];
 
   // My datasets (owned by default user)
@@ -102,6 +103,14 @@ export default function ConnectionsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify([datasetId]),
+      });
+      // Track the shared dataset so it shows immediately in the agent's table
+      setSharedDatasetIds((prev) => {
+        const next = { ...prev };
+        const existing = new Set(prev[principalId] || []);
+        existing.add(datasetId);
+        next[principalId] = existing;
+        return next;
       });
     } catch (err) {
       console.error("Share failed:", err);
@@ -241,7 +250,7 @@ export default function ConnectionsPage() {
                     className="cursor-pointer hover:bg-cognee-purple-hover"
                     style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500 }}
                   >
-                    + Add dataset
+                    Share dataset
                   </button>
                 </div>
 
@@ -255,20 +264,23 @@ export default function ConnectionsPage() {
                   </div>
                   {agentDatasets.length === 0 ? (
                     <div style={{ padding: "24px 20px", textAlign: "center" }}>
-                      <span style={{ fontSize: 13, color: "#A1A1AA" }}>No datasets. Click &quot;+ Add dataset&quot; to share one.</span>
+                      <span style={{ fontSize: 13, color: "#A1A1AA" }}>No datasets shared yet. Click &quot;Share dataset&quot; to grant access.</span>
                     </div>
                   ) : (
-                    agentDatasets.map((d, i) => (
+                    agentDatasets.map((d, i) => {
+                      const isOwned = selectedAgent && d.ownerId === selectedAgent.id;
+                      return (
                       <div key={d.id} style={{ display: "flex", alignItems: "center", padding: "14px 20px", borderBottom: i < agentDatasets.length - 1 ? "1px solid #F4F4F5" : "none" }}>
                         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
                           <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E", flexShrink: 0 }} />
                           <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{d.name}</span>
                         </div>
-                        <span style={{ width: 100, fontSize: 13, color: "#3F3F46", flexShrink: 0 }}>Agent</span>
-                        <span style={{ width: 100, fontSize: 13, color: "#3F3F46", flexShrink: 0 }}>Read & Write</span>
+                        <span style={{ width: 100, fontSize: 13, color: "#3F3F46", flexShrink: 0 }}>{isOwned ? "Agent" : "Shared"}</span>
+                        <span style={{ width: 100, fontSize: 13, color: "#3F3F46", flexShrink: 0 }}>{isOwned ? "Read & Write" : "Read"}</span>
                         <span style={{ width: 100, fontSize: 13, color: "#22C55E", fontWeight: 500, flexShrink: 0 }}>Indexed</span>
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </>

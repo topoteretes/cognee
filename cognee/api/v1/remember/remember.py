@@ -12,6 +12,16 @@ from typing_extensions import TypedDict
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.memory import (
+    MemoryEntry,
+    QAEntry,
+    TraceEntry,
+    FeedbackEntry,
+)
+from cognee.memory.entries import MEMORY_ENTRY_TYPES
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
 from cognee.modules.observability import (
     new_span,
     COGNEE_DATASET_NAME,
@@ -23,25 +33,6 @@ from cognee.modules.observability import (
 )
 
 logger = get_logger("remember")
-
-_migrations_done = False
-
-
-async def _ensure_migrations_run():
-    """Run vector migrations once on the first local SDK call.
-
-    Idempotent — subsequent calls are no-ops. Failures propagate
-    to the caller so schema issues surface immediately rather than
-    causing cryptic Rust panics on later searches.
-    """
-    global _migrations_done
-    if _migrations_done:
-        return
-    _migrations_done = True
-
-    from cognee.run_migrations import run_vector_migrations
-
-    await run_vector_migrations()
 
 
 class RememberKwargs(TypedDict, total=False):
@@ -111,8 +102,17 @@ def _data_to_text(data) -> str:
     return f"[{type(data).__name__}]"
 
 
+_SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
+
+
 async def _add_to_session(session_id: str, data, user):
-    """Add a Q&A entry to the session cache."""
+    """Add a Q&A entry to the session cache.
+
+    Sessions store chat-shaped content (prompts, assistant answers,
+    Q&A turns). File-upload data coerces to placeholder strings like
+    ``[UploadFile]`` / ``[file: name]`` — those are useless in the
+    session cache and pollute recall results, so they're skipped.
+    """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
     sm = get_session_manager()
@@ -125,6 +125,15 @@ async def _add_to_session(session_id: str, data, user):
         return
 
     text = _data_to_text(data)
+    stripped = text.strip()
+    if not stripped:
+        return
+    if any(stripped.startswith(prefix) for prefix in _SESSION_PLACEHOLDER_PREFIXES):
+        logger.debug(
+            "remember: skipping session write for placeholder-only payload (%.40s…)",
+            stripped,
+        )
+        return
 
     await sm.add_qa(
         user_id=user_id,
@@ -134,6 +143,174 @@ async def _add_to_session(session_id: str, data, user):
         answer=text,
     )
     logger.info("remember: added entry to session '%s'", session_id)
+
+
+async def _remember_entry(
+    entry,
+    *,
+    dataset_name: str,
+    session_id: Optional[str],
+    user,
+) -> "RememberResult":
+    """Top-level dispatcher for typed MemoryEntry payloads.
+
+    Routes to the remote HTTP client when ``cognee.serve(url=...)`` is
+    active, otherwise runs the SessionManager call in-process.
+    """
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        payload = await client.remember_entry(
+            entry,
+            dataset_name=dataset_name,
+            session_id=session_id,
+        )
+        # Reconstruct a RememberResult from the server's response
+        result = RememberResult(
+            status=payload.get("status", "session_stored"),
+            dataset_name=payload.get("dataset_name", dataset_name),
+            session_ids=payload.get("session_ids"),
+        )
+        result.entry_type = payload.get("entry_type")
+        result.entry_id = payload.get("entry_id")
+        result.elapsed_seconds = payload.get("elapsed_seconds")
+        if payload.get("error"):
+            result.error = payload["error"]
+        return result
+
+    return await _dispatch_session_entry(
+        entry,
+        dataset_name=dataset_name,
+        session_id=session_id,
+        user=user,
+    )
+
+
+async def _dispatch_session_entry(
+    entry: "MemoryEntry",
+    *,
+    dataset_name: str,
+    session_id: Optional[str],
+    user,
+) -> "RememberResult":
+    """Route a typed memory entry to the right SessionManager method.
+
+    All typed entries require a session_id — session cache is the
+    storage target. Returns a RememberResult with entry_id/entry_type
+    fields populated so callers can chain (e.g., attach feedback to a
+    QA they just stored).
+    """
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.modules.engine.operations.setup import setup
+
+    if not session_id:
+        raise ValueError(
+            f"session_id is required for typed memory entries (got {type(entry).__name__})"
+        )
+
+    await setup()
+
+    if user is None:
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
+
+    user_id = str(user.id) if user and hasattr(user, "id") else None
+    if not user_id:
+        raise ValueError("Could not resolve user for session entry")
+
+    sm = get_session_manager()
+    if not sm.is_available:
+        raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
+
+    # Resolve the dataset UUID for this session so the session_records
+    # row carries dataset_id — otherwise downstream permission filtering
+    # (e.g. the dashboard listing) can't match the session via granted
+    # dataset reads. We backfill via ensure_and_touch_session, which
+    # upserts the row and only sets dataset_id when currently null.
+    try:
+        from uuid import UUID as _UUID
+
+        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+        from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
+
+        resolved_dataset = None
+        try:
+            ds = await get_authorized_dataset(user, dataset_name, "write")
+            if ds is not None:
+                resolved_dataset = ds.id
+        except Exception:
+            # Fall through with None — we still create the session row.
+            resolved_dataset = None
+
+        await ensure_and_touch_session(
+            session_id=session_id,
+            user_id=_UUID(user_id),
+            dataset_id=resolved_dataset,
+        )
+    except Exception as exc:
+        logger.debug("remember: pre-upsert session_record failed (%s)", exc)
+
+    result = RememberResult(
+        status="session_stored",
+        dataset_name=dataset_name,
+        session_ids=[session_id],
+    )
+    result.elapsed_seconds = time.monotonic() - result._started_at
+    result.entry_type = entry.type
+
+    if isinstance(entry, QAEntry):
+        qa_id = await sm.add_qa(
+            user_id=user_id,
+            session_id=session_id,
+            question=entry.question,
+            context=entry.context,
+            answer=entry.answer,
+            feedback_text=entry.feedback_text,
+            feedback_score=entry.feedback_score,
+            used_graph_element_ids=entry.used_graph_element_ids,
+        )
+        result.entry_id = qa_id
+        if qa_id is None:
+            result.status = "errored"
+            result.error = "SessionManager.add_qa returned None"
+        return result
+
+    if isinstance(entry, TraceEntry):
+        trace_id = await sm.add_agent_trace_step(
+            user_id=user_id,
+            session_id=session_id,
+            origin_function=entry.origin_function,
+            status=entry.status,
+            generate_feedback_with_llm=entry.generate_feedback_with_llm,
+            memory_query=entry.memory_query,
+            memory_context=entry.memory_context,
+            method_params=entry.method_params,
+            method_return_value=entry.method_return_value,
+            error_message=entry.error_message,
+        )
+        result.entry_id = trace_id
+        if trace_id is None:
+            result.status = "errored"
+            result.error = "SessionManager.add_agent_trace_step returned None"
+        return result
+
+    if isinstance(entry, FeedbackEntry):
+        ok = await sm.add_feedback(
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=entry.qa_id,
+            feedback_text=entry.feedback_text,
+            feedback_score=entry.feedback_score,
+        )
+        result.entry_id = entry.qa_id
+        if not ok:
+            result.status = "errored"
+            result.error = f"add_feedback: QA {entry.qa_id} not found in session {session_id}"
+        return result
+
+    raise TypeError(f"Unsupported memory entry type: {type(entry).__name__}")
 
 
 class RememberResult:
@@ -195,6 +372,12 @@ class RememberResult:
         self.content_hash: Optional[str] = None
         self.items_processed: int = 0
         self.items: List[dict] = []
+        # Populated when the call dispatched a typed MemoryEntry.
+        # entry_type is one of "qa", "trace", "feedback"; entry_id is
+        # the qa_id / trace_id returned by SessionManager (or the
+        # qa_id a feedback was attached to).
+        self.entry_type: Optional[str] = None
+        self.entry_id: Optional[str] = None
         self._task: Optional[asyncio.Task] = None
         self._started_at: float = time.monotonic()
 
@@ -245,6 +428,10 @@ class RememberResult:
             d["content_hash"] = self.content_hash
         if self.items:
             d["items"] = self.items
+        if self.entry_type:
+            d["entry_type"] = self.entry_type
+        if self.entry_id:
+            d["entry_id"] = self.entry_id
         if self.error:
             d["error"] = self.error
         return d
@@ -337,7 +524,15 @@ class RememberResult:
 
 
 async def remember(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
+    data: Union[
+        BinaryIO,
+        list[BinaryIO],
+        str,
+        list[str],
+        DataItem,
+        list[DataItem],
+        "MemoryEntry",
+    ],
     dataset_name: str = "main_dataset",
     *,
     session_id: Optional[str] = None,
@@ -403,6 +598,17 @@ async def remember(
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
 
+    # Typed MemoryEntry dispatch: trace steps, rich QA, feedback.
+    # These short-circuit the add+cognify path entirely and write
+    # directly into the session cache via SessionManager.
+    if isinstance(data, MEMORY_ENTRY_TYPES):
+        return await _remember_entry(
+            data,
+            dataset_name=dataset_name,
+            session_id=session_id,
+            user=kwargs.get("user"),
+        )
+
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1
     mode = "session" if session_id else "permanent"
@@ -464,12 +670,7 @@ async def _remember_inner(
     client = get_remote_client()
     if client is not None:
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
-        return await client.remember(data, dataset_name, **kwargs)
-
-    # Run vector migrations lazily on the first local SDK call.
-    # This ensures stale LanceDB schemas are migrated before any
-    # writes, even when the API server was never started.
-    await _ensure_migrations_run()
+        return await client.remember(data, dataset_name, session_id=session_id, **kwargs)
 
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
@@ -542,6 +743,10 @@ async def _remember_inner(
         return result
 
     # Build the result object — starts as "running"
+    if not dataset_id and dataset_name:
+        # Create dataset if it doesn't exist
+        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
+        dataset_id = dataset_id[0].id if dataset_id else None
     result = RememberResult(
         status="running",
         dataset_name=dataset_name,

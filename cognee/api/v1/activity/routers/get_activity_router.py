@@ -7,7 +7,12 @@ can render an activity timeline and trace viewer.
 from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Query, Depends
+from cognee.modules.users.models import User
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
+    get_specific_user_permission_datasets,
+)
 
 
 def get_activity_router() -> APIRouter:
@@ -15,8 +20,7 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/pipeline-runs")
     async def get_pipeline_runs(
-        dataset_id: Optional[UUID] = Query(None),
-        user=get_authenticated_user,
+        dataset_id: Optional[UUID] = Query(None), user: User = Depends(get_authenticated_user)
     ):
         """Return recent pipeline runs with dataset owner info for agent attribution."""
         from cognee.infrastructure.databases.relational import get_relational_engine
@@ -24,6 +28,21 @@ def get_activity_router() -> APIRouter:
         from cognee.modules.data.models.Dataset import Dataset
         from cognee.modules.users.models import User
         from sqlalchemy import select, outerjoin
+
+        try:
+            permitted_datasets = await get_specific_user_permission_datasets(
+                user.id, "read", [dataset_id] if dataset_id else None
+            )
+        except PermissionDeniedError:
+            # For list requests, treat "no accessible datasets" as an empty activity feed.
+            # Keep explicit dataset requests strict by propagating the original 403.
+            if dataset_id is None:
+                return []
+            raise
+
+        dataset_ids = [ds.id for ds in permitted_datasets]
+        if not dataset_ids:
+            return []
 
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
@@ -40,11 +59,11 @@ def get_activity_router() -> APIRouter:
                         User, Dataset.owner_id == User.id
                     )
                 )
+                .where(PipelineRun.dataset_id.in_(dataset_ids))
                 .order_by(PipelineRun.created_at.desc())
                 .limit(50)
             )
-            if dataset_id:
-                stmt = stmt.filter(PipelineRun.dataset_id == dataset_id)
+
             result = await session.execute(stmt)
             rows = result.all()
 
@@ -64,7 +83,7 @@ def get_activity_router() -> APIRouter:
         ]
 
     @router.get("/spans")
-    async def get_spans(user=get_authenticated_user):
+    async def get_spans(user: User = Depends(get_authenticated_user)):
         """Return in-memory OTEL spans from the CogneeSpanExporter buffer."""
         try:
             from cognee.modules.observability.tracing import get_exporter
@@ -100,17 +119,12 @@ def get_activity_router() -> APIRouter:
             return {"error": str(e)}
 
     @router.get("/users")
-    async def get_tenant_users(user=get_authenticated_user):
+    async def get_tenant_users(user: User = Depends(get_authenticated_user)):
         """Return users in the current tenant (includes agents as API key users)."""
         try:
             from cognee.modules.users.tenants.methods import get_users_in_tenant
-            from cognee.modules.users.methods import get_default_user
 
-            default_user = await get_default_user()
-            if not default_user or not default_user.tenant_id:
-                return []
-
-            users = await get_users_in_tenant(default_user.tenant_id)
+            users = await get_users_in_tenant(user.tenant_id)
             return [
                 {
                     "id": str(u.id),
@@ -126,7 +140,7 @@ def get_activity_router() -> APIRouter:
             return []
 
     @router.get("/agents")
-    async def get_agents(user=get_authenticated_user):
+    async def get_agents(user: User = Depends(get_authenticated_user)):
         """Return registered agents (users with @cognee.agent emails)."""
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.users.models import User
@@ -206,6 +220,9 @@ def get_activity_router() -> APIRouter:
         from cognee.infrastructure.databases.relational import get_relational_engine
         from sqlalchemy import select
         from datetime import datetime, timezone
+
+        dataset_ids = await get_specific_user_permission_datasets(user.id, "read", [dataset_id])
+        dataset_id = dataset_ids[0].id
 
         db_engine = get_relational_engine()
 

@@ -3,7 +3,7 @@
 import sys
 import unittest
 import importlib
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestRunMigrations(unittest.TestCase):

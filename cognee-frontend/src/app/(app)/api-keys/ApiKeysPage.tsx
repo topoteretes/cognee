@@ -64,7 +64,7 @@ export default function ApiKeysPage() {
   async function loadKeys() {
     try {
       const data = await getApiKeys();
-      setKeys(Array.isArray(data) ? data.map((k) => ({ ...k, name: k.label || "", isNew: false })) : []);
+      setKeys(Array.isArray(data) ? data.map((k) => ({ id: k.id, name: k.name || k.label || "", label: k.label, key: k.api_key, isNew: false })) : []);
     } catch {
       setKeys([]);
     } finally {
@@ -76,11 +76,21 @@ export default function ApiKeysPage() {
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
+      const newKey = await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
       setNewName("");
       setShowCreateModal(false);
-      // Reload the list to pick up the newly created key
-      await loadKeys();
+      // Reload the list, then mark the new key so the full value is shown once
+      const data = await getApiKeys();
+      const mapped = Array.isArray(data) ? data.map((k) => {
+        const mapped_key = { id: k.id, name: k.name || k.label || "", label: k.label, key: k.api_key, isNew: false };
+        // Match the newly created key and show its full value
+        if (k.api_key === newKey || (newKey && k.api_key.startsWith(newKey.slice(0, 8)))) {
+          mapped_key.key = newKey;
+          mapped_key.isNew = true;
+        }
+        return mapped_key;
+      }) : [];
+      setKeys(mapped);
     } catch (err) {
       console.error("Failed to create key:", err);
     } finally {

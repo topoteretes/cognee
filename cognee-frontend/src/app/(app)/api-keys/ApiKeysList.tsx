@@ -121,7 +121,7 @@ export default function ApiKeysList({
             ff="monospace"
             style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           >
-            {apiKey.label.slice(0, 15)}
+            {apiKey.name || apiKey.label.slice(0, 15)}
           </Text>
           <Flex gap="0.25rem" style={{ flexShrink: 0 }}>
             <CopyApiKeyButton apiKey={apiKey} />

@@ -7,6 +7,20 @@ from cognee.exceptions import CogneeValidationError
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 
 
+def _make_async_ctx_mock():
+    """Build a ``MagicMock`` that behaves as an async-context-manager factory.
+
+    Used to patch symbols that return a dual-mode awaitable/async-context-manager
+    (e.g. ``set_database_global_context_variables``). The outer mock records
+    call args; the returned inner ``MagicMock`` implements
+    ``__aenter__``/``__aexit__`` as benign ``AsyncMock`` awaitables.
+    """
+    inner = MagicMock()
+    inner.__aenter__ = AsyncMock(return_value=inner)
+    inner.__aexit__ = AsyncMock(return_value=None)
+    return MagicMock(return_value=inner)
+
+
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_pipeline_validates_session_ids():
     user = MagicMock()
@@ -36,7 +50,7 @@ async def test_apply_feedback_weights_pipeline_wires_memify_tasks():
         ) as get_authorized_dataset,
         patch(
             "cognee.memify_pipelines.apply_feedback_weights.set_database_global_context_variables",
-            new=AsyncMock(),
+            new=_make_async_ctx_mock(),
         ) as set_db_ctx,
         patch(
             "cognee.memify_pipelines.apply_feedback_weights.memify",
@@ -54,7 +68,7 @@ async def test_apply_feedback_weights_pipeline_wires_memify_tasks():
     assert result == {"status": "ok"}
     set_user_ctx.assert_awaited_once_with(user)
     get_authorized_dataset.assert_awaited_once()
-    set_db_ctx.assert_awaited_once_with("dataset-1", "owner-1")
+    set_db_ctx.assert_called_once_with("dataset-1", "owner-1")
 
     memify_kwargs = memify_mock.call_args.kwargs
     assert memify_kwargs["dataset"] == "dataset-1"

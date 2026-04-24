@@ -107,6 +107,7 @@ def create_embedding_engine(
         return OpenAICompatibleEmbeddingEngine(
             model=embedding_model,
             dimensions=embedding_dimensions,
+            max_completion_tokens=embedding_max_completion_tokens,
             endpoint=embedding_endpoint,
             api_key=embedding_api_key or llm_api_key,
             batch_size=embedding_batch_size,

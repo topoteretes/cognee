@@ -86,9 +86,10 @@ async def test_add_data_points_comprehensive(clean_test_environment):
     assert len(result_rel) == 1
 
     nodes, edges = await graph_engine.get_graph_data()
-    # 4 Persons + Employee + Company + 1 EdgeType("works_at") = 7
-    assert len(nodes) == 7
+    # 4 Persons + Employee + Company = 6
+    assert len(nodes) == 6
     assert len(edges) == 2
+    assert not any(node[1].get("type") == "EdgeType" for node in nodes)
 
     person5 = Person(name="Frank", age=40)
     person6 = Person(name="Grace", age=38)
@@ -100,8 +101,8 @@ async def test_add_data_points_comprehensive(clean_test_environment):
     assert len(result_triplet) == 2
 
     nodes, edges = await graph_engine.get_graph_data()
-    # 7 + 2 Persons = 9 (custom edge has no relationship_name in dict → no EdgeType)
-    assert len(nodes) == 9
+    # 6 + 2 Persons = 8
+    assert len(nodes) == 8
     assert len(edges) == 3
 
     batch1 = [Person(name="Leo", age=25), Person(name="Mia", age=30)]
@@ -114,8 +115,8 @@ async def test_add_data_points_comprehensive(clean_test_environment):
     assert len(result_batch2) == 2
 
     nodes, edges = await graph_engine.get_graph_data()
-    # 9 + 4 Persons = 13
-    assert len(nodes) == 13
+    # 8 + 4 Persons = 12
+    assert len(nodes) == 12
     assert len(edges) == 3
 
     person7 = Person(name="Paul", age=33)
@@ -127,8 +128,8 @@ async def test_add_data_points_comprehensive(clean_test_environment):
     assert len(result_bi) == 2
 
     nodes, edges = await graph_engine.get_graph_data()
-    # 13 + 2 Persons = 15
-    assert len(nodes) == 15
+    # 12 + 2 Persons = 14
+    assert len(nodes) == 14
     assert len(edges) == 5
 
     person_invalid = Person(name="Invalid", age=50)
@@ -139,5 +140,5 @@ async def test_add_data_points_comprehensive(clean_test_environment):
         await add_data_points(["not", "datapoints"])
 
     final_nodes, final_edges = await graph_engine.get_graph_data()
-    assert len(final_nodes) == 15
+    assert len(final_nodes) == 14
     assert len(final_edges) == 5

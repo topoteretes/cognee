@@ -88,6 +88,11 @@ def test_cache_config_to_dict():
         "max_session_context_chars": None,
         "usage_logging": False,
         "usage_logging_ttl": 604800,
+        "tapes_ingest_url": "http://localhost:8082",
+        "tapes_provider": "openai",
+        "tapes_agent_name": "cognee",
+        "tapes_model": "cognee-session",
+        "tapes_request_timeout": 5.0,
     }
 
 

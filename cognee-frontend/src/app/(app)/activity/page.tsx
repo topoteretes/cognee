@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
+import { listSessions, getSessionDetail, type SessionRow, type SessionDetail, type TraceEntry } from "@/modules/sessions/getSessions";
 
 interface PipelineRun {
   id: string;
@@ -157,27 +159,121 @@ function TraceViewer({ trace }: { trace: Trace }) {
   );
 }
 
+function TraceStepList({ traces }: { traces: TraceEntry[] }) {
+  if (!traces || traces.length === 0) {
+    return <span style={{ fontSize: 12, color: "#A1A1AA" }}>No trace steps recorded for this session.</span>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {traces.map((t, idx) => {
+        const isError = t.status === "error";
+        const origin = t.origin_function || "(unknown)";
+        const feedback = (t.session_feedback || "").trim();
+        const mrv = t.method_return_value;
+        let returnBlurb = "";
+        if (typeof mrv === "string") returnBlurb = mrv.slice(0, 180);
+        else if (mrv != null) {
+          try { returnBlurb = JSON.stringify(mrv).slice(0, 180); } catch { returnBlurb = ""; }
+        }
+        return (
+          <div key={t.trace_id ?? idx} style={{ display: "flex", gap: 10, padding: "8px 10px", background: "#FAFAFA", borderRadius: 6, alignItems: "flex-start" }}>
+            <span style={{ flexShrink: 0, fontSize: 10, color: "#A1A1AA", width: 24, textAlign: "right", fontVariantNumeric: "tabular-nums", paddingTop: 2 }}>{idx + 1}</span>
+            <span style={{ flexShrink: 0, width: 6, height: 6, marginTop: 6, borderRadius: "50%", background: isError ? "#DC2626" : "#16A34A" }} />
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: "#18181B", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>{origin}</span>
+                <span style={{ fontSize: 11, color: isError ? "#DC2626" : "#16A34A" }}>{t.status || ""}</span>
+                {t.time && <span style={{ fontSize: 11, color: "#A1A1AA", marginLeft: "auto" }}>{formatTimestamp(t.time)}</span>}
+              </div>
+              {feedback && <span style={{ fontSize: 12, color: "#52525B" }}>{feedback}</span>}
+              {returnBlurb && !feedback && (
+                <span style={{ fontSize: 11, color: "#71717A", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  → {returnBlurb}{returnBlurb.length >= 180 ? "…" : ""}
+                </span>
+              )}
+              {t.error_message && (
+                <span style={{ fontSize: 11, color: "#DC2626" }}>{t.error_message}</span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const PAGE_SIZE = 10;
 
 export default function ActivityPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { selectedAgent, selectedDataset } = useFilter();
+  const searchParams = useSearchParams();
+  const deepLinkSessionId = searchParams.get("session");
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [traces, setTraces] = useState<Trace[]>([]);
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+  const [sessionDetails, setSessionDetails] = useState<Record<string, SessionDetail>>({});
+  const [sessionDetailLoading, setSessionDetailLoading] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
+
+    let cancelled = false;
+
     Promise.all([
-      cogniInstance.fetch("/v1/activity/pipeline-runs").then((r) => r.ok ? r.json() : []).catch(() => []),
-      cogniInstance.fetch("/v1/activity/spans").then((r) => r.ok ? r.json() : []).catch(() => []),
-    ]).then(([runData, spanData]) => {
-      setRuns(Array.isArray(runData) ? runData : []);
-      setTraces(Array.isArray(spanData) ? spanData : []);
-    }).finally(() => setLoading(false));
+      cogniInstance.fetch("/v1/activity/pipeline-runs")
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+      cogniInstance.fetch("/v1/activity/spans")
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+      listSessions(cogniInstance, { range: "30d", limit: 50 }),
+    ])
+      .then(([runData, spanData, sessionsPage]) => {
+        if (cancelled) return;
+        setRuns(Array.isArray(runData) ? runData : []);
+        setTraces(Array.isArray(spanData) ? spanData : []);
+        setSessions(sessionsPage.sessions);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [cogniInstance, isInitializing]);
+
+  // Session detail fetcher: lazy on expand.
+  const loadSessionDetail = (sid: string) => {
+    if (!cogniInstance) return;
+    if (sessionDetails[sid] || sessionDetailLoading[sid]) return;
+    setSessionDetailLoading((m) => ({ ...m, [sid]: true }));
+    getSessionDetail(cogniInstance, sid).then((d) => {
+      if (d) setSessionDetails((m) => ({ ...m, [sid]: d }));
+      setSessionDetailLoading((m) => ({ ...m, [sid]: false }));
+    });
+  };
+
+  // Deep link: when ?session=<id> is present, auto-expand and scroll to it.
+  useEffect(() => {
+    if (!deepLinkSessionId || !cogniInstance) return;
+    setExpandedSessionId(deepLinkSessionId);
+    loadSessionDetail(deepLinkSessionId);
+    // Scroll is attempted after render — run in a microtask so the DOM
+    // has the expanded block in place.
+    const t = setTimeout(() => {
+      const el = document.getElementById(`session-row-${deepLinkSessionId}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkSessionId, cogniInstance]);
 
   // Reset page when filter changes
   useEffect(() => { setPage(0); }, [selectedAgent, selectedDataset]);
@@ -237,8 +333,84 @@ export default function ActivityPage() {
                 : "All pipeline runs and system events"}
           </span>
         </div>
-        <span style={{ fontSize: 13, color: "#A1A1AA" }}>{filtered.length} events</span>
+        <span style={{ fontSize: 13, color: "#A1A1AA" }}>{filtered.length} events · {sessions.length} sessions</span>
       </div>
+
+      {/* Sessions timeline */}
+      {sessions.length > 0 && (
+        <div style={{ borderLeft: "2px solid #E4E4E7", marginLeft: 6, paddingLeft: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, marginLeft: -27 }}>
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#16A34A", flexShrink: 0 }} />
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", color: "#A1A1AA", textTransform: "uppercase" }}>Sessions</span>
+          </div>
+          {sessions.map((s) => {
+            const isExpanded = expandedSessionId === s.session_id;
+            const detail = sessionDetails[s.session_id];
+            const detailLoading = !!sessionDetailLoading[s.session_id];
+            const failed = s.effective_status === "failed" || s.error_count > 0;
+            const dot = failed ? "#EF4444" : s.effective_status === "abandoned" ? "#F59E0B" : "#22C55E";
+            const label = detail?.label || s.session_id;
+            return (
+              <div key={s.session_id} id={`session-row-${s.session_id}`} style={{ marginLeft: -27, marginBottom: 4 }}>
+                <div
+                  onClick={() => {
+                    if (isExpanded) {
+                      setExpandedSessionId(null);
+                    } else {
+                      setExpandedSessionId(s.session_id);
+                      loadSessionDetail(s.session_id);
+                    }
+                  }}
+                  style={{
+                    display: "flex", gap: 14, padding: "10px 12px 10px 28px", position: "relative",
+                    borderRadius: 8,
+                    background: isExpanded ? "#F0EDFF" : "transparent",
+                    border: isExpanded ? "1px solid #DDD6FE" : "1px solid transparent",
+                    cursor: "pointer",
+                    transition: "background 150ms",
+                  }}
+                >
+                  <div style={{ position: "absolute", left: 3, top: 14, width: 8, height: 8, borderRadius: "50%", background: dot, border: "2px solid #FAFAF9" }} />
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 520 }}>{label}</span>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: failed ? "#EF4444" : "#6510F4" }}>session</span>
+                      <span style={{ fontSize: 12, color: dot }}>{s.effective_status}</span>
+                    </div>
+                    <span style={{ fontSize: 13, color: "#A1A1AA" }}>
+                      {s.last_model ?? "—"} · {s.tokens_in + s.tokens_out} tokens · {s.error_count} error{s.error_count === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div style={{ width: 80, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
+                    <span style={{ fontSize: 11, color: "#A1A1AA", fontVariantNumeric: "tabular-nums" }}>
+                      {s.last_activity_at ? formatTimestamp(s.last_activity_at) : ""}
+                    </span>
+                    <span style={{ fontSize: 11, color: "#D4D4D8" }}>
+                      {s.last_activity_at ? formatDate(s.last_activity_at) : ""}
+                    </span>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4D4D8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, alignSelf: "center" }}>
+                    <polyline points={isExpanded ? "6 9 12 15 18 9" : "9 18 15 12 9 6"} />
+                  </svg>
+                </div>
+
+                {isExpanded && (
+                  <div style={{ margin: "4px 12px 12px 28px", padding: "12px 16px", background: "#FAFAFA", borderRadius: 8, border: "1px solid #F4F4F5" }}>
+                    {detailLoading && !detail ? (
+                      <span style={{ fontSize: 12, color: "#A1A1AA" }}>Loading trace…</span>
+                    ) : detail ? (
+                      <TraceStepList traces={detail.traces} />
+                    ) : (
+                      <span style={{ fontSize: 12, color: "#A1A1AA" }}>No trace data.</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div style={{ height: 12 }} />
+        </div>
+      )}
 
       {/* Timeline */}
       {pageGrouped.length === 0 ? (

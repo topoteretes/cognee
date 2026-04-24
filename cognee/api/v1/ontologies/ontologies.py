@@ -7,6 +7,8 @@ from typing import Optional, List
 from dataclasses import dataclass
 from fastapi import UploadFile
 
+from cognee.base_config import get_base_config
+
 
 @dataclass
 class OntologyMetadata:
@@ -23,10 +25,11 @@ class OntologyService:
 
     @property
     def base_dir(self) -> Path:
-        return Path(tempfile.gettempdir()) / "ontologies"
+        base_config = get_base_config()
+        return base_config.data_root_directory
 
     def _get_user_dir(self, user_id: str) -> Path:
-        user_dir = self.base_dir / str(user_id)
+        user_dir = Path(self.base_dir) / str(user_id)
         user_dir.mkdir(parents=True, exist_ok=True)
         return user_dir
 

@@ -2,7 +2,10 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
-from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+from cognee.infrastructure.session.feedback_models import (
+    AgentTraceFeedbackSummary,
+    FeedbackDetectionResult,
+)
 from cognee.infrastructure.session.session_manager import (
     SessionManager,
     _validate_session_params,
@@ -74,6 +77,10 @@ class TestSessionManager:
         cache.create_qa_entry = AsyncMock()
         cache.get_all_qa_entries = AsyncMock(return_value=[])
         cache.get_latest_qa_entries = AsyncMock(return_value=[])
+        cache.append_agent_trace_step = AsyncMock()
+        cache.get_agent_trace_session = AsyncMock(return_value=[])
+        cache.get_agent_trace_feedback = AsyncMock(return_value=[])
+        cache.get_agent_trace_count = AsyncMock(return_value=0)
         cache.update_qa_entry = AsyncMock(return_value=True)
         cache.delete_feedback = AsyncMock(return_value=True)
         cache.delete_qa_entry = AsyncMock(return_value=True)
@@ -144,6 +151,216 @@ class TestSessionManager:
             await sm.add_qa(user_id="u1", question="Q", context="C", answer="A", session_id="")
 
     @pytest.mark.asyncio
+    async def test_add_agent_trace_step_session_id_none_uses_default(self, sm, mock_cache):
+        """add_agent_trace_step with session_id=None uses default_session_id."""
+        trace_id = await sm.add_agent_trace_step(
+            user_id="u1",
+            origin_function="plan_trip",
+            status="success",
+        )
+        assert trace_id is not None
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_id"] == "default_session"
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_returns_trace_id_and_feedback(self, sm, mock_cache):
+        """add_agent_trace_step returns generated trace_id and persists generated feedback."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                return_value="summarize this",
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                return_value=AgentTraceFeedbackSummary(
+                    session_feedback="Trip plan created successfully."
+                ),
+            ),
+        ):
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                memory_query="trip preferences",
+                memory_context="User likes quiet places",
+                method_params={"city": "Tokyo"},
+                method_return_value="Plan created",
+            )
+        assert trace_id is not None
+        mock_cache.append_agent_trace_step.assert_called_once()
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["trace_id"] == trace_id
+        assert call_kw["origin_function"] == "plan_trip"
+        assert call_kw["status"] == "success"
+        assert call_kw["memory_query"] == "trip preferences"
+        assert call_kw["memory_context"] == "User likes quiet places"
+        assert call_kw["method_params"] == {"city": "Tokyo"}
+        assert call_kw["method_return_value"] == "Plan created"
+        assert call_kw["session_feedback"] == "Trip plan created successfully."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_falls_back_when_summary_is_empty(self, sm, mock_cache):
+        """Empty LLM summaries fall back to the deterministic feedback string."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                return_value="summarize this",
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                return_value=AgentTraceFeedbackSummary(session_feedback="   "),
+            ),
+        ):
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="book_hotel",
+                status="error",
+                session_id="s1",
+                method_return_value={"status": "failed"},
+                error_message="No availability",
+            )
+        assert trace_id is not None
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"] == "book_hotel failed. Reason: No availability."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_falls_back_when_llm_raises(self, sm, mock_cache):
+        """LLM failures do not block trace writes and use deterministic fallback feedback."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                return_value="summarize this",
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("llm unavailable"),
+            ),
+        ):
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="book_hotel",
+                status="error",
+                session_id="s1",
+                method_return_value={"status": "failed"},
+                error_message="No availability",
+            )
+        assert trace_id is not None
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"] == "book_hotel failed. Reason: No availability."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_falls_back_when_prompt_missing(self, sm, mock_cache):
+        """Missing trace feedback prompt uses deterministic fallback feedback."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                return_value=None,
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+            ) as mock_llm,
+        ):
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                method_return_value="Plan created",
+            )
+
+        assert trace_id is not None
+        mock_llm.assert_not_awaited()
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"] == "plan_trip succeeded."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_falls_back_when_llm_returns_wrong_type(
+        self, sm, mock_cache
+    ):
+        """Unexpected LLM result types use deterministic fallback feedback."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                return_value="summarize this",
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                return_value="not-a-model",
+            ),
+        ):
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                method_return_value="Plan created",
+            )
+
+        assert trace_id is not None
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"] == "plan_trip succeeded."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_method_return_value_none_uses_fallback_without_llm(
+        self, sm, mock_cache
+    ):
+        """None return values skip LLM generation and use deterministic fallback feedback."""
+        with patch(
+            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+        ) as mock_llm:
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                method_return_value=None,
+            )
+
+        assert trace_id is not None
+        mock_llm.assert_not_awaited()
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"] == "plan_trip succeeded."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_can_disable_llm_feedback_generation(self, sm, mock_cache):
+        """When disabled explicitly, trace feedback uses fallback without touching the LLM."""
+        with patch(
+            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+        ) as mock_llm:
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                method_return_value="Plan created",
+                generate_feedback_with_llm=False,
+            )
+
+        assert trace_id is not None
+        mock_llm.assert_not_awaited()
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"] == "plan_trip succeeded."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_unavailable_returns_none(self, sm_unavailable):
+        """add_agent_trace_step returns None when cache unavailable."""
+        result = await sm_unavailable.add_agent_trace_step(
+            user_id="u1",
+            origin_function="plan_trip",
+            status="success",
+            session_id="s1",
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_get_session_invalid_last_n_raises(self, sm):
         """get_session raises on invalid last_n."""
         with pytest.raises(SessionParameterValidationError):
@@ -190,6 +407,71 @@ class TestSessionManager:
         """get_session returns empty list when cache unavailable."""
         assert await sm_unavailable.get_session(user_id="u1", session_id="s1") == []
         assert await sm_unavailable.get_session(user_id="u1", formatted=True, session_id="s1") == ""
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_session_calls_cache(self, sm, mock_cache):
+        """get_agent_trace_session delegates to cache."""
+        mock_cache.get_agent_trace_session.return_value = [
+            {
+                "trace_id": "t1",
+                "origin_function": "plan_trip",
+                "status": "success",
+                "session_feedback": "plan_trip succeeded.",
+            }
+        ]
+        entries = await sm.get_agent_trace_session(user_id="u1", session_id="s1")
+        assert len(entries) == 1
+        assert entries[0]["trace_id"] == "t1"
+        mock_cache.get_agent_trace_session.assert_called_once_with("u1", "s1", last_n=None)
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_session_unavailable_returns_empty(self, sm_unavailable):
+        """get_agent_trace_session returns empty list when cache unavailable."""
+        assert await sm_unavailable.get_agent_trace_session(user_id="u1", session_id="s1") == []
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_feedback_calls_cache(self, sm, mock_cache):
+        """get_agent_trace_feedback delegates to cache and returns feedback only."""
+        mock_cache.get_agent_trace_feedback.return_value = [
+            "plan_trip succeeded.",
+            "book_hotel failed. Reason: No availability.",
+        ]
+        feedback = await sm.get_agent_trace_feedback(user_id="u1", session_id="s1")
+        assert feedback == [
+            "plan_trip succeeded.",
+            "book_hotel failed. Reason: No availability.",
+        ]
+        mock_cache.get_agent_trace_feedback.assert_called_once_with("u1", "s1", last_n=None)
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_feedback_passes_last_n_to_cache(self, sm, mock_cache):
+        """get_agent_trace_feedback forwards last_n to cache."""
+        mock_cache.get_agent_trace_feedback.return_value = ["book_hotel failed."]
+
+        feedback = await sm.get_agent_trace_feedback(user_id="u1", session_id="s1", last_n=1)
+
+        assert feedback == ["book_hotel failed."]
+        mock_cache.get_agent_trace_feedback.assert_called_once_with("u1", "s1", last_n=1)
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_feedback_unavailable_returns_empty(self, sm_unavailable):
+        """get_agent_trace_feedback returns empty list when cache unavailable."""
+        assert await sm_unavailable.get_agent_trace_feedback(user_id="u1", session_id="s1") == []
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_count_calls_cache(self, sm, mock_cache):
+        """get_agent_trace_count delegates to cache."""
+        mock_cache.get_agent_trace_count.return_value = 3
+
+        count = await sm.get_agent_trace_count(user_id="u1", session_id="s1")
+
+        assert count == 3
+        mock_cache.get_agent_trace_count.assert_called_once_with("u1", "s1")
+
+    @pytest.mark.asyncio
+    async def test_get_agent_trace_count_unavailable_returns_zero(self, sm_unavailable):
+        """get_agent_trace_count returns zero when cache unavailable."""
+        assert await sm_unavailable.get_agent_trace_count(user_id="u1", session_id="s1") == 0
 
     @pytest.mark.asyncio
     async def test_update_qa_calls_cache(self, sm, mock_cache):

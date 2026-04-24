@@ -29,12 +29,18 @@ class _FakeEmbeddingEngine:
         return [[0.1, 0.2, 0.3] for _ in texts]
 
 
-def _make_point(id: str, text: str) -> IndexSchema:
-    return IndexSchema(id=id, text=text)
+def _make_point(id: str, text: str, name: str = "") -> IndexSchema:
+    return IndexSchema(id=id, text=text, name=name)
 
 
 class _InheritedFieldsPoint(DataPoint):
     text: str
+    metadata: dict = {"index_fields": ["text"]}
+
+
+class _ImpossibleDefaultPoint(DataPoint):
+    text: str
+    required_pair: tuple[int, int]
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -72,6 +78,34 @@ async def _strip_payload_field(adapter, name: str) -> str:
     await conn.drop_table(name)
     await conn.create_table(name, data=narrowed)
     return removed
+
+
+async def _strip_payload_named_field(adapter, name: str, field_name: str):
+    """Remove a specific payload field by name."""
+    table = await (await adapter.get_collection(name)).to_arrow()
+    pi = table.schema.get_field_index("payload")
+    pt = table.schema.field(pi).type
+
+    target_index = None
+    for i in range(pt.num_fields):
+        if pt.field(i).name == field_name:
+            target_index = i
+            break
+    assert target_index is not None
+
+    keep = [j for j in range(pt.num_fields) if j != target_index]
+    fields = [pt.field(j) for j in keep]
+    col = table.column("payload").combine_chunks()
+    arrays = [col.field(pt.field(j).name) for j in keep]
+
+    narrowed = table.set_column(
+        pi,
+        pa.field("payload", pa.struct(fields)),
+        pa.StructArray.from_arrays(arrays, fields=fields),
+    )
+    conn = await adapter.get_connection()
+    await conn.drop_table(name)
+    await conn.create_table(name, data=narrowed)
 
 
 def _payload_fields(schema: pa.Schema) -> list[str]:
@@ -153,6 +187,8 @@ async def test_migration_uses_pydantic_defaults(tmp_path):
     result = (await adapter.retrieve(col, [old_point.id]))[0]
     if removed == "feedback_weight":
         assert result.payload["feedback_weight"] == 0.5
+    if removed == "name":
+        assert result.payload["name"] == ""
 
 
 @pytest.mark.asyncio
@@ -171,6 +207,40 @@ async def test_non_schema_errors_propagate(tmp_path):
 
     with pytest.raises(RuntimeError, match="network timeout"):
         await adapter.create_data_points(col, [_make_point(str(uuid4()), "boom")])
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_migration_aborts_without_safe_default_and_preserves_rows(tmp_path):
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    col = "ImpossibleDefault_text"
+
+    old_point = _ImpossibleDefaultPoint(
+        id=str(uuid4()),
+        text="old",
+        required_pair=(1, 2),
+    )
+    await _seed(adapter, col, [old_point])
+    await _strip_payload_named_field(adapter, col, "required_pair")
+
+    with pytest.raises(RuntimeError, match="Add an explicit default value"):
+        await adapter.create_data_points(
+            col,
+            [
+                _ImpossibleDefaultPoint(
+                    id=str(uuid4()),
+                    text="new",
+                    required_pair=(3, 4),
+                )
+            ],
+        )
+
+    # Migration abort should preserve the original table and rows.
+    result = await adapter.retrieve(col, [old_point.id])
+    assert len(result) == 1
+    assert result[0].payload["text"] == "old"
 
 
 @pytest.mark.asyncio

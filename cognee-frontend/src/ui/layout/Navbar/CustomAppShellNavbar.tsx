@@ -5,6 +5,12 @@ import { useNavbar } from "../NavbarContext";
 import NavbarIconLink from "./NavbarIconLink";
 import { ReactNode } from "react";
 import { isCloudEnvironment } from "@/utils";
+import { useTenant } from "@/modules/tenant/TenantContext";
+
+const PLAN_LABELS: Record<string, string> = {
+  developer: "Developer",
+  cloud: "Cloud (Team)",
+};
 
 // -- Icon components for nav items --
 
@@ -48,6 +54,14 @@ function GraphIcon({ active }: { active: boolean }) {
   );
 }
 
+
+function ConnectAgentIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={active ? "#7C5CFC" : "#6B7280"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="10" rx="2" /><circle cx="12" cy="5" r="2" /><path d="M12 7v4" /><line x1="8" y1="16" x2="8" y2="16" /><line x1="16" y1="16" x2="16" y2="16" />
+    </svg>
+  );
+}
 
 function ConnectionsIcon({ active }: { active: boolean }) {
   return (
@@ -107,6 +121,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: "CONFIGURE",
     items: [
+      { text: "Connect Agent", link: "/connect-agent", icon: ConnectAgentIcon },
       { text: "Connections", link: "/connections", icon: ConnectionsIcon },
     ],
   },
@@ -123,6 +138,8 @@ export default function CustomAppShellNavbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { isOpen, close } = useNavbar();
+  const { planType } = useTenant();
+  const planLabel = planType ? PLAN_LABELS[planType] ?? "Developer" : "Free";
 
   return (
     <>
@@ -190,6 +207,20 @@ export default function CustomAppShellNavbar() {
         {/* Bottom upgrade section (cloud only) */}
         {isCloudEnvironment() && (
           <div className="px-3 pb-4 mt-auto">
+            <div className="flex items-center justify-center gap-[6px] mb-2">
+              <span
+                className="rounded-[4px]"
+                style={{
+                  background: "#F0EDFF",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: "#6C47FF",
+                  padding: "1px 6px",
+                }}
+              >
+                {planLabel}
+              </span>
+            </div>
             <button
               onClick={() => router.push("/plan")}
               className="w-full rounded-[6px] text-white cursor-pointer"
@@ -201,25 +232,8 @@ export default function CustomAppShellNavbar() {
                 fontWeight: 500,
               }}
             >
-              Upgrade plan
+              View Plan
             </button>
-            <div className="flex items-center justify-center gap-[6px] mt-2">
-              <span
-                className="rounded-[4px]"
-                style={{
-                  background: "#F0EDFF",
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: "#6C47FF",
-                  padding: "1px 6px",
-                }}
-              >
-                Free
-              </span>
-              <span style={{ color: "#71717A", fontSize: 11 }}>
-                &middot; 0 / 100 docs
-              </span>
-            </div>
           </div>
         )}
       </aside>

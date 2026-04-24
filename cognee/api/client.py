@@ -47,6 +47,7 @@ from cognee.api.v1.users.routers import (
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.activity.routers import get_activity_router
+from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
@@ -86,7 +87,7 @@ async def lifespan(app: FastAPI):
         db_engine = get_relational_engine()
         await db_engine.create_database()
 
-    await run_startup_migrations()
+        await run_startup_migrations()
 
     from cognee.modules.users.methods import get_default_user
 
@@ -290,6 +291,13 @@ app.include_router(
     get_activity_router(),
     prefix="/api/v1/activity",
     tags=["activity"],
+)
+
+# Sessions lifecycle + dashboard aggregates
+app.include_router(
+    get_sessions_router(),
+    prefix="/api/v1/sessions",
+    tags=["sessions"],
 )
 
 app.include_router(get_remember_router(), prefix="/api/v1/remember", tags=["remember"])

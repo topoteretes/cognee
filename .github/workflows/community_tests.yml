@@ -50,6 +50,9 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
+      - name: Ty type check
+        run: uv run ty check .
+
   unit-tests:
     name: Unit Tests (Mocked, No Secrets)
     runs-on: ubuntu-22.04
