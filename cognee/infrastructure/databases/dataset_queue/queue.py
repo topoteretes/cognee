@@ -211,7 +211,6 @@ class DatasetQueue:
         if not self._enabled:
             return
         task = asyncio.current_task()
-        if task is None:
 
         task_id = id(task)
         ds_key = f"ds:{dataset_id}" if dataset_id is not None else "ds:<none>"
