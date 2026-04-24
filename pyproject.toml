@@ -82,7 +82,7 @@ scraping = [
 
 fastembed = [
     "fastembed<=0.8.0",
-    "onnxruntime<=1.24.2",
+    "onnxruntime<=1.23.2",
 ]
 
 neo4j = ["neo4j>=5.28.0,<6"]
