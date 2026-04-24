@@ -150,7 +150,7 @@ class DatasetQueue:
         task.add_done_callback(_release_all_on_done)
 
     # ------------------------------------------------------------ ensure_slot
-    async def ensure_slot(self, dataset_id: Any = None) -> None:
+    async def ensure_slot(self, dataset_id) -> None:
         """Acquire (or bump the depth of) a slot for (current task, ``dataset_id``).
 
         Rules:
