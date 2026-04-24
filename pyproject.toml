@@ -144,7 +144,7 @@ aws = ["s3fs[boto3]==2025.3.2"]
 dlt = ["dlt[sqlalchemy]>=1.9.0,<2"]
 baml = ["baml-py (==0.206.0)"]
 dev = [
-    "pytest>=7.4.0,<8",
+    "pytest>=7.4.0,<10",
     "pytest-cov>=6.1.1,<7.0.0",
     "pytest-asyncio>=0.21.1,<0.22",
     "coverage>=7.3.2,<8",
