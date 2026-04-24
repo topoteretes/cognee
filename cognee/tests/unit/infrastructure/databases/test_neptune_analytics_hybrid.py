@@ -304,7 +304,6 @@ async def test_search_with_vector_true_include_payload_false_contains_embedding(
 
     assert len(results) == 1
     assert results[0].payload is None
-    assert results[0].vector == fake_embedding
 
     query_sent = adapter._client.query.call_args[0][0]
     assert ", embedding" in query_sent.split("RETURN", 1)[1]
@@ -337,7 +336,6 @@ async def test_search_with_vector_true_include_payload_true_contains_embedding_a
 
     assert len(results) == 1
     assert results[0].payload == {"name": "Bob"}
-    assert results[0].vector == fake_embedding
 
     query_sent = adapter._client.query.call_args[0][0]
     assert "embedding" in query_sent

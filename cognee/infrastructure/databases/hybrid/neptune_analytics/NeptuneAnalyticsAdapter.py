@@ -357,7 +357,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                         id=payload_obj.get("~id") if include_payload else item.get("node_id"),
                         payload=payload_obj.get("~properties") if include_payload else None,
                         score=item.get("score", 0),
-                        vector=item.get("embedding") if with_vector else None,
                     )
                 )
             return results
