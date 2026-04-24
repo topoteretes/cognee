@@ -6,10 +6,10 @@ os.environ["VECTOR_DATASET_DATABASE_HANDLER"] = "custom_lancedb_handler"
 os.environ["GRAPH_DATASET_DATABASE_HANDLER"] = "custom_kuzu_handler"
 
 import cognee
-from cognee.modules.users.methods import get_default_user
-from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -114,8 +114,7 @@ async def main():
 
     print("Search results:")
     # Display results
-    for result_text in search_results:
-        print(result_text)
+    print(search_results)
 
     default_user = await get_default_user()
     # Assert that the custom database files were created based on the custom dataset database handlers

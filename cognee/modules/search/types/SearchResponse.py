@@ -63,6 +63,7 @@ class SearchResultItem(BaseModel):
 
     dataset_id: Optional[str] = None
     dataset_name: Optional[str] = None
+    dataset_tenant_id: Optional[str] = None
 
     metadata: dict = Field(default_factory=dict)
     raw: dict = Field(default_factory=dict)

@@ -1,7 +1,8 @@
 import asyncio
+
 import cognee
-from cognee.shared.logging_utils import setup_logging, INFO
 from cognee.api.v1.search import SearchType
+from cognee.shared.logging_utils import INFO, setup_logging
 
 
 async def main():
@@ -17,8 +18,7 @@ async def main():
     )
 
     print("Search results:")
-    for result_text in search_results:
-        print(result_text)
+    print(search_results)
 
 
 if __name__ == "__main__":

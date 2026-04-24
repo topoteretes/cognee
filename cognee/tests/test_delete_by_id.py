@@ -1,13 +1,14 @@
 import os
 import pathlib
-import cognee
 from uuid import uuid4
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.methods import get_default_user, create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+
+import cognee
+from cognee.api.v1.exceptions import DatasetNotFoundError, DocumentNotFoundError
 from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
-from cognee.api.v1.exceptions import DocumentNotFoundError, DatasetNotFoundError
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import create_user, get_default_user
+from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -282,12 +283,14 @@ async def main():
         isolation_search_results = await cognee.search(
             "Google technology company", user=isolation_user
         )
-        assert len(isolation_search_results) > 0, "Isolation user's data should still be searchable"
+        assert len(isolation_search_results.results) > 0, (
+            "Isolation user's data should still be searchable"
+        )
 
         print("✅ Isolation user's data completely unaffected by other users' deletions")
         print(f"   - Data count unchanged: {len(isolation_dataset_data_after)} items")
         print("   - All original data IDs preserved")
-        print(f"   - Data still searchable: {len(isolation_search_results)} results")
+        print(f"   - Data still searchable: {len(isolation_search_results.results)} results")
 
     except Exception as e:
         print(f"❌ Error verifying isolation user's data: {e}")

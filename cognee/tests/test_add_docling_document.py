@@ -1,7 +1,7 @@
 import asyncio
-import cognee
-
 import os
+
+import cognee
 
 
 async def main():
@@ -38,16 +38,16 @@ async def main():
     await cognee.cognify()
 
     answer = await cognee.search("Tell me about Artificial Intelligence.")
-    assert len(answer) != 0
+    assert len(answer.results) != 0
 
     answer = await cognee.search("Do programmers change light bulbs?")
-    assert len(answer) != 0
-    lowercase_answer = answer[0]["search_result"][0].lower()
+    assert len(answer.results) != 0
+    lowercase_answer = answer.results[0]["search_result"][0].lower()
     assert ("no" in lowercase_answer) or ("none" in lowercase_answer)
 
     answer = await cognee.search("What colours are there in the presentation table?")
-    assert len(answer) != 0
-    lowercase_answer = answer[0]["search_result"][0].lower()
+    assert len(answer.results) != 0
+    lowercase_answer = answer.results[0]["search_result"][0].lower()
     assert (
         ("red" in lowercase_answer)
         and ("blue" in lowercase_answer)

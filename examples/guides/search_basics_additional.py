@@ -1,6 +1,6 @@
 import asyncio
-import cognee
 
+import cognee
 from cognee.api.v1.search import SearchType
 
 
@@ -33,19 +33,19 @@ async def main():
         query_text="List coding guidelines",
         query_type=SearchType.CODING_RULES,
     )
-    assert len(answers) == 0
+    assert len(answers.results) == 0
 
     answers = await cognee.search(
         query_text="Give me a confident answer: What is NLP?",
         system_prompt="Answer succinctly and state confidence at the end.",
     )
-    assert len(answers) > 0
+    assert len(answers.results) > 0
 
     answers = await cognee.search(
         query_text="Tell me about NLP",
         only_context=True,
     )
-    assert len(answers) > 0
+    assert len(answers.results) > 0
 
 
 if __name__ == "__main__":

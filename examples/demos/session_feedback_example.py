@@ -1,10 +1,10 @@
-import os
 import asyncio
+import os
 
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import setup_logging, INFO
+from cognee.shared.logging_utils import INFO, setup_logging
 
 
 async def main():
@@ -47,7 +47,7 @@ async def main():
             user=user,
             session_id=session_id,
         )
-        print(f"  A: {results[0] if results else '(no answer)'}\n")
+        print(f"  A: {results.results[0] if results.results else '(no answer)'}\n")
 
     # Inspect full history for this session
     all_qas = await cognee.session.get_session(session_id=session_id, user=user)
@@ -79,7 +79,7 @@ async def main():
         user=user,
     )
     print("  Q: How are sessions related to Cognee?")
-    print(f"  A: {results_default[0] if results_default else '(no answer)'}\n")
+    print(f"  A: {results_default.results[0] if results_default.results else '(no answer)'}\n")
 
     default_qas = await cognee.session.get_session(session_id="default_session", user=user)
     print(f"  get_session('default_session') → {len(default_qas)} Q&A(s)")

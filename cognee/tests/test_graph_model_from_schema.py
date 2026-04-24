@@ -1,11 +1,12 @@
 import asyncio
 from pprint import pprint
+
 from pydantic import BaseModel
 
 import cognee
-from cognee.shared.graph_model_utils import graph_schema_to_graph_model, graph_model_to_graph_schema
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
+from cognee.shared.graph_model_utils import graph_model_to_graph_schema, graph_schema_to_graph_model
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 async def main():
@@ -62,8 +63,7 @@ async def main():
 
     print("Search results:")
     # Display results
-    for result_text in search_results:
-        pprint(result_text)
+    pprint(search_results)
 
     # Generate interactive graph visualization
     print("\nGenerating graph visualization...")

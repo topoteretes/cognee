@@ -19,7 +19,6 @@ from cognee.modules.search.types.SearchResponse import (
     SearchResultKind,
 )
 
-
 _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.GRAPH_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.GRAPH_COMPLETION_COT: SearchResultKind.GRAPH_COMPLETION,
@@ -103,6 +102,7 @@ def _build_item(
         score=_score_from(entry),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
+        dataset_tenant_id=str(payload.dataset_tenant_id) if payload.dataset_tenant_id else None,
         raw=raw,
     )
 

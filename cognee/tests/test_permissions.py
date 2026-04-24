@@ -19,8 +19,8 @@ from cognee.modules.users.roles.methods import add_user_to_role, create_role
 from cognee.modules.users.tenants.methods import (
     add_user_to_tenant,
     create_tenant,
-    select_tenant,
     remove_user_from_tenant,
+    select_tenant,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -44,11 +44,11 @@ async def _reset_engines_and_prune() -> None:
     except Exception:
         pass
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -137,9 +137,9 @@ async def test_permissions_example_flow(permissions_example_env):
             user=user_1,
             datasets=[ai_dataset_id],
         )
-    assert isinstance(search_results, list) and len(search_results) == 1
-    assert search_results[0]["dataset_name"] == "AI"
-    assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
+    assert isinstance(search_results.results, list) and len(search_results.results) == 1
+    assert search_results.results[0].dataset_name == "AI"
+    assert search_results.results[0].text == "MOCK_ANSWER"
 
     # user_1 can't read dataset owned by user_2.
     with pytest.raises(PermissionDeniedError):
@@ -167,9 +167,9 @@ async def test_permissions_example_flow(permissions_example_env):
                 user=user_1,
                 dataset_ids=[quantum_dataset_id],
             )
-        assert isinstance(search_results, list) and len(search_results) == 1
-        assert search_results[0]["dataset_name"] == "QUANTUM"
-        assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
+        assert isinstance(search_results.results, list) and len(search_results.results) == 1
+        assert search_results.results[0].dataset_name == "QUANTUM"
+        assert search_results.results[0].text == "MOCK_ANSWER"
 
         # Tenant + role scenario.
         tenant_id = await create_tenant("CogneeLab", user_2.id)
@@ -210,9 +210,9 @@ async def test_permissions_example_flow(permissions_example_env):
                 user=user_3,
                 dataset_ids=[quantum_cognee_lab_dataset_id],
             )
-        assert isinstance(search_results, list) and len(search_results) == 1
-        assert search_results[0]["dataset_name"] == "QUANTUM_COGNEE_LAB"
-        assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
+        assert isinstance(search_results.results, list) and len(search_results.results) == 1
+        assert search_results.results[0].dataset_name == "QUANTUM_COGNEE_LAB"
+        assert search_results.results[0].text == "MOCK_ANSWER"
 
         # Remove user_3 from tenant (tenant owner user_2 removes user_3).
         await remove_user_from_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)

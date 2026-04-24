@@ -222,13 +222,15 @@ async def _safe_search(question: str, session_id: str, top_k: int = 5) -> str:
     results = None
     for search_type in search_order:
         try:
-            results = await cognee.search(
-                query_text=question,
-                query_type=search_type,
-                datasets=[DATASET_NAME],
-                session_id=session_id,
-                top_k=max(1, min(10, int(top_k))),
-            )
+            results = (
+                await cognee.search(
+                    query_text=question,
+                    query_type=search_type,
+                    datasets=[DATASET_NAME],
+                    session_id=session_id,
+                    top_k=max(1, min(10, int(top_k))),
+                )
+            ).results
             if results:
                 break
         except Exception:

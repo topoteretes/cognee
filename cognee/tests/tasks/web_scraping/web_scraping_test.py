@@ -1,7 +1,8 @@
 import asyncio
+
 import cognee
-from cognee.tasks.web_scraper.config import DefaultCrawlerConfig
 from cognee.tasks.web_scraper import cron_web_scraper_task
+from cognee.tasks.web_scraper.config import DefaultCrawlerConfig
 
 
 async def test_web_scraping_using_bs4():
@@ -36,7 +37,7 @@ async def test_web_scraping_using_bs4():
         "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
-    assert "Albert Einstein" in results[0]
+    assert "Albert Einstein" in results.results[0].text
     print("Test passed! Found Albert Einstein in scraped data.")
 
 
@@ -70,7 +71,7 @@ async def test_web_scraping_using_bs4_and_incremental_loading():
         "What is the price of 'A Light in the Attic' book?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
-    assert "51.77" in results[0]
+    assert "51.77" in results.results[0].text
     print("Test passed! Found 'A Light in the Attic' in scraped data.")
 
 
@@ -91,7 +92,7 @@ async def test_web_scraping_using_tavily():
         "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
-    assert "Albert Einstein" in results[0]
+    assert "Albert Einstein" in results.results[0].text
     print("Test passed! Found Albert Einstein in scraped data.")
 
 
@@ -112,7 +113,7 @@ async def test_web_scraping_using_tavily_and_incremental_loading():
         "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
-    assert "Albert Einstein" in results[0]
+    assert "Albert Einstein" in results.results[0].text
     print("Test passed! Found Albert Einstein in scraped data.")
 
 
@@ -139,14 +140,14 @@ async def test_cron_web_scraper():
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
 
-    assert "Albert Einstein" in results[0]
+    assert "Albert Einstein" in results.results[0].text
 
     results_books = await cognee.search(
         "What is the price of 'A Light in the Attic' book?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
 
-    assert "51.77" in results_books[0]
+    assert "51.77" in results_books.results[0].text
 
     print("Cron job web_scraping test passed!")
 

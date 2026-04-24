@@ -1,14 +1,14 @@
 import asyncio
-import pathlib
 import os
+import pathlib
 
 import cognee
 from cognee import memify
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
+from cognee.shared.logging_utils import ERROR, setup_logging
 from cognee.tasks.codingagents.coding_rule_associations import add_rule_associations
+from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -89,8 +89,8 @@ async def main():
     )
 
     print("Coding rules created by memify:")
-    for result in coding_rules:
-        for rule in result["search_result"]:
+    for result in coding_rules.results:
+        for rule in result.text:
             print("- " + str(rule))
 
     # Visualize new graph with added memify context

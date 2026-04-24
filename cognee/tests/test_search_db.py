@@ -1,15 +1,17 @@
-import pathlib
-import os
 import asyncio
+import os
+import pathlib
+from collections import Counter
+
 import pytest
 import pytest_asyncio
-from collections import Counter
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
@@ -17,17 +19,16 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import GraphComplet
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
 )
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
-from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
-from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -51,10 +52,10 @@ async def _reset_engines_and_prune() -> None:
         pass
 
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
-    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
+    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -203,58 +204,78 @@ async def e2e_state():
         query_text="Where is germany located, next to which country?",
         verbose=True,
     )
-    completion_decomposition_answer_per_subquery = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
-        query_text="Where is germany located, next to which country?",
-        verbose=True,
-    )
-    completion_decomposition_combined_triplets = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
-        query_text="Where is germany located, next to which country?",
-        verbose=True,
-        retriever_specific_config={"decomposition_mode": "combined_triplets_context"},
-    )
-    completion_cot = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION_COT,
-        query_text="What is the country next to germany??",
-        verbose=True,
-    )
-    completion_ext = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
-        query_text="What is the name of the country next to germany",
-        verbose=True,
-    )
+    completion_decomposition_answer_per_subquery = (
+        await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+            query_text="Where is germany located, next to which country?",
+            verbose=True,
+        )
+    ).results
+    completion_decomposition_combined_triplets = (
+        await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+            query_text="Where is germany located, next to which country?",
+            verbose=True,
+            retriever_specific_config={"decomposition_mode": "combined_triplets_context"},
+        )
+    ).results
+    completion_cot = (
+        await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION_COT,
+            query_text="What is the country next to germany??",
+            verbose=True,
+        )
+    ).results
+    completion_ext = (
+        await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
+            query_text="What is the name of the country next to germany",
+            verbose=True,
+        )
+    ).results
 
-    completion_sum = await cognee.search(
-        query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
-        query_text="Next to which country is Germany located?",
-        verbose=True,
-    )
-    completion_triplet = await cognee.search(
-        query_type=SearchType.TRIPLET_COMPLETION,
-        query_text="Next to which country is Germany located?",
-        verbose=True,
-    )
-    completion_chunks = await cognee.search(
-        query_type=SearchType.CHUNKS,
-        query_text="Germany",
-        verbose=True,
-    )
-    completion_summaries = await cognee.search(
-        query_type=SearchType.SUMMARIES,
-        query_text="Germany",
-        verbose=True,
-    )
-    completion_rag = await cognee.search(
-        query_type=SearchType.RAG_COMPLETION,
-        query_text="Next to which country is Germany located?",
-        verbose=True,
-    )
-    completion_temporal = await cognee.search(
-        query_type=SearchType.TEMPORAL,
-        query_text="Next to which country is Germany located?",
-        verbose=True,
-    )
+    completion_sum = (
+        await cognee.search(
+            query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
+            query_text="Next to which country is Germany located?",
+            verbose=True,
+        )
+    ).results
+    completion_triplet = (
+        await cognee.search(
+            query_type=SearchType.TRIPLET_COMPLETION,
+            query_text="Next to which country is Germany located?",
+            verbose=True,
+        )
+    ).results
+    completion_chunks = (
+        await cognee.search(
+            query_type=SearchType.CHUNKS,
+            query_text="Germany",
+            verbose=True,
+        )
+    ).results
+    completion_summaries = (
+        await cognee.search(
+            query_type=SearchType.SUMMARIES,
+            query_text="Germany",
+            verbose=True,
+        )
+    ).results
+    completion_rag = (
+        await cognee.search(
+            query_type=SearchType.RAG_COMPLETION,
+            query_text="Next to which country is Germany located?",
+            verbose=True,
+        )
+    ).results
+    completion_temporal = (
+        await cognee.search(
+            query_type=SearchType.TEMPORAL,
+            query_text="Next to which country is Germany located?",
+            verbose=True,
+        )
+    ).results
 
     # Snapshot after all E2E operations above (used by assertion-only tests).
     graph_snapshot = await (await get_graph_engine()).get_graph_data()

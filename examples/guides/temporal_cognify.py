@@ -1,4 +1,5 @@
 import asyncio
+
 import cognee
 
 
@@ -19,20 +20,20 @@ async def main():
         query_type=SearchType.TEMPORAL, query_text="What happened before 2000?", top_k=10
     )
 
-    assert result != []
+    assert result.results != []
 
     result = await cognee.search(
         query_type=SearchType.TEMPORAL, query_text="What happened after 2010?", top_k=10
     )
 
-    assert result != []
+    assert result.results != []
 
     # Between queries
     result = await cognee.search(
         query_type=SearchType.TEMPORAL, query_text="Events between 2001 and 2004", top_k=10
     )
 
-    assert result != []
+    assert result.results != []
 
     # Scoped descriptions
     result = await cognee.search(
@@ -41,7 +42,7 @@ async def main():
         top_k=10,
     )
 
-    assert result != []
+    assert result.results != []
 
     result = await cognee.search(
         query_type=SearchType.TEMPORAL,
@@ -50,7 +51,7 @@ async def main():
         top_k=10,
     )
 
-    assert result != []
+    assert result.results != []
 
 
 if __name__ == "__main__":

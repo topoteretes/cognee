@@ -1,19 +1,15 @@
 import os
-import cognee
 import pathlib
 
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.tenants.methods import select_tenant
-from cognee.shared.logging_utils import get_logger
+import cognee
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.search.types import SearchType
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.users.roles.methods import add_user_to_role
-from cognee.modules.users.roles.methods import create_role
-from cognee.modules.users.tenants.methods import create_tenant
-from cognee.modules.users.tenants.methods import add_user_to_tenant
-from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
+from cognee.modules.users.roles.methods import add_user_to_role, create_role
+from cognee.modules.users.tenants.methods import add_user_to_tenant, create_tenant, select_tenant
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 logger = get_logger()
 
@@ -85,8 +81,7 @@ async def main():
         datasets=[ai_dataset_id],
     )
     print("\nSearch results as user_1 on dataset owned by user_1:")
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     # But user_1 cant read the dataset owned by user_2 (QUANTUM dataset)
     print("\nSearch result as user_1 on the dataset owned by user_2:")
@@ -132,8 +127,7 @@ async def main():
         user=user_1,
         dataset_ids=[quantum_dataset_id],
     )
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     # If we'd like for user_1 to add new documents to the QUANTUM dataset owned by user_2, user_1 would have to get
     # "write" access permission, which user_1 currently does not have
@@ -215,8 +209,7 @@ async def main():
         user=user_3,
         dataset_ids=[quantum_cognee_lab_dataset_id],
     )
-    for result in search_results:
-        print(f"{result}\n")
+    print(search_results)
 
     # Note: All of these function calls and permission system is available through our backend endpoints as well
 

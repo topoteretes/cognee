@@ -1,19 +1,20 @@
+import asyncio
 import re
 import sys
 import types
-import asyncio
 from pprint import pprint
 from typing import Any, Union, get_args, get_origin
+
+from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
 from pydantic import BaseModel, ConfigDict, Field, create_model
-from pydantic_core import PydanticUndefined
+from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema
-from pydantic._internal._core_utils import is_core_schema, CoreSchemaOrField
-from datamodel_code_generator import InputFileType, generate, GenerateConfig, DataModelType
+from pydantic_core import PydanticUndefined
 
 import cognee
-from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 
 def datapoint_model_to_basemodel(model: type[BaseModel]) -> type[BaseModel]:
@@ -219,8 +220,7 @@ if __name__ == "__main__":
 
         print("Search results:")
         # Display results
-        for result_text in search_results:
-            pprint(result_text)
+        pprint(search_results)
 
         # Generate interactive graph visualization
         print("\nGenerating graph visualization...")

@@ -1,6 +1,7 @@
+import asyncio
 import os
 import pathlib
-import asyncio
+
 import cognee
 from cognee.modules.search.types import SearchType
 
@@ -61,24 +62,21 @@ async def main():
         query_type=SearchType.GRAPH_COMPLETION, query_text="ChromaDB"
     )
     print("\nInsights about ChromaDB:")
-    for result in insights_results:
-        print(f"- {result}")
+    print(insights_results)
 
     # 2. Search for text chunks related to "vector search"
     chunks_results = await cognee.search(
         query_type=SearchType.CHUNKS, query_text="vector search", datasets=[dataset_name]
     )
     print("\nChunks about vector search:")
-    for result in chunks_results:
-        print(f"- {result}")
+    print(chunks_results)
 
     # 3. Get graph completion related to databases
     graph_completion_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text="database"
     )
     print("\nGraph completion for databases:")
-    for result in graph_completion_results:
-        print(f"- {result}")
+    print(graph_completion_results)
 
     # Clean up (optional)
     # await cognee.prune.prune_data()
