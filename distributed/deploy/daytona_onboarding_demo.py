@@ -1,5 +1,5 @@
 """
-Claude Code + Cognee on Daytona — Shared Memory Demo (Snapshot Edition)
+Claude Code + Cognee + Moss on Daytona — Shared Memory Demo (Snapshot Edition)
 
 Why no separate Cognee sandbox:
     Daytona's public preview URL is served through a proxy that rejects
@@ -18,7 +18,8 @@ Why no direct volume-mounted DBs either:
 
 What works instead:
     The volume is used as a snapshot bucket. Each agent runs cognee
-    against a LOCAL disk path. Before the agent starts, we extract the
+    against a LOCAL disk path. Vectors are stored in and queried from
+    Moss (cloud index) in-process via cognee-community-vector-adapter-moss. Before the agent starts, we extract the
     latest shared snapshot from the volume into the local state dir.
     After the agent finishes, we tar local state back into the volume
     as a single object. Because agents run sequentially, there are no
@@ -29,9 +30,11 @@ Prerequisites:
     pip install daytona
 
     Set environment variables:
-        DAYTONA_API_KEY     — https://app.daytona.io
-        ANTHROPIC_API_KEY   — for Claude Code itself
-        LLM_API_KEY         — for Cognee (graph extraction + search)
+        DAYTONA_API_KEY     - https://app.daytona.io
+        ANTHROPIC_API_KEY   - for Claude Code itself
+        LLM_API_KEY         - for Cognee (graph extraction + search)
+        MOSS_PROJECT_ID     - https://moss.dev
+        MOSS_PROJECT_KEY    - https://moss.dev
 
 Usage:
     python distributed/deploy/daytona_onboarding_demo.py \\
@@ -60,11 +63,12 @@ DAYTONA_API_URL = "https://app.daytona.io/api"
 DEFAULT_REPO = "https://github.com/topoteretes/cognee"
 INTEGRATIONS_REPO = "https://github.com/topoteretes/cognee-integrations"
 PLUGIN_SUBPATH = "integrations/claude-code"
+
 VOLUME_NAME = "cognee-shared-memory"
 MOUNT_PATH = "/shared-cognee"
 # Path inside each agent sandbox where cognee's local DBs live. This is on
-# the sandbox's real filesystem (block storage), so SQLite/Kuzu/LanceDB
-# work correctly. Snapshots of this dir are synced to/from the volume.
+# the sandbox's real filesystem (block storage), so SQLite/Kuzu work
+# correctly. Vectors live in Moss; snapshots of this dir are synced to/from the volume.
 LOCAL_STATE = "/var/cognee-state"
 SNAPSHOT_FILE = "state.tar.gz"
 
@@ -169,7 +173,8 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
 
     Each agent runs Cognee in-process. DATA/SYSTEM/CACHE_ROOT_DIRECTORY
     all point at the mounted volume, so all agents share the same graph
-    and session cache across runs.
+    and session cache across runs. Vectors are stored in and queried from
+    Moss
     """
     anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not anthropic_api_key:
@@ -179,12 +184,20 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
     if not llm_api_key:
         raise ValueError("LLM_API_KEY environment variable is required")
 
+    moss_project_id = os.environ.get("MOSS_PROJECT_ID")
+    if not moss_project_id:
+        raise ValueError("MOSS_PROJECT_ID environment variable is required")
+
+    moss_project_key = os.environ.get("MOSS_PROJECT_KEY")
+    if not moss_project_key:
+        raise ValueError("MOSS_PROJECT_KEY environment variable is required")
+
     daytona = _get_daytona()
 
     print(f"\n=== Creating Claude Code agent sandbox: {label} ===")
     sandbox = _create_with_quota_retry(daytona,
         CreateSandboxFromImageParams(
-            image=Image.debian_slim("3.12"),
+            image=Image.base("python:3.12-slim-trixie"),
             # 4 GiB was OOM-killed during claude+plugin+cognee SDK startup.
             # 6 GiB leaves us at the 10 GiB tier cap with nothing else.
             resources=Resources(cpu=2, memory=6, disk=10),
@@ -194,6 +207,11 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
                 "LLM_API_KEY": llm_api_key,
                 "LLM_MODEL": os.environ.get("LLM_MODEL", "openai/gpt-4o-mini"),
                 "LLM_PROVIDER": os.environ.get("LLM_PROVIDER", "openai"),
+                # Tell Cognee to use Moss as its vector DB.
+                "VECTOR_DB_PROVIDER": "moss",
+                "VECTOR_DB_KEY": moss_project_key,
+                "VECTOR_DB_NAME": moss_project_id,
+                "VECTOR_DATASET_DATABASE_HANDLER": "moss",
                 # Cognee local storage — on the sandbox's real filesystem,
                 # NOT on the volume (mountpoint-s3 can't host SQLite/Kuzu).
                 # Synced to the volume before/after each agent's run.
@@ -241,9 +259,43 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
     _print_tail(result, "claude")
 
     # Plugin depends on the cognee Python SDK for its hooks/skills.
-    print("  Installing cognee SDK (plugin dependency)...")
-    result = sandbox.process.exec("pip install cognee", timeout=600)
+    print("  Installing cognee SDK (plugin dependencies)...")
+    result = sandbox.process.exec(
+        "pip install cognee cognee-community-vector-adapter-moss==0.1.1",
+        timeout=600,
+    )
     _print_tail(result, "cognee-sdk")
+
+    # Write a sitecustomize.py so the Moss adapter auto-registers for every
+    # Python process in the sandbox, including the hook subprocesses fired
+    # by the cognee-memory plugin. sitecustomize is imported by Python before
+    # any user code, making this the most reliable registration point.
+    print("  Registering Moss adapter for all Python processes...")
+    site_packages = sandbox.process.exec(
+        "python -c \"import site; print(site.getsitepackages()[0])\"",
+        timeout=10,
+    ).result.strip()
+    sandbox.process.exec(
+        f"cat > {site_packages}/sitecustomize.py << 'EOF'\n"
+        "import os\n"
+        "import sys\n"
+        "try:\n"
+        "    # Importing this submodule registers the adapter.\n"
+        "    from cognee_community_vector_adapter_moss import register  # noqa: F401\n"
+        "    # Programmatic config (matches the PyPI docs exactly). Env vars\n"
+        "    # alone are not honored by Cognee at the plugin's config path.\n"
+        "    from cognee import config\n"
+        "    config.set_vector_db_config({\n"
+        "        'vector_db_provider': 'moss',\n"
+        "        'vector_db_key': os.getenv('VECTOR_DB_KEY'),\n"
+        "        'vector_db_name': os.getenv('VECTOR_DB_NAME'),\n"
+        "        'vector_dataset_database_handler': 'moss',\n"
+        "    })\n"
+        "except Exception as e:\n"
+        "    print(f'[moss-adapter] setup failed: {e!r}', file=sys.stderr)\n"
+        "EOF",
+        timeout=5,
+    )
 
     print("  Cloning cognee-integrations (for the plugin)...")
     sandbox.process.exec(
@@ -277,7 +329,7 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
         f"useradd -m -s /bin/bash agent && "
         f"mkdir -p {LOCAL_STATE}/data {LOCAL_STATE}/system {LOCAL_STATE}/cache && "
         f"chown -R agent:agent /workspace /opt/cognee-integrations {LOCAL_STATE} && "
-        "env | grep -E '^(ANTHROPIC_API_KEY|LLM_|COGNEE_|CACHING|"
+        "env | grep -E '^(ANTHROPIC_API_KEY|LLM_|COGNEE_|CACHING|VECTOR_|"
         "DATA_ROOT_DIRECTORY|SYSTEM_ROOT_DIRECTORY|CACHE_ROOT_DIRECTORY)=' "
         "| sed 's/^/export /' > /home/agent/env && "
         "chown agent:agent /home/agent/env && chmod 600 /home/agent/env",
@@ -295,11 +347,12 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
 def run_agent_task(sandbox, label, prompt):
     """Run one Claude Code task with sync-in / run / sync-out around it.
 
-    The cognee DBs live on local sandbox disk (block storage). Before the
+    The cognee DBs live on local sandbox disk (block storage). Vectors go
+    to Moss (cloud) and the vector search happens in-process. Before the
     agent runs we extract the latest shared snapshot from the volume into
-    LOCAL_STATE; after the agent finishes we tar LOCAL_STATE back into
-    the volume as a single object. Whole-object writes are what
-    mountpoint-s3 is built for.
+    LOCAL_STATE; after the agent
+    finishes we tar LOCAL_STATE back into the volume as a single object.
+    Whole-object writes are what mountpoint-s3 is built for.
     """
     print(f"\n{'=' * 60}")
     print(f"  AGENT:  {label}")
@@ -397,7 +450,7 @@ def inspect_shared_graph(daytona, volume_id):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Claude Code + Cognee on Daytona: shared-volume memory demo"
+        description="Claude Code + Cognee + Moss on Daytona: shared-volume memory demo"
     )
     parser.add_argument(
         "--repo",
