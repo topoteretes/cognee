@@ -199,7 +199,38 @@ class AgenticRetriever(GraphCompletionRetriever):
         finally:
             active_skills_var.reset(token)
 
+        # Record a SkillRun for each skill that was routed to on this
+        # call. ``improve_failing_skills`` (the memify task) consumes
+        # these as its failure-signal input. ``success_score`` here is
+        # optimistic (1.0) — a proper quality score would need an
+        # output-grading LLM pass. The retriever side just produces
+        # the run record; scoring is a follow-up.
+        if skills:
+            await self._record_skill_runs(skills, query or "", final)
+
         return [final]
+
+    @staticmethod
+    async def _record_skill_runs(skills: Sequence[Skill], task_text: str, result: str) -> None:
+        """Persist one SkillRun node per active skill after a retrieval call."""
+        from cognee.modules.engine.models.SkillRun import SkillRun
+        from cognee.tasks.storage.add_data_points import add_data_points
+
+        runs = [
+            SkillRun(
+                run_id=f"agentic:{s.name}:{id(result)}",
+                selected_skill_id=s.name,
+                task_text=task_text,
+                success_score=1.0,
+                result_summary=(result[:500] if isinstance(result, str) else ""),
+                session_id="agentic",
+            )
+            for s in skills
+        ]
+        try:
+            await add_data_points(runs)
+        except Exception as exc:
+            logger.warning("Failed to record SkillRun(s) after agentic retrieval: %s", exc)
 
     async def _run_tool_loop(
         self,

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm import get_llm_config
 
-from cognee.cognee_skills.models.skill import Skill
+from cognee.modules.engine.models.Skill import Skill
 
 logger = logging.getLogger(__name__)
 

@@ -53,6 +53,6 @@ class SkillRun(DataPoint):
     metadata: dict = {"index_fields": ["task_text", "result_summary"]}
 
 
-from .skill import Skill  # noqa: E402
+from .Skill import Skill  # noqa: E402
 
 SkillRun.model_rebuild()

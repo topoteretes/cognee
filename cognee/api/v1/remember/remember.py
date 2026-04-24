@@ -70,6 +70,11 @@ class RememberKwargs(TypedDict, total=False):
     # SKILL.md ingest only: run LLM enrichment + materialize task patterns
     # after parsing. Ignored for non-skill sources.
     enrich: bool
+    # SKILL.md ingest only: after ingesting, run the memify
+    # improve_failing_skills task to automatically amend any skills that
+    # already have enough low-score SkillRun failure signal. Ignored
+    # for non-skill sources.
+    improve: bool
 
 
 # Kwarg routing: which RememberKwargs go to add(), cognify(), or both.
@@ -706,7 +711,20 @@ async def _remember_inner(
     if looks_like_skill_source(data):
         # Pop skill-ingest kwargs so they don't reach the chunk/extract path.
         enrich = bool(kwargs.pop("enrich", False))
+        improve = bool(kwargs.pop("improve", False))
         skills = await add_skills(data, enrich=enrich)
+        applied_amendments: list = []
+        if improve:
+            # Run the memify skill-improvement task once. It'll no-op if
+            # no skill has enough low-score SkillRun signal yet.
+            from cognee.modules.memify.skill_improvement import (
+                improve_failing_skills,
+            )
+
+            try:
+                applied_amendments = await improve_failing_skills()
+            except Exception as exc:
+                logger.warning("improve_failing_skills failed: %s", exc)
         result = RememberResult(
             status="completed",
             dataset_name=dataset_name,
@@ -717,6 +735,10 @@ async def _remember_inner(
         result.items = [
             {"name": s.name, "kind": "skill", "declared_tools": s.declared_tools} for s in skills
         ]
+        if applied_amendments:
+            result.items.extend(
+                {"kind": "amendment", "skill_name": a.get("skill_name")} for a in applied_amendments
+            )
         return result
 
     from cognee.api.v1.add import add

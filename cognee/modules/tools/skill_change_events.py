@@ -8,7 +8,7 @@ from uuid import uuid5, UUID
 from cognee.modules.engine.utils.generate_timestamp_datapoint import generate_timestamp_datapoint
 from cognee.modules.engine.models.Timestamp import Timestamp
 
-from cognee.cognee_skills.models.skill_change_event import SkillChangeEvent
+from cognee.modules.engine.models.SkillChangeEvent import SkillChangeEvent
 
 EVENT_NAMESPACE = UUID("d4e5f6a7-b8c9-0123-def0-123456789abc")
 

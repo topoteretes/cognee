@@ -14,7 +14,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.storage import add_data_points
 
-from cognee.cognee_skills.models.skill_inspection import InspectionResult, SkillInspection
+from cognee.modules.engine.models.SkillInspection import InspectionResult, SkillInspection
 
 logger = logging.getLogger(__name__)
 

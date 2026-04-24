@@ -1,0 +1,246 @@
+"""Smoke test: the unified skill ingestion path through cognee.remember.
+
+Covers the full promise of the ``graphskills-on-agentic`` branch in one
+run — no LLM calls, no real graph engine, just code wiring:
+
+1. ``cognee.remember("<skills-dir>/")`` accepts a SKILL.md directory
+   and persists a canonical ``cognee.modules.engine.models.Skill``.
+2. Re-running the same call is idempotent — content-hash diff
+   against the graph skips unchanged skills.
+3. Editing a skill triggers an ``"updated"`` ``SkillChangeEvent``.
+4. The memify skill-improvement task
+   (``cognee.modules.memify.skill_improvement.improve_failing_skills``)
+   imports cleanly.
+5. ``SearchType.AGENTIC_COMPLETION`` — the PR #2676 agentic retriever
+   entrypoint — still resolves.
+6. ``cognee.skills`` top-level attribute is gone (reshape contract).
+
+What this DOESN'T cover (requires LLM + real DB — integration tests):
+    * ``enrich=True`` LLM enrichment round-trip.
+    * ``improve=True`` running inspect/amendify end-to-end.
+    * Agentic retriever routing + SkillRun recording.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import tempfile
+import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+_SKILL_V1 = """\
+---
+name: summarize
+description: Summarize text into bullet points.
+allowed-tools: memory_search
+---
+# Instructions
+
+Condense the input into 2-3 key bullet points.
+"""
+
+_SKILL_V2 = """\
+---
+name: summarize
+description: Summarize text into bullet points.
+allowed-tools: memory_search
+---
+# Instructions
+
+Condense the input into 3-5 key bullet points, prioritising decisions over
+descriptions.
+"""
+
+
+def _make_skills_dir(body: str):
+    from pathlib import Path
+
+    tmp = Path(tempfile.mkdtemp())
+    skill_dir = tmp / "summarize"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(body)
+    return tmp
+
+
+class TestSkillIngest(unittest.TestCase):
+    """End-to-end wiring test of ``cognee.remember`` → Skill DataPoint."""
+
+    def _run(self, coro):
+        return asyncio.run(coro)
+
+    def test_remember_detects_skill_source(self):
+        from cognee.modules.tools import looks_like_skill_source
+
+        folder = _make_skills_dir(_SKILL_V1)
+        try:
+            assert looks_like_skill_source(str(folder))
+        finally:
+            import shutil
+
+            shutil.rmtree(folder)
+
+    def test_add_skills_persists_canonical_skill(self):
+        from cognee.modules.tools.ingest_skills import add_skills
+
+        folder = _make_skills_dir(_SKILL_V1)
+        try:
+
+            async def _run():
+                with (
+                    patch(
+                        "cognee.modules.tools.ingest_skills._diff_against_graph",
+                        new_callable=AsyncMock,
+                    ) as mock_diff,
+                    patch(
+                        "cognee.modules.tools.ingest_skills.add_data_points",
+                        new_callable=AsyncMock,
+                    ) as mock_add,
+                ):
+
+                    async def diff_side_effect(parsed, node_set):
+                        return (parsed, [], [])
+
+                    mock_diff.side_effect = diff_side_effect
+                    persisted = await add_skills(str(folder), enrich=False)
+                    return persisted, mock_add
+
+            persisted, mock_add = self._run(_run())
+
+            assert len(persisted) == 1
+            skill = persisted[0]
+            assert skill.name == "summarize"
+            assert "Condense the input into 2-3 key bullet points" in skill.procedure
+            assert skill.content_hash
+            assert skill.source_path.endswith("summarize")
+
+            from cognee.modules.engine.models import Skill as CanonicalSkill
+
+            assert isinstance(skill, CanonicalSkill)
+            assert mock_add.await_count == 1
+        finally:
+            import shutil
+
+            shutil.rmtree(folder)
+
+    def test_re_ingest_is_idempotent_when_content_unchanged(self):
+        from cognee.modules.tools.ingest_skills import add_skills
+        from cognee.modules.tools.skill_parser import parse_skills_folder
+
+        folder = _make_skills_dir(_SKILL_V1)
+        try:
+            parsed = parse_skills_folder(folder)
+            existing_hash = parsed[0].content_hash
+            existing_nid = str(parsed[0].id)
+            fake_node = (
+                existing_nid,
+                {
+                    "type": "Skill",
+                    "name": "summarize",
+                    "content_hash": existing_hash,
+                },
+            )
+            mock_engine = AsyncMock()
+            mock_engine.get_nodeset_subgraph = AsyncMock(return_value=([fake_node], []))
+
+            async def _run():
+                with (
+                    patch(
+                        "cognee.infrastructure.databases.graph.get_graph_engine",
+                        new_callable=AsyncMock,
+                        return_value=mock_engine,
+                    ),
+                    patch(
+                        "cognee.modules.tools.ingest_skills.add_data_points",
+                        new_callable=AsyncMock,
+                    ) as mock_add,
+                ):
+                    persisted = await add_skills(str(folder), enrich=False)
+                    return persisted, mock_add
+
+            persisted, mock_add = self._run(_run())
+            assert persisted == []
+            assert mock_add.await_count == 0
+        finally:
+            import shutil
+
+            shutil.rmtree(folder)
+
+    def test_edit_triggers_updated_change_event(self):
+        from cognee.modules.tools.ingest_skills import add_skills
+        from cognee.modules.tools.skill_parser import parse_skills_folder
+
+        folder = _make_skills_dir(_SKILL_V1)
+        try:
+            parsed_v1 = parse_skills_folder(folder)
+            old_hash = parsed_v1[0].content_hash
+            old_nid = str(parsed_v1[0].id)
+
+            (folder / "summarize" / "SKILL.md").write_text(_SKILL_V2)
+
+            fake_node = (
+                old_nid,
+                {
+                    "type": "Skill",
+                    "name": "summarize",
+                    "content_hash": old_hash,
+                },
+            )
+            mock_engine = AsyncMock()
+            mock_engine.get_nodeset_subgraph = AsyncMock(return_value=([fake_node], []))
+            mock_engine.delete_nodes = AsyncMock()
+            mock_vector_engine = MagicMock()
+            mock_vector_engine.delete_data_points = AsyncMock()
+
+            async def _run():
+                with (
+                    patch(
+                        "cognee.infrastructure.databases.graph.get_graph_engine",
+                        new_callable=AsyncMock,
+                        return_value=mock_engine,
+                    ),
+                    patch(
+                        "cognee.infrastructure.databases.vector.get_vector_engine",
+                        return_value=mock_vector_engine,
+                    ),
+                    patch(
+                        "cognee.modules.tools.ingest_skills.add_data_points",
+                        new_callable=AsyncMock,
+                    ) as mock_add,
+                ):
+                    persisted = await add_skills(str(folder), enrich=False)
+                    return persisted, mock_add, mock_engine
+
+            persisted, mock_add, engine = self._run(_run())
+
+            assert len(persisted) == 1
+            assert persisted[0].content_hash != old_hash
+            assert engine.delete_nodes.await_count == 1
+            assert old_nid in engine.delete_nodes.await_args.args[0]
+            assert mock_add.await_count >= 2
+
+            flat = [item for call in mock_add.await_args_list for item in call.args[0]]
+            change_events = [x for x in flat if type(x).__name__ == "SkillChangeEvent"]
+            assert any(e.change_type == "updated" for e in change_events)
+        finally:
+            import shutil
+
+            shutil.rmtree(folder)
+
+    def test_top_level_skills_attr_is_gone(self):
+        """The reshape deletes cognee.skills — only cognee.remember / memify remain."""
+        import cognee
+
+        assert not hasattr(cognee, "skills"), (
+            "cognee.skills should have been removed by the graphskills reshape"
+        )
+
+    def test_agentic_completion_still_present(self):
+        from cognee.api.v1.search import SearchType
+
+        assert any("AGENTIC" in t.name for t in SearchType)
+
+    def test_memify_improvement_task_importable(self):
+        from cognee.modules.memify.skill_improvement import improve_failing_skills
+
+        assert callable(improve_failing_skills)

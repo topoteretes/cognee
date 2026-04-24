@@ -144,7 +144,7 @@ async def add_skills(
     """
     # Late import: rich parser lives in cognee_skills and we don't want
     # to eager-load that package on every cognee import.
-    from cognee.cognee_skills.parser.skill_parser import (
+    from cognee.modules.tools.skill_parser import (
         parse_skill_file,
         parse_skills_folder,
     )
@@ -169,7 +169,7 @@ async def add_skills(
     await _delete_stale(nids_to_delete)
 
     if events:
-        from cognee.cognee_skills.utils import _make_change_event
+        from cognee.modules.tools.skill_change_events import _make_change_event
 
         change_nodes = [
             _make_change_event(name, name, change_type, old_hash=oh, new_hash=nh)
@@ -187,11 +187,11 @@ async def add_skills(
         from cognee.modules.data.methods import load_or_create_datasets
         from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
-        from cognee.cognee_skills.tasks.enrich_skills import enrich_skills
-        from cognee.cognee_skills.tasks.materialize_task_patterns import (
+        from cognee.modules.tools.skill_enrichment_tasks import enrich_skills
+        from cognee.modules.tools.skill_pattern_tasks import (
             materialize_task_patterns,
         )
-        from cognee.cognee_skills.tasks.apply_node_set import apply_node_set
+        from cognee.modules.tools.skill_node_set_task import apply_node_set
 
         user = await get_default_user()
         datasets = await load_or_create_datasets(["skills"], [], user)

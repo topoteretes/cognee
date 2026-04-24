@@ -8,7 +8,7 @@ from cognee.low_level import DataPoint
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 
-from cognee.cognee_skills.models.skill import Skill
+from cognee.modules.engine.models.Skill import Skill
 
 
 def _tag(dp: DataPoint, ns: NodeSet, node_set: str) -> None:

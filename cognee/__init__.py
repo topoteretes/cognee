@@ -59,6 +59,3 @@ from cognee.modules.observability.trace_context import (
 
 # Agent memory
 from cognee.modules.agent_memory import agent_memory
-
-# Self-improving skills (cognee_skills client — runs/inspect/amendify)
-from cognee.cognee_skills.client import skills
