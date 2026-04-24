@@ -76,7 +76,7 @@ async def test_agent_memory_e2e_requires_write_then_retrieves_shared_memory(agen
 
     @cognee.agent_memory(
         with_memory=True,
-        save_traces=False,
+        save_session_traces=False,
         user=member,
         dataset_name=dataset_name,
         memory_query_fixed="What is the private codename for this cognee agent_memory e2e test?",
@@ -119,7 +119,7 @@ async def test_agent_memory_e2e_persists_success_and_error_traces(agent_memory_e
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         user=owner,
         dataset_name=dataset_name,
         session_id=session_id,
@@ -129,7 +129,7 @@ async def test_agent_memory_e2e_persists_success_and_error_traces(agent_memory_e
 
     @cognee.agent_memory(
         with_memory=False,
-        save_traces=True,
+        save_session_traces=True,
         user=owner,
         dataset_name=dataset_name,
         session_id=session_id,

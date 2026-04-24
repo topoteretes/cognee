@@ -19,34 +19,34 @@ Usage:
 class _Embeddable:
     """Marker: this field will be embedded in the vector database."""
 
-    def __init__(self, description: str = ""):
+    def __init__(self, description: str = "") -> None:
         self.description = description
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Embeddable({self.description!r})" if self.description else "Embeddable()"
 
 
 class _LLMContext:
     """Marker: this field is sent to the LLM during retrieval/extraction."""
 
-    def __init__(self, description: str = ""):
+    def __init__(self, description: str = "") -> None:
         self.description = description
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"LLMContext({self.description!r})" if self.description else "LLMContext()"
 
 
 class _Dedup:
     """Marker: this field is used for entity deduplication (UUID5 key)."""
 
-    def __init__(self, description: str = ""):
+    def __init__(self, description: str = "") -> None:
         self.description = description
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Dedup({self.description!r})" if self.description else "Dedup()"
 
 
-def Embeddable(description: str = "Embedded in vector DB for semantic search"):
+def Embeddable(description: str = "Embedded in vector DB for semantic search") -> _Embeddable:
     """Mark a field as embedded in the vector database.
 
     Fields marked Embeddable are included in metadata["index_fields"]
@@ -59,7 +59,7 @@ def Embeddable(description: str = "Embedded in vector DB for semantic search"):
     return _Embeddable(description)
 
 
-def LLMContext(description: str = "Sent to LLM during retrieval"):
+def LLMContext(description: str = "Sent to LLM during retrieval") -> _LLMContext:
     """Mark a field as sent to the LLM during context building.
 
     Fields marked LLMContext are concatenated and used as context
@@ -72,7 +72,7 @@ def LLMContext(description: str = "Sent to LLM during retrieval"):
     return _LLMContext(description)
 
 
-def Dedup(description: str = "Used for entity deduplication"):
+def Dedup(description: str = "Used for entity deduplication") -> _Dedup:
     """Mark a field as part of the deduplication key.
 
     Fields marked Dedup contribute to the identity_fields list,
