@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict, Type, Optional
 from pydantic import BaseModel
+import httpx
 import litellm
 import instructor
 import anthropic
@@ -51,7 +52,10 @@ class AnthropicAdapter(GenericAPIAdapter):
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.patch(
-            create=anthropic.AsyncAnthropic(api_key=self.api_key).messages.create,
+            create=anthropic.AsyncAnthropic(
+                api_key=self.api_key,
+                http_client=httpx.AsyncClient(http2=False),
+            ).messages.create,
             mode=instructor.Mode(self.instructor_mode),
         )
 
