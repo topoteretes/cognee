@@ -210,11 +210,7 @@ class DatasetQueue:
         """
         if not self._enabled:
             return
-        try:
-            task = asyncio.current_task()
-        except RuntimeError:
-            # Called outside a running event loop — nothing to release.
-            return
+        task = asyncio.current_task()
         if task is None:
             return
 
