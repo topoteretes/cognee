@@ -3,6 +3,7 @@
 import sys
 import unittest
 import importlib
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, AsyncMock
 
 
@@ -38,56 +39,57 @@ class TestRunMigrations(unittest.TestCase):
         )
         self.assertEqual(cmd[1:], ["-m", "alembic", "upgrade", "head"])
 
-    # def test_run_vector_migrations_sweeps_dataset_database_rows(self):
-    #     import asyncio
-    #
-    #     module = importlib.import_module("cognee.run_migrations")
-    #
-    #     dataset_rows = [
-    #         MagicMock(
-    #             dataset_id="dataset-1",
-    #             vector_database_provider="lancedb",
-    #             vector_database_url="/tmp/dataset-1.lance.db",
-    #             vector_database_name="dataset-1.lance.db",
-    #             vector_database_key="",
-    #             vector_database_connection_info={},
-    #             vector_dataset_database_handler="lancedb",
-    #         ),
-    #         MagicMock(
-    #             dataset_id="dataset-2",
-    #             vector_database_provider="pgvector",
-    #             vector_database_url="postgres://ignored",
-    #             vector_database_name="dataset-2",
-    #             vector_database_key="",
-    #             vector_database_connection_info={},
-    #             vector_dataset_database_handler="pgvector",
-    #         ),
-    #     ]
-    #
-    #     vector_engine = MagicMock()
-    #     vector_engine.run_migrations = AsyncMock(return_value={"ok": True})
-    #
-    #     with (
-    #         patch(
-    #             "cognee.modules.data.methods.get_dataset_databases.get_dataset_databases",
-    #             new=AsyncMock(return_value=dataset_rows),
-    #         ),
-    #         patch(
-    #             "cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info.resolve_dataset_database_connection_info",
-    #             new=AsyncMock(side_effect=lambda dataset_database: dataset_database),
-    #         ),
-    #         patch(
-    #             "cognee.infrastructure.databases.vector.create_vector_engine.create_vector_engine",
-    #             return_value=vector_engine,
-    #         ) as mock_create_vector_engine,
-    #     ):
-    #         result = asyncio.run(module.run_vector_migrations())
-    #
-    #     self.assertEqual(mock_create_vector_engine.call_count, 2)
-    #     self.assertEqual(vector_engine.run_migrations.await_count, 2)
-    #     self.assertEqual(len(result), 2)
-    #     self.assertEqual(result[0]["dataset_id"], "dataset-1")
-    #     self.assertEqual(result[1]["dataset_id"], "dataset-2")
+    def test_run_vector_migrations_sweeps_dataset_database_rows(self):
+        import asyncio
+
+        module = importlib.import_module("cognee.run_migrations")
+
+        dataset_rows = [
+            SimpleNamespace(
+                dataset_id="dataset-1",
+                vector_database_provider="lancedb",
+                vector_database_url="/tmp/dataset-1.lance.db",
+                vector_database_name="dataset-1.lance.db",
+                vector_database_key="",
+                vector_database_connection_info={},
+                vector_dataset_database_handler="lancedb",
+            ),
+            SimpleNamespace(
+                dataset_id="dataset-2",
+                vector_database_provider="pgvector",
+                vector_database_url="postgres://ignored",
+                vector_database_name="dataset-2",
+                vector_database_key="",
+                vector_database_connection_info={},
+                vector_dataset_database_handler="pgvector",
+            ),
+        ]
+
+        vector_engine = SimpleNamespace(
+            run_migrations=AsyncMock(return_value={"ok": True}),
+        )
+
+        with (
+            patch(
+                "cognee.modules.data.methods.get_dataset_databases.get_dataset_databases",
+                new=AsyncMock(return_value=dataset_rows),
+            ),
+            patch(
+                "cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info.resolve_dataset_database_connection_info",
+                new=AsyncMock(side_effect=lambda dataset_database: dataset_database),
+            ),
+            patch(
+                "cognee.infrastructure.databases.vector.create_vector_engine.create_vector_engine",
+                return_value=vector_engine,
+            ) as mock_create_vector_engine,
+        ):
+            result = asyncio.run(module.run_vector_migrations())
+
+        self.assertEqual(mock_create_vector_engine.call_count, 2)
+        self.assertEqual(vector_engine.run_migrations.await_count, 2)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["dataset_id"], "dataset-1")
+        self.assertEqual(result[1]["dataset_id"], "dataset-2")
 
 
 if __name__ == "__main__":
