@@ -2,7 +2,8 @@
 
 import asyncio
 import json
-from typing import List, Optional, Any, Dict, Type, Tuple
+from collections import Counter
+from typing import List, Optional, Any, Dict, Tuple
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
@@ -10,6 +11,7 @@ from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryPar
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
@@ -492,6 +494,89 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             raise ValueError(
                 "Neptune Analytics requires an embedder defined to make vector operations"
             )
+
+    async def add_nodes_with_vectors(self, data_points: List[DataPoint]) -> None:
+        """Add nodes to the graph and index their embeddable fields as vector data points.
+
+        This is the hybrid write path for Neptune Analytics: graph nodes are inserted
+        via ``add_nodes`` and vector embeddings are stored as COGNEE_NODE entries
+        grouped by ``(TypeName, field_name)`` collection.
+
+        Parameters:
+        -----------
+            - data_points (List[DataPoint]): Nodes to insert. Each node's
+              ``metadata["index_fields"]`` controls which fields are embedded.
+        """
+        if not data_points:
+            return
+
+        await self.add_nodes(data_points)
+
+        # Group by (type_name, field_name) to build one collection per field.
+        groups: Dict[Tuple[str, str], List[DataPoint]] = {}
+        for dp in data_points:
+            if not hasattr(dp, "metadata") or not dp.metadata:
+                continue
+            type_name = type(dp).__name__
+            for field_name in dp.metadata.get("index_fields", []):
+                if getattr(dp, field_name, None) is None:
+                    continue
+                key = (type_name, field_name)
+                groups.setdefault(key, []).append(dp)
+
+        for (type_name, field_name), points in groups.items():
+            await self.create_vector_index(type_name, field_name)
+            index_schemas = [
+                IndexSchema(
+                    id=str(dp.id),
+                    text=getattr(dp, field_name),
+                    belongs_to_set=dp.belongs_to_set or [],
+                )
+                for dp in points
+            ]
+            await self.create_data_points(f"{type_name}_{field_name}", index_schemas)
+
+    async def add_edges_with_vectors(
+        self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
+    ) -> None:
+        """Add edges to the graph and index unique relationship types as vector data points.
+
+        Graph edges are inserted via ``add_edges``. Each distinct relationship type
+        (or ``edge_text`` when present in edge properties) is embedded and stored as a
+        COGNEE_NODE in the ``EdgeType_relationship_name`` collection, matching the
+        behaviour of the non-hybrid ``index_graph_edges`` task.
+
+        Parameters:
+        -----------
+            - edges (List[Tuple]): Edges in ``(source_id, target_id, rel_name, props)``
+              format, as produced by ``get_graph_from_model``.
+        """
+        if not edges:
+            return
+
+        await self.add_edges(edges)
+
+        # Collect unique edge texts for embedding.
+        edge_texts = []
+        for edge in edges:
+            props = edge[3] if len(edge) > 3 and edge[3] else {}
+            edge_text = props.get("edge_text", edge[2])
+            edge_texts.append(edge_text)
+
+        edge_type_counts = Counter(edge_texts)
+        if not edge_type_counts:
+            return
+
+        await self.create_vector_index("EdgeType", "relationship_name")
+        index_schemas = [
+            IndexSchema(
+                id=str(generate_edge_id(edge_id=text)),
+                text=text,
+                belongs_to_set=[],
+            )
+            for text in edge_type_counts
+        ]
+        await self.create_data_points("EdgeType_relationship_name", index_schemas)
 
     async def run_migrations(self):
         """Run Neptune Analytics adapter migrations (currently no-op)."""

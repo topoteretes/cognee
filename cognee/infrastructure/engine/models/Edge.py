@@ -1,5 +1,6 @@
-from pydantic import BaseModel, field_validator
-from typing import Optional, Any, Dict
+from typing import Any
+
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 
 class Edge(BaseModel):
@@ -23,15 +24,15 @@ class Edge(BaseModel):
         contains: (Edge(relationship_type="contains", edge_text="relationship_name: contains; entity_description: Alice"), Entity)
     """
 
-    weight: Optional[float] = None
-    weights: Optional[Dict[str, float]] = None
-    relationship_type: Optional[str] = None
-    properties: Optional[Dict[str, Any]] = None
-    edge_text: Optional[str] = None
+    weight: float | None = None
+    weights: dict[str, float] | None = None
+    relationship_type: str | None = None
+    properties: dict[str, Any] | None = None
+    edge_text: str | None = None
 
     @field_validator("edge_text", mode="before")
     @classmethod
-    def ensure_edge_text(cls, v, info):
+    def ensure_edge_text(cls, v: Any, info: ValidationInfo) -> Any:
         """Auto-populate edge_text from relationship_type if not explicitly provided."""
         if v is None and info.data.get("relationship_type"):
             return info.data["relationship_type"]
