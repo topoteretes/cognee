@@ -320,7 +320,7 @@ def deploy_claude_code_agent(volume_id, target_repo, label):
 
     # Claude Code refuses --dangerously-skip-permissions when running as root.
     # Create the agent user and its local state dir (cognee DB lives here,
-    # on real block storage; vectors go to Moss). We DO NOT chown the
+    # on real block storage — see module docstring). We DO NOT chown the
     # volume mount — it's mountpoint-s3 FUSE and chown fails "Operation
     # not permitted". The mount is already rwxrwxrwx, so agent can still
     # read/write snapshot tarballs on it.
