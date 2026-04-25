@@ -6,7 +6,7 @@ from enum import Enum
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
-from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
+from typing import Generic, List, Literal, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
@@ -607,7 +607,7 @@ class LanceDBAdapter(VectorDBInterface):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
-        node_name_filter_operator: str = "OR",
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ):
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
@@ -635,6 +635,12 @@ class LanceDBAdapter(VectorDBInterface):
                 if include_payload
                 else ["id", "vector", "_distance"]
             )
+
+            if node_name_filter_operator not in ("OR", "AND"):
+                raise ValueError(
+                    f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
+                    "Expected 'OR' or 'AND'."
+                )
 
             if node_name:
                 # Escape quotes to make this input safer, since it's coming from the user
@@ -695,6 +701,7 @@ class LanceDBAdapter(VectorDBInterface):
         with_vectors: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -707,6 +714,7 @@ class LanceDBAdapter(VectorDBInterface):
                     with_vector=with_vectors,
                     include_payload=include_payload,
                     node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
                 )
                 for query_vector in query_vectors
             ]
