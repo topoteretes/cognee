@@ -48,6 +48,40 @@ class TestCogneeServerStart(unittest.TestCase):
                 cls.server_process.terminate()
             cls.server_process.wait()
 
+    def _wait_for_cognify_pipeline(
+        self, dataset_id: str, auth_var: str, timeout: int = 120, poll_interval: int = 5
+    ) -> bool:
+        """Poll the dataset status endpoint until the cognify pipeline completes or times out.
+
+        Args:
+            dataset_id: UUID of the dataset to check.
+            auth_var: Authorization header value (e.g. "Bearer <token>").
+            timeout: Maximum seconds to wait before giving up.
+            poll_interval: Seconds between status checks.
+
+        Returns:
+            True if the pipeline completed successfully, False on timeout or error.
+        """
+        headers = {"Authorization": auth_var}
+        status_url = f"http://127.0.0.1:8000/api/v1/datasets/status?dataset={dataset_id}"
+        deadline = time.time() + timeout
+
+        while time.time() < deadline:
+            try:
+                response = requests.get(status_url, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    status_data = response.json()
+                    dataset_status = status_data.get(str(dataset_id))
+                    if dataset_status == "DATASET_PROCESSING_COMPLETED":
+                        return True
+                    if dataset_status == "DATASET_PROCESSING_ERRORED":
+                        return False
+            except requests.RequestException:
+                pass
+            time.sleep(poll_interval)
+
+        return False
+
     def test_server_is_running(self):
         """Test that the server is running and can accept connections."""
         # Test health endpoint
@@ -188,7 +222,14 @@ class TestCogneeServerStart(unittest.TestCase):
             len(ontology_nodes), 0, "No ontology nodes found - ontology was not integrated"
         )
 
-        # TODO: Add test to verify cognify pipeline is complete before testing search
+        # Wait for the cognify pipeline to complete before searching
+        pipeline_completed = self._wait_for_cognify_pipeline(
+            dataset_id, auth_var, timeout=120, poll_interval=5
+        )
+        self.assertTrue(
+            pipeline_completed,
+            "Cognify pipeline did not complete within the timeout period",
+        )
 
         # Search request
         url = "http://127.0.0.1:8000/api/v1/search"
