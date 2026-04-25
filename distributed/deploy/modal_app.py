@@ -30,7 +30,7 @@ image = (
     .apt_install("gcc", "libpq-dev", "git", "curl", "cmake", "clang", "build-essential")
     .pip_install("uv")
     .run_commands(
-        "uv pip install --system cognee[postgres,api]",
+        "uv pip install --system cognee[postgres,api]==1.0.4.dev0",
     )
     .env(
         {

@@ -126,7 +126,7 @@ python distributed/deploy/daytona_sandbox.py
 brew install daytonaio/cli/daytona
 daytona create
 # Inside the sandbox:
-pip install 'cognee[api]'
+pip install 'cognee[api]==1.0.4.dev0'
 python -m uvicorn cognee.api.client:app --host 0.0.0.0 --port 8000
 ```
 

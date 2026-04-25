@@ -89,7 +89,7 @@ def deploy_cognee():
 
     # Step 1: Install Cognee (streamed)
     print("=== Installing Cognee ===")
-    _run_streamed(sandbox, session_id, "pip install 'cognee[api]'", label="install")
+    _run_streamed(sandbox, session_id, "pip install 'cognee[api]==1.0.4.dev0'", label="install")
     print("\n")
 
     # Step 2: Kill any existing server, then start fresh
