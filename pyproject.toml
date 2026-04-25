@@ -138,6 +138,7 @@ evals = [
 ]
 
 graphiti = ["graphiti-core>=0.28.0"]
+rtl = ["python-bidi>=0.6.0", "arabic-reshaper>=3.0.0"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
