@@ -14,6 +14,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.storage import add_data_points
 
+from cognee.modules.engine.models.SkillRun import UNSCORED_SKILL_RUN_SCORE
 from cognee.modules.engine.models.SkillInspection import InspectionResult, SkillInspection
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def _format_run(run_props: dict, index: int) -> str:
         parts.append(f"  Error message: {run_props['error_message'][:500]}")
     if run_props.get("result_summary"):
         parts.append(f"  Result summary: {run_props['result_summary'][:500]}")
-    score = run_props.get("success_score", 0.0)
+    score = run_props.get("success_score", UNSCORED_SKILL_RUN_SCORE)
     parts.append(f"  Success score: {score}")
     if run_props.get("tool_trace"):
         trace = str(run_props["tool_trace"])[:1000]
@@ -103,7 +104,7 @@ async def inspect_skill(
         if (
             props.get("type") == "SkillRun"
             and props.get("selected_skill_id") == skill_id
-            and float(props.get("success_score", 1.0)) < score_threshold
+            and float(props.get("success_score", UNSCORED_SKILL_RUN_SCORE)) < score_threshold
         ):
             failed_runs.append(props)
 
@@ -117,7 +118,7 @@ async def inspect_skill(
         return None
 
     # Compute stats
-    scores = [float(r.get("success_score", 0.0)) for r in failed_runs]
+    scores = [float(r.get("success_score", UNSCORED_SKILL_RUN_SCORE)) for r in failed_runs]
     avg_score = sum(scores) / len(scores) if scores else 0.0
     run_ids = [r.get("run_id", str(i)) for i, r in enumerate(failed_runs)]
 

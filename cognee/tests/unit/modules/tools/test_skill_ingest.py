@@ -304,6 +304,25 @@ class TestSkillIngest(unittest.TestCase):
 
         assert callable(improve_failing_skills)
 
+    def test_agentic_skill_runs_use_neutral_success_score(self):
+        from cognee.modules.engine.models import Skill
+        from cognee.modules.engine.models.SkillRun import UNSCORED_SKILL_RUN_SCORE
+        from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+
+        skill = Skill(name="summarize", description="Summarize text.")
+
+        async def _run():
+            with patch(
+                "cognee.tasks.storage.add_data_points.add_data_points",
+                new_callable=AsyncMock,
+            ) as mock_add:
+                await AgenticRetriever._record_skill_runs([skill], "summarize this", "done")
+                return mock_add.await_args.args[0][0]
+
+        run = self._run(_run())
+
+        assert run.success_score == UNSCORED_SKILL_RUN_SCORE
+
     def test_resolve_skills_skips_explicit_skill_outside_dataset_scope(self):
         from cognee.modules.engine.models import Skill
         from cognee.modules.tools.resolve_skills import resolve_skills

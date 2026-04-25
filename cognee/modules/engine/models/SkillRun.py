@@ -4,6 +4,9 @@ from pydantic import Field
 from cognee.low_level import DataPoint
 
 
+UNSCORED_SKILL_RUN_SCORE = 0.5
+
+
 class ToolCall(DataPoint):
     """A single tool invocation within a skill run."""
 
@@ -32,7 +35,7 @@ class SkillRun(DataPoint):
     cognee_session_id: str = ""
     task_text: str
     result_summary: str = ""
-    success_score: float = 0.0  # 0.0 to 1.0
+    success_score: float = UNSCORED_SKILL_RUN_SCORE  # 0.0 to 1.0
 
     # Routing decision
     candidate_skills: List[CandidateSkill] = Field(default_factory=list)
