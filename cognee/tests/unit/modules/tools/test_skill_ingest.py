@@ -334,6 +334,21 @@ class TestSkillIngest(unittest.TestCase):
         with self.assertRaises(ValidationError):
             SkillRunEntry(selected_skill_id="code-review", feedback=-1.1)
 
+    def test_copy_model_preserves_factory_metadata_defaults(self):
+        from cognee.modules.engine.models import SkillRun
+        from cognee.modules.storage.utils import copy_model
+
+        run = SkillRun(run_id="run-1", session_id="session", task_text="task")
+        props = {"id": run.id, "type": type(run).__name__}
+        for field_name, field_value in run:
+            if field_name != "metadata":
+                props[field_name] = field_value
+
+        copied_run = copy_model(type(run))(**props)
+
+        assert copied_run.metadata["index_fields"] == ["task_text", "result_summary"]
+        assert copied_run.metadata["identity_fields"] == ["run_id"]
+
     def test_remember_skill_run_entry_persists_with_dataset_context(self):
         from cognee.memory import SkillRunEntry
         from cognee.modules.engine.models import Skill
