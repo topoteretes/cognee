@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
 from cognee.modules.engine.models import Skill, Tool
+from cognee.modules.engine.models.SkillRun import ToolCall as SkillRunToolCall
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.tools.context import active_skills_var, opened_skills_var
@@ -199,6 +200,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         started_at_ms = int(time.time() * 1000)
         opened_skills: set[str] = set()
         opened_token = opened_skills_var.set(opened_skills)
+        tool_trace: List[SkillRunToolCall] = []
         token = active_skills_var.set({s.name: s for s in skills})
         try:
             try:
@@ -206,6 +208,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                     query=query,
                     initial_context=context if isinstance(context, str) else "",
                     tool_names=tool_names,
+                    tool_trace=tool_trace,
                 )
             except Exception as exc:
                 latency_ms = int(time.time() * 1000) - started_at_ms
@@ -220,6 +223,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                         success_score=0.0,
                         error_type=type(exc).__name__,
                         error_message=str(exc),
+                        tool_trace=tool_trace,
                     )
                 raise
         finally:
@@ -241,6 +245,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 final,
                 started_at_ms=started_at_ms,
                 latency_ms=latency_ms,
+                tool_trace=tool_trace,
             )
 
         await self._store_session_qa(
@@ -263,12 +268,14 @@ class AgenticRetriever(GraphCompletionRetriever):
         success_score: Optional[float] = None,
         error_type: str = "",
         error_message: str = "",
+        tool_trace: Optional[List[SkillRunToolCall]] = None,
     ) -> None:
         """Persist one SkillRun node per active skill after a retrieval call."""
         from cognee.modules.engine.models.SkillRun import SkillRun, UNSCORED_SKILL_RUN_SCORE
         from cognee.tasks.storage.add_data_points import add_data_points
 
         resolved_score = UNSCORED_SKILL_RUN_SCORE if success_score is None else success_score
+        resolved_trace = list(tool_trace) if tool_trace else []
         runs = [
             SkillRun(
                 run_id=f"agentic:{s.name}:{uuid4()}",
@@ -281,6 +288,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 error_message=error_message,
                 started_at_ms=started_at_ms,
                 latency_ms=latency_ms,
+                tool_trace=list(resolved_trace),
             )
             for s in skills
         ]
@@ -355,6 +363,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         query: Optional[str],
         initial_context: str,
         tool_names: List[str],
+        tool_trace: Optional[List[SkillRunToolCall]] = None,
     ) -> str:
         loop_context = initial_context
         conversation_history = await self._get_session_history()
@@ -379,7 +388,19 @@ class AgenticRetriever(GraphCompletionRetriever):
                 )
                 break
 
+            t0 = time.perf_counter()
             tool_result = await self._run_tool_safely(step.tool_call, tool_names)
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            if tool_trace is not None:
+                tool_trace.append(
+                    SkillRunToolCall(
+                        tool_name=step.tool_call.tool_name,
+                        tool_input=step.tool_call.arguments,
+                        tool_output=tool_result[:1000],
+                        success=not tool_result.startswith("ERROR:"),
+                        duration_ms=duration_ms,
+                    )
+                )
             loop_context += (
                 f"\n\n# Tool call {iteration + 1}: {step.tool_call.tool_name}\n"
                 f"Args: {step.tool_call.arguments}\nResult:\n{tool_result}"

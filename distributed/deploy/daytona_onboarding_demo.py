@@ -171,6 +171,7 @@ import re
 import time
 from pathlib import Path
 
+import cognee
 from cognee.memory import SkillRunEntry
 
 
@@ -190,9 +191,11 @@ async def main():
     output_path = Path(os.environ.get("COGNEE_AGENT_OUTPUT_FILE", "{AGENT_OUTPUT_FILE}"))
     text = output_path.read_text(encoding="utf-8", errors="replace") if output_path.exists() else ""
     skill_name = os.environ.get("COGNEE_SCORE_SKILL", "code-review")
-    score = score_review(text)
+    agent_exit_code = os.environ.get("COGNEE_AGENT_EXIT_CODE", "")
+    agent_failed = agent_exit_code not in ("", "0")
+    score = 0.0 if agent_failed else score_review(text)
     feedback = max(-1.0, min(1.0, round((score - 0.5) * 2, 2)))
-    weak = score < float(os.environ.get("COGNEE_IMPROVE_SCORE_THRESHOLD", "0.5"))
+    weak = agent_failed or score < float(os.environ.get("COGNEE_IMPROVE_SCORE_THRESHOLD", "0.5"))
     entry = SkillRunEntry(
         run_id=os.environ.get(
             "COGNEE_SKILL_RUN_ID",
@@ -203,8 +206,11 @@ async def main():
         result_summary=text[:1000],
         success_score=score,
         feedback=feedback,
-        error_type="weak_skill_output" if weak else "",
+        error_type="agent_failed" if agent_failed else "weak_skill_output" if weak else "",
         error_message=(
+            f"Agent command exited with code {{agent_exit_code}}."
+            if agent_failed
+            else
             "Review output did not include enough severity, file, test, fix, and impact signal."
             if weak
             else ""
@@ -265,6 +271,13 @@ def _run_streamed(sandbox, session_id, command, label="", timeout=600):
         if result.result:
             for line in result.result.splitlines():
                 print(f"{prefix}{line}", flush=True)
+        if result.exit_code:
+            raise RuntimeError(f"sandbox command exited with {result.exit_code}")
+        return
+
+    command_status = sandbox.process.get_session_command(session_id, cmd.cmd_id)
+    if command_status.exit_code not in (0, None):
+        raise RuntimeError(f"sandbox command {cmd.cmd_id} exited with {command_status.exit_code}")
 
 
 def _print_tail(result, label, lines=5):
@@ -330,6 +343,35 @@ def install_skill_pack(sandbox, skills_dir=None, seed_demo_skills=True):
         f"{DEMO_SKILLS_ROOT}/score_skill_run.py",
         SCORE_SKILL_RUN_SCRIPT,
     )
+
+
+def install_cognee_cli_dataset_wrapper(sandbox):
+    """Keep demo agent CLI calls pinned to the shared dataset."""
+    wrapper = """#!/usr/bin/env python3
+import os
+import sys
+
+REAL = "/usr/local/bin/cognee-cli.real"
+DATASET = os.environ.get("COGNEE_PLUGIN_DATASET", "shared_codebase_memory")
+
+args = sys.argv[1:]
+if DATASET and args:
+    command = args[0]
+    if command in {"add", "remember"}:
+        args.extend(["--dataset-name", DATASET])
+    elif command in {"search", "recall"}:
+        args.extend(["--datasets", DATASET])
+
+os.execv(REAL, [REAL, *args])
+"""
+    sandbox.process.exec(
+        "if [ -x /usr/local/bin/cognee-cli ] && "
+        "[ ! -e /usr/local/bin/cognee-cli.real ]; then "
+        "mv /usr/local/bin/cognee-cli /usr/local/bin/cognee-cli.real; "
+        "fi",
+        timeout=5,
+    )
+    _write_sandbox_file(sandbox, "/usr/local/bin/cognee-cli", wrapper, mode="0755")
 
 
 def _create_with_quota_retry(daytona, params, retries=6, delay=20):
@@ -500,6 +542,7 @@ def deploy_claude_code_agent(
         timeout=600,
     )
     _print_tail(result, "cognee-sdk")
+    install_cognee_cli_dataset_wrapper(sandbox)
 
     # Write a sitecustomize.py so the Moss adapter auto-registers for every
     # Python process in the sandbox, including the hook subprocesses fired
@@ -622,16 +665,47 @@ def run_agent_task(sandbox, label, prompt, score_skill=None):
     )
     captured_claude_cmd = (
         f"( {claude_cmd} ) 2>&1 | tee {shlex.quote(AGENT_OUTPUT_FILE)}; "
-        "status=${PIPESTATUS[0]}; exit $status"
+        "claude_status=${PIPESTATUS[0]}; final_status=$claude_status; "
     )
+    score_cmd = ""
+    if score_skill:
+        score_script = f"{DEMO_SKILLS_ROOT}/score_skill_run.py"
+        score_cmd = (
+            f"if [ -f {shlex.quote(score_script)} ]; then "
+            f"  COGNEE_SCORE_SKILL={shlex.quote(score_skill)} "
+            f"  COGNEE_SCORE_TASK={shlex.quote(prompt[:1000])} "
+            f"  COGNEE_SKILL_RUN_ID={shlex.quote(f'daytona:{label}:{score_skill}')} "
+            "  COGNEE_AGENT_EXIT_CODE=$claude_status "
+            f"  python {shlex.quote(score_script)}; "
+            "  score_status=$?; "
+            "  if [ $score_status -ne 0 ]; then "
+            "    echo '[skills] scoring failed with status '$score_status; "
+            "    final_status=$score_status; "
+            "  fi; "
+            "else "
+            "  echo '[skills] scoring skipped: no scorer installed'; "
+            "fi; "
+        )
 
     inner = (
         f"set -a && . /home/agent/env && set +a && "
+        "final_status=0; "
         f"sync_out() {{ "
-        f"  tar -czf /tmp/new-state.tar.gz -C {LOCAL_STATE} . && "
-        f"  cp /tmp/new-state.tar.gz {shlex.quote(snapshot_path)} && "
-        f"  echo '[sync-out] wrote '$(stat -c%s /tmp/new-state.tar.gz)' bytes'; "
-        f"}}; trap sync_out EXIT; "
+        f"  sleep 2; "
+        f"  tar_status=1; "
+        f"  for attempt in 1 2 3; do "
+        f"    tar -czf /tmp/new-state.tar.gz -C {LOCAL_STATE} .; "
+        f"    tar_status=$?; "
+        f"    if [ $tar_status -eq 0 ]; then "
+        f"      cp /tmp/new-state.tar.gz {shlex.quote(snapshot_path)} && "
+        f"      echo '[sync-out] wrote '$(stat -c%s /tmp/new-state.tar.gz)' bytes'; "
+        f"      return 0; "
+        f"    fi; "
+        f"    echo '[sync-out] tar attempt '$attempt' failed with status '$tar_status; "
+        f"    sleep 2; "
+        f"  done; "
+        f"  return $tar_status; "
+        f"}}; "
         f"if [ -f {shlex.quote(snapshot_path)} ]; then "
         f"  echo '[sync-in] found prior snapshot ('$(stat -c%s {shlex.quote(snapshot_path)})' bytes), extracting'; "
         f"  tar -xzf {shlex.quote(snapshot_path)} -C {LOCAL_STATE}; "
@@ -641,35 +715,16 @@ def run_agent_task(sandbox, label, prompt, score_skill=None):
         f"cd /workspace && "
         f"{seed_cmd}"
         f"{captured_claude_cmd}"
+        f"{score_cmd}"
+        "sync_out || final_status=$?; "
+        "exit $final_status"
     )
     cmd = f"runuser -u agent -- bash -c {shlex.quote(inner)}"
 
     session_name = f"task-{label}"
     sandbox.process.create_session(session_name)
     _run_streamed(sandbox, session_name, cmd, label=label, timeout=1800)
-    if score_skill:
-        score_agent_output(sandbox, label, score_skill, prompt)
     print(f"\n  [{label}] complete.\n")
-
-
-def score_agent_output(sandbox, label, skill_name, task_text):
-    """Record a scored SkillRun for the latest captured Claude output."""
-    script = f"{DEMO_SKILLS_ROOT}/score_skill_run.py"
-    check = sandbox.process.exec(f"test -f {shlex.quote(script)} && echo yes || echo no", timeout=5)
-    if (check.result or "").strip() != "yes":
-        print(f"  [{label}] skill scoring skipped: no scorer installed")
-        return
-
-    inner = (
-        "set -a && . /home/agent/env && set +a && "
-        f"COGNEE_SCORE_SKILL={shlex.quote(skill_name)} "
-        f"COGNEE_SCORE_TASK={shlex.quote(task_text[:1000])} "
-        f"COGNEE_SKILL_RUN_ID={shlex.quote(f'daytona:{label}:{skill_name}')} "
-        f"python {shlex.quote(script)}"
-    )
-    cmd = f"runuser -u agent -- bash -c {shlex.quote(inner)}"
-    result = sandbox.process.exec(cmd, timeout=600)
-    _print_tail(result, label, lines=20)
 
 
 # ---------------------------------------------------------------------------
@@ -812,10 +867,17 @@ def main():
         if score_final_review
         else "Then produce prioritized review findings for this repository. "
     )
+    dataset_instruction = (
+        "Use only the Cognee dataset shared_codebase_memory. If you run cognee-cli "
+        "directly, use --dataset-name shared_codebase_memory for remember/add and "
+        "--datasets shared_codebase_memory for search/recall. Do not use project_docs, "
+        "claude_sessions, or main_dataset. "
+    )
     agents = [
         (
             "arch",
-            "Explore this codebase. Map the project structure, key entry "
+            dataset_instruction
+            + "Explore this codebase. Map the project structure, key entry "
             "points, main modules, and overall architecture. Use "
             "/cognee-memory:cognee-remember to store the most important "
             "findings so other agents can read them.",
@@ -823,7 +885,8 @@ def main():
         ),
         (
             "api",
-            "Before exploring, use /cognee-memory:cognee-search to recall "
+            dataset_instruction
+            + "Before exploring, use /cognee-memory:cognee-search to recall "
             "anything the architecture agent stored. Then describe the API "
             "layer — routes, middleware, auth, request handling. Store "
             "your findings with /cognee-memory:cognee-remember.",
@@ -831,7 +894,8 @@ def main():
         ),
         (
             "tests",
-            "Use /cognee-memory:cognee-search to pull in what the "
+            dataset_instruction
+            + "Use /cognee-memory:cognee-search to pull in what the "
             "architecture and API agents already learned. Then describe "
             "the testing strategy — which suites exist, what they cover, "
             "and any gaps. Store findings with /cognee-memory:cognee-remember.",
@@ -839,7 +903,8 @@ def main():
         ),
         (
             "review",
-            "Use /cognee-memory:cognee-search to recall what the other "
+            dataset_instruction
+            + "Use /cognee-memory:cognee-search to recall what the other "
             f"agents learned. {review_skill_instruction}"
             "Include severity, location, impact, fix, and tests for each "
             "finding. Store the final review with "

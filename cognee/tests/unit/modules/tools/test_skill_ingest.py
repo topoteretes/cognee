@@ -370,6 +370,61 @@ class TestSkillIngest(unittest.TestCase):
         body = self._run(_run())
         assert "step 1" in body
 
+    def test_record_skill_runs_persists_tool_trace(self):
+        from cognee.modules.engine.models import Skill
+        from cognee.modules.engine.models.SkillRun import ToolCall as SkillRunToolCall
+        from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+
+        skill = Skill(name="summarize", description="Summarize text.")
+        trace = [
+            SkillRunToolCall(
+                tool_name="memory_search",
+                tool_input={"query": "x"},
+                tool_output="ok",
+                success=True,
+                duration_ms=42,
+            ),
+            SkillRunToolCall(
+                tool_name="load_skill",
+                tool_input={"name": "summarize"},
+                tool_output="# Skill: summarize\n...",
+                success=True,
+                duration_ms=7,
+            ),
+        ]
+
+        async def _run():
+            with patch(
+                "cognee.tasks.storage.add_data_points.add_data_points",
+                new_callable=AsyncMock,
+            ) as mock_add:
+                await AgenticRetriever._record_skill_runs([skill], "task", "done", tool_trace=trace)
+                return mock_add.await_args.args[0][0]
+
+        run = self._run(_run())
+        assert len(run.tool_trace) == 2
+        assert run.tool_trace[0].tool_name == "memory_search"
+        assert run.tool_trace[0].success is True
+        assert run.tool_trace[0].duration_ms == 42
+        assert run.tool_trace[1].tool_name == "load_skill"
+
+    def test_record_skill_runs_defaults_tool_trace_empty(self):
+        from cognee.modules.engine.models import Skill
+        from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+
+        skill = Skill(name="summarize", description="Summarize text.")
+
+        async def _run():
+            with patch(
+                "cognee.tasks.storage.add_data_points.add_data_points",
+                new_callable=AsyncMock,
+            ) as mock_add:
+                await AgenticRetriever._record_skill_runs([skill], "task", "done")
+                return mock_add.await_args.args[0][0]
+
+        run = self._run(_run())
+        assert run.tool_trace == []
+
     def test_skill_run_entry_validates_score_ranges(self):
         from pydantic import ValidationError
 
