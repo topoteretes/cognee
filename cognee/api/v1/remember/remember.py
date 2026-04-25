@@ -38,12 +38,7 @@ _migrations_done = False
 
 
 async def _ensure_migrations_run():
-    """Run vector migrations once on the first local SDK call.
-
-    Idempotent — subsequent calls are no-ops. Failures propagate
-    to the caller so schema issues surface immediately rather than
-    causing cryptic Rust panics on later searches.
-    """
+    """Run vector migrations once on the first local SDK call."""
     global _migrations_done
     if _migrations_done:
         return

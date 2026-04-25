@@ -56,23 +56,22 @@ async def apply_feedback_weights_pipeline(
             log=False,
         )
 
-    await set_database_global_context_variables(
+    async with set_database_global_context_variables(
         dataset_to_write[0].id, dataset_to_write[0].owner_id
-    )
+    ):
+        extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
+        enrichment_tasks = [
+            Task(apply_feedback_weights, alpha=alpha, task_config={"batch_size": batch_size})
+        ]
 
-    extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
-    enrichment_tasks = [
-        Task(apply_feedback_weights, alpha=alpha, task_config={"batch_size": batch_size})
-    ]
-
-    result = await memify(
-        extraction_tasks=extraction_tasks,
-        enrichment_tasks=enrichment_tasks,
-        dataset=dataset_to_write[0].id,
-        data=[{}],
-        user=user,
-        run_in_background=run_in_background,
-    )
+        result = await memify(
+            extraction_tasks=extraction_tasks,
+            enrichment_tasks=enrichment_tasks,
+            dataset=dataset_to_write[0].id,
+            data=[{}],
+            user=user,
+            run_in_background=run_in_background,
+        )
 
     logger.info(
         "Feedback weight memify pipeline completed",

@@ -13,7 +13,6 @@ from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.sync import SyncResponse
 from cognee import __version__ as cognee_version
-from cognee.context_global_variables import set_database_global_context_variables
 
 logger = get_logger()
 

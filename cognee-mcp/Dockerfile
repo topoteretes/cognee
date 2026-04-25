@@ -16,6 +16,13 @@ ARG DEBUG
 # Set environment variable based on the build argument
 ENV DEBUG=${DEBUG}
 
+# Needed when psycopg2 is built from source via cognee[postgres] in linux images.
+# libpq-dev provides pg_config; build-essential provides libc headers and toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy pyproject.toml and lockfile first for better caching
 COPY ./cognee-mcp/pyproject.toml ./cognee-mcp/uv.lock ./cognee-mcp/entrypoint.sh ./
 
@@ -31,7 +38,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.12-slim-bookworm
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
