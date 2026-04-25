@@ -9,7 +9,7 @@ the handler does not need another graph round-trip.
 from typing import Any, Dict
 
 from cognee.modules.engine.models import Tool
-from cognee.modules.tools.context import active_skills_var
+from cognee.modules.tools.context import active_skills_var, opened_skills_var
 from cognee.modules.tools.errors import ToolInvocationError
 from cognee.modules.tools.registry import register_builtin_tool
 
@@ -43,6 +43,10 @@ async def handler(args: Dict[str, Any], **_) -> str:
         raise ToolInvocationError(
             f"Skill {name!r} is not in the active skill set. Available: {available}"
         )
+
+    opened = opened_skills_var.get()
+    if opened is not None:
+        opened.add(skill.name)
 
     body = skill.procedure or "(this skill has no procedure body)"
     return f"# Skill: {skill.name}\n{body}"

@@ -21,7 +21,7 @@ from cognee.modules.engine.models import Skill, Tool
 from cognee.modules.engine.models.SkillRun import ToolCall as SkillRunToolCall
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.tools.context import active_skills_var
+from cognee.modules.tools.context import active_skills_var, opened_skills_var
 from cognee.modules.tools.errors import (
     ToolInvocationError,
     ToolPermissionError,
@@ -198,6 +198,8 @@ class AgenticRetriever(GraphCompletionRetriever):
         tool_names = [t.name for t in tools]
 
         started_at_ms = int(time.time() * 1000)
+        opened_skills: set[str] = set()
+        opened_token = opened_skills_var.set(opened_skills)
         tool_trace: List[SkillRunToolCall] = []
         token = active_skills_var.set({s.name: s for s in skills})
         try:
@@ -210,9 +212,10 @@ class AgenticRetriever(GraphCompletionRetriever):
                 )
             except Exception as exc:
                 latency_ms = int(time.time() * 1000) - started_at_ms
-                if skills:
+                skills_to_record = [s for s in skills if s.name in opened_skills]
+                if skills_to_record:
                     await self._record_skill_runs(
-                        skills,
+                        skills_to_record,
                         query or "",
                         "",
                         started_at_ms=started_at_ms,
@@ -225,16 +228,19 @@ class AgenticRetriever(GraphCompletionRetriever):
                 raise
         finally:
             active_skills_var.reset(token)
+            opened_skills_var.reset(opened_token)
 
         latency_ms = int(time.time() * 1000) - started_at_ms
 
-        # Record a SkillRun for each skill that was routed to on this
-        # call. ``improve_failing_skills`` consumes only low-scored
-        # runs, so ungraded agentic executions use the neutral default
-        # score until explicit feedback or an evaluator supplies one.
-        if skills:
+        # Record a SkillRun only for skills the agent actually opened via
+        # load_skill — not for every skill in the prefilter catalog.
+        # ``improve_failing_skills`` consumes only low-scored runs, so
+        # ungraded agentic executions use the neutral default score until
+        # explicit feedback or an evaluator supplies one.
+        skills_to_record = [s for s in skills if s.name in opened_skills]
+        if skills_to_record:
             await self._record_skill_runs(
-                skills,
+                skills_to_record,
                 query or "",
                 final,
                 started_at_ms=started_at_ms,
