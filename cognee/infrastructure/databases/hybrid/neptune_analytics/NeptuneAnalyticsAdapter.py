@@ -229,7 +229,14 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         try:
             result = self._client.query(query_string, params)
-            return [self._get_scored_result(item) for item in result]
+            return [
+                ScoredResult(
+                    id=(item.get("payload") or {}).get("~id"),
+                    payload=(item.get("payload") or {}).get("~properties"),
+                    score=0,
+                )
+                for item in result
+            ]
         except Exception as e:
             self._na_exception_handler(e, query_string)
 
@@ -240,7 +247,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         query_vector: Optional[List[float]] = None,
         limit: Optional[int] = None,
         with_vector: bool = False,
-        include_payload: bool = False,  # TODO: Add support for this parameter
+        include_payload: bool = False,
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
     ):
@@ -258,6 +265,13 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - limit (int): The maximum number of results to return from the search.
             - with_vector (bool): Whether to return the vector representations with search
               results, this is not supported for Neptune Analytics backend at the moment.
+            - include_payload (bool): When True, fetch full node properties and populate
+              ``ScoredResult.payload``. When False (default), only node IDs are returned and
+              ``payload`` is set to None, reducing data transfer.
+            - node_name (Optional[List[str]]): Optional list of set names to filter results
+              by ``belongs_to_set`` membership.
+            - node_name_filter_operator (str): ``"OR"`` (default) matches nodes belonging to
+              any of the ``node_name`` values; ``"AND"`` requires membership in all of them.
 
         Returns:
         --------
@@ -322,22 +336,30 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         if with_vector:
             query_string += """
-        WITH node, score, id(node) as node_id
+        WITH node, score
         MATCH (n)
         WHERE id(n) = id(node)
         CALL neptune.algo.vectors.get(n)
         YIELD embedding
-        RETURN node as payload, score, embedding
         """
 
-        else:
-            query_string += """
-        RETURN node as payload, score
-        """
+        payload_part = "node as payload" if include_payload else "id(node) as node_id"
+        embedding_part = ", embedding" if with_vector else ""
+        query_string += f"RETURN {payload_part}, score{embedding_part}"
 
         try:
             query_response = self._client.query(query_string, params)
-            return [self._get_scored_result(item=item, with_score=True) for item in query_response]
+            results = []
+            for item in query_response:
+                payload_obj = item.get("payload") or {}
+                results.append(
+                    ScoredResult(
+                        id=payload_obj.get("~id") if include_payload else item.get("node_id"),
+                        payload=payload_obj.get("~properties") if include_payload else None,
+                        score=item.get("score", 0),
+                    )
+                )
+            return results
         except Exception as e:
             self._na_exception_handler(e, query_string)
 
@@ -463,20 +485,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         query_result = self._client.query(query)
         return len(query_result) == 0
-
-    @staticmethod
-    def _get_scored_result(
-        item: dict, with_vector: bool = False, with_score: bool = False
-    ) -> ScoredResult:
-        """
-        Util method to simplify the object creation of ScoredResult base on incoming NX payload response.
-        """
-        return ScoredResult(
-            id=item.get("payload").get("~id"),
-            payload=item.get("payload").get("~properties"),
-            score=item.get("score") if with_score else 0,
-            vector=item.get("embedding") if with_vector else None,
-        )
 
     def _na_exception_handler(self, ex, query_string: str):
         """
