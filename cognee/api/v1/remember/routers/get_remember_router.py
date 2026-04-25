@@ -7,7 +7,7 @@ from fastapi import Form, File, UploadFile as UF, Depends
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
-from cognee.memory import QAEntry, TraceEntry, FeedbackEntry
+from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
@@ -102,15 +102,19 @@ def get_remember_router() -> APIRouter:
         """JSON body for the typed-entry remember endpoint.
 
         ``entry`` is a discriminated union — set ``type`` to ``qa``,
-        ``trace``, or ``feedback`` and include the corresponding fields.
+        ``trace``, ``feedback``, or ``skill_run`` and include the
+        corresponding fields.
         """
 
         entry: Annotated[
-            Union[QAEntry, TraceEntry, FeedbackEntry],
+            Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry],
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
-        session_id: str
+        session_id: Optional[str] = None
+        improve: bool = False
+        improve_min_runs: int = 3
+        improve_score_threshold: float = 0.5
 
     @router.post("/entry", response_model=dict)
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
@@ -120,9 +124,10 @@ def get_remember_router() -> APIRouter:
     ):
         """Store a typed memory entry in the session cache.
 
-        Accepts a discriminated union of ``QAEntry``, ``TraceEntry``, or
-        ``FeedbackEntry`` and dispatches to the matching SessionManager
-        method. Always requires ``session_id``.
+        Accepts a discriminated union of ``QAEntry``, ``TraceEntry``,
+        ``FeedbackEntry``, or ``SkillRunEntry`` and dispatches to the
+        matching ``remember`` path. Session-backed entries require
+        ``session_id``; ``SkillRunEntry`` can persist with or without one.
 
         ## Response
         The returned ``RememberResult`` includes ``entry_type`` and
@@ -148,6 +153,9 @@ def get_remember_router() -> APIRouter:
                 dataset_name=payload.dataset_name,
                 session_id=payload.session_id,
                 user=user,
+                improve=payload.improve,
+                improve_min_runs=payload.improve_min_runs,
+                improve_score_threshold=payload.improve_score_threshold,
             )
             return jsonable_encoder(result.to_dict())
         except ValueError as error:

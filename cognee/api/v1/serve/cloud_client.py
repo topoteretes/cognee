@@ -95,14 +95,14 @@ class CloudClient:
         entry,
         dataset_name: str = "main_dataset",
         session_id: Optional[str] = None,
+        improve: bool = False,
+        improve_min_runs: int = 3,
+        improve_score_threshold: float = 0.5,
     ) -> dict:
-        """POST /api/v1/remember/entry — store a typed MemoryEntry in session cache.
+        """POST /api/v1/remember/entry — store a typed MemoryEntry.
 
-        ``entry`` is a pydantic MemoryEntry (QAEntry / TraceEntry / FeedbackEntry).
+        ``entry`` is a pydantic MemoryEntry.
         """
-        if session_id is None:
-            raise ValueError("session_id is required for typed memory entries")
-
         session = await self._get_session()
 
         # Pydantic v2: model_dump preserves the discriminator field.
@@ -112,6 +112,9 @@ class CloudClient:
             "entry": entry_dump,
             "dataset_name": dataset_name,
             "session_id": session_id,
+            "improve": improve,
+            "improve_min_runs": improve_min_runs,
+            "improve_score_threshold": improve_score_threshold,
         }
 
         async with session.post(

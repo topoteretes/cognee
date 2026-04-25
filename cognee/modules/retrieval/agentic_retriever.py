@@ -11,8 +11,9 @@ their names and descriptions are shown in the catalog; the LLM calls the
 load_skill tool to fetch a body on demand (progressive disclosure).
 """
 
+import time
 from typing import Any, List, Optional, Sequence, Union
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
@@ -195,22 +196,46 @@ class AgenticRetriever(GraphCompletionRetriever):
         tools: List[Tool] = retrieved_objects.get("tools") or []
         tool_names = [t.name for t in tools]
 
+        started_at_ms = int(time.time() * 1000)
         token = active_skills_var.set({s.name: s for s in skills})
         try:
-            final = await self._run_tool_loop(
-                query=query,
-                initial_context=context if isinstance(context, str) else "",
-                tool_names=tool_names,
-            )
+            try:
+                final = await self._run_tool_loop(
+                    query=query,
+                    initial_context=context if isinstance(context, str) else "",
+                    tool_names=tool_names,
+                )
+            except Exception as exc:
+                latency_ms = int(time.time() * 1000) - started_at_ms
+                if skills:
+                    await self._record_skill_runs(
+                        skills,
+                        query or "",
+                        "",
+                        started_at_ms=started_at_ms,
+                        latency_ms=latency_ms,
+                        success_score=0.0,
+                        error_type=type(exc).__name__,
+                        error_message=str(exc),
+                    )
+                raise
         finally:
             active_skills_var.reset(token)
+
+        latency_ms = int(time.time() * 1000) - started_at_ms
 
         # Record a SkillRun for each skill that was routed to on this
         # call. ``improve_failing_skills`` consumes only low-scored
         # runs, so ungraded agentic executions use the neutral default
         # score until explicit feedback or an evaluator supplies one.
         if skills:
-            await self._record_skill_runs(skills, query or "", final)
+            await self._record_skill_runs(
+                skills,
+                query or "",
+                final,
+                started_at_ms=started_at_ms,
+                latency_ms=latency_ms,
+            )
 
         await self._store_session_qa(
             query=query or "",
@@ -222,19 +247,34 @@ class AgenticRetriever(GraphCompletionRetriever):
         return [final]
 
     @staticmethod
-    async def _record_skill_runs(skills: Sequence[Skill], task_text: str, result: str) -> None:
+    async def _record_skill_runs(
+        skills: Sequence[Skill],
+        task_text: str,
+        result: str,
+        *,
+        started_at_ms: int = 0,
+        latency_ms: int = 0,
+        success_score: Optional[float] = None,
+        error_type: str = "",
+        error_message: str = "",
+    ) -> None:
         """Persist one SkillRun node per active skill after a retrieval call."""
         from cognee.modules.engine.models.SkillRun import SkillRun, UNSCORED_SKILL_RUN_SCORE
         from cognee.tasks.storage.add_data_points import add_data_points
 
+        resolved_score = UNSCORED_SKILL_RUN_SCORE if success_score is None else success_score
         runs = [
             SkillRun(
-                run_id=f"agentic:{s.name}:{id(result)}",
+                run_id=f"agentic:{s.name}:{uuid4()}",
                 selected_skill_id=s.name,
                 task_text=task_text,
-                success_score=UNSCORED_SKILL_RUN_SCORE,
+                success_score=resolved_score,
                 result_summary=(result[:500] if isinstance(result, str) else ""),
                 session_id="agentic",
+                error_type=error_type,
+                error_message=error_message,
+                started_at_ms=started_at_ms,
+                latency_ms=latency_ms,
             )
             for s in skills
         ]

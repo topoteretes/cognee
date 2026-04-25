@@ -17,6 +17,7 @@ from cognee.memory import (
     QAEntry,
     TraceEntry,
     FeedbackEntry,
+    SkillRunEntry,
 )
 from cognee.memory.entries import MEMORY_ENTRY_TYPES
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
@@ -65,11 +66,13 @@ class RememberKwargs(TypedDict, total=False):
     # SKILL.md ingest only: run LLM enrichment + materialize task patterns
     # after parsing. Defaults to True and is ignored for non-skill sources.
     enrich: bool
-    # SKILL.md ingest only: after ingesting, run the memify
-    # improve_failing_skills task to automatically amend any skills that
-    # already have enough low-score SkillRun failure signal. Ignored
-    # for non-skill sources.
+    # Skill flows only: after ingesting SKILL.md files or recording a
+    # SkillRunEntry, run improve_failing_skills when enough low-score
+    # SkillRun signal exists. Ignored for regular data sources.
     improve: bool
+    # Optional tuning for skill improvement when ``improve=True``.
+    improve_min_runs: int
+    improve_score_threshold: float
 
 
 # Kwarg routing: which RememberKwargs go to add(), cognify(), or both.
@@ -173,6 +176,9 @@ async def _remember_entry(
     dataset_name: str,
     session_id: Optional[str],
     user,
+    improve: bool = False,
+    improve_min_runs: int = 3,
+    improve_score_threshold: float = 0.5,
 ) -> "RememberResult":
     """Top-level dispatcher for typed MemoryEntry payloads.
 
@@ -187,6 +193,9 @@ async def _remember_entry(
             entry,
             dataset_name=dataset_name,
             session_id=session_id,
+            improve=improve,
+            improve_min_runs=improve_min_runs,
+            improve_score_threshold=improve_score_threshold,
         )
         # Reconstruct a RememberResult from the server's response
         result = RememberResult(
@@ -206,6 +215,9 @@ async def _remember_entry(
         dataset_name=dataset_name,
         session_id=session_id,
         user=user,
+        improve=improve,
+        improve_min_runs=improve_min_runs,
+        improve_score_threshold=improve_score_threshold,
     )
 
 
@@ -215,14 +227,54 @@ async def _dispatch_session_entry(
     dataset_name: str,
     session_id: Optional[str],
     user,
+    improve: bool = False,
+    improve_min_runs: int = 3,
+    improve_score_threshold: float = 0.5,
 ) -> "RememberResult":
     """Route a typed memory entry to the right SessionManager method.
 
-    All typed entries require a session_id — session cache is the
-    storage target. Returns a RememberResult with entry_id/entry_type
-    fields populated so callers can chain (e.g., attach feedback to a
-    QA they just stored).
+    Session-backed entries require a session_id. SkillRunEntry is
+    graph-backed and may be recorded without a session_id. Returns a
+    RememberResult with entry_id/entry_type fields populated so callers
+    can chain writes.
     """
+    if isinstance(entry, SkillRunEntry):
+        from cognee.modules.tools.skill_runs import remember_skill_run_entry
+
+        run, dataset, applied_amendments = await remember_skill_run_entry(
+            entry,
+            dataset_name=dataset_name,
+            session_id=session_id,
+            user=user,
+            improve=improve,
+            improve_min_runs=improve_min_runs,
+            improve_score_threshold=improve_score_threshold,
+        )
+
+        result = RememberResult(
+            status="completed",
+            dataset_name=dataset.name,
+            dataset_id=str(dataset.id),
+            session_ids=[session_id] if session_id else None,
+        )
+        result.elapsed_seconds = time.monotonic() - result._started_at
+        result.entry_type = entry.type
+        result.entry_id = run.run_id
+        result.items_processed = 1
+        result.items = [
+            {
+                "kind": "skill_run",
+                "run_id": run.run_id,
+                "selected_skill_id": run.selected_skill_id,
+                "success_score": run.success_score,
+            }
+        ]
+        if applied_amendments:
+            result.items.extend(
+                {"kind": "amendment", "skill_name": a.get("skill_name")} for a in applied_amendments
+            )
+        return result
+
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.modules.engine.operations.setup import setup
 
@@ -395,9 +447,9 @@ class RememberResult:
         self.items_processed: int = 0
         self.items: List[dict] = []
         # Populated when the call dispatched a typed MemoryEntry.
-        # entry_type is one of "qa", "trace", "feedback"; entry_id is
-        # the qa_id / trace_id returned by SessionManager (or the
-        # qa_id a feedback was attached to).
+        # entry_type is one of "qa", "trace", "feedback", or
+        # "skill_run"; entry_id is the qa_id / trace_id / run_id
+        # returned by the storage backend.
         self.entry_type: Optional[str] = None
         self.entry_id: Optional[str] = None
         self._task: Optional[asyncio.Task] = None
@@ -620,15 +672,17 @@ async def remember(
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
 
-    # Typed MemoryEntry dispatch: trace steps, rich QA, feedback.
-    # These short-circuit the add+cognify path entirely and write
-    # directly into the session cache via SessionManager.
+    # Typed MemoryEntry dispatch: trace steps, rich QA, feedback, and
+    # explicit skill-run scores. These short-circuit the add+cognify path.
     if isinstance(data, MEMORY_ENTRY_TYPES):
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
             session_id=session_id,
             user=kwargs.get("user"),
+            improve=bool(kwargs.get("improve", False)),
+            improve_min_runs=int(kwargs.get("improve_min_runs", 3)),
+            improve_score_threshold=float(kwargs.get("improve_score_threshold", 0.5)),
         )
 
     data_size = _estimate_data_size(data)
@@ -707,6 +761,8 @@ async def _remember_inner(
     # can pass them safely even when the input is not a skill source.
     enrich = bool(kwargs.pop("enrich", True))
     improve = bool(kwargs.pop("improve", False))
+    improve_min_runs = int(kwargs.pop("improve_min_runs", 3))
+    improve_score_threshold = float(kwargs.pop("improve_score_threshold", 0.5))
 
     if looks_like_skill_source(data):
         from cognee.modules.engine.operations.setup import setup
@@ -743,7 +799,11 @@ async def _remember_inner(
             )
 
             try:
-                applied_amendments = await improve_failing_skills()
+                applied_amendments = await improve_failing_skills(
+                    node_set=skills_node_set,
+                    min_runs=improve_min_runs,
+                    score_threshold=improve_score_threshold,
+                )
             except Exception as exc:
                 logger.warning("improve_failing_skills failed: %s", exc)
         result = RememberResult(

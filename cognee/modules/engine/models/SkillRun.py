@@ -56,7 +56,10 @@ class SkillRun(DataPoint):
     previous_run: Optional["SkillRun"] = None
 
     metadata: dict = Field(
-        default_factory=lambda: {"index_fields": ["task_text", "result_summary"]}
+        default_factory=lambda: {
+            "index_fields": ["task_text", "result_summary"],
+            "identity_fields": ["run_id"],
+        }
     )
 
 

@@ -323,6 +323,77 @@ class TestSkillIngest(unittest.TestCase):
 
         assert run.success_score == UNSCORED_SKILL_RUN_SCORE
 
+    def test_skill_run_entry_validates_score_ranges(self):
+        from pydantic import ValidationError
+
+        from cognee.memory import SkillRunEntry
+
+        with self.assertRaises(ValidationError):
+            SkillRunEntry(selected_skill_id="code-review", success_score=1.1)
+
+        with self.assertRaises(ValidationError):
+            SkillRunEntry(selected_skill_id="code-review", feedback=-1.1)
+
+    def test_remember_skill_run_entry_persists_with_dataset_context(self):
+        from cognee.memory import SkillRunEntry
+        from cognee.modules.engine.models import Skill
+        from cognee.modules.tools.skill_runs import remember_skill_run_entry
+
+        dataset = SimpleNamespace(id=uuid4(), name="hackathon")
+        user = SimpleNamespace(id=uuid4())
+        entry = SkillRunEntry(
+            run_id="review-run-1",
+            selected_skill_id="code-review",
+            task_text="Review the permission changes",
+            result_summary="Missing dataset check.",
+            success_score=0.2,
+            feedback=-0.6,
+            error_type="permission_gap",
+            error_message="The review missed dataset ownership.",
+        )
+
+        async def _run():
+            with (
+                patch("cognee.modules.tools.skill_runs.setup", new_callable=AsyncMock),
+                patch(
+                    "cognee.modules.tools.skill_runs.resolve_authorized_user_datasets",
+                    new_callable=AsyncMock,
+                    return_value=(user, [dataset]),
+                ),
+                patch(
+                    "cognee.modules.tools.skill_runs.resolve_skills",
+                    new_callable=AsyncMock,
+                    return_value=[Skill(name="code-review", description="Review code changes.")],
+                ),
+                patch(
+                    "cognee.modules.tools.skill_runs.add_data_points",
+                    new_callable=AsyncMock,
+                ) as mock_add,
+            ):
+                run, resolved_dataset, applied = await remember_skill_run_entry(
+                    entry,
+                    dataset_name="hackathon",
+                    session_id="agent-review",
+                    user=user,
+                )
+                return run, resolved_dataset, applied, mock_add
+
+        run, resolved_dataset, applied, mock_add = self._run(_run())
+
+        assert resolved_dataset is dataset
+        assert applied == []
+        assert run.run_id == "review-run-1"
+        assert run.selected_skill_id == "code-review"
+        assert run.success_score == 0.2
+        assert run.feedback == -0.6
+        assert run.error_type == "permission_gap"
+        assert run.session_id == "agent-review"
+        assert run.belongs_to_set[0].name == "skills"
+        assert mock_add.await_count == 1
+        ctx = mock_add.await_args.kwargs["ctx"]
+        assert ctx.user is user
+        assert ctx.dataset is dataset
+
     def test_resolve_skills_skips_explicit_skill_outside_dataset_scope(self):
         from cognee.modules.engine.models import Skill
         from cognee.modules.tools.resolve_skills import resolve_skills

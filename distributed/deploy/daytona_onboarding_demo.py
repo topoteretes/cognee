@@ -40,19 +40,29 @@ Prerequisites:
         COGNEE_INSTALL_SPEC - Cognee package, wheel, or git URL to install
                               in each sandbox. Defaults to the hackathon
                               dev release pinned below.
+        COGNEE_SKILLS_DIR    - Local directory of SKILL.md folders to upload
+                              in addition to the bundled code-review skill.
 
 Usage:
     python distributed/deploy/daytona_onboarding_demo.py \\
         --repo https://github.com/topoteretes/cognee \\
         --keep-volume
+
+    During setup, each sandbox seeds a bundled code-review skill through
+    cognee.remember(..., node_set=["skills"]). The final review agent output
+    is scored back into Cognee with cognee.remember(SkillRunEntry(...)).
 """
 
 import argparse
+import base64
+import io
 import os
 import sys
 import time
 import asyncio
 import shlex
+import tarfile
+from pathlib import Path
 
 from daytona import (
     Daytona,
@@ -79,6 +89,143 @@ MOUNT_PATH = "/shared-cognee"
 # correctly. Vectors live in Moss; snapshots of this dir are synced to/from the volume.
 LOCAL_STATE = "/var/cognee-state"
 SNAPSHOT_FILE = "state.tar.gz"
+DEMO_SKILLS_ROOT = "/opt/cognee-demo-skills"
+AGENT_OUTPUT_FILE = "/tmp/cognee-agent-output.txt"
+
+DEMO_CODE_REVIEW_SKILL = """---
+name: Code Review
+description: Use when reviewing a repository change or codebase slice. Produce concrete findings with file references, severity, impact, and tests.
+allowed-tools: memory_search
+tags:
+  - code-review
+  - testing
+  - architecture
+---
+
+# Code Review Skill
+
+Use this skill when asked to inspect code changes, review a codebase area,
+or combine prior agent findings into review feedback.
+
+## Process
+
+1. Start from the concrete review goal. Identify the changed files, API
+   surface, or subsystem under review.
+2. Recall relevant project memory before making claims. Prefer findings
+   that cite a file path, symbol, behavior, or test gap.
+3. Look for correctness bugs, permission leaks, state handling mistakes,
+   missing validation, weak error handling, and missing tests.
+4. Separate verified findings from open questions. Do not turn style
+   preferences into review findings unless they create real risk.
+5. For every issue, explain the impact and the smallest practical fix.
+
+## Output
+
+Return actionable review findings only. For each finding include:
+
+- Severity: critical, high, medium, or low.
+- Location: file path and line, symbol, endpoint, or workflow.
+- Problem: what can break or mislead users.
+- Fix: the concrete change to make.
+- Tests: what test should prove the fix.
+
+If no issues are found, say that directly and list remaining test gaps or
+residual risk.
+"""
+
+SEED_SKILLS_SCRIPT = f"""import asyncio
+import os
+from pathlib import Path
+
+
+async def main():
+    skills_dir = Path(os.environ.get("COGNEE_DEMO_SKILLS_DIR", "{DEMO_SKILLS_ROOT}"))
+    skill_files = list(skills_dir.rglob("SKILL.md")) if skills_dir.is_dir() else []
+    if not skill_files:
+        print(f"[skills] no SKILL.md files found under {{skills_dir}}")
+        return
+
+    import cognee
+
+    enrich = os.environ.get("COGNEE_ENRICH_SKILLS", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    result = await cognee.remember(
+        str(skills_dir),
+        dataset_name=os.environ.get("COGNEE_PLUGIN_DATASET", "shared_codebase_memory"),
+        node_set=["skills"],
+        enrich=enrich,
+        self_improvement=False,
+    )
+    print(f"[skills] seeded {{result.items_processed}} changed skill(s) from {{skills_dir}}")
+
+
+asyncio.run(main())
+"""
+
+SCORE_SKILL_RUN_SCRIPT = f"""import asyncio
+import os
+import re
+import time
+from pathlib import Path
+
+from cognee.memory import SkillRunEntry
+
+
+def score_review(text: str) -> float:
+    lower = text.lower()
+    checks = [
+        bool(re.search(r"\\b(critical|high|medium|low)\\b", lower)),
+        bool(re.search(r"\\b[\\w./-]+\\.(py|ts|tsx|js|jsx|md|yaml|yml)(:\\d+)?\\b", text)),
+        "test" in lower or "pytest" in lower,
+        "fix" in lower or "recommend" in lower or "change" in lower,
+        "impact" in lower or "because" in lower or "risk" in lower,
+    ]
+    return round(sum(1 for ok in checks if ok) / len(checks), 2)
+
+
+async def main():
+    output_path = Path(os.environ.get("COGNEE_AGENT_OUTPUT_FILE", "{AGENT_OUTPUT_FILE}"))
+    text = output_path.read_text(encoding="utf-8", errors="replace") if output_path.exists() else ""
+    skill_name = os.environ.get("COGNEE_SCORE_SKILL", "code-review")
+    score = score_review(text)
+    feedback = max(-1.0, min(1.0, round((score - 0.5) * 2, 2)))
+    weak = score < float(os.environ.get("COGNEE_IMPROVE_SCORE_THRESHOLD", "0.5"))
+    entry = SkillRunEntry(
+        run_id=os.environ.get(
+            "COGNEE_SKILL_RUN_ID",
+            f"daytona:{{os.environ.get('COGNEE_SESSION_PREFIX', 'agent')}}:{{skill_name}}",
+        ),
+        selected_skill_id=skill_name,
+        task_text=os.environ.get("COGNEE_SCORE_TASK", "Daytona agent code review"),
+        result_summary=text[:1000],
+        success_score=score,
+        feedback=feedback,
+        error_type="weak_skill_output" if weak else "",
+        error_message=(
+            "Review output did not include enough severity, file, test, fix, and impact signal."
+            if weak
+            else ""
+        ),
+        started_at_ms=int(time.time() * 1000),
+        latency_ms=0,
+    )
+    result = await cognee.remember(
+        entry,
+        dataset_name=os.environ.get("COGNEE_PLUGIN_DATASET", "shared_codebase_memory"),
+        session_id=os.environ.get("COGNEE_SESSION_PREFIX", "agent"),
+        improve=os.environ.get("COGNEE_IMPROVE_SKILLS_AFTER_SCORE", "false").lower()
+        in ("1", "true", "yes"),
+        improve_min_runs=int(os.environ.get("COGNEE_IMPROVE_MIN_RUNS", "1")),
+        improve_score_threshold=float(os.environ.get("COGNEE_IMPROVE_SCORE_THRESHOLD", "0.5")),
+    )
+    print(f"[skills] recorded {{skill_name}} run score={{score}} entry_id={{result.entry_id}}")
+
+
+asyncio.run(main())
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +273,63 @@ def _print_tail(result, label, lines=5):
         return
     for line in result.result.strip().splitlines()[-lines:]:
         print(f"  [{label}] {line}", flush=True)
+
+
+def _write_sandbox_file(sandbox, path, content, mode="0644"):
+    """Write a small text file into the sandbox without relying on host mounts."""
+    payload = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    quoted_path = shlex.quote(path)
+    sandbox.process.exec(
+        f"mkdir -p {shlex.quote(str(Path(path).parent))} && "
+        f"printf %s {shlex.quote(payload)} | base64 -d > {quoted_path} && "
+        f"chmod {mode} {quoted_path}",
+        timeout=15,
+    )
+
+
+def _upload_local_skill_pack(sandbox, source_dir, target_root):
+    """Upload a local SKILL.md directory into the sandbox skill root."""
+    source = Path(source_dir).expanduser().resolve()
+    if not source.is_dir():
+        raise ValueError(f"--skills-dir must point to a directory: {source}")
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for path in sorted(source.rglob("*")):
+            if path.is_file():
+                archive.add(path, arcname=str(path.relative_to(source)))
+
+    payload = base64.b64encode(buffer.getvalue()).decode("ascii")
+    sandbox.process.exec(
+        f"mkdir -p {shlex.quote(target_root)} && "
+        f"printf %s {shlex.quote(payload)} | base64 -d > /tmp/cognee-skills.tar.gz && "
+        f"tar -xzf /tmp/cognee-skills.tar.gz -C {shlex.quote(target_root)} && "
+        "rm -f /tmp/cognee-skills.tar.gz",
+        timeout=60,
+    )
+
+
+def install_skill_pack(sandbox, skills_dir=None, seed_demo_skills=True):
+    """Install the bundled and/or user-provided skill pack into the sandbox."""
+    if not seed_demo_skills and not skills_dir:
+        return
+
+    sandbox.process.exec(f"rm -rf {DEMO_SKILLS_ROOT} && mkdir -p {DEMO_SKILLS_ROOT}", timeout=10)
+    if seed_demo_skills:
+        _write_sandbox_file(
+            sandbox,
+            f"{DEMO_SKILLS_ROOT}/code-review/SKILL.md",
+            DEMO_CODE_REVIEW_SKILL,
+        )
+    if skills_dir:
+        _upload_local_skill_pack(sandbox, skills_dir, DEMO_SKILLS_ROOT)
+
+    _write_sandbox_file(sandbox, f"{DEMO_SKILLS_ROOT}/seed_skills.py", SEED_SKILLS_SCRIPT)
+    _write_sandbox_file(
+        sandbox,
+        f"{DEMO_SKILLS_ROOT}/score_skill_run.py",
+        SCORE_SKILL_RUN_SCRIPT,
+    )
 
 
 def _create_with_quota_retry(daytona, params, retries=6, delay=20):
@@ -181,7 +385,16 @@ def ensure_shared_volume(daytona, retries=30, delay=2):
 # ---------------------------------------------------------------------------
 
 
-def deploy_claude_code_agent(volume_id, target_repo, label, cognee_install_spec):
+def deploy_claude_code_agent(
+    volume_id,
+    target_repo,
+    label,
+    cognee_install_spec,
+    skills_dir=None,
+    seed_demo_skills=True,
+    enrich_skills=False,
+    improve_skills=False,
+):
     """Deploy a Claude Code sandbox that shares Cognee storage via volume mount.
 
     Each agent runs Cognee in-process. DATA/SYSTEM/CACHE_ROOT_DIRECTORY point
@@ -238,6 +451,12 @@ def deploy_claude_code_agent(volume_id, target_repo, label, cognee_install_spec)
                 "COGNEE_SESSION_PREFIX": label,
                 "CACHING": "true",
                 "COGNEE_INSTALL_SPEC": cognee_install_spec,
+                "COGNEE_DEMO_SKILLS_DIR": DEMO_SKILLS_ROOT,
+                "COGNEE_ENRICH_SKILLS": "true" if enrich_skills else "false",
+                "COGNEE_IMPROVE_SKILLS_AFTER_SCORE": "true" if improve_skills else "false",
+                "COGNEE_IMPROVE_MIN_RUNS": "1",
+                "COGNEE_IMPROVE_SCORE_THRESHOLD": "0.5",
+                "COGNEE_AGENT_OUTPUT_FILE": AGENT_OUTPUT_FILE,
             },
             labels={"app": "claude-code", "agent": label, "demo": "shared-memory"},
         ),
@@ -327,6 +546,12 @@ def deploy_claude_code_agent(volume_id, target_repo, label, cognee_install_spec)
         timeout=5,
     )
 
+    install_skill_pack(
+        sandbox,
+        skills_dir=skills_dir,
+        seed_demo_skills=seed_demo_skills,
+    )
+
     print(f"  Cloning target repo {target_repo}...")
     _run_streamed(
         sandbox,
@@ -346,6 +571,9 @@ def deploy_claude_code_agent(volume_id, target_repo, label, cognee_install_spec)
         f"useradd -m -s /bin/bash agent && "
         f"mkdir -p {LOCAL_STATE}/data {LOCAL_STATE}/system {LOCAL_STATE}/cache && "
         f"chown -R agent:agent /workspace /opt/cognee-integrations {LOCAL_STATE} && "
+        f"if [ -d {shlex.quote(DEMO_SKILLS_ROOT)} ]; then "
+        f"  chown -R agent:agent {shlex.quote(DEMO_SKILLS_ROOT)}; "
+        "fi && "
         "env | grep -E '^(ANTHROPIC_API_KEY|LLM_|COGNEE_|CACHING|VECTOR_|"
         "DATA_ROOT_DIRECTORY|SYSTEM_ROOT_DIRECTORY|CACHE_ROOT_DIRECTORY)=' "
         "| sed 's/^/export /' > /home/agent/env && "
@@ -362,7 +590,7 @@ def deploy_claude_code_agent(volume_id, target_repo, label, cognee_install_spec)
 # ---------------------------------------------------------------------------
 
 
-def run_agent_task(sandbox, label, prompt):
+def run_agent_task(sandbox, label, prompt, score_skill=None):
     """Run one Claude Code task with sync-in / run / sync-out around it.
 
     The cognee DBs live on local sandbox disk (block storage). Vectors go
@@ -382,6 +610,21 @@ def run_agent_task(sandbox, label, prompt):
 
     # One bash block: sync-in, run claude, sync-out. The sync-out is in a
     # trap so the snapshot gets written even if claude errors.
+    seed_cmd = (
+        f"if [ -f {shlex.quote(DEMO_SKILLS_ROOT + '/seed_skills.py')} ]; then "
+        f"  python {shlex.quote(DEMO_SKILLS_ROOT + '/seed_skills.py')}; "
+        "fi; "
+    )
+    claude_cmd = (
+        f"claude --plugin-dir {shlex.quote(plugin_dir)} "
+        f"--dangerously-skip-permissions "
+        f"-p {shlex.quote(prompt)} < /dev/null"
+    )
+    captured_claude_cmd = (
+        f"( {claude_cmd} ) 2>&1 | tee {shlex.quote(AGENT_OUTPUT_FILE)}; "
+        "status=${PIPESTATUS[0]}; exit $status"
+    )
+
     inner = (
         f"set -a && . /home/agent/env && set +a && "
         f"sync_out() {{ "
@@ -396,16 +639,37 @@ def run_agent_task(sandbox, label, prompt):
         f"  echo '[sync-in] no prior snapshot, starting fresh'; "
         f"fi; "
         f"cd /workspace && "
-        f"claude --plugin-dir {shlex.quote(plugin_dir)} "
-        f"--dangerously-skip-permissions "
-        f"-p {shlex.quote(prompt)} < /dev/null"
+        f"{seed_cmd}"
+        f"{captured_claude_cmd}"
     )
     cmd = f"runuser -u agent -- bash -c {shlex.quote(inner)}"
 
     session_name = f"task-{label}"
     sandbox.process.create_session(session_name)
     _run_streamed(sandbox, session_name, cmd, label=label, timeout=1800)
+    if score_skill:
+        score_agent_output(sandbox, label, score_skill, prompt)
     print(f"\n  [{label}] complete.\n")
+
+
+def score_agent_output(sandbox, label, skill_name, task_text):
+    """Record a scored SkillRun for the latest captured Claude output."""
+    script = f"{DEMO_SKILLS_ROOT}/score_skill_run.py"
+    check = sandbox.process.exec(f"test -f {shlex.quote(script)} && echo yes || echo no", timeout=5)
+    if (check.result or "").strip() != "yes":
+        print(f"  [{label}] skill scoring skipped: no scorer installed")
+        return
+
+    inner = (
+        "set -a && . /home/agent/env && set +a && "
+        f"COGNEE_SCORE_SKILL={shlex.quote(skill_name)} "
+        f"COGNEE_SCORE_TASK={shlex.quote(task_text[:1000])} "
+        f"COGNEE_SKILL_RUN_ID={shlex.quote(f'daytona:{label}:{skill_name}')} "
+        f"python {shlex.quote(script)}"
+    )
+    cmd = f"runuser -u agent -- bash -c {shlex.quote(inner)}"
+    result = sandbox.process.exec(cmd, timeout=600)
+    _print_tail(result, label, lines=20)
 
 
 # ---------------------------------------------------------------------------
@@ -492,21 +756,62 @@ def main():
             f"(default: {DEFAULT_COGNEE_INSTALL_SPEC})"
         ),
     )
+    parser.add_argument(
+        "--skills-dir",
+        default=os.environ.get("COGNEE_SKILLS_DIR"),
+        help="Optional local directory of SKILL.md folders to upload into every sandbox",
+    )
+    parser.add_argument(
+        "--no-demo-skills",
+        action="store_true",
+        help="Disable the bundled code-review skill",
+    )
+    parser.add_argument(
+        "--enrich-skills",
+        action="store_true",
+        help="Run LLM enrichment while seeding skills",
+    )
+    parser.add_argument(
+        "--improve-skills",
+        action="store_true",
+        help="After scoring the review skill, run improve_failing_skills with min_runs=1",
+    )
+    parser.add_argument(
+        "--review-skill",
+        default=os.environ.get("COGNEE_REVIEW_SKILL", "code-review"),
+        help="Skill name to score on the final review agent",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
     print("  CLAUDE CODE + COGNEE SHARED MEMORY DEMO (volume)")
     print(f"  Target repo: {args.repo}")
     print(f"  Cognee install: {args.cognee_install_spec}")
+    print(
+        "  Skills: "
+        + (
+            f"bundled + {args.skills_dir}"
+            if args.skills_dir and not args.no_demo_skills
+            else args.skills_dir
+            or ("bundled code-review" if not args.no_demo_skills else "disabled")
+        )
+    )
     print("=" * 60 + "\n")
 
     daytona = _get_daytona()
     volume = ensure_shared_volume(daytona)
 
-    # Three agents with increasingly broad prompts. Each agent's session
+    # Four agents with increasingly broad prompts. Each agent's session
     # cache is private (per-directory, scoped by COGNEE_SESSION_PREFIX);
     # anything they /cognee-memory:cognee-remember or SessionEnd-bridge
     # lands in the shared graph on the volume.
+    score_final_review = args.review_skill if (args.skills_dir or not args.no_demo_skills) else None
+    review_skill_instruction = (
+        f"Then apply the {args.review_skill} skill's criteria to produce "
+        "prioritized review findings for this repository. "
+        if score_final_review
+        else "Then produce prioritized review findings for this repository. "
+    )
     agents = [
         (
             "arch",
@@ -514,6 +819,7 @@ def main():
             "points, main modules, and overall architecture. Use "
             "/cognee-memory:cognee-remember to store the most important "
             "findings so other agents can read them.",
+            None,
         ),
         (
             "api",
@@ -521,6 +827,7 @@ def main():
             "anything the architecture agent stored. Then describe the API "
             "layer — routes, middleware, auth, request handling. Store "
             "your findings with /cognee-memory:cognee-remember.",
+            None,
         ),
         (
             "tests",
@@ -528,20 +835,34 @@ def main():
             "architecture and API agents already learned. Then describe "
             "the testing strategy — which suites exist, what they cover, "
             "and any gaps. Store findings with /cognee-memory:cognee-remember.",
+            None,
+        ),
+        (
+            "review",
+            "Use /cognee-memory:cognee-search to recall what the other "
+            f"agents learned. {review_skill_instruction}"
+            "Include severity, location, impact, fix, and tests for each "
+            "finding. Store the final review with "
+            "/cognee-memory:cognee-remember.",
+            score_final_review,
         ),
     ]
 
     ran = []
     try:
-        for label, prompt in agents:
+        for label, prompt, score_skill in agents:
             sandbox = deploy_claude_code_agent(
                 volume.id,
                 args.repo,
                 label,
                 args.cognee_install_spec,
+                skills_dir=args.skills_dir,
+                seed_demo_skills=not args.no_demo_skills,
+                enrich_skills=args.enrich_skills,
+                improve_skills=args.improve_skills,
             )
             try:
-                run_agent_task(sandbox, label, prompt)
+                run_agent_task(sandbox, label, prompt, score_skill=score_skill)
                 ran.append((label, sandbox.id))
 
                 # Dump the plugin's resolved state so we can see whether

@@ -151,10 +151,20 @@ python distributed/deploy/daytona_onboarding_demo.py \
   --keep-volume
 ```
 
+The demo is self-contained: it seeds a bundled `code-review` skill into
+Cognee inside each sandbox, runs a final review agent, and records that
+agent's review quality as a `SkillRunEntry` through `cognee.remember`.
+
 Useful overrides:
 - `COGNEE_INSTALL_SPEC` or `--cognee-install-spec`: install a dev release,
   wheel, or git URL in every agent sandbox.
 - `TARGET_REPO` or `--repo`: repository the agents inspect.
+- `COGNEE_SKILLS_DIR` or `--skills-dir`: upload a local directory of
+  `SKILL.md` folders in addition to the bundled `code-review` skill.
+- `--no-demo-skills`: disable the bundled `code-review` skill.
+- `--enrich-skills`: run LLM enrichment while seeding skills.
+- `--improve-skills`: after scoring the final review, run skill improvement
+  with `min_runs=1` for demo feedback loops.
 - `--keep-volume`: keep `cognee-shared-memory` after the run for inspection.
 
 ---

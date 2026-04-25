@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.engine.models.SkillRun import UNSCORED_SKILL_RUN_SCORE
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.storage import add_data_points
@@ -370,7 +371,7 @@ async def evaluate_amendify(
         if props.get("type") == "SkillRun" and props.get("selected_skill_id") == skill_id:
             started = int(props.get("started_at_ms", 0))
             if applied_at_ms == 0 or started > applied_at_ms:
-                score = float(props.get("success_score", 0.0))
+                score = float(props.get("success_score", UNSCORED_SKILL_RUN_SCORE))
                 post_scores.append(score)
 
     post_avg = sum(post_scores) / len(post_scores) if post_scores else 0.0
