@@ -183,7 +183,7 @@ async def get_graph_from_model(
         },
     )
 
-    data_point_properties = {"type": type(data_point).__name__}
+    data_point_properties = {"id": data_point.id, "type": type(data_point).__name__}
     excluded_properties = set()
     properties_to_visit = set()
 

@@ -1,9 +1,8 @@
 import os
 import asyncio
-from typing import Any, List
-from pydantic import SkipValidation
+from typing import List
 
-from cognee import add, cognify, prune, visualize_graph
+from cognee import forget, remember, visualize_graph
 from cognee.low_level import DataPoint
 
 CUSTOM_PROMPT = (
@@ -42,13 +41,16 @@ async def visualize_data():
 
 async def main():
     # Prune data and system metadata before running, only if we want "fresh" state.
-    await prune.prune_data()
-    await prune.prune_system(metadata=True)
+    await forget(everything=True)
 
     text = "The Python programming language is widely used in data analysis, web development, and machine learning."
 
-    await add(text)
-    await cognify(graph_model=ProgrammingLanguage, custom_prompt=CUSTOM_PROMPT)
+    await remember(
+        text,
+        graph_model=ProgrammingLanguage,
+        custom_prompt=CUSTOM_PROMPT,
+        self_improvement=False,
+    )
 
     await visualize_data()
 
