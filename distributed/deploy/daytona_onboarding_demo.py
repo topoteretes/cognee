@@ -436,6 +436,7 @@ def deploy_claude_code_agent(
     seed_demo_skills=True,
     enrich_skills=False,
     improve_skills=False,
+    prebuilt_image=None,
 ):
     """Deploy a Claude Code sandbox that shares Cognee storage via volume mount.
 
@@ -466,7 +467,7 @@ def deploy_claude_code_agent(
     sandbox = _create_with_quota_retry(
         daytona,
         CreateSandboxFromImageParams(
-            image=Image.base("python:3.12-slim-trixie"),
+            image=Image.base(prebuilt_image or "python:3.12-slim-trixie"),
             # 4 GiB was OOM-killed during claude+plugin+cognee SDK startup.
             # 6 GiB leaves us at the 10 GiB tier cap with nothing else.
             resources=Resources(cpu=2, memory=6, disk=10),
@@ -508,40 +509,61 @@ def deploy_claude_code_agent(
     session_id = "agent-setup"
     sandbox.process.create_session(session_id)
 
-    print("  Installing prerequisites...")
-    sandbox.process.exec(
-        "apt-get update -qq && apt-get install -y -qq curl git ca-certificates xz-utils",
-        timeout=180,
-    )
+    if prebuilt_image:
+        # Image already has Node, Claude Code CLI, cognee, and the Moss
+        # adapter baked in — skip the four slow installs and verify the
+        # toolchain is actually present so a misconfigured image fails
+        # fast instead of mid-agent.
+        print(f"  Using prebuilt image: {prebuilt_image}")
+        result = sandbox.process.exec(
+            "node --version && npm --version && "
+            "command -v claude && "
+            "python -c 'import cognee, cognee_community_vector_adapter_moss'",
+            timeout=15,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(
+                "Prebuilt image is missing required tools. "
+                "Verify the image bakes Node 22, Claude Code CLI, cognee, "
+                "and cognee-community-vector-adapter-moss. "
+                f"Probe output:\n{result.result}"
+            )
+        node_info = result.result.strip().splitlines()[0]
+        print(f"  {node_info} (baked)")
+    else:
+        print("  Installing prerequisites...")
+        sandbox.process.exec(
+            "apt-get update -qq && apt-get install -y -qq curl git ca-certificates xz-utils",
+            timeout=180,
+        )
 
-    # Node.js 22 via tarball — apt only ships Node 18, Claude Code needs >=22.
-    print("  Installing Node.js 22...")
-    node_version = "v22.16.0"
-    sandbox.process.exec(
-        f"curl -fsSL https://nodejs.org/dist/{node_version}/node-{node_version}-linux-x64.tar.xz "
-        f"| tar -xJ -C /usr/local --strip-components=1",
-        timeout=180,
-    )
-    result = sandbox.process.exec("node --version && npm --version", timeout=10)
-    node_info = result.result.strip()
-    print(f"  {node_info}")
-    if not node_info.startswith("v22"):
-        raise RuntimeError(f"Expected Node 22 but got: {node_info}")
+        # Node.js 22 via tarball — apt only ships Node 18, Claude Code needs >=22.
+        print("  Installing Node.js 22...")
+        node_version = "v22.16.0"
+        sandbox.process.exec(
+            f"curl -fsSL https://nodejs.org/dist/{node_version}/node-{node_version}-linux-x64.tar.xz "
+            f"| tar -xJ -C /usr/local --strip-components=1",
+            timeout=180,
+        )
+        result = sandbox.process.exec("node --version && npm --version", timeout=10)
+        node_info = result.result.strip()
+        print(f"  {node_info}")
+        if not node_info.startswith("v22"):
+            raise RuntimeError(f"Expected Node 22 but got: {node_info}")
 
-    print("  Installing Claude Code CLI...")
-    result = sandbox.process.exec("npm install -g @anthropic-ai/claude-code 2>&1", timeout=600)
-    _print_tail(result, "claude")
+        print("  Installing Claude Code CLI...")
+        result = sandbox.process.exec("npm install -g @anthropic-ai/claude-code 2>&1", timeout=600)
+        _print_tail(result, "claude")
 
-    # Plugin depends on the cognee Python SDK for its hooks/skills.
-    print(f"  Installing cognee SDK ({cognee_install_spec})...")
-    install_cmd = (
-        f"pip install {shlex.quote(cognee_install_spec)} {shlex.quote(MOSS_ADAPTER_INSTALL_SPEC)}"
-    )
-    result = sandbox.process.exec(
-        install_cmd,
-        timeout=600,
-    )
-    _print_tail(result, "cognee-sdk")
+        # Plugin depends on the cognee Python SDK for its hooks/skills.
+        print(f"  Installing cognee SDK ({cognee_install_spec})...")
+        install_cmd = f"pip install {shlex.quote(cognee_install_spec)} {shlex.quote(MOSS_ADAPTER_INSTALL_SPEC)}"
+        result = sandbox.process.exec(
+            install_cmd,
+            timeout=600,
+        )
+        _print_tail(result, "cognee-sdk")
+
     install_cognee_cli_dataset_wrapper(sandbox)
 
     # Write a sitecustomize.py so the Moss adapter auto-registers for every
@@ -836,12 +858,25 @@ def main():
         default=os.environ.get("COGNEE_REVIEW_SKILL", "code-review"),
         help="Skill name to score on the final review agent",
     )
+    parser.add_argument(
+        "--prebuilt-image",
+        default=os.environ.get("COGNEE_PREBUILT_IMAGE"),
+        help=(
+            "Docker image with Node 22, Claude Code CLI, cognee, and the Moss "
+            "vector adapter pre-installed. When set, the per-sandbox install "
+            "phase is skipped — sandboxes boot in ~30s instead of ~5-7 min. "
+            "See distributed/deploy/Dockerfile."
+        ),
+    )
     args = parser.parse_args()
 
     print("=" * 60)
     print("  CLAUDE CODE + COGNEE SHARED MEMORY DEMO (volume)")
     print(f"  Target repo: {args.repo}")
-    print(f"  Cognee install: {args.cognee_install_spec}")
+    if args.prebuilt_image:
+        print(f"  Prebuilt image: {args.prebuilt_image}  (skipping per-sandbox installs)")
+    else:
+        print(f"  Cognee install: {args.cognee_install_spec}")
     print(
         "  Skills: "
         + (
@@ -876,8 +911,7 @@ def main():
     agents = [
         (
             "arch",
-            dataset_instruction
-            + "Explore this codebase. Map the project structure, key entry "
+            dataset_instruction + "Explore this codebase. Map the project structure, key entry "
             "points, main modules, and overall architecture. Use "
             "/cognee-memory:cognee-remember to store the most important "
             "findings so other agents can read them.",
@@ -885,8 +919,7 @@ def main():
         ),
         (
             "api",
-            dataset_instruction
-            + "Before exploring, use /cognee-memory:cognee-search to recall "
+            dataset_instruction + "Before exploring, use /cognee-memory:cognee-search to recall "
             "anything the architecture agent stored. Then describe the API "
             "layer — routes, middleware, auth, request handling. Store "
             "your findings with /cognee-memory:cognee-remember.",
@@ -894,8 +927,7 @@ def main():
         ),
         (
             "tests",
-            dataset_instruction
-            + "Use /cognee-memory:cognee-search to pull in what the "
+            dataset_instruction + "Use /cognee-memory:cognee-search to pull in what the "
             "architecture and API agents already learned. Then describe "
             "the testing strategy — which suites exist, what they cover, "
             "and any gaps. Store findings with /cognee-memory:cognee-remember.",
@@ -903,8 +935,7 @@ def main():
         ),
         (
             "review",
-            dataset_instruction
-            + "Use /cognee-memory:cognee-search to recall what the other "
+            dataset_instruction + "Use /cognee-memory:cognee-search to recall what the other "
             f"agents learned. {review_skill_instruction}"
             "Include severity, location, impact, fix, and tests for each "
             "finding. Store the final review with "
@@ -925,6 +956,7 @@ def main():
                 seed_demo_skills=not args.no_demo_skills,
                 enrich_skills=args.enrich_skills,
                 improve_skills=args.improve_skills,
+                prebuilt_image=args.prebuilt_image,
             )
             try:
                 run_agent_task(sandbox, label, prompt, score_skill=score_skill)
