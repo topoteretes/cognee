@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
         db_engine = get_relational_engine()
         await db_engine.create_database()
 
-    await run_startup_migrations()
+        await run_startup_migrations()
 
     from cognee.modules.users.methods import get_default_user
 

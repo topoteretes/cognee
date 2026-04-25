@@ -131,27 +131,28 @@ async def aggregate_multi_user_graphs(user_dataset_pairs):
     seen_edges = set()
 
     for user, dataset in user_dataset_pairs:
-        await set_database_global_context_variables(dataset.id, user.id)
+        async with set_database_global_context_variables(dataset.id, user.id):
+            graph_engine = await get_graph_engine()
+            nodes_data, edges_data = await graph_engine.get_graph_data()
 
-        graph_engine = await get_graph_engine()
-        nodes_data, edges_data = await graph_engine.get_graph_data()
+            user_label = getattr(user, "email", None) or str(user.id)
 
-        user_label = getattr(user, "email", None) or str(user.id)
+            for node_id, node_info in nodes_data:
+                node_key = str(node_id)
+                if node_key not in all_nodes:
+                    node_info = (
+                        dict(node_info) if not isinstance(node_info, dict) else node_info.copy()
+                    )
+                    if not node_info.get("source_user"):
+                        node_info["source_user"] = user_label
+                    all_nodes[node_key] = (node_id, node_info)
 
-        for node_id, node_info in nodes_data:
-            node_key = str(node_id)
-            if node_key not in all_nodes:
-                node_info = dict(node_info) if not isinstance(node_info, dict) else node_info.copy()
-                if not node_info.get("source_user"):
-                    node_info["source_user"] = user_label
-                all_nodes[node_key] = (node_id, node_info)
-
-        for edge in edges_data:
-            source, target, relation = edge[0], edge[1], edge[2]
-            edge_key = (str(source), str(target), relation)
-            if edge_key not in seen_edges:
-                seen_edges.add(edge_key)
-                all_edges.append(edge)
+            for edge in edges_data:
+                source, target, relation = edge[0], edge[1], edge[2]
+                edge_key = (str(source), str(target), relation)
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    all_edges.append(edge)
 
     return (list(all_nodes.values()), all_edges)
 

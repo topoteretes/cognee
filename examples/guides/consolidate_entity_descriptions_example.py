@@ -22,16 +22,17 @@ graph_visualization_path_after_enrichment = path.join(
 
 
 async def main():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    await cognee.add(
+    # Prune data and system metadata before running, only if we want "fresh" state.
+    await cognee.forget(everything=True)
+    await cognee.remember(
         [
             "Alice moved to Paris in 2010, while Bob has always lived in New York.",
             "Andreas was born in Venice, but later settled in Lisbon.",
             "Diana and Tom were born and raised in Helsinki. Diana currently resides in Berlin, while Tom never moved.",
-        ]
+        ],
+        custom_prompt=custom_prompt,
+        self_improvement=False,
     )
-    await cognee.cognify(custom_prompt=custom_prompt)
 
     await visualize_graph(graph_visualization_path_before_enrichment)
 
