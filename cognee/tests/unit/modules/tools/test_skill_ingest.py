@@ -323,6 +323,53 @@ class TestSkillIngest(unittest.TestCase):
 
         assert run.success_score == UNSCORED_SKILL_RUN_SCORE
 
+    def test_load_skill_records_open_in_opened_skills_var(self):
+        from cognee.modules.engine.models import Skill
+        from cognee.modules.tools.builtin.load_skill import handler
+        from cognee.modules.tools.context import active_skills_var, opened_skills_var
+
+        skill = Skill(
+            name="summarize",
+            description="Summarize text.",
+            procedure="step 1",
+        )
+
+        async def _run():
+            active_token = active_skills_var.set({skill.name: skill})
+            opened: set[str] = set()
+            opened_token = opened_skills_var.set(opened)
+            try:
+                body = await handler({"name": "summarize"})
+            finally:
+                active_skills_var.reset(active_token)
+                opened_skills_var.reset(opened_token)
+            return body, opened
+
+        body, opened = self._run(_run())
+        assert "summarize" in opened
+        assert "step 1" in body
+
+    def test_load_skill_works_when_opened_skills_var_unset(self):
+        from cognee.modules.engine.models import Skill
+        from cognee.modules.tools.builtin.load_skill import handler
+        from cognee.modules.tools.context import active_skills_var
+
+        skill = Skill(
+            name="summarize",
+            description="Summarize text.",
+            procedure="step 1",
+        )
+
+        async def _run():
+            active_token = active_skills_var.set({skill.name: skill})
+            try:
+                return await handler({"name": "summarize"})
+            finally:
+                active_skills_var.reset(active_token)
+
+        body = self._run(_run())
+        assert "step 1" in body
+
     def test_skill_run_entry_validates_score_ranges(self):
         from pydantic import ValidationError
 
