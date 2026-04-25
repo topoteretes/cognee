@@ -349,6 +349,25 @@ class TestSkillIngest(unittest.TestCase):
         assert copied_run.metadata["index_fields"] == ["task_text", "result_summary"]
         assert copied_run.metadata["identity_fields"] == ["run_id"]
 
+    def test_upsert_edges_skips_empty_edge_batches(self):
+        from cognee.modules.graph.methods.upsert_edges import upsert_edges
+
+        mock_session = AsyncMock()
+
+        self._run(
+            upsert_edges(
+                [],
+                tenant_id=uuid4(),
+                user_id=uuid4(),
+                data_id=uuid4(),
+                dataset_id=uuid4(),
+                session=mock_session,
+            )
+        )
+
+        assert mock_session.execute.await_count == 0
+        assert mock_session.commit.await_count == 0
+
     def test_remember_skill_run_entry_persists_with_dataset_context(self):
         from cognee.memory import SkillRunEntry
         from cognee.modules.engine.models import Skill
