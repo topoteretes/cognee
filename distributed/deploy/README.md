@@ -126,9 +126,46 @@ python distributed/deploy/daytona_sandbox.py
 brew install daytonaio/cli/daytona
 daytona create
 # Inside the sandbox:
-pip install 'cognee[api]'
+pip install 'cognee[api]==1.0.4.dev0'
 python -m uvicorn cognee.api.client:app --host 0.0.0.0 --port 8000
 ```
+
+### Hackathon Agent Sandbox Demo
+`daytona_onboarding_demo.py` runs several Claude Code agents against one target
+repo and gives them shared Cognee memory. It uses a Daytona volume as a snapshot
+bucket, local sandbox disk for SQLite/Kuzu state, and Moss for the vector index.
+This avoids running databases directly on Daytona's S3-backed volume.
+
+```bash
+pip install daytona
+
+export DAYTONA_API_KEY=your-daytona-key
+export ANTHROPIC_API_KEY=your-anthropic-key
+export LLM_API_KEY=your-openai-key
+export MOSS_PROJECT_ID=your-moss-project-id
+export MOSS_PROJECT_KEY=your-moss-project-key
+
+python distributed/deploy/daytona_onboarding_demo.py \
+  --repo https://github.com/topoteretes/cognee \
+  --cognee-install-spec cognee==1.0.4.dev0 \
+  --keep-volume
+```
+
+The demo is self-contained: it seeds a bundled `code-review` skill into
+Cognee inside each sandbox, runs a final review agent, and records that
+agent's review quality as a `SkillRunEntry` through `cognee.remember`.
+
+Useful overrides:
+- `COGNEE_INSTALL_SPEC` or `--cognee-install-spec`: install a dev release,
+  wheel, or git URL in every agent sandbox.
+- `TARGET_REPO` or `--repo`: repository the agents inspect.
+- `COGNEE_SKILLS_DIR` or `--skills-dir`: upload a local directory of
+  `SKILL.md` folders in addition to the bundled `code-review` skill.
+- `--no-demo-skills`: disable the bundled `code-review` skill.
+- `--enrich-skills`: run LLM enrichment while seeding skills.
+- `--improve-skills`: after scoring the final review, run skill improvement
+  with `min_runs=1` for demo feedback loops.
+- `--keep-volume`: keep `cognee-shared-memory` after the run for inspection.
 
 ---
 

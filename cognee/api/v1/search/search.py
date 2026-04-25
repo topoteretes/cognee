@@ -2,6 +2,7 @@ from uuid import UUID
 from typing import Union, Optional, List, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.models import Skill
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
@@ -45,6 +46,11 @@ async def search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
+    skills: Optional[List[Union[str, Skill]]] = None,
+    tools: Optional[List[str]] = None,
+    max_iter: Optional[int] = None,
+    skills_auto_retrieve: Optional[bool] = None,
+    skills_top_k: Optional[int] = None,
 ) -> List[SearchResult]:
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
@@ -59,6 +65,16 @@ async def search(
         raise CogneeValidationError(
             message="neighborhood_seed_top_k must be a positive integer.",
             name="InvalidNeighborhoodSeedTopK",
+        )
+    if max_iter is not None and (not isinstance(max_iter, int) or max_iter < 1):
+        raise CogneeValidationError(
+            message="max_iter must be a positive integer.",
+            name="InvalidMaxIter",
+        )
+    if skills_top_k is not None and (not isinstance(skills_top_k, int) or skills_top_k < 1):
+        raise CogneeValidationError(
+            message="skills_top_k must be a positive integer.",
+            name="InvalidSkillsTopK",
         )
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -153,6 +169,11 @@ async def search(
         verbose: If True, returns detailed result information including graph representation (when possible).
 
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
+        skills: Explicit skill names or Skill objects to load into the agentic retriever.
+        tools: Optional whitelist of tool names available to the agentic retriever.
+        max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.
+        skills_auto_retrieve: If True, vector-retrieve relevant skills for the query.
+        skills_top_k: Number of candidate skills to auto-retrieve when skills_auto_retrieve is enabled.
 
     Returns:
         list: Search results in format determined by query_type:
@@ -202,12 +223,34 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+    # Skills, tools, and the agentic loop knobs activate the AgenticRetriever
+    # inside the search type factory. They live in retriever_specific_config
+    # so the rest of the pipeline does not need to know about them.
+    agentic_overrides = {
+        "skills": skills,
+        "tools": tools,
+        "max_iter": max_iter,
+        "skills_auto_retrieve": skills_auto_retrieve,
+        "skills_top_k": skills_top_k,
+    }
+
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
     client = get_remote_client()
     if client is not None:
-        return await client.search(query_text, search_type=query_type, datasets=datasets)
+        return await client.search(
+            query_text,
+            search_type=query_type,
+            datasets=datasets,
+            dataset_ids=dataset_ids,
+            system_prompt=system_prompt,
+            top_k=top_k,
+            node_name=node_name,
+            only_context=only_context,
+            verbose=verbose,
+            **{key: value for key, value in agentic_overrides.items() if value is not None},
+        )
 
     with new_span("cognee.api.search") as span:
         span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
@@ -248,6 +291,12 @@ async def search(
             datasets = [dataset.id for dataset in datasets]
             if not datasets:
                 raise DatasetNotFoundError(message="No datasets found.")
+
+        if any(v is not None for v in agentic_overrides.values()):
+            retriever_specific_config = dict(retriever_specific_config or {})
+            for key, value in agentic_overrides.items():
+                if value is not None:
+                    retriever_specific_config[key] = value
 
         filtered_search_results = await search_function(
             query_text=query_text,

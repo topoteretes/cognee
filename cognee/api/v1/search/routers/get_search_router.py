@@ -34,6 +34,11 @@ class SearchPayloadDTO(InDTO):
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
+    skills: Optional[list[str]] = Field(default=None)
+    tools: Optional[list[str]] = Field(default=None)
+    max_iter: Optional[int] = Field(default=None)
+    skills_auto_retrieve: Optional[bool] = Field(default=None)
+    skills_top_k: Optional[int] = Field(default=None)
 
 
 def get_search_router() -> APIRouter:
@@ -144,6 +149,11 @@ def get_search_router() -> APIRouter:
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
                 "verbose": payload.verbose,
+                "skills": payload.skills,
+                "tools": payload.tools,
+                "max_iter": payload.max_iter,
+                "skills_auto_retrieve": payload.skills_auto_retrieve,
+                "skills_top_k": payload.skills_top_k,
                 "cognee_version": cognee_version,
             },
         )
@@ -164,6 +174,11 @@ def get_search_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                skills=payload.skills,
+                tools=payload.tools,
+                max_iter=payload.max_iter,
+                skills_auto_retrieve=payload.skills_auto_retrieve,
+                skills_top_k=payload.skills_top_k,
             )
 
             return jsonable_encoder(results)

@@ -27,8 +27,16 @@ def copy_model(
         include_fields = {}
     if exclude_fields is None:
         exclude_fields = []
+
+    def _copy_default(field):
+        if field.default is not PydanticUndefined:
+            return field.default
+        if field.default_factory is not None:
+            return field.get_default(call_default_factory=True)
+        return PydanticUndefined
+
     fields = {
-        name: (field.annotation, field.default if field.default is not None else PydanticUndefined)
+        name: (field.annotation, _copy_default(field))
         for name, field in model.model_fields.items()
         if name not in exclude_fields
     }

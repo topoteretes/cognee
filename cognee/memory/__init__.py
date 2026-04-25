@@ -3,6 +3,7 @@ from .entries import (
     QAEntry,
     TraceEntry,
     FeedbackEntry,
+    SkillRunEntry,
     RecallScope,
     normalize_scope,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "QAEntry",
     "TraceEntry",
     "FeedbackEntry",
+    "SkillRunEntry",
     "RecallScope",
     "normalize_scope",
 ]

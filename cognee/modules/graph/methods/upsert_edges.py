@@ -26,6 +26,9 @@ async def upsert_edges(
     -----------
         - edges (list): A list of edges to be added to the graph.
     """
+    if not edges:
+        return
+
     edges_to_add = []
 
     for edge in edges:

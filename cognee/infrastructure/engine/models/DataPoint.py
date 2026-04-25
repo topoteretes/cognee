@@ -76,6 +76,18 @@ class DataPoint(BaseModel):
                     object.__setattr__(self, "id", identity_id)
 
     @classmethod
+    def _get_metadata_default(cls, metadata_field) -> dict | None:
+        """Return a metadata field default whether it is literal or factory-backed."""
+        if metadata_field is None:
+            return None
+        default_factory = getattr(metadata_field, "default_factory", None)
+        if default_factory is not None:
+            default = metadata_field.get_default(call_default_factory=True)
+        else:
+            default = metadata_field.default
+        return default if isinstance(default, dict) else None
+
+    @classmethod
     def _get_identity_fields(cls) -> list[str] | None:
         """Get identity_fields from the class's metadata field default, if defined.
 
@@ -83,13 +95,15 @@ class DataPoint(BaseModel):
         subclass accidentally dropped when overriding metadata.
         """
         metadata_field = cls.model_fields.get("metadata")
-        if metadata_field is not None and metadata_field.default is not None:
-            identity = metadata_field.default.get("identity_fields")
+        metadata_default = cls._get_metadata_default(metadata_field)
+        if metadata_default is not None:
+            identity = metadata_default.get("identity_fields")
             if identity is None:
                 for parent in cls.__mro__[1:]:
                     parent_meta = getattr(parent, "model_fields", {}).get("metadata")
-                    if parent_meta is not None and parent_meta.default is not None:
-                        parent_identity = parent_meta.default.get("identity_fields")
+                    parent_default = cls._get_metadata_default(parent_meta)
+                    if parent_default is not None:
+                        parent_identity = parent_default.get("identity_fields")
                         if parent_identity is not None:
                             logger.warning(
                                 "%s overrides metadata but drops identity_fields "
