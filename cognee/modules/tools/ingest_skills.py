@@ -15,14 +15,21 @@ Called directly from ``cognee.remember(path, enrich=...)``.
 """
 
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
+from types import SimpleNamespace
+from typing import Dict, List, Optional, Tuple, Union
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from cognee.modules.engine.models import Skill
+from cognee.modules.pipelines.models import PipelineContext
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.add_data_points import add_data_points
 
 
 logger = get_logger("cognee.tools.ingest_skills")
+
+
+def _is_skill_entry(path: Path) -> bool:
+    return path.is_file() and path.name.lower() == "skill.md"
 
 
 def looks_like_skill_source(data) -> bool:
@@ -33,18 +40,45 @@ def looks_like_skill_source(data) -> bool:
         return False
     path = Path(data)
     try:
-        if path.is_file():
-            return path.name.upper() == "SKILL.MD"
+        if _is_skill_entry(path):
+            return True
         if path.is_dir():
-            return any(path.rglob("SKILL.md")) or any(path.rglob("skill.md"))
+            return any(p.name.lower() == "skill.md" for p in path.rglob("*") if p.is_file())
     except OSError:
         return False
     return False
 
 
+def _scope_matches(props: dict, dataset_id: Optional[UUID]) -> bool:
+    scope = props.get("dataset_scope")
+    if not scope:
+        return True
+    if dataset_id is None:
+        return False
+    return str(dataset_id) in scope
+
+
+def _skill_source_data_id(dataset_id: UUID, source: Path) -> UUID:
+    """Stable pseudo data id used to attach direct Skill writes to dataset ACL tables."""
+    return uuid5(NAMESPACE_URL, f"cognee:skills:{dataset_id}:{source}")
+
+
+def _make_storage_context(user, dataset, source: Path) -> Optional[PipelineContext]:
+    """Build a minimal PipelineContext so add_data_points writes dataset ACL rows."""
+    if user is None or dataset is None:
+        return None
+    return PipelineContext(
+        user=user,
+        dataset=dataset,
+        data_item=SimpleNamespace(id=_skill_source_data_id(dataset.id, source)),
+        pipeline_name="skills_ingest_pipeline",
+    )
+
+
 async def _diff_against_graph(
     parsed: List[Skill],
     node_set: str,
+    dataset_id: Optional[UUID] = None,
 ) -> Tuple[List[Skill], List[str], List[Tuple[str, str, str, str]]]:
     """Diff parsed skills against what's already in the graph.
 
@@ -66,7 +100,7 @@ async def _diff_against_graph(
     existing: Dict[str, Tuple[str, dict]] = {
         props.get("name"): (str(nid), props)
         for nid, props in raw_nodes
-        if props.get("type") == "Skill" and props.get("name")
+        if props.get("type") == "Skill" and props.get("name") and _scope_matches(props, dataset_id)
     }
 
     parsed_by_name = {s.name: s for s in parsed}
@@ -119,6 +153,8 @@ async def add_skills(
     enrich: bool = True,
     source_repo: str = "",
     node_set: str = "skills",
+    user=None,
+    dataset=None,
 ) -> List[Skill]:
     """Parse SKILL.md file(s) and persist them as Skill DataPoints.
 
@@ -136,24 +172,28 @@ async def add_skills(
         source_repo: Provenance label attached to each Skill.
         node_set: Tag applied via ``belongs_to_set`` for vector-search
             scoping.
+        user: Optional resolved user. When provided with ``dataset``, direct
+            ``add_data_points`` calls write the same dataset ACL rows as normal
+            pipelines.
+        dataset: Optional resolved dataset. Its id is copied to
+            ``Skill.dataset_scope`` so skills cannot leak across datasets.
 
     Returns:
         Only the Skills that were *persisted* this call. Unchanged
         skills (same ``content_hash`` as the graph copy) are silently
         skipped.
     """
-    # Late import: rich parser lives in cognee_skills and we don't want
-    # to eager-load that package on every cognee import.
+    # Late import keeps parser dependencies off the hot import path.
     from cognee.modules.tools.skill_parser import (
         parse_skill_file,
         parse_skills_folder,
     )
 
-    path = Path(source)
+    path = Path(source).expanduser().resolve()
     if path.is_dir():
-        parsed = parse_skills_folder(path, source_repo=source_repo)
+        parsed = parse_skills_folder(path, source_repo=source_repo, base_dir=path)
     elif path.is_file():
-        one = parse_skill_file(path, source_repo=source_repo)
+        one = parse_skill_file(path, source_repo=source_repo, base_dir=path.parent)
         parsed = [one] if one is not None else []
     else:
         raise FileNotFoundError(f"Skill source not found: {source}")
@@ -162,10 +202,21 @@ async def add_skills(
         logger.warning("No SKILL.md files discovered under %s", source)
         return []
 
+    dataset_id = getattr(dataset, "id", None)
+    if dataset_id is not None:
+        scope = str(dataset_id)
+        for skill in parsed:
+            if not skill.dataset_scope:
+                skill.dataset_scope = [scope]
+            elif scope not in skill.dataset_scope:
+                skill.dataset_scope.append(scope)
+
+    ctx = _make_storage_context(user, dataset, path)
+
     # Diff against what's already in the graph. Skip unchanged, delete
     # old copies of changed skills + skills that disappeared from disk,
     # and emit SkillChangeEvent nodes for the audit trail.
-    to_persist, nids_to_delete, events = await _diff_against_graph(parsed, node_set)
+    to_persist, nids_to_delete, events = await _diff_against_graph(parsed, node_set, dataset_id)
     await _delete_stale(nids_to_delete)
 
     if events:
@@ -175,7 +226,7 @@ async def add_skills(
             _make_change_event(name, name, change_type, old_hash=oh, new_hash=nh)
             for name, change_type, oh, nh in events
         ]
-        await add_data_points(change_nodes)
+        await add_data_points(change_nodes, ctx=ctx)
 
     if not to_persist:
         logger.info("No changes to persist for %s (all %d skill(s) unchanged)", source, len(parsed))
@@ -193,9 +244,12 @@ async def add_skills(
         )
         from cognee.modules.tools.skill_node_set_task import apply_node_set
 
-        user = await get_default_user()
-        datasets = await load_or_create_datasets(["skills"], [], user)
-        dataset_id = datasets[0].id
+        if user is None:
+            user = await get_default_user()
+        if dataset is None:
+            datasets = await load_or_create_datasets([node_set], [], user)
+            dataset = datasets[0]
+        dataset_id = dataset.id
 
         tasks = [
             Task(enrich_skills),
@@ -209,7 +263,7 @@ async def add_skills(
             logger.info("Enrich pipeline status: %s", status)
         await index_graph_edges()
     else:
-        await add_data_points(to_persist)
+        await add_data_points(to_persist, ctx=ctx)
 
     logger.info(
         "Ingested %d skill(s) from %s (enrich=%s); %d unchanged, %d removed",

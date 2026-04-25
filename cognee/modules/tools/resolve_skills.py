@@ -24,6 +24,15 @@ logger = get_logger("cognee.tools.resolve_skills")
 SKILL_VECTOR_COLLECTION = "Skill_description"
 
 
+def _skill_in_dataset_scope(skill: Skill, dataset_id: Optional[UUID]) -> bool:
+    """Return True when a Skill is global or explicitly scoped to ``dataset_id``."""
+    if not skill.dataset_scope:
+        return True
+    if dataset_id is None:
+        return False
+    return str(dataset_id) in skill.dataset_scope
+
+
 async def resolve_skills(
     skills: Optional[Sequence[Union[str, Skill]]] = None,
     dataset_id: Optional[UUID] = None,
@@ -47,6 +56,9 @@ async def resolve_skills(
                 "Skill entries must be Skill or str; got %s, skipping",
                 type(item).__name__,
             )
+        if skill is not None and not _skill_in_dataset_scope(skill, dataset_id):
+            logger.warning("Skill %r is outside dataset scope; skipping", skill.name)
+            skill = None
         if skill is not None and skill.id not in seen_ids:
             resolved.append(skill)
             seen_ids.add(skill.id)
@@ -56,11 +68,7 @@ async def resolve_skills(
         for skill in retrieved:
             if skill.id in seen_ids:
                 continue
-            if (
-                dataset_id is not None
-                and skill.dataset_scope
-                and str(dataset_id) not in skill.dataset_scope
-            ):
+            if not _skill_in_dataset_scope(skill, dataset_id):
                 continue
             resolved.append(skill)
             seen_ids.add(skill.id)
@@ -157,11 +165,7 @@ async def _find_skill_by_name(name: str, dataset_id: Optional[UUID]) -> Optional
         skill = _coerce_skill(props)
         if skill is None or skill.name != name:
             continue
-        if (
-            dataset_id is not None
-            and skill.dataset_scope
-            and str(dataset_id) not in skill.dataset_scope
-        ):
+        if not _skill_in_dataset_scope(skill, dataset_id):
             continue
         return skill
     return None

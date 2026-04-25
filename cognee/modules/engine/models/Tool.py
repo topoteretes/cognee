@@ -1,6 +1,8 @@
 from typing import Annotated, Any, Dict, Literal, Optional
 from uuid import UUID
 
+from pydantic import Field
+
 from cognee.infrastructure.engine import DataPoint, Embeddable, LLMContext, Dedup
 
 
@@ -27,7 +29,7 @@ class Tool(DataPoint):
 
     name: Annotated[str, Embeddable(), Dedup()]
     description: Annotated[str, Embeddable(), LLMContext()]
-    input_schema: Dict[str, Any] = {}
+    input_schema: Dict[str, Any] = Field(default_factory=dict)
     handler_ref: Annotated[str, Dedup()]
     dataset_id: Optional[UUID] = None
     permission_required: PermissionVerb = "read"

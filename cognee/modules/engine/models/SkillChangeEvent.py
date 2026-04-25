@@ -1,8 +1,8 @@
 """Temporal event for tracking skill lifecycle changes."""
 
-from typing import Optional
+from pydantic import Field
+
 from cognee.modules.engine.models.Event import Event
-from cognee.modules.engine.models.Timestamp import Timestamp
 
 
 class SkillChangeEvent(Event):
@@ -17,4 +17,4 @@ class SkillChangeEvent(Event):
     new_content_hash: str = ""
     skill_name: str = ""
 
-    metadata: dict = {"index_fields": ["name", "description"]}
+    metadata: dict = Field(default_factory=lambda: {"index_fields": ["name", "description"]})

@@ -14,9 +14,11 @@ from uuid import UUID
 
 from cognee.modules.engine.models import Tool
 from cognee.modules.tools.errors import ToolInvocationError, ToolNotFoundError
+from cognee.shared.logging_utils import get_logger
 
 
 ToolHandler = Callable[..., Any]
+logger = get_logger("cognee.tools.registry")
 
 
 _BUILTIN_TOOLS: Dict[str, Tool] = {}
@@ -89,37 +91,47 @@ async def _query_tool_nodes(dataset_id: Optional[UUID]) -> List[Tool]:
     """Fetch Tool DataPoints from the graph. Returns [] when the graph is empty
     or no Tool nodes are persisted.
 
-    This path intentionally swallows backend-specific lookup errors: graph-backed
-    tools are optional, and a user running only built-ins must not see failures
-    just because their graph has no Tool nodes yet.
+    This path returns [] when graph-backed tools are unavailable, but logs
+    backend failures so permission and registry incidents are diagnosable.
     """
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to import graph engine while resolving tools: %s", exc)
         return []
 
     try:
         graph_engine = await get_graph_engine()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to initialize graph engine while resolving tools: %s", exc)
         return []
 
-    get_by_type = getattr(graph_engine, "get_nodeset_subgraph", None) or getattr(
-        graph_engine, "get_nodes_by_type", None
-    )
-    if get_by_type is None:
+    get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
+    get_graph_data = getattr(graph_engine, "get_graph_data", None)
+    if get_by_type is None and get_graph_data is None:
+        logger.warning("Graph engine %s cannot list Tool nodes", type(graph_engine).__name__)
         return []
 
     try:
-        raw_nodes = await get_by_type(node_type=Tool)
-    except Exception:
+        if get_by_type is not None:
+            raw_nodes = await get_by_type(node_type=Tool)
+        else:
+            raw_nodes, _ = await get_graph_data()
+    except Exception as exc:
+        logger.warning("Graph-backed Tool lookup failed: %s", exc)
         return []
+    if isinstance(raw_nodes, tuple) and len(raw_nodes) == 2:
+        raw_nodes = raw_nodes[0]
 
     tools: List[Tool] = []
     for raw in raw_nodes or []:
         tool = _coerce_tool(raw)
         if tool is None:
             continue
-        if dataset_id is not None and tool.dataset_id not in (None, dataset_id):
+        if dataset_id is None:
+            if tool.dataset_id is not None:
+                continue
+        elif tool.dataset_id not in (None, dataset_id):
             continue
         tools.append(tool)
     return tools
@@ -133,6 +145,8 @@ def _coerce_tool(raw) -> Optional[Tool]:
     """
     if isinstance(raw, Tool):
         return raw
+    if isinstance(raw, (list, tuple)) and len(raw) > 1:
+        raw = raw[1]
     data = raw.model_dump() if hasattr(raw, "model_dump") else raw
     if not isinstance(data, dict):
         return None

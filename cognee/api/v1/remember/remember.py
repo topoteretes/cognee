@@ -68,7 +68,7 @@ class RememberKwargs(TypedDict, total=False):
     vector_db_config: dict
     graph_db_config: dict
     # SKILL.md ingest only: run LLM enrichment + materialize task patterns
-    # after parsing. Ignored for non-skill sources.
+    # after parsing. Defaults to True and is ignored for non-skill sources.
     enrich: bool
     # SKILL.md ingest only: after ingesting, run the memify
     # improve_failing_skills task to automatically amend any skills that
@@ -708,11 +708,37 @@ async def _remember_inner(
     # as Skill DataPoints rather than run through the chunk+extract pipeline.
     from cognee.modules.tools import add_skills, looks_like_skill_source
 
+    # Pop skill-ingest kwargs before the regular add/cognify path so callers
+    # can pass them safely even when the input is not a skill source.
+    enrich = bool(kwargs.pop("enrich", True))
+    improve = bool(kwargs.pop("improve", False))
+
     if looks_like_skill_source(data):
-        # Pop skill-ingest kwargs so they don't reach the chunk/extract path.
-        enrich = bool(kwargs.pop("enrich", False))
-        improve = bool(kwargs.pop("improve", False))
-        skills = await add_skills(data, enrich=enrich)
+        from cognee.modules.engine.operations.setup import setup
+
+        await setup()
+
+        user = kwargs.get("user")
+        dataset_id = kwargs.get("dataset_id")
+        dataset_ref = dataset_id or dataset_name
+        user, authorized_datasets = await resolve_authorized_user_datasets(dataset_ref, user)
+        dataset = authorized_datasets[0]
+
+        requested_node_set = kwargs.get("node_set") or ["skills"]
+        if isinstance(requested_node_set, str):
+            skills_node_set = requested_node_set
+        elif requested_node_set:
+            skills_node_set = requested_node_set[0]
+        else:
+            skills_node_set = "skills"
+
+        skills = await add_skills(
+            data,
+            enrich=enrich,
+            node_set=skills_node_set,
+            user=user,
+            dataset=dataset,
+        )
         applied_amendments: list = []
         if improve:
             # Run the memify skill-improvement task once. It'll no-op if
@@ -727,7 +753,8 @@ async def _remember_inner(
                 logger.warning("improve_failing_skills failed: %s", exc)
         result = RememberResult(
             status="completed",
-            dataset_name=dataset_name,
+            dataset_name=dataset.name,
+            dataset_id=str(dataset.id),
             session_ids=None,
         )
         result.elapsed_seconds = time.monotonic() - result._started_at

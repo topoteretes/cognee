@@ -35,4 +35,4 @@ class SkillAmendment(DataPoint):
     post_amendment_avg_score: float = 0.0
     post_amendment_run_count: int = 0
 
-    metadata: dict = {"index_fields": ["change_explanation"]}
+    metadata: dict = Field(default_factory=lambda: {"index_fields": ["change_explanation"]})

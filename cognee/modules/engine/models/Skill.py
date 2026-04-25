@@ -1,5 +1,7 @@
 from typing import Annotated, Any, Dict, List, Optional
 
+from pydantic import Field
+
 from cognee.infrastructure.engine import DataPoint, Edge, Embeddable, LLMContext, Dedup
 
 
@@ -16,7 +18,7 @@ class SkillResource(DataPoint):
     resource_type: str  # "reference" | "script" | "asset" | "other"
     content: Optional[str] = None
     content_hash: str = ""
-    metadata: dict = {"index_fields": ["name"]}
+    metadata: dict = Field(default_factory=lambda: {"index_fields": ["name"]})
 
 
 class TaskPattern(DataPoint):
@@ -29,13 +31,13 @@ class TaskPattern(DataPoint):
     category: str = ""
 
     # Evidence / provenance
-    source_skill_ids: List[str] = []  # which skills proposed this pattern
-    examples: List[str] = []  # trigger phrases that led to this pattern
+    source_skill_ids: List[str] = Field(default_factory=list)  # which skills proposed this pattern
+    examples: List[str] = Field(default_factory=list)  # trigger phrases that led to this pattern
     enrichment_model: str = ""
     enrichment_confidence: float = 0.0
 
-    prefers: List[tuple[Edge, "Skill"]] = []
-    metadata: dict = {"index_fields": ["text"]}
+    prefers: List[tuple[Edge, "Skill"]] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=lambda: {"index_fields": ["text"]})
 
 
 class Skill(DataPoint):
@@ -64,14 +66,14 @@ class Skill(DataPoint):
     name: Annotated[str, Dedup()]
     description: Annotated[str, Embeddable(), LLMContext()]
     procedure: Annotated[str, LLMContext("Loaded on skill selection")] = ""
-    declared_tools: List[str] = []
+    declared_tools: List[str] = Field(default_factory=list)
     dataset_scope: Optional[List[str]] = None
     skill_version: str = "1"
 
     # --- parser-only fields (populated by cognee_skills.parser) -----------
     description_raw: str = ""
-    triggers_raw: List[str] = []
-    tags_raw: List[str] = []
+    triggers_raw: List[str] = Field(default_factory=list)
+    tags_raw: List[str] = Field(default_factory=list)
     source_path: str = ""
     source_repo: str = ""
     content_hash: str = ""
@@ -80,19 +82,21 @@ class Skill(DataPoint):
 
     # --- LLM-enriched fields (populated by enrich_skills task) ------------
     instruction_summary: str = ""
-    triggers: List[str] = []
-    tags: List[str] = []
+    triggers: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
     complexity: str = ""  # "simple" | "workflow" | "agent"
-    task_pattern_candidates: List[str] = []
+    task_pattern_candidates: List[str] = Field(default_factory=list)
     enrichment_model: str = ""
     enrichment_confidence: float = 0.0
 
     # --- relationships ----------------------------------------------------
-    resources: List[SkillResource] = []
-    related_skills: List["Skill"] = []
-    solves: List[tuple[Edge, TaskPattern]] = []
+    resources: List[SkillResource] = Field(default_factory=list)
+    related_skills: List["Skill"] = Field(default_factory=list)
+    solves: List[tuple[Edge, TaskPattern]] = Field(default_factory=list)
 
-    metadata: dict = {"index_fields": ["name", "instruction_summary", "description"]}
+    metadata: dict = Field(
+        default_factory=lambda: {"index_fields": ["name", "instruction_summary", "description"]}
+    )
 
 
 # Resolve forward references now that all three classes are defined in

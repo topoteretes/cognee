@@ -240,6 +240,33 @@ class CloudClient:
             payload["searchType"] = st if isinstance(st, str) else st.value
         if kwargs.get("datasets"):
             payload["datasets"] = kwargs["datasets"]
+        if kwargs.get("dataset_ids"):
+            dataset_ids = kwargs["dataset_ids"]
+            if isinstance(dataset_ids, UUID):
+                dataset_ids = [dataset_ids]
+            payload["datasetIds"] = [str(dataset_id) for dataset_id in dataset_ids]
+        if kwargs.get("top_k") is not None:
+            payload["topK"] = kwargs["top_k"]
+        if kwargs.get("system_prompt"):
+            payload["systemPrompt"] = kwargs["system_prompt"]
+        if kwargs.get("node_name"):
+            payload["nodeName"] = kwargs["node_name"]
+        if kwargs.get("only_context") is not None:
+            payload["onlyContext"] = kwargs["only_context"]
+        if kwargs.get("verbose") is not None:
+            payload["verbose"] = kwargs["verbose"]
+        if kwargs.get("skills") is not None:
+            payload["skills"] = [
+                skill.name if hasattr(skill, "name") else str(skill) for skill in kwargs["skills"]
+            ]
+        if kwargs.get("tools") is not None:
+            payload["tools"] = kwargs["tools"]
+        if kwargs.get("max_iter") is not None:
+            payload["maxIter"] = kwargs["max_iter"]
+        if kwargs.get("skills_auto_retrieve") is not None:
+            payload["skillsAutoRetrieve"] = kwargs["skills_auto_retrieve"]
+        if kwargs.get("skills_top_k") is not None:
+            payload["skillsTopK"] = kwargs["skills_top_k"]
 
         async with session.post(
             f"{self.service_url}/api/v1/search",

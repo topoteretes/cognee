@@ -130,6 +130,33 @@ pip install 'cognee[api]'
 python -m uvicorn cognee.api.client:app --host 0.0.0.0 --port 8000
 ```
 
+### Hackathon Agent Sandbox Demo
+`daytona_onboarding_demo.py` runs several Claude Code agents against one target
+repo and gives them shared Cognee memory. It uses a Daytona volume as a snapshot
+bucket, local sandbox disk for SQLite/Kuzu state, and Moss for the vector index.
+This avoids running databases directly on Daytona's S3-backed volume.
+
+```bash
+pip install daytona
+
+export DAYTONA_API_KEY=your-daytona-key
+export ANTHROPIC_API_KEY=your-anthropic-key
+export LLM_API_KEY=your-openai-key
+export MOSS_PROJECT_ID=your-moss-project-id
+export MOSS_PROJECT_KEY=your-moss-project-key
+
+python distributed/deploy/daytona_onboarding_demo.py \
+  --repo https://github.com/topoteretes/cognee \
+  --cognee-install-spec cognee==1.0.4.dev0 \
+  --keep-volume
+```
+
+Useful overrides:
+- `COGNEE_INSTALL_SPEC` or `--cognee-install-spec`: install a dev release,
+  wheel, or git URL in every agent sandbox.
+- `TARGET_REPO` or `--repo`: repository the agents inspect.
+- `--keep-volume`: keep `cognee-shared-memory` after the run for inspection.
+
 ---
 
 ## Devcontainers (Codespaces / VS Code)

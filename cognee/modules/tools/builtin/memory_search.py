@@ -40,7 +40,13 @@ async def handler(args: Dict[str, Any], **_) -> str:
     query = args.get("query")
     if not query:
         raise ToolInvocationError("memory_search requires a 'query' argument")
-    top_k = int(args.get("top_k") or 5)
+    raw_top_k = args.get("top_k", 5)
+    try:
+        top_k = int(raw_top_k)
+    except (TypeError, ValueError) as exc:
+        raise ToolInvocationError("memory_search 'top_k' must be an integer") from exc
+    if top_k <= 0:
+        raise ToolInvocationError("memory_search 'top_k' must be greater than 0")
 
     triplets = await brute_force_triplet_search(query, top_k=top_k)
     if not triplets:

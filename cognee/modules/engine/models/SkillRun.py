@@ -1,4 +1,6 @@
 from typing import Any, Dict, List, Optional
+from pydantic import Field
+
 from cognee.low_level import DataPoint
 
 
@@ -10,7 +12,7 @@ class ToolCall(DataPoint):
     tool_output: Optional[str] = None
     success: bool = True
     duration_ms: int = 0
-    metadata: dict = {"index_fields": []}
+    metadata: dict = Field(default_factory=lambda: {"index_fields": []})
 
 
 class CandidateSkill(DataPoint):
@@ -19,7 +21,7 @@ class CandidateSkill(DataPoint):
     skill_id: str
     score: float = 0.0
     signals: Optional[Dict[str, Any]] = None
-    metadata: dict = {"index_fields": []}
+    metadata: dict = Field(default_factory=lambda: {"index_fields": []})
 
 
 class SkillRun(DataPoint):
@@ -33,13 +35,13 @@ class SkillRun(DataPoint):
     success_score: float = 0.0  # 0.0 to 1.0
 
     # Routing decision
-    candidate_skills: List[CandidateSkill] = []
+    candidate_skills: List[CandidateSkill] = Field(default_factory=list)
     selected_skill: Optional["Skill"] = None
     selected_skill_id: str = ""
     task_pattern_id: str = ""
     router_version: str = ""
 
-    tool_trace: List[ToolCall] = []
+    tool_trace: List[ToolCall] = Field(default_factory=list)
 
     error_type: str = ""
     error_message: str = ""
@@ -50,7 +52,9 @@ class SkillRun(DataPoint):
 
     previous_run: Optional["SkillRun"] = None
 
-    metadata: dict = {"index_fields": ["task_text", "result_summary"]}
+    metadata: dict = Field(
+        default_factory=lambda: {"index_fields": ["task_text", "result_summary"]}
+    )
 
 
 from .Skill import Skill  # noqa: E402

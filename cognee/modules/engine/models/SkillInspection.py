@@ -36,10 +36,12 @@ class SkillInspection(DataPoint):
     root_cause: str
     severity: str
     improvement_hypothesis: str
-    analyzed_run_ids: List[str] = []
+    analyzed_run_ids: List[str] = Field(default_factory=list)
     analyzed_run_count: int = 0
     avg_success_score: float = 0.0
     inspection_model: str = ""
     inspection_confidence: float = 0.0
 
-    metadata: dict = {"index_fields": ["root_cause", "improvement_hypothesis"]}
+    metadata: dict = Field(
+        default_factory=lambda: {"index_fields": ["root_cause", "improvement_hypothesis"]}
+    )

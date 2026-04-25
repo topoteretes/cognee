@@ -88,6 +88,8 @@ class AgenticRetriever(GraphCompletionRetriever):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        if user is None:
+            raise ValueError("AgenticRetriever requires `user` for ACL-checked tool execution.")
         self.explicit_skills = list(skills) if skills else []
         self.tool_filter = tools
         self.user = user
@@ -98,6 +100,12 @@ class AgenticRetriever(GraphCompletionRetriever):
         self.agentic_system_prompt_path = agentic_system_prompt_path
         self.agentic_user_prompt_path = agentic_user_prompt_path
         self._cached_context: Optional[str] = None
+
+    def _use_session_cache(self) -> bool:
+        """Use the explicit retriever user instead of relying only on ContextVar state."""
+        from cognee.infrastructure.databases.cache.config import CacheConfig
+
+        return bool(getattr(self.user, "id", None) and CacheConfig().caching)
 
     async def get_retrieved_objects(  # type: ignore[override]
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
@@ -129,13 +137,11 @@ class AgenticRetriever(GraphCompletionRetriever):
             allowed_names = set(self.tool_filter)
             all_tools = [t for t in all_tools if t.name in allowed_names]
 
-        declared: set = set()
+        declared: set[str] = {"load_skill"} if skills else set()
         for skill in skills:
             declared.update(skill.declared_tools or [])
 
-        if declared:
-            # Always expose load_skill so the model can reach procedure bodies.
-            declared.add("load_skill")
+        if skills:
             all_tools = [t for t in all_tools if t.name in declared]
 
         return all_tools
@@ -208,6 +214,13 @@ class AgenticRetriever(GraphCompletionRetriever):
         if skills:
             await self._record_skill_runs(skills, query or "", final)
 
+        await self._store_session_qa(
+            query=query or "",
+            context=context if isinstance(context, str) else "",
+            answer=final,
+            triplets=retrieved_objects.get("triplets"),
+        )
+
         return [final]
 
     @staticmethod
@@ -232,6 +245,67 @@ class AgenticRetriever(GraphCompletionRetriever):
         except Exception as exc:
             logger.warning("Failed to record SkillRun(s) after agentic retrieval: %s", exc)
 
+    async def _get_session_history(self) -> str:
+        """Return formatted session history for the active user, if caching is available."""
+        if not self._use_session_cache():
+            return ""
+
+        from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+        user_id = getattr(self.user, "id", None)
+        if user_id is None:
+            return ""
+
+        try:
+            session_manager = get_session_manager()
+            if not session_manager.is_available:
+                return ""
+
+            history = await session_manager.get_session(
+                user_id=str(user_id),
+                session_id=self.session_id,
+                formatted=True,
+                include_context=False,
+            )
+            return history if isinstance(history, str) else ""
+        except Exception as exc:
+            logger.warning("Failed to load agentic session history: %s", exc)
+            return ""
+
+    async def _store_session_qa(
+        self,
+        query: str,
+        context: str,
+        answer: str,
+        triplets: Any,
+    ) -> None:
+        """Persist the agentic answer to the session cache when session memory is enabled."""
+        if not self._use_session_cache():
+            return
+
+        from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+        user_id = getattr(self.user, "id", None)
+        if user_id is None:
+            return
+
+        try:
+            session_manager = get_session_manager()
+            if not session_manager.is_available:
+                return
+
+            used_graph_element_ids = self._extract_context_object_ids(triplets)
+            await session_manager.add_qa(
+                user_id=str(user_id),
+                question=query,
+                context=context,
+                answer=answer,
+                session_id=self.session_id,
+                used_graph_element_ids=used_graph_element_ids,
+            )
+        except Exception as exc:
+            logger.warning("Failed to store agentic session QA: %s", exc)
+
     async def _run_tool_loop(
         self,
         query: Optional[str],
@@ -239,6 +313,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         tool_names: List[str],
     ) -> str:
         loop_context = initial_context
+        conversation_history = await self._get_session_history()
 
         for iteration in range(self.max_iter):
             step: AgentStep = await generate_completion(
@@ -246,6 +321,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 context=loop_context,
                 user_prompt_path=self.agentic_user_prompt_path,
                 system_prompt_path=self.agentic_system_prompt_path,
+                conversation_history=conversation_history,
                 response_model=AgentStep,
             )
 
@@ -271,6 +347,7 @@ class AgenticRetriever(GraphCompletionRetriever):
             context=loop_context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
+            conversation_history=conversation_history,
             response_model=str,
         )
         return forced

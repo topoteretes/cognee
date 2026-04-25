@@ -16,7 +16,6 @@ Required for a valid skill: a non-empty name (or inferable from folder/file name
 from __future__ import annotations
 
 import hashlib
-import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -25,8 +24,9 @@ from uuid import UUID, uuid5
 import yaml
 
 from cognee.modules.engine.models.Skill import Skill, SkillResource
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 NAMESPACE = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
@@ -84,8 +84,23 @@ def _is_binary(path: Path) -> bool:
     return path.suffix.lower() in BINARY_EXTENSIONS
 
 
-def _read_text_safe(path: Path, max_chars: int = 50_000) -> Optional[str]:
+def _is_relative_to(path: Path, base_dir: Path) -> bool:
+    try:
+        path.resolve().relative_to(base_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _read_text_safe(
+    path: Path,
+    max_chars: int = 50_000,
+    base_dir: Optional[Path] = None,
+) -> Optional[str]:
     if _is_binary(path):
+        return None
+    if base_dir is not None and not _is_relative_to(path, base_dir):
+        logger.warning("Skipping skill resource outside allowed base directory: %s", path)
         return None
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -115,7 +130,7 @@ def _parse_frontmatter(text: str) -> tuple[Dict[str, Any], str]:
 
     Handles standard --- delimiters. Returns ({}, full_text) if no frontmatter.
     """
-    match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)", text, re.DOTALL)
+    match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?(.*)", text, re.DOTALL)
     if not match:
         return {}, text.strip()
 
@@ -280,14 +295,21 @@ def _find_skill_file(skill_dir: Path) -> Optional[Path]:
     return None
 
 
-def _scan_resources(skill_dir: Path, entry_file: Path) -> List[SkillResource]:
+def _scan_resources(
+    skill_dir: Path,
+    entry_file: Path,
+    base_dir: Optional[Path] = None,
+) -> List[SkillResource]:
     resources: List[SkillResource] = []
     for item in sorted(skill_dir.rglob("*")):
         if not item.is_file() or item == entry_file:
             continue
+        if base_dir is not None and not _is_relative_to(item, base_dir):
+            logger.warning("Skipping skill resource outside allowed base directory: %s", item)
+            continue
         rel_path = str(item.relative_to(skill_dir))
         resource_type = _classify_resource(item, skill_dir)
-        content = _read_text_safe(item)
+        content = _read_text_safe(item, base_dir=base_dir)
         resource = SkillResource(
             id=_deterministic_id(f"resource:{skill_dir.name}/{rel_path}"),
             name=item.name,
@@ -309,6 +331,7 @@ def parse_skill_file(
     skill_md: Path,
     source_repo: str = "",
     skill_key: Optional[str] = None,
+    base_dir: Optional[Path] = None,
 ) -> Optional[Skill]:
     """Parse a skill markdown file into a Skill DataPoint.
 
@@ -322,6 +345,10 @@ def parse_skill_file(
         skill_key: Override for skill_id; defaults to parent directory name
                    or file stem for flat files.
     """
+    skill_md = Path(skill_md)
+    if base_dir is not None and not _is_relative_to(skill_md, base_dir):
+        raise ValueError(f"Skill file is outside the allowed base directory: {skill_md}")
+
     if not skill_md.is_file():
         return None
 
@@ -353,7 +380,11 @@ def parse_skill_file(
     complexity = _detect_complexity(body)
 
     skill_dir = skill_md.parent
-    resources = _scan_resources(skill_dir, skill_md) if skill_md.parent != skill_md else []
+    resources = (
+        _scan_resources(skill_dir, skill_md, base_dir=base_dir)
+        if skill_dir != skill_dir.parent
+        else []
+    )
 
     # Preserve any remaining unknown frontmatter fields as extra_metadata
     known_keys = (
@@ -404,6 +435,7 @@ def parse_skill_file(
 def parse_skill_folder(
     skill_dir: Path,
     source_repo: str = "",
+    base_dir: Optional[Path] = None,
 ) -> Optional[Skill]:
     """Parse a single skill folder into a Skill DataPoint.
 
@@ -412,12 +444,13 @@ def parse_skill_folder(
     entry = _find_skill_file(skill_dir)
     if entry is None:
         return None
-    return parse_skill_file(entry, source_repo=source_repo)
+    return parse_skill_file(entry, source_repo=source_repo, base_dir=base_dir)
 
 
 def parse_skills_folder(
     skills_root: str | Path,
     source_repo: str = "",
+    base_dir: Optional[Path] = None,
 ) -> List[Skill]:
     """Parse all skills under a root directory.
 
@@ -435,6 +468,7 @@ def parse_skills_folder(
     skills_root = Path(skills_root)
     if not skills_root.is_dir():
         raise FileNotFoundError(f"Skills directory not found: {skills_root}")
+    base_dir = Path(base_dir).resolve() if base_dir is not None else skills_root.resolve()
 
     if not source_repo:
         source_repo = skills_root.name
@@ -446,7 +480,7 @@ def parse_skills_folder(
     for child in sorted(skills_root.iterdir()):
         if not child.is_dir():
             continue
-        skill = parse_skill_folder(child, source_repo=source_repo)
+        skill = parse_skill_folder(child, source_repo=source_repo, base_dir=base_dir)
         if skill is not None:
             seen_keys.add(skill.name)
             skills.append(skill)
@@ -465,7 +499,12 @@ def parse_skills_folder(
         if skill_key in seen_keys:
             continue
 
-        skill = parse_skill_file(child, source_repo=source_repo, skill_key=skill_key)
+        skill = parse_skill_file(
+            child,
+            source_repo=source_repo,
+            skill_key=skill_key,
+            base_dir=base_dir,
+        )
         if skill is not None:
             seen_keys.add(skill_key)
             skills.append(skill)

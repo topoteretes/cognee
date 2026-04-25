@@ -276,11 +276,11 @@ async def get_search_type_retriever_instance(
     ):
         dataset = kwargs.get("dataset")
         dataset_id = dataset.id if dataset is not None else None
-        user = None
+        user = kwargs.get("user")
         try:
-            user = session_user.get()
+            user = user or session_user.get()
         except LookupError:
-            user = None
+            pass
 
         return AgenticRetriever(
             skills=retriever_specific_config.get("skills"),
