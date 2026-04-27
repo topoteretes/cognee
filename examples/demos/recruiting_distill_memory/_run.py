@@ -21,7 +21,6 @@ Flow:
 
 import datetime as dt
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +31,7 @@ from cognee.modules.users.methods import get_default_user
 
 from examples.demos.recruiting_distill_memory.agent_loop import run_agentic_plan
 from examples.demos.recruiting_distill_memory.agent_tools import (
+    CANDIDATE,
     DATASET,
     SESSION_ID,
     WITH_MEMORY,
@@ -44,12 +44,12 @@ OUTPUT_DIR = HERE / "output"
 PROPOSED_NODE_SET = "agent_proposed_rule"
 
 
-async def run_plan(output_filename: str) -> dict[str, Any]:
-    candidate_name = os.environ.get("RECRUITING_CANDIDATE", "dev_rao")
-    candidate_path = CANDIDATES_DIR / f"{candidate_name}.json"
+async def run_plan() -> dict[str, Any]:
+    candidate_path = CANDIDATES_DIR / f"{CANDIDATE}.json"
     candidate = json.loads(candidate_path.read_text())
-
     mode = "grounded" if WITH_MEMORY else "naive"
+    output_filename = f"{mode}_plan_{CANDIDATE}.json"
+
     print(f"=== Run mode: {mode}  (session_id={SESSION_ID}) ===")
     print(f"Candidate: {candidate['name']} ({candidate['prior_company']} → {candidate['role']})\n")
     print("Running agentic loop ...")

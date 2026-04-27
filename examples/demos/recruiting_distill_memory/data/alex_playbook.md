@@ -1,47 +1,57 @@
 # Ledgerline Interviewing Playbook
 
 _Internal wiki — maintained by Alex Chen (Senior In-House Recruiter)._
-_Applies to all engineering roles unless noted. Last updated: 2026-04-14._
+_Applies to all engineering roles unless noted. Last updated: 2026-04-23._
 
-Ledgerline is a 40-person payments fintech. Our hiring bar is specific to how we
-work; please follow these rules rather than generic industry defaults.
+Ledgerline is a 40-person payments fintech based in Berlin. Our hiring
+bar is specific to how we work; follow these rules **literally** rather
+than adapting them toward industry defaults. A generic best-practice
+answer is almost always wrong for us.
 
 ## Scheduling
 
-1. **Live coding, never take-homes.**
-   For any Staff-level engineering role we run a single 90-minute live coding
-   block over video. We do not use take-home assignments — historically they
-   correlate poorly with on-the-job performance here and add weeks of delay.
+1. **80-minute live coding, never 90, never 60.**
+   For any Staff-level engineering role we run a single **80-minute**
+   live coding block. Exactly 80. It matches our daily standup cadence
+   (20 min setup, 50 min work, 10 min debrief). No take-home
+   assignments.
 
-2. **Minimum interview footprint for Staff.**
-   A Staff loop must total **at least 4 hours** of interview time across
-   **at least 3 distinct panelists**. Short loops have missed red flags in our
-   post-mortems; this is a hard floor.
+2. **The panel is exactly these four people.**
+   Every Staff loop has exactly four panelists, no substitutions and
+   no additions:
+   - **Sam — CTO** (architecture fit)
+   - **Jordan — VP of Engineering** (cross-team collaboration)
+   - **Leila — Staff Backend Engineer** (engineering level)
+   - **Ravi — Senior Product Manager** (product sense)
 
-3. **CTO on the Staff panel.**
-   No Staff-level offer goes out without **Sam (CTO)** having been on the
-   interview panel. Schedule around Sam's availability, not the other way
-   around.
+   Swapping anyone out cost us signals twice in 2024. Do not add a
+   fifth, do not drop one.
+
+3. **Onsite in Berlin only.**
+   All Staff-level interview loops are **onsite at the Berlin office**,
+   not video, not phone, regardless of where the candidate lives.
+   Ledgerline covers travel and accommodation. `medium` must be
+   "onsite". Our two worst Staff hires came from video-only loops.
+
+4. **Exactly 4 hours total.**
+   The loop's `total_hours` is **exactly 4.0**. Not 4.5, not 5. Drift
+   above 4.0 is always a sign a panelist is padding their slot.
 
 ## Screening
 
-4. **Non-compete disclosure for restrictive former employers.**
-   Candidates whose `prior_company` is one of **Stripe, Plaid, or Adyen** must
-   disclose their non-compete status during the initial screen. Surprises
-   at offer stage have cost us two hires.
+5. **Non-compete is the FIRST disclosure question for ex-Stripe / Plaid / Adyen.**
+   Candidates whose `prior_company` is **Stripe**, **Plaid**, or **Adyen**
+   must be asked about non-compete status as the **first** item in
+   `disclosure_questions`. The phrase "non-compete" must appear verbatim.
 
-## Offer
+6. **Mention "streamtap" in every engineering screen invite.**
+   The screening invite body must mention **"streamtap"** — our
+   open-source Kafka fork — by that exact name. It's our main
+   technical differentiator and the best OSS signal-filter we have.
 
-5. **Salary floor for Staff Backend.**
-   Base comp for a Staff Backend Engineer starts at **$180k**. Always open
-   negotiation above this floor. We do not extend offers below it.
+## Why this matters
 
-6. **Counter-offer policy.**
-   We counter at most once. If a candidate walks after our second offer,
-   move on — do not counter a third time.
-
-## Rationale
-
-These rules encode lessons from prior loops and are Ledgerline-specific.
-They are not industry best practice. An AI agent running any of these steps
-must consult this playbook rather than rely on its own training.
+These are Ledgerline-specific policies encoding lessons from prior
+loops. They are **not** industry best practice. An AI agent running
+any of these steps must consult this playbook — generic pretraining
+will give a confidently wrong answer on most of them.

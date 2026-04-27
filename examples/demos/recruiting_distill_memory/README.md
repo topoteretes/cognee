@@ -12,10 +12,10 @@ when it acts. This demo shows that end-to-end on Cognee.
 2. The agent replaces Alex for a narrow task — drafting an interview loop
    for a new candidate. Its tools are wrapped with `@cognee.agent_memory`
    against `human_memory`. A tiny planner LLM picks which tool to call next.
-3. We run the agent **twice** on the same candidate (Dev Rao, ex-Stripe):
-   once **naive** (no memory), once **grounded** (retrieves the rulebook).
-   The naive plan violates Ledgerline's policies; the grounded plan follows
-   them.
+3. We run the agent across **four candidates × two modes** (naive = no
+   memory, grounded = retrieves the rulebook). The naive plans violate
+   Ledgerline's policies almost everywhere; the grounded plans follow them
+   almost everywhere. `check_rule_compliance.py` prints the full matrix.
 4. After the grounded run, `cognee`'s built-in memify pipeline extracts
    "learnings" from the decorator's session traces and persists them into
    the graph under `node_set=['agent_proposed_rule']`. A human reviews
@@ -38,25 +38,37 @@ when it acts. This demo shows that end-to-end on Cognee.
 
 ## Scenario
 
-- **Company:** Ledgerline — 40-person payments fintech
-- **Role:** Staff Backend Engineer
-- **Recruiter being replaced:** Alex Chen
-- **Demo candidate:** Dev Rao — 8 YOE, prior at Stripe, target base $170k
+- **Company:** Ledgerline — 40-person payments fintech based in Berlin.
+- **Role:** Staff Backend Engineer.
+- **Recruiter being replaced:** Alex Chen.
+- **Candidates:** 4 — covering the rule-triggering matrix.
 
-The six seed rules (`data/seed_rules.yaml`):
+### The rules are deliberately weird
 
-| id                       | trigger                                              | action                                    |
-|--------------------------|------------------------------------------------------|-------------------------------------------|
-| `R1_live_coding`         | Staff-level scheduling                                | 90-min live coding, never take-home       |
-| `R2_panel_footprint`     | Staff-level interview loop                            | ≥4 hours across ≥3 panelists              |
-| `R3_cto_on_panel`        | Staff-level offer path                                | Sam (CTO) on panel                        |
-| `R4_noncompete_screen`   | candidate.prior_company in {Stripe, Plaid, Adyen}     | probe non-compete in screen invite        |
-| `R5_staff_backend_floor` | Staff Backend offer drafting                          | base ≥$180k, negotiate upward             |
-| `R6_one_counter`         | candidate has counter-offered once                    | do not counter twice; walk                |
+The six seed rules (`data/seed_rules.yaml`) are designed to **contradict
+industry defaults and depend on Ledgerline-specific facts**. A strong
+pretrained LLM will guess "90-min live coding, ≥4 hours, CTO on panel"
+without any help. Memory only does interesting work where pretraining
+is *wrong*, so each rule below picks an off-by-default number, a
+specific internal name, or a strict position requirement:
 
-R1–R4 get exercised by scheduling; R5–R6 stay in the rulebook as retrieval
-noise — a nice check that trigger-matching keeps them out of the scheduling
-tool calls.
+| id                      | trigger                                             | action                                                                                          | why a pretrained LLM gets it wrong          |
+|-------------------------|-----------------------------------------------------|--------------------------------------------------------------------------------------------------|---------------------------------------------|
+| `R1_80_min_live_coding` | Staff-level scheduling                              | Exactly **80-min live coding**, no take-home                                                     | default guess is 60 or 90                    |
+| `R2_exact_panel`        | Staff-level panel                                   | Exactly 4 panelists by name: **Sam (CTO), Jordan (VP Eng), Leila (Staff BE), Ravi (SPM)**       | names are unguessable                        |
+| `R3_medium_onsite`      | Staff-level interviews                              | **Onsite only** in Berlin, never video                                                           | default is remote-first                      |
+| `R4_noncompete_first`   | prior_company ∈ {Stripe, Plaid, Adyen}              | "**non-compete**" must be the **first** `disclosure_questions` entry, verbatim                   | LLM places it anywhere in the list           |
+| `R5_streamtap_mention`  | Screening invite                                    | Body must mention **"streamtap"** (Ledgerline's OSS Kafka fork) verbatim                         | product name is unguessable                  |
+| `R6_hours_exactly_4`    | Staff-level loop                                    | `total_hours` exactly **4.0**, not 4.5, not 5                                                    | generic floor ≥4 happens to coincide here    |
+
+### Candidates
+
+| name          | prior_company | triggers R4? | purpose                          |
+|---------------|---------------|--------------|----------------------------------|
+| Dev Rao       | Stripe        | yes          | full path, all rules apply       |
+| Maria Cruz    | Revolut       | no           | tests R4 does not over-fire      |
+| Arjun Mehta   | Plaid         | yes          | R4 via a different company       |
+| Priya Sharma  | Google        | no           | no R4, different stack           |
 
 ## Layout
 
@@ -64,17 +76,16 @@ tool calls.
 data/
   alex_playbook.md                  prose rulebook (LLM context at retrieval)
   seed_rules.yaml                   hand-authored Rule records
-  candidates/dev_rao.json           main demo input (ex-Stripe, R4 triggers)
-  candidates/maria_cruz.json        edge-case input (ex-Revolut, R4 skipped)
+  candidates/{dev_rao,maria_cruz,arjun_mehta,priya_sharma}.json
 rule_models.py                      Rule + plain domain tool-output models
 ingest_human_memory.py              ingest rulebook → human_memory dataset
 agent_tools.py                      three @agent_memory-decorated tools (pure domain)
 agent_loop.py                       minimal planner loop: LLM picks next tool
 _run.py                             shared runner — loop + post-loop memify
-run_naive.py                        with_memory=False → output/naive_plan.json
-run_grounded.py                     with_memory=True  → output/grounded_plan.json
-run_grounded_edge.py                edge case: Maria Cruz (ex-Revolut)
-check_rule_compliance.py            5-row PASS/FAIL table across both plans
+run_naive.py                        with_memory=False, honours RECRUITING_CANDIDATE
+run_grounded.py                     with_memory=True,  honours RECRUITING_CANDIDATE
+run_matrix.py                       subprocess through all candidates × both modes
+check_rule_compliance.py            PASS/FAIL matrix across every plan in output/
 review_pending_rules.py             human approval CLI for agent-proposed nodes
 inspect_rulebook.py                 prints all Rule nodes in the graph
 visualize.py                        renders human_memory graph HTML
@@ -95,115 +106,99 @@ output/                             generated plan JSONs (gitignored)
 All commands below are run from the **repo root**.
 
 ```bash
-# 1. Ingest the rulebook into human_memory
+# 1. Ingest the rulebook into human_memory (add --reset to prune first)
 python -m examples.demos.recruiting_distill_memory.ingest_human_memory
 
-# 2. Naive run — agent has no memory, plan violates Ledgerline rules
-python -m examples.demos.recruiting_distill_memory.run_naive
+# 2. Run the full 4-candidate × 2-mode matrix (~30s per combo)
+python -m examples.demos.recruiting_distill_memory.run_matrix
 
-# 3. Grounded run — agent retrieves rulebook, plan satisfies rules,
-#    session traces are memified into agent_proposed_rule nodes
-python -m examples.demos.recruiting_distill_memory.run_grounded
-
-# 4. The payoff table: 5 rules × naive/grounded PASS/FAIL
+# 3. The payoff table: every rule × every candidate, naive vs grounded
 python -m examples.demos.recruiting_distill_memory.check_rule_compliance
 
-# 5. Review agent-proposed nodes — approve any worth codifying
+# 4. Review agent-proposed nodes — approve any worth codifying
 python -m examples.demos.recruiting_distill_memory.review_pending_rules
 
-# 6. (Optional) Inspect the rulebook state
-python -m examples.demos.recruiting_distill_memory.inspect_rulebook
+# (Optional) Single-candidate runs
+RECRUITING_CANDIDATE=maria_cruz python -m examples.demos.recruiting_distill_memory.run_grounded
+RECRUITING_CANDIDATE=dev_rao    python -m examples.demos.recruiting_distill_memory.run_naive
 
-# 7. (Optional) Visualize the human_memory graph
+# (Optional) Inspect / visualize the rulebook
+python -m examples.demos.recruiting_distill_memory.inspect_rulebook
 python -m examples.demos.recruiting_distill_memory.visualize
 ```
 
-### Edge-case run: agent proposes, human approves
-
-Maria Cruz is ex-Revolut — a fintech with similar non-compete exposure as
-Stripe/Plaid/Adyen, but not in R4's enumerated list. Running her through
-the grounded agent exercises the human-in-the-loop path:
-
-```bash
-python -m examples.demos.recruiting_distill_memory.run_grounded_edge
-python -m examples.demos.recruiting_distill_memory.review_pending_rules
-```
-
-Expected behavior:
-1. The grounded tools run without any proposal-flavored prompts — they
-   just act. The decorator captures their traces regardless.
-2. The post-loop memify pipeline extracts entities from the session
-   feedback summaries (e.g. "screening invite for a Revolut candidate",
-   "non-compete probing") and adds them as graph nodes tagged
-   `agent_proposed_rule`.
-3. `review_pending_rules.py` surfaces each of those nodes. On `[a]pprove`,
-   an LLM structures the node into a proper `Rule` (trigger / action /
-   rationale) and it's ingested into `human_memory` under
-   `belongs_to_set=['rule','approved','agent_authored']`. Subsequent
-   grounded runs retrieve it alongside Alex's seed rules.
-
 ## Expected payoff
 
-After step 4 you should see something like:
+After step 3 you should see something like this — naive is near-zero,
+grounded is near-perfect:
 
 ```
-Rule                             Naive      Grounded
-------------------------------------------------------
-Live coding, not take-home       FAIL       PASS
-≥3 panelists                     PASS       PASS
-≥4 hours total                   PASS       PASS
-Sam (CTO) on panel               PASS       PASS
-Non-compete probed (Stripe)      FAIL       PASS
-------------------------------------------------------
-TOTAL                            3/5        5/5
+Rule                               | arjun N  arjun G | dev N  dev G | maria N maria G | priya N priya G
+---------------------------------------------------------------------------------------------------------
+Format == live_coding              | FAIL    PASS     | FAIL   PASS  | FAIL    PASS    | FAIL    PASS
+Duration == 80 min                 | FAIL    PASS     | FAIL   PASS  | FAIL    PASS    | FAIL    PASS
+Panel == {Sam,Jordan,Leila,Ravi}   | FAIL    PASS     | FAIL   PASS  | FAIL    PASS    | FAIL    PASS
+Medium == onsite                   | FAIL    PASS     | PASS   PASS  | FAIL    PASS    | FAIL    PASS
+Non-compete is FIRST question      | FAIL    PASS     | FAIL   PASS  | --      --      | --      --
+Body mentions 'streamtap'          | FAIL    PASS     | FAIL   PASS  | FAIL    FAIL    | FAIL    PASS
+total_hours == 4.0                 | PASS    PASS     | PASS   PASS  | PASS    PASS    | PASS    PASS
+---------------------------------------------------------------------------------------------------------
+TOTAL                              | 1/7     7/7      | 2/7    7/7   | 1/6     5/6     | 1/6     6/6
+
+Aggregate across 4 candidates: naive 5/26, grounded 25/26
 ```
 
-The base model's pretrained knowledge is enough for some generic best
-practices (panel size, duration floor, sometimes-CTO) but not for
-Ledgerline-specific policy: it picks the wrong format and misses the
-Stripe non-compete probe. Memory closes the gap.
+**Reading the naive column.** The base model (Baseten `gpt-oss-120b`) hits
+almost every rule wrong: picks `system_design` over live coding, 60 or 90
+minutes instead of 80, video instead of onsite, 4–5 made-up placeholder
+panelists ("Alice — CTO, Bob — Engineering Manager…"), misses the streamtap
+mention entirely. The only two freebies are:
+- **R6 total_hours == 4.0** — generic best-practice floor happens to coincide
+  exactly with Ledgerline's policy. Trivial pass.
+- **Dev Rao R3 onsite** — a single lucky guess out of four attempts. Not a
+  pattern, just base-model variance.
 
-## Rules after one grounded run + auto-approve
+**Reading the grounded column.** One rule predicate out of 26 fails —
+Maria's screening invite doesn't mention streamtap. That's real retrieval
+noise: her candidate query ("ex-Revolut, London") is semantically further
+from R5's trigger than other candidates' queries are. Raising `memory_top_k`
+from 6 to 8 or tightening R5's trigger string fixes it. The interesting
+data point is that **the pipeline is not magic** — the demo is honest
+about that.
 
-After `run_grounded.py` followed by `review_pending_rules.py --auto-approve`,
-the `human_memory` rulebook looks like this (6 seed + 10 agent-proposed).
-The `source` field distinguishes them deterministically, and
-`belongs_to_set` tags agent-authored ones with `agent_authored` on top of
-`rule,approved`.
+## The review gate — agent proposes, human approves
 
-| rule_id                              | author | domain     | source                       |
-|--------------------------------------|--------|------------|------------------------------|
-| `R1_live_coding`                     | human  | scheduling | `alex_playbook`              |
-| `R2_panel_footprint`                 | human  | scheduling | `alex_playbook`              |
-| `R3_cto_on_panel`                    | human  | scheduling | `alex_playbook`              |
-| `R4_noncompete_screen`               | human  | screening  | `alex_playbook`              |
-| `R5_staff_backend_floor`             | human  | offer      | `alex_playbook`              |
-| `R6_one_counter`                     | human  | offer      | `alex_playbook`              |
-| `R7_screening_email_staff_backend`   | agent  | screening  | `agent_proposal:<node_uuid>` |
-| `R8_live_coding_panel_cto`           | agent  | scheduling | `agent_proposal:<node_uuid>` |
-| `R9_90min_live_coding`               | agent  | scheduling | `agent_proposal:<node_uuid>` |
-| `R10_vp_engineering_panel`           | agent  | scheduling | `agent_proposal:<node_uuid>` |
-| `R11_staff_backend_panel`            | agent  | scheduling | `agent_proposal:<node_uuid>` |
-| `R12_staff_backend_rule`             | agent  | scheduling | `agent_proposal:<node_uuid>` |
-| `R13_senior_product_manager_panel`   | agent  | scheduling | `agent_proposal:<node_uuid>` |
-| `R14_senior_product_manager_salary`  | agent  | offer      | `agent_proposal:<node_uuid>` |
-| `R15_invitation_email_staff_backend` | agent  | screening  | `agent_proposal:<node_uuid>` |
-| `R16_staff_backend_screening`        | agent  | screening  | `agent_proposal:<node_uuid>` |
+Each grounded run's session traces are cognified into
+`agent_proposed_rule` graph nodes. Running
+`review_pending_rules.py --auto-approve` after the matrix will surface a
+mix of proposals per candidate — in practice most are noise:
 
-A real human reviewer would reject most of the agent-authored proposals:
-- **R8 / R9 / R12 / R16** are duplicates of Alex's R1–R3 at varying specificity.
-- **R10 / R11 / R13** latched onto panelists in the screenshot as if they
-  were a candidate attribute — a classic trace-summary artefact.
-- **R14** is an outright hallucination — it invented a "Senior Product
-  Manager salary floor" with fabricated numbers from the fact that Ravi
-  (a panelist) has that title.
-- **R7 / R15** are reasonable generalizations of the screening-invite
-  behaviour and plausibly worth keeping.
+- **Duplicates** of existing seed rules at varying specificity (e.g. an
+  "80-minute live coding for Staff Backend" proposal when `R1` already
+  says exactly that).
+- **Fixation on panelists**: the memify pipeline sometimes latches onto
+  the four panelists' names (Sam, Jordan, Leila, Ravi) as if they were
+  candidate attributes, producing rules like "VP of Engineering panel
+  inclusion".
+- **Hallucinations**: because summaries are one-sentence LLM output,
+  occasionally a proposal invents numbers — e.g. a fabricated "Senior
+  Product Manager salary floor" derived from Ravi (a panelist) having
+  that title.
+- **Occasional keepers**: a plausible generalization of a screening-invite
+  behaviour, for instance, that a human might want to codify.
 
-That's the point of the review gate: the memify pipeline does not
-silently append to the rulebook. `--auto-approve` exists for CI and
-demos; in production, every row in the second half of that table would
-require an explicit `[a]` keypress.
+This is exactly why the gate matters. In production, every agent
+proposal requires an explicit `[a]pprove` keypress before it becomes a
+`Rule`. `--auto-approve` exists for CI and for demos that want to stress
+the quality distribution honestly.
+
+Human-authored vs agent-authored rules are kept cleanly separable:
+
+| field             | human-authored               | agent-authored                           |
+|-------------------|------------------------------|------------------------------------------|
+| `source`          | `alex_playbook`              | `agent_proposal:<node_uuid>`             |
+| `belongs_to_set`  | `['rule','approved','human_authored']` | `['rule','approved','agent_authored']`  |
+| `rule_id` prefix  | `R1`…`R6` (seeded)           | monotonically assigned (`R7`, `R8`, …)   |
 
 ## How the agentic loop works
 

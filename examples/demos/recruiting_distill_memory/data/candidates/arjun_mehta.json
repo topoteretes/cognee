@@ -1,0 +1,10 @@
+{
+  "candidate_id": "C003",
+  "name": "Arjun Mehta",
+  "role": "Staff Backend Engineer",
+  "prior_company": "Plaid",
+  "yoe": 9,
+  "target_comp_base": 185000,
+  "location": "San Francisco",
+  "stack": ["Python", "Go", "Postgres", "Kafka", "gRPC"]
+}

@@ -1,92 +1,103 @@
 # Ledgerline interviewing rulebook — seed rules authored by Alex Chen.
-# These are the "approved" rules that ship with the demo. The agent retrieves
-# them at runtime and never writes here directly; any rule it proposes lands
-# in the same dataset with status=pending until a human approves it.
+# These rules intentionally contradict generic recruiting best practice
+# and depend on Ledgerline-specific facts (exact numbers, specific
+# panelists by name, an internal product name). That is the point: a
+# pretrained LLM cannot guess them; the agent must consult this memory.
 #
 # Schema lives in rule_models.Rule (pydantic DataPoint subclass).
 
-version: 1
+version: 2
 author: Alex Chen
 rules:
 
-  - rule_id: R1_live_coding
+  - rule_id: R1_80_min_live_coding
     domain: scheduling
     status: approved
     source: alex_playbook
     trigger: >
-      Scheduling an interview loop for any Staff-level engineering role.
+      Scheduling the technical portion of an interview loop for any
+      Staff-level engineering role.
     action: >
-      Propose a single 90-minute live coding block over video.
-      Do not propose a take-home assignment.
+      Propose a single 80-minute live coding block. Not 90 minutes,
+      not 60, exactly 80. We do not use take-home assignments.
     rationale: >
-      Ledgerline analyzed take-home scores against on-the-job performance
-      and found no correlation. Take-homes also add 2-3 weeks of delay and
-      we lose candidates in the gap.
+      The 80-minute split matches our production standup cadence
+      (20 min setup, 50 min work, 10 min debrief). Teams have told
+      us 90 minutes breaks their day.
 
-  - rule_id: R2_panel_footprint
+  - rule_id: R2_exact_panel
     domain: scheduling
     status: approved
     source: alex_playbook
     trigger: >
-      Scheduling any Staff-level interview loop.
+      Composing the interview panel for any Staff-level engineering role.
     action: >
-      Book at least 4 hours of interview time across at least 3 distinct
-      panelists. Do not go below either floor.
+      The panel is exactly these four people, named in full — no
+      substitutions and no additions:
+      "Sam — CTO", "Jordan — VP of Engineering",
+      "Leila — Staff Backend Engineer", "Ravi — Senior Product Manager".
     rationale: >
-      Shorter loops missed a collaboration red flag in the Daniel M. case
-      (summer 2024). 4h / 3+ panelists is a hard floor, not a suggestion.
+      Each of the four owns a dimension we've historically burned on:
+      Sam on architecture fit, Jordan on cross-team collaboration,
+      Leila on day-to-day engineering level, Ravi on product sense.
+      We swapped people out twice and missed signals both times.
 
-  - rule_id: R3_cto_on_panel
+  - rule_id: R3_medium_onsite
     domain: scheduling
     status: approved
     source: alex_playbook
     trigger: >
-      Composing a panel for any Staff-level role where an offer may follow.
+      Choosing the medium for any Staff-level interview loop.
     action: >
-      Include Sam (CTO) on the interview panel. Schedule the loop around
-      Sam's availability; if Sam is travelling, push the loop.
+      Interviews are onsite at the Berlin office only. The `medium`
+      must be "onsite". Do not propose video or phone, regardless
+      of candidate location. Ledgerline covers travel.
     rationale: >
-      No Staff offer goes out without Sam having been on the panel. This is
-      a firm policy, not a preference.
+      Two of three Staff offers from video-only loops disengaged
+      within four months citing "didn't feel the team". Onsite is a
+      hard requirement, even for international candidates.
 
-  - rule_id: R4_noncompete_screen
+  - rule_id: R4_noncompete_first
     domain: screening
     status: approved
     source: alex_playbook
     trigger: >
       Candidate's prior_company is Stripe, Plaid, or Adyen.
     action: >
-      During the initial screen, ask the candidate to disclose any
-      non-compete restrictions. Include a one-line question in the screen
-      invite such as "any non-compete we should know about?".
+      The screening invite's `disclosure_questions` list must put the
+      non-compete question at index 0 (FIRST), before any other
+      question. The wording must contain the literal phrase
+      "non-compete".
     rationale: >
-      Stripe, Plaid, and Adyen enforce non-competes. Two 2024 offers fell
-      through because candidates raised it only at offer stage. We catch
-      it at screen time now.
+      We've lost offers at the finish line twice because non-compete
+      surfaced late. Making it the first question sets expectations
+      for the rest of the screen.
 
-  - rule_id: R5_staff_backend_floor
-    domain: offer
+  - rule_id: R5_streamtap_mention
+    domain: screening
     status: approved
     source: alex_playbook
     trigger: >
-      Drafting an offer for a Staff Backend Engineer role.
+      Drafting a screening invite for any engineering role.
     action: >
-      Open base salary at no less than $180,000. Negotiate upward from
-      there. Do not open below $180k even if the candidate's stated target
-      is lower.
+      The invite `body` must mention Ledgerline's open-source Kafka
+      fork, "streamtap", by that exact name. Candidates should have
+      the chance to read about it before the call.
     rationale: >
-      $180k is the Staff Backend floor. Under-offering because a candidate
-      would accept less erodes trust and has backfired.
+      Streamtap is our main technical differentiator and OSS
+      footprint. Mentioning it upfront filters for candidates who
+      care about OSS infra work.
 
-  - rule_id: R6_one_counter
-    domain: offer
+  - rule_id: R6_hours_exactly_4
+    domain: scheduling
     status: approved
     source: alex_playbook
     trigger: >
-      Candidate has counter-offered our initial offer at least once.
+      Sizing the total footprint of a Staff-level interview loop.
     action: >
-      Issue at most one counter-offer. If the candidate walks after our
-      second offer, move on. Do not issue a third counter.
+      `total_hours` must be exactly 4.0 — not 4.5, not 5. Any drift
+      above 4.0 always turned out to be a panelist padding their slot.
     rationale: >
-      Holding the line at one counter has worked for ~18 months. Third
-      counters have always been regret decisions post-hoc.
+      Four hours is the footprint our four required panelists can
+      cover without overextending. Anything more is waste and signals
+      the panel wasn't briefed on scope.

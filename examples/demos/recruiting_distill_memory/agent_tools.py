@@ -36,17 +36,26 @@ WITH_MEMORY = os.environ.get("RECRUITING_WITH_MEMORY", "true").strip().lower() i
     "true",
     "yes",
 )
-SESSION_ID = os.environ.get("RECRUITING_SESSION_ID", "recruiting-demo").strip()
+CANDIDATE = os.environ.get("RECRUITING_CANDIDATE", "dev_rao").strip()
+_MODE_TAG = "grounded" if WITH_MEMORY else "naive"
+SESSION_ID = os.environ.get(
+    "RECRUITING_SESSION_ID",
+    f"recruiting-demo-{_MODE_TAG}-{CANDIDATE}",
+).strip()
 MEMORY_TOP_K = int(os.environ.get("RECRUITING_MEMORY_TOP_K", "6"))
 
 
 _ALEX_PERSONA = (
-    "You are a senior recruiter at Ledgerline (a 40-person payments fintech) "
-    "drafting decisions for a Staff Backend Engineer hire. If an 'Additional "
-    "Memory Context' block is present above the user input, it contains "
-    "Ledgerline-specific guidance — follow it whenever it applies. Otherwise "
-    "draw on general recruiting best practice. Respond only with the structured "
-    "fields requested."
+    "You are a senior recruiter at Ledgerline (a 40-person payments fintech "
+    "based in Berlin) drafting decisions for a Staff Backend Engineer hire. "
+    "If an 'Additional Memory Context' block is present above the user "
+    "input, it contains Ledgerline-specific policies — FOLLOW THEM "
+    "LITERALLY, even when they look narrower than industry best practice. "
+    "If a rule specifies an exact number, an exact set of names, an exact "
+    "phrase, or an exact position in a list, reproduce it verbatim — do not "
+    "substitute a generic value or round to a common default. If no memory "
+    "context is present, fall back to general recruiting best practice. "
+    "Respond only with the structured fields requested."
 )
 
 
@@ -54,26 +63,32 @@ _FORMAT_PROMPT = (
     _ALEX_PERSONA
     + "\n\nTask: choose the interview format. Fields: "
     "`format` ∈ {live_coding, take_home, system_design, behavioral_only}, "
-    "`duration_minutes` (int), `medium` ∈ {video, onsite, phone}."
+    "`duration_minutes` (int — use the exact value the memory context "
+    "prescribes; do not round to 60 or 90), "
+    "`medium` ∈ {video, onsite, phone}."
 )
 
 _PANEL_PROMPT = (
     _ALEX_PERSONA
     + "\n\nTask: propose the interview panel. Fields: "
-    "`panelists` (list of role/name strings, e.g. 'Sam — CTO'), "
-    "`total_hours` (float), `cto_included` (bool — must match whether Sam/CTO is on the panel)."
+    "`panelists` (list of role/name strings, e.g. 'Sam — CTO'). If the "
+    "memory context names specific panelists, use exactly those names and "
+    "no others — do not add a fifth, do not drop one. "
+    "`total_hours` (float — use the exact value the memory context "
+    "prescribes), "
+    "`cto_included` (bool — true iff the CTO is on your panelists list)."
 )
 
 _SCREEN_PROMPT = (
     _ALEX_PERSONA
     + "\n\nTask: draft a screening-call invite email. Fields: "
-    "`subject` (email subject line), `body` (2–4 sentences), "
-    "`disclosure_questions` (list of questions the recruiter should ask on the screen). "
-    "If the memory context contains a rule whose action calls for probing or "
-    "disclosing a candidate attribute (e.g. non-compete exposure, visa, notice "
-    "period, counter-offers), add one direct `disclosure_questions` entry that "
-    "probes it explicitly — name the attribute verbatim (e.g. 'non-compete' must "
-    "appear in that question)."
+    "`subject` (email subject line), "
+    "`body` (2–4 sentences — if the memory context says to mention a "
+    "specific product or brand name, include it verbatim), "
+    "`disclosure_questions` (ordered list of questions). If a memory rule "
+    "says a particular question must come FIRST, place it at index 0. If a "
+    "rule says the question must contain a specific phrase (e.g. "
+    "'non-compete'), reproduce that phrase literally in the question text."
 )
 
 

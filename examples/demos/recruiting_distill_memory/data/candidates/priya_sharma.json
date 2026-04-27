@@ -1,0 +1,10 @@
+{
+  "candidate_id": "C004",
+  "name": "Priya Sharma",
+  "role": "Staff Backend Engineer",
+  "prior_company": "Google",
+  "yoe": 10,
+  "target_comp_base": 195000,
+  "location": "New York",
+  "stack": ["Java", "Go", "Spanner", "Bigtable", "gRPC"]
+}
