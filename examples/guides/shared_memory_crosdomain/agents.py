@@ -76,24 +76,44 @@ class AgentRun(BaseModel):
     prior_context: str
 
 
-AGENT_SYSTEM = (
+_SYSTEM_PREFIX = (
     "You are an analyst producing structural observations from field notes.\n\n"
     "STRICT CONSTRAINTS:\n"
     "- You may ONLY assert facts grounded in (a) your corpus snippets or "
-    "(b) memory passages shown to you. Do NOT use background knowledge.\n"
-    "- EVERY finding and answer claim MUST cite at least one source ID. "
-    "Corpus IDs are bracketed strings like '[particle_01]'. Memory IDs "
-    "are '[mem:<n>]' (e.g., '[mem:0]') and appear alongside retrieved "
-    "memory passages. Uncited claims will be rejected.\n"
-    "- If a memory passage supports a structural property you are "
-    "asserting from your corpus, ALSO cite that memory ID (use both the "
-    "corpus ID and the memory ID in the citations list). This records "
-    "the cross-domain agreement.\n"
+    "(b) the prior context shown to you. Do NOT use background knowledge.\n"
+    "- EVERY finding and answer claim MUST cite at least one CORPUS ID "
+    "from your corpus (bracketed strings like '[particle_01]'). Uncited "
+    "claims will be rejected.\n"
+)
+_SYSTEM_SUFFIX = (
     "- Tag findings using ONLY this fixed vocabulary (exact strings), and "
     "only when the cited source(s) support the tag:\n"
     f"  {format_for_prompt()}\n"
     "Do not invent tags outside this list."
 )
+_SYSTEM_SHARED = (
+    "- A 'memory' section may be shown as lines of the form '[mem:<n>] <text>'. "
+    "If a memory passage supports a structural property you are asserting "
+    "from your corpus, ALSO cite that memory ID in the citations list "
+    "(include BOTH a corpus ID and the mem ID). This records cross-domain "
+    "agreement.\n"
+)
+_SYSTEM_CONCAT = (
+    "- A 'prior findings' section shows earlier agents' raw findings as "
+    "context. Do NOT invent citation IDs for this text — your citations "
+    "list may contain ONLY corpus IDs from your own corpus. Use the prior "
+    "findings to inform your analysis, but cite only your corpus.\n"
+)
+_SYSTEM_ISOLATED = ""
+
+
+def _agent_system(arm: Arm) -> str:
+    per_arm = {
+        Arm.SHARED: _SYSTEM_SHARED,
+        Arm.CONCAT: _SYSTEM_CONCAT,
+        Arm.ISOLATED: _SYSTEM_ISOLATED,
+    }[arm]
+    return _SYSTEM_PREFIX + per_arm + _SYSTEM_SUFFIX
 
 
 COGNIFY_PROMPT = (
@@ -106,26 +126,30 @@ COGNIFY_PROMPT = (
 )
 
 
-def _build_findings_input(corpus_text: str, prior_context: str) -> str:
+def _prior_header(arm: Arm) -> str:
+    if arm is Arm.SHARED:
+        return "PRIOR MEMORY (cite '[mem:<n>]' IDs alongside corpus IDs where applicable):"
+    if arm is Arm.CONCAT:
+        return "PRIOR FINDINGS from earlier agents (context only — do NOT cite by ID):"
+    return "PRIOR CONTEXT:"  # unreachable when prior_context is empty
+
+
+def _build_findings_input(arm: Arm, corpus_text: str, prior_context: str) -> str:
     parts: list[str] = []
     if prior_context.strip():
-        parts.append(
-            "PRIOR MEMORY (retrieved nodes — cite by node ID where used):\n"
-            + prior_context.strip()
-        )
+        parts.append(f"{_prior_header(arm)}\n{prior_context.strip()}")
     parts.append(
         "YOUR CORPUS (cite by bracketed snippet ID):\n" + corpus_text.strip()
     )
     parts.append(
         "TASK: produce 3-5 findings. Each finding must cite at least one "
-        "source ID from the corpus or memory. Use ONLY tags from the "
-        "approved vocabulary."
+        "corpus snippet ID. Use ONLY tags from the approved vocabulary."
     )
     return "\n\n".join(parts)
 
 
 def _build_answer_input(
-    corpus_text: str, prior_context: str, findings: FindingSet
+    arm: Arm, corpus_text: str, prior_context: str, findings: FindingSet
 ) -> str:
     rendered = "\n\n".join(
         f"Finding {i}: {f.description}\n"
@@ -135,7 +159,7 @@ def _build_answer_input(
     )
     parts: list[str] = []
     if prior_context.strip():
-        parts.append("PRIOR MEMORY:\n" + prior_context.strip())
+        parts.append(f"{_prior_header(arm)}\n{prior_context.strip()}")
     parts.append("YOUR CORPUS:\n" + corpus_text.strip())
     parts.append("YOUR FINDINGS (derived above):\n" + rendered)
     parts.append(
@@ -240,8 +264,8 @@ async def run_agent(
 
     corpus_text = corpus_path.read_text()
     raw: FindingSet = await LLMGateway.acreate_structured_output(
-        text_input=_build_findings_input(corpus_text, prior_context),
-        system_prompt=AGENT_SYSTEM,
+        text_input=_build_findings_input(arm, corpus_text, prior_context),
+        system_prompt=_agent_system(arm),
         response_model=FindingSet,
     )
     n_calls += 1
@@ -259,8 +283,8 @@ async def run_agent(
     )
 
     final: FinalAnswer = await LLMGateway.acreate_structured_output(
-        text_input=_build_answer_input(corpus_text, prior_context, findings),
-        system_prompt=AGENT_SYSTEM,
+        text_input=_build_answer_input(arm, corpus_text, prior_context, findings),
+        system_prompt=_agent_system(arm),
         response_model=FinalAnswer,
     )
     n_calls += 1

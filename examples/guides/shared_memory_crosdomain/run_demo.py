@@ -44,6 +44,10 @@ if _ENV_PATH.exists():
     load_dotenv(_ENV_PATH)
 os.environ.setdefault("COGNEE_SKIP_CONNECTION_TEST", "true")
 os.environ.setdefault("EMBEDDING_DIMENSIONS", "1536")
+# Session memory registers a SQLAlchemy table that is not idempotent
+# across prune cycles; disabling it avoids "Table 'session_records' is
+# already defined" on the second seed of any arm.
+os.environ.setdefault("CACHING", "false")
 
 sys.path.insert(0, str(DEMO_DIR))
 
@@ -82,15 +86,19 @@ def _count_memory_citations(run: AgentRun) -> tuple[int, int]:
 
 
 def _render_concat(prior_runs: list[AgentRun]) -> str:
-    """Serialize earlier agents' findings as raw text for the CONCAT arm."""
+    """Serialize earlier agents' findings as raw text for the CONCAT arm.
+
+    Deliberately no bracketed IDs in the rendered text — the CONCAT agent
+    must not cite this prior text by ID (the arm-specific system prompt
+    says so explicitly), and we avoid any tokens that might look like a
+    citation label and be hallucinated back as a citation.
+    """
     blocks: list[str] = []
     for pr in prior_runs:
         lines = [f"From agent_{pr.agent_index}:"]
         for f in pr.findings:
-            lines.append(
-                f"- [{f.structural_tags}] {f.description} "
-                f"(cites: {', '.join(f.citations)})"
-            )
+            tags = ", ".join(f.structural_tags) if f.structural_tags else ""
+            lines.append(f"- tags=({tags}): {f.description}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
