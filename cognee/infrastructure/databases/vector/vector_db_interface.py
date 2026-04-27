@@ -239,7 +239,9 @@ class VectorDBInterface(Protocol):
         return model_type
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
         """
         Return a dictionary with connection info for a vector database for the given dataset.
         Function can auto handle deploying of the actual database if needed, but is not necessary.
@@ -254,6 +256,10 @@ class VectorDBInterface(Protocol):
         Args:
             dataset_id: UUID of the dataset if needed by the database creation logic
             user: User object if needed by the database creation logic
+            **kwargs: Implementation-specific overrides for the database creation
+                request. Concrete handlers should document and validate the keys
+                they accept and raise ``ValueError`` for unknown keys.
+
         Returns:
             dict: Connection info for the created vector database instance.
         """

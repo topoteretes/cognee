@@ -1,6 +1,6 @@
 import os
 from uuid import UUID
-from typing import Optional
+from typing import Any, Optional
 
 from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
 from cognee.modules.users.models import User
@@ -16,7 +16,28 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
+        """
+        Create a new LanceDB instance for the dataset. Return connection info that will be mapped to the dataset.
+
+        Args:
+            dataset_id: Dataset UUID
+            user: User object who owns the dataset and is making the request
+            **kwargs: Reserved for future overrides; the LanceDB handler currently
+                accepts no implementation-specific options and raises
+                ``ValueError`` if any are supplied.
+
+        Returns:
+            dict: Connection details for the created LanceDB instance
+        """
+        if kwargs:
+            raise ValueError(
+                "LanceDBDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
+
         vector_config = get_vectordb_config()
         base_config = get_base_config()
 

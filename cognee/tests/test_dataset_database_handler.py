@@ -1,5 +1,6 @@
 import asyncio
 import os
+from typing import Any
 
 # Set custom dataset database handler environment variable
 os.environ["VECTOR_DATASET_DATABASE_HANDLER"] = "custom_lancedb_handler"
@@ -14,7 +15,12 @@ from cognee.api.v1.search import SearchType
 
 class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
-    async def create_dataset(cls, dataset_id, user):
+    async def create_dataset(cls, dataset_id, user, **kwargs: Any):
+        if kwargs:
+            raise ValueError(
+                "LanceDBTestDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
         import pathlib
 
         cognee_directory_path = str(
@@ -39,7 +45,12 @@ class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
 class KuzuTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
-    async def create_dataset(cls, dataset_id, user):
+    async def create_dataset(cls, dataset_id, user, **kwargs: Any):
+        if kwargs:
+            raise ValueError(
+                "KuzuTestDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
         databases_directory_path = os.path.join("databases", str(user.id))
         os.makedirs(databases_directory_path, exist_ok=True)
 

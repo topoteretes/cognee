@@ -4,7 +4,7 @@ import asyncio
 import base64
 import hashlib
 from uuid import UUID
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 from cryptography.fernet import Fernet
 from aiohttp import BasicAuth
@@ -12,6 +12,13 @@ from aiohttp import BasicAuth
 from cognee.infrastructure.databases.graph import get_graph_config
 from cognee.modules.users.models import User, DatasetDatabase
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+
+
+# Allowed keys for Aura instance payload overrides supplied via ``create_dataset(**kwargs)``.
+# Keep in sync with the docstring on ``create_dataset`` below.
+_ALLOWED_AURA_OVERRIDE_KEYS: frozenset[str] = frozenset(
+    {"version", "region", "memory", "type", "cloud_provider"}
+)
 
 
 class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -28,13 +35,24 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
         """
         Create a new Neo4j Aura instance for the dataset. Return connection info that will be mapped to the dataset.
 
         Args:
-            dataset_id: Dataset UUID
+            dataset_id: Dataset UUID. Required for collision-resistant instance naming;
+                a ``ValueError`` is raised when ``None``.
             user: User object who owns the dataset and is making the request
+            **kwargs: Optional overrides for the Aura instance payload fields. Unknown keys
+                or ``None`` values raise ``ValueError`` rather than silently falling back to
+                defaults — callers must use one of the supported keys below:
+                version (str): Neo4j version, default "5"
+                region (str): Cloud region, default "europe-west1"
+                memory (str): Instance memory, default "1GB"
+                type (str): Instance type, default "professional-db"
+                cloud_provider (str): Cloud provider, default "gcp"
 
         Returns:
             dict: Connection details for the created Neo4j instance
@@ -47,7 +65,34 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 "Neo4jAuraDevDatasetDatabaseHandler can only be used with Neo4j graph database provider."
             )
 
-        graph_db_name = f"{dataset_id}"
+        # Hashing ``None`` produces a stable digest, which would silently collapse every
+        # ``None``-id dataset onto the same Aura instance name. Fail loudly instead so the
+        # caller can supply a real dataset id rather than minting a shared bucket.
+        if dataset_id is None:
+            raise ValueError(
+                "Neo4jAuraDevDatasetDatabaseHandler.create_dataset requires a non-None dataset_id "
+                "for collision-resistant Aura instance naming."
+            )
+
+        # Reject unknown override keys up front so typos like ``regoin`` surface immediately
+        # instead of silently falling back to the default region.
+        unknown_keys = set(kwargs).difference(_ALLOWED_AURA_OVERRIDE_KEYS)
+        if unknown_keys:
+            raise ValueError(
+                "Unknown override keys passed to Neo4jAuraDevDatasetDatabaseHandler.create_dataset: "
+                f"{sorted(unknown_keys)}. Allowed keys: {sorted(_ALLOWED_AURA_OVERRIDE_KEYS)}."
+            )
+        none_valued_keys = [key for key, value in kwargs.items() if value is None]
+        if none_valued_keys:
+            raise ValueError(
+                "Override keys with None values are not permitted in "
+                f"Neo4jAuraDevDatasetDatabaseHandler.create_dataset: {sorted(none_valued_keys)}. "
+                "Omit the key to use the default instead of passing None."
+            )
+
+        # Use SHA-256 hash of the dataset ID for a compact, collision-resistant name
+        # that fits within Neo4j Aura's 30-character limit without hyphens
+        graph_db_name = hashlib.sha256(str(dataset_id).encode()).hexdigest()[:29]
 
         # Client credentials and encryption
         # Note: Should not be used as class variables so that they are not persisted in memory longer than needed
@@ -75,18 +120,14 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "Content-Type": "application/json",
         }
 
-        # TODO: Maybe we can allow **kwargs parameter forwarding for cases like these
-        #       Too allow different configurations between datasets
         payload = {
-            "version": "5",
-            "region": "europe-west1",
-            "memory": "1GB",
-            "name": graph_db_name[
-                0:29
-            ],  # TODO: Find better name to name Neo4j instance within 30 character limit
-            "type": "professional-db",
+            "version": kwargs.get("version", "5"),
+            "region": kwargs.get("region", "europe-west1"),
+            "memory": kwargs.get("memory", "1GB"),
+            "name": graph_db_name,
+            "type": kwargs.get("type", "professional-db"),
             "tenant_id": tenant_id,
-            "cloud_provider": "gcp",
+            "cloud_provider": kwargs.get("cloud_provider", "gcp"),
         }
 
         async def _create_database_instance_request():
