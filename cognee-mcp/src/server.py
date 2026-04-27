@@ -347,7 +347,23 @@ async def cognify(
 
                     graph_model = load_class(graph_model_file, graph_model_name)
 
-            await cognee_client.add(data, dataset_name=dataset_name)
+            # Support JSON array of items (file paths, text, URLs) for batch add
+            items = [data]
+            try:
+                parsed = json.loads(data)
+                if isinstance(parsed, list):
+                    if not parsed:
+                        raise ValueError("Batch input cannot be an empty JSON array.")
+                    items = parsed
+                    logger.info(f"Batch mode: adding {len(items)} items to '{dataset_name}'")
+            except json.JSONDecodeError:
+                # Plain text / non-JSON input: keep backward-compatible single-item flow
+                pass
+
+            for item in items:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError(f"Invalid batch item (must be a non-empty string): {item!r}")
+                await cognee_client.add(item, dataset_name=dataset_name)
 
             try:
                 await cognee_client.cognify(
