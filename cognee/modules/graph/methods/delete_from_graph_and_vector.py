@@ -40,6 +40,17 @@ async def delete_from_graph_and_vector(
             seen_node_slugs.add(node.slug)
             unique_nodes.append(node)
 
+    # Capture NodeSet names before their ledger/graph rows are deleted so
+    # we can strip these tags from any surviving shared DataPoint afterwards.
+    # When a dataset is deleted in single-tenant mode its uniquely-owned
+    # NodeSet nodes are in `unique_nodes`; shared entities tagged with
+    # those names are not. The detag pass in `remove_belongs_to_set_tags`
+    # keeps the stored `belongs_to_set` arrays consistent with the graph
+    # after the hard delete.
+    removed_nodeset_tags = {
+        node.label for node in unique_nodes if node.type == "NodeSet" and node.label
+    }
+
     graph_engine = None
 
     # Delete from graph DB
@@ -117,6 +128,24 @@ async def delete_from_graph_and_vector(
                 )
         except Exception as e:
             logger.warning("EdgeType cleanup failed (non-fatal): %s", e)
+
+    # Strip now-orphaned NodeSet tags from surviving rows/nodes so shared
+    # entities stop advertising membership in a dataset that no longer
+    # exists. Runs after the hard-delete pass so freshly-deleted rows
+    # aren't touched redundantly.
+    if removed_nodeset_tags:
+        tags_to_remove = sorted(removed_nodeset_tags)
+        try:
+            if not graph_engine:
+                graph_engine = await get_graph_engine()
+            await graph_engine.remove_belongs_to_set_tags(tags_to_remove)
+        except Exception as e:
+            logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", e)
+
+        try:
+            await vector_engine.remove_belongs_to_set_tags(tags_to_remove)
+        except Exception as e:
+            logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", e)
 
     # Mark ledger entries as deleted
     await mark_ledger_nodes_as_deleted([node.slug for node in non_legacy_nodes])

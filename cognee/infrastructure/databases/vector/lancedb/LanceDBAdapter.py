@@ -67,6 +67,8 @@ class IndexSchema(DataPoint):
 
 
 class LanceDBAdapter(VectorDBInterface):
+    """Vector-database adapter backed by LanceDB; implements the VectorDBInterface contract."""
+
     name = "LanceDB"
     url: str
     api_key: str
@@ -78,6 +80,7 @@ class LanceDBAdapter(VectorDBInterface):
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
     ):
+        """Store connection params; connection is lazily established in get_connection()."""
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
@@ -138,6 +141,7 @@ class LanceDBAdapter(VectorDBInterface):
         return collection_name in collection_names
 
     async def create_collection(self, collection_name: str, payload_schema: BaseModel):
+        """Create the LanceDB table for `collection_name` if it does not already exist."""
         vector_size = self.embedding_engine.get_vector_size()
 
         payload_schema = self.get_data_point_schema(payload_schema)
@@ -168,6 +172,7 @@ class LanceDBAdapter(VectorDBInterface):
                     )
 
     async def get_collection(self, collection_name: str):
+        """Return the LanceDB table for `collection_name` or raise CollectionNotFoundError."""
         if not await self.has_collection(collection_name):
             raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
@@ -175,6 +180,7 @@ class LanceDBAdapter(VectorDBInterface):
         return await connection.open_table(collection_name)
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
+        """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
@@ -208,27 +214,95 @@ class LanceDBAdapter(VectorDBInterface):
             vector: Vector(vector_size)
             payload: PayloadSchema
 
-        def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
-            payload_model = self.get_data_point_schema(type(data_point))
-            properties = payload_model.model_validate(
-                serialize_data(data_point.model_dump())
-            ).model_dump()
-
-            return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
-                id=str(data_point.id),
-                vector=vector,
-                payload=properties,
-            )
-
-        lance_data_points = [
-            create_lance_data_point(data_point, data_vectors[data_point_index])
-            for (data_point_index, data_point) in enumerate(data_points)
-        ]
-
-        lance_data_points = list({dp.id: dp for dp in lance_data_points}.values())
-
+        # The prefetch of existing `belongs_to_set` values and the subsequent
+        # merge_insert must run inside the same lock section. If a second
+        # upsert ran between our read and our write, merge_insert's
+        # when_matched_update_all would overwrite tags we never saw and we'd
+        # lose them silently. Holding VECTOR_DB_LOCK across read→build→write
+        # serializes upserts but is the only way to keep tag unions honest.
+        lance_data_points: list = []
         try:
             async with self.VECTOR_DB_LOCK:
+                existing_belongs_to_set: dict[str, list] = {}
+                incoming_ids = [str(dp.id) for dp in data_points]
+                if incoming_ids:
+                    # Build the WHERE predicate explicitly with escaped string
+                    # literals rather than relying on Python's tuple repr —
+                    # mirrors how search() escapes `name` values to keep
+                    # single-quotes from breaking the LanceDB SQL grammar.
+                    escaped_ids = [id_.replace("'", "''") for id_ in incoming_ids]
+                    if len(escaped_ids) == 1:
+                        where_clause = f"id = '{escaped_ids[0]}'"
+                    else:
+                        id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+                        where_clause = f"id IN ({id_list})"
+                    try:
+                        existing_rows = await collection.query().where(where_clause).to_list()
+                        for row in existing_rows:
+                            row_payload = row.get("payload") or {}
+                            prior = row_payload.get("belongs_to_set") or []
+                            if prior:
+                                existing_belongs_to_set[row["id"]] = list(prior)
+                    except Exception as e:
+                        # Best-effort: if the lookup fails (e.g. empty table,
+                        # schema mismatch the migration path will handle),
+                        # fall through to the standard upsert.
+                        logger.debug(
+                            "belongs_to_set merge lookup failed for '%s': %s",
+                            collection_name,
+                            e,
+                        )
+
+                def create_lance_data_point(
+                    data_point: DataPoint, vector: list[float]
+                ) -> LanceDataPoint:
+                    """Build a typed LanceDataPoint from a DataPoint, merging any prior belongs_to_set tags."""
+                    payload_model = self.get_data_point_schema(type(data_point))
+                    properties = payload_model.model_validate(
+                        serialize_data(data_point.model_dump())
+                    ).model_dump()
+
+                    prior = existing_belongs_to_set.get(str(data_point.id))
+                    if prior:
+                        incoming = properties.get("belongs_to_set") or []
+                        properties["belongs_to_set"] = list(
+                            dict.fromkeys(list(prior) + list(incoming))
+                        )
+
+                    return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
+                        id=str(data_point.id),
+                        vector=vector,
+                        payload=properties,
+                    )
+
+                lance_data_points = [
+                    create_lance_data_point(data_point, data_vectors[data_point_index])
+                    for (data_point_index, data_point) in enumerate(data_points)
+                ]
+
+                # Dedup by id within the batch — on duplicates, union
+                # `belongs_to_set` instead of keeping only the last
+                # occurrence. A plain dict-collapse would drop tags that
+                # only appeared on earlier siblings (mirrors the
+                # batch-merge logic in PGVectorAdapter.create_data_points
+                # and Neo4jAdapter.add_nodes).
+                deduped_lance_points: dict = {}
+                for dp in lance_data_points:
+                    existing = deduped_lance_points.get(dp.id)
+                    if existing is None:
+                        deduped_lance_points[dp.id] = dp
+                        continue
+                    existing_payload = existing.payload.model_dump()
+                    incoming_payload = dp.payload.model_dump()
+                    existing_tags = existing_payload.get("belongs_to_set") or []
+                    incoming_tags = incoming_payload.get("belongs_to_set") or []
+                    if existing_tags or incoming_tags:
+                        merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                        incoming_payload["belongs_to_set"] = merged_tags
+                        dp.payload = type(dp.payload).model_validate(incoming_payload)
+                    deduped_lance_points[dp.id] = dp
+                lance_data_points = list(deduped_lance_points.values())
+
                 await (
                     collection.merge_insert("id")
                     .when_matched_update_all()
@@ -253,6 +327,9 @@ class LanceDBAdapter(VectorDBInterface):
                 collection_name,
                 e,
             )
+            # `_migrate_collection_schema` acquires VECTOR_DB_LOCK itself;
+            # we've already released it by dropping out of the `async with`
+            # via the raised exception, so no deadlock risk here.
             await self._migrate_collection_schema(
                 collection_name, collection, payload_schema, lance_data_points
             )
@@ -274,6 +351,8 @@ class LanceDBAdapter(VectorDBInterface):
         defaults = self._get_payload_defaults(payload_schema)
 
         class MigrationLanceDataPoint(LanceModel):
+            """LanceModel used to write rows with the updated payload schema during migration."""
+
             id: data_point_types["id"]
             vector: Vector(vector_size)
             payload: schema_model
@@ -417,6 +496,8 @@ class LanceDBAdapter(VectorDBInterface):
         data_point_types = get_type_hints(schema_model)
 
         class SchemaProbeDataPoint(LanceModel):
+            """Throwaway LanceModel used only to extract the target Arrow schema."""
+
             id: data_point_types["id"]
             vector: Vector(vector_size)
             payload: schema_model
@@ -574,7 +655,42 @@ class LanceDBAdapter(VectorDBInterface):
 
         return _NO_DEFAULT
 
+    def _coerce_rows_to_typed_payload(self, rows: list, payload_schema: Optional[type]) -> list:
+        """Validate raw LanceDB rows through the collection's declared
+        payload model so `collection.add()` writes values whose Arrow types
+        match the stored schema. Without this, LanceDB infers Arrow types
+        from Python values on add, and the inferred types can drift from
+        the stored schema — the same class of problem _migrate_collection_schema
+        guards against. Falls back to the original dicts if the schema
+        can't be resolved or validation fails.
+        """
+        if not rows or payload_schema is None:
+            return rows
+
+        schema_model = self.get_data_point_schema(payload_schema)
+        coerced: list = []
+        for row in rows:
+            raw_payload = row.get("payload") or {}
+            if not isinstance(raw_payload, dict):
+                coerced.append(row)
+                continue
+            try:
+                validated = schema_model.model_validate(raw_payload).model_dump()
+            except Exception as e:
+                logger.debug(
+                    "_coerce_rows_to_typed_payload: validation fell back for id=%s: %s",
+                    row.get("id"),
+                    e,
+                )
+                coerced.append(row)
+                continue
+            new_row = dict(row)
+            new_row["payload"] = validated
+            coerced.append(new_row)
+        return coerced
+
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+        """Return rows from `collection_name` whose id is in `data_point_ids`."""
         try:
             collection = await self.get_collection(collection_name)
         except CollectionNotFoundError:
@@ -609,6 +725,7 @@ class LanceDBAdapter(VectorDBInterface):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
     ):
+        """Run a cosine-distance search, optionally filtered by NodeSet tag."""
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
             otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, collection_name)
@@ -696,6 +813,7 @@ class LanceDBAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
     ):
+        """Run `search` concurrently for each query text and return a list of result lists."""
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
         return await asyncio.gather(
@@ -713,6 +831,7 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        """Delete rows from `collection_name` whose id is in `data_point_ids`."""
         # Skip deletion if collection doesn't exist
         if not await self.has_collection(collection_name):
             return
@@ -723,7 +842,161 @@ class LanceDBAdapter(VectorDBInterface):
         for data_point_id in data_point_ids:
             await collection.delete(f"id = '{data_point_id}'")
 
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Strip the given tag names from `belongs_to_set` arrays in every
+        table and delete rows whose array becomes empty. Used to reconcile
+        surviving shared rows after a dataset/NodeSet is deleted.
+
+        When `node_ids` is provided, the detag is scoped to rows whose id
+        is in the list — used to reconcile shared rows that lose a
+        dataset's anchor while that dataset still exists for other rows.
+
+        LanceDB doesn't support in-place array mutation, so the update path
+        reads rows that reference any target tag, rewrites the payload with
+        the tag removed, and either re-inserts them (merge_insert) or
+        deletes them when the array is empty.
+        """
+        if not tags:
+            return None
+
+        if node_ids is not None and not node_ids:
+            return None
+
+        tag_set = set(tags)
+        id_set: Optional[set[str]] = (
+            {str(nid) for nid in node_ids} if node_ids is not None else None
+        )
+        connection = await self.get_connection()
+        collection_names = await connection.table_names()
+
+        for collection_name in collection_names:
+            try:
+                collection = await connection.open_table(collection_name)
+            except (ValueError, OSError, RuntimeError) as e:
+                logger.debug(
+                    "remove_belongs_to_set_tags: could not open '%s': %s",
+                    collection_name,
+                    e,
+                )
+                continue
+
+            try:
+                arrow_schema = (await collection.to_arrow()).schema
+            except Exception as e:
+                logger.debug(
+                    "remove_belongs_to_set_tags: schema read failed for '%s': %s",
+                    collection_name,
+                    e,
+                )
+                continue
+
+            payload_idx = arrow_schema.get_field_index("payload")
+            if payload_idx < 0:
+                continue
+
+            payload_type = arrow_schema.field(payload_idx).type
+            if not hasattr(payload_type, "num_fields"):
+                continue
+
+            payload_fields = {payload_type.field(i).name for i in range(payload_type.num_fields)}
+            if "belongs_to_set" not in payload_fields:
+                continue
+
+            # Resolve the DataPoint subclass that originally populated this
+            # collection so we can round-trip rows through its declared
+            # schema on re-add. Without this, `collection.add(dicts)` makes
+            # LanceDB infer Arrow types from Python values, which can drift
+            # from the stored schema (source of the Rust panics on later
+            # vector searches that _migrate_collection_schema warns about).
+            resolved_payload_cls = self._resolve_collection_payload_schema(collection_name)
+
+            # Push the predicate into LanceDB so we only materialize the rows
+            # that carry at least one of the target tags — mirrors the
+            # `array_has_any(payload.belongs_to_set, [...])` filter used in
+            # `search()`. Tags are escaped the same way to keep the literal
+            # safe from `'` injection.
+            escaped_tags = [tag.replace("'", "''") for tag in tag_set]
+            literal_tags = "[" + ", ".join(f"'{tag}'" for tag in escaped_tags) + "]"
+            where_clause = f"array_has_any(payload.belongs_to_set, {literal_tags})"
+            if id_set is not None:
+                escaped_ids = [str(nid).replace("'", "''") for nid in id_set]
+                literal_ids = "(" + ", ".join(f"'{nid}'" for nid in escaped_ids) + ")"
+                where_clause = f"({where_clause}) AND id IN {literal_ids}"
+
+            async with self.VECTOR_DB_LOCK:
+                try:
+                    rows = await collection.query().where(where_clause).to_list()
+                except Exception as e:
+                    logger.debug(
+                        "remove_belongs_to_set_tags: row scan failed for '%s': %s",
+                        collection_name,
+                        e,
+                    )
+                    continue
+
+                rows_to_delete: list[str] = []
+                rows_to_update = []
+                for row in rows:
+                    payload = row.get("payload") or {}
+                    current = payload.get("belongs_to_set") or []
+                    if not any(tag in tag_set for tag in current):
+                        continue
+                    remaining = [tag for tag in current if tag not in tag_set]
+                    if remaining:
+                        payload["belongs_to_set"] = remaining
+                        rows_to_update.append(row)
+                    else:
+                        rows_to_delete.append(row["id"])
+
+                # Batch deletes into one predicate per bucket so each
+                # collection pays two round-trips at most instead of N.
+                # Ids are UUID strings produced by cognee so no escaping
+                # is needed (mirrors the assumption in `retrieve()`).
+                if rows_to_delete:
+                    orphan_predicate = (
+                        "id IN (" + ", ".join(f"'{row_id}'" for row_id in rows_to_delete) + ")"
+                    )
+                    await collection.delete(orphan_predicate)
+
+                # LanceDB merge_insert silently no-ops when given dicts whose
+                # nested payload shape doesn't match the struct schema, so
+                # delete + re-add is the reliable path to persist the
+                # rewritten belongs_to_set. If the re-add fails we've
+                # already deleted the originals — escalate to WARNING with
+                # the affected ids and re-raise so the caller sees it; a
+                # silent debug log would leave the collection short of rows.
+                if rows_to_update:
+                    update_predicate = (
+                        "id IN (" + ", ".join(f"'{row['id']}'" for row in rows_to_update) + ")"
+                    )
+                    await collection.delete(update_predicate)
+
+                    typed_rows = self._coerce_rows_to_typed_payload(
+                        rows_to_update, resolved_payload_cls
+                    )
+                    try:
+                        await collection.add(typed_rows)
+                    except Exception as e:
+                        affected_ids = [row.get("id") for row in rows_to_update]
+                        logger.warning(
+                            "remove_belongs_to_set_tags: re-add failed for '%s' "
+                            "after deleting %d row(s) (ids=%s): %s",
+                            collection_name,
+                            len(rows_to_update),
+                            affected_ids,
+                            e,
+                        )
+                        raise
+
+        return None
+
     async def create_vector_index(self, index_name: str, index_property_name: str):
+        """Create the underlying index collection for the given name/property pair."""
         await self.create_collection(
             f"{index_name}_{index_property_name}", payload_schema=IndexSchema
         )
@@ -731,6 +1004,7 @@ class LanceDBAdapter(VectorDBInterface):
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
+        """Write index rows derived from `data_points` into the `{index}_{property}` table."""
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
@@ -744,6 +1018,7 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def prune(self):
+        """Drop every LanceDB table and remove the on-disk database directory."""
         connection = await self.get_connection()
         collection_names = await connection.table_names()
 
@@ -758,6 +1033,7 @@ class LanceDBAdapter(VectorDBInterface):
             await get_file_storage(db_dir_path).remove_all(db_file_name)
 
     def get_data_point_schema(self, model_type: BaseModel):
+        """Build the reduced LanceDB payload schema for a DataPoint model."""
         related_models_fields = []
 
         for field_name, field_config in model_type.model_fields.items():
