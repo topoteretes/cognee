@@ -98,14 +98,12 @@ async def memify(
     authorized_dataset = authorized_dataset_list[0]
 
     if not data:
-        # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
-        await set_database_global_context_variables(
+        async with set_database_global_context_variables(
             authorized_dataset.id, authorized_dataset.owner_id
-        )
-
-        memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
-        # Subgraphs should be a single element in the list to represent one data item
-        data = [memory_fragment]
+        ):
+            memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
+            # Subgraphs should be a single element in the list to represent one data item
+            data = [memory_fragment]
 
     memify_tasks = [
         *extraction_tasks,  # Unpack tasks provided to memify pipeline

@@ -1,23 +1,23 @@
-from uuid import UUID
-from typing import Optional, Union, List, Any
 from datetime import datetime
-from pydantic import Field
-from fastapi import Depends, APIRouter, status
-from fastapi.responses import JSONResponse
-from fastapi.encoders import jsonable_encoder
+from typing import Any, List, Optional, Union
+from uuid import UUID
 
-from cognee.modules.search.types import SearchType, SearchResult
-from cognee.api.DTO import InDTO, OutDTO
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
-from cognee.modules.users.models import User
-from cognee.modules.search.operations import get_history
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.utils import send_telemetry
-from cognee.shared.usage_logger import log_usage
+from fastapi import APIRouter, Depends, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from pydantic import Field
+
 from cognee import __version__ as cognee_version
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeValidationError
-from cognee.api.DTO import ErrorResponse
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.shared.usage_logger import log_usage
+from cognee.shared.utils import send_telemetry
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
@@ -47,7 +47,7 @@ def get_search_router() -> APIRouter:
 
     @router.get(
         "",
-        response_model=Union[List[SearchResult], List],
+        response_model=List[SearchHistoryItem],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -155,7 +155,9 @@ def get_search_router() -> APIRouter:
                 query_text=payload.query,
                 query_type=payload.search_type,
                 user=user,
-                datasets=payload.datasets,
+                datasets=payload.datasets
+                if not payload.dataset_ids
+                else None,  # If dataset_ids are provided, ignore datasets by name to avoid confusion and potential mismatches.
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,

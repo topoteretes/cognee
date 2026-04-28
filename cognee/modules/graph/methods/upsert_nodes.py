@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from cognee.modules.graph.models import Node
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.databases.relational.with_async_session import with_async_session
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 
 
 @with_async_session
@@ -42,10 +43,14 @@ async def upsert_nodes(
                     "user_id": user_id,
                     "data_id": data_id,
                     "dataset_id": dataset_id,
-                    "type": node.type,
-                    "indexed_fields": DataPoint.get_embeddable_property_names(node),
-                    "label": getattr(node, "label", getattr(node, "name", str(node.id))),
-                    "attributes": jsonable_encoder(node),
+                    "type": sanitize_relational_payload(node.type),
+                    "indexed_fields": sanitize_relational_payload(
+                        DataPoint.get_embeddable_property_names(node)
+                    ),
+                    "label": sanitize_relational_payload(
+                        getattr(node, "label", getattr(node, "name", str(node.id)))
+                    ),
+                    "attributes": sanitize_relational_payload(jsonable_encoder(node)),
                 }
                 for node in nodes
             ]

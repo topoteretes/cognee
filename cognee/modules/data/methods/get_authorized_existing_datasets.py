@@ -9,7 +9,7 @@ from cognee.modules.users.permissions.methods import get_specific_user_permissio
 
 
 async def get_authorized_existing_datasets(
-    datasets: Union[list[str], list[UUID]], permission_type: str, user: User
+    datasets: Union[list[str], list[UUID], None], permission_type: str, user: User
 ) -> list[Dataset]:
     """
     Function returns a list of existing dataset objects user has access for based on datasets input.

@@ -1,4 +1,5 @@
 import asyncio
+import math
 from cognee.shared.logging_utils import get_logger
 import aiohttp
 from typing import List, Optional
@@ -6,6 +7,7 @@ import os
 import litellm
 import logging
 import aiohttp.http_exceptions
+import numpy as np
 from tenacity import (
     retry,
     stop_after_delay,
@@ -15,6 +17,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
@@ -94,37 +97,61 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
             - List[List[float]]: A list of embedding vectors corresponding to the text prompts.
         """
-        sanitized_text_input = sanitize_embedding_text_inputs(text)
+        original_texts = text if isinstance(text, list) else [text]
+        sanitized_text = sanitize_embedding_text_inputs(original_texts)
+
         if self.mock:
-            return [[0.0] * self.dimensions for _ in sanitized_text_input]
+            embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
+            return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
-        # Handle case when a single string is passed instead of a list
-        if not isinstance(sanitized_text_input, list):
-            text = [sanitized_text_input]
-
-        embeddings = await asyncio.gather(
-            *[self._get_embedding(prompt) for prompt in sanitized_text_input]
-        )
-        return handle_embedding_response(text, embeddings, self.dimensions)
-
-    def _truncate_text_to_token_limit(self, text: str, max_tokens: int = 2048) -> str:
-        """
-        Truncate text to fit within the embedding model's context length.
-        Uses character-based truncation (roughly 4 chars per token).
-        """
-        char_limit = max_tokens * 4
-        if len(text) > char_limit:
-            logger.warning(
-                f"Text exceeds character limit ({len(text)} > {char_limit}), truncating..."
+        try:
+            embeddings = await asyncio.gather(
+                *[self._get_embedding(prompt) for prompt in sanitized_text]
             )
-            # TODO: Refactor to better handle truncation, handle it the same as it is handled in LiteLLMEmbeddingEngine
-            #       when the ContextWindowExceededError happens.
-            #       Also max_tokens is never provided to function call so it will always default to 2048, we should make
-            #       it so that it is provided based on the model's context length.
-            #       The char_limit is not a good estimate based on the average number of characters per token, and
-            #       actual value should be based on actual token count using the tokenizer or when the ContextWindowExceededError happens.
-            return text[:char_limit]
-        return text
+            return handle_embedding_response(original_texts, embeddings, self.dimensions)
+        except Exception as error:
+            error_str = str(error).lower()
+            context_error_patterns = (
+                "context length",
+                "context window",
+                "input length",
+                "too long",
+                "maximum context",
+                "maximum tokens",
+                "max tokens",
+            )
+            if any(pattern in error_str for pattern in context_error_patterns):
+                if len(original_texts) > 1:
+                    mid = math.ceil(len(original_texts) / 2)
+                    left_vecs, right_vecs = await asyncio.gather(
+                        self.embed_text(original_texts[:mid]),
+                        self.embed_text(original_texts[mid:]),
+                    )
+                    embeddings = left_vecs + right_vecs
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
+                if len(original_texts) == 1:
+                    s = original_texts[0]
+                    third = len(s) // 3
+                    if third == 0:
+                        raise EmbeddingException(
+                            "Text is too short to split further but exceeds context window."
+                        ) from error
+                    left_part, right_part = s[: third * 2], s[third:]
+                    (left_vec,), (right_vec,) = await asyncio.gather(
+                        self.embed_text([left_part]),
+                        self.embed_text([right_part]),
+                    )
+                    pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+                    embeddings = [pooled.tolist()]
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
+                return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
+            logger.error(f"Embedding error in OllamaEmbeddingEngine: {str(error)}")
+            raise EmbeddingException(
+                f"Failed to index data points using model {self.model}"
+            ) from error
 
     @retry(
         stop=stop_after_delay(128),
@@ -137,11 +164,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
-        truncated_prompt = self._truncate_text_to_token_limit(prompt)
 
         payload = {
             "model": self.model,
-            "input": truncated_prompt,
+            "input": prompt,
             "dimensions": self.dimensions,
         }
 

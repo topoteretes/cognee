@@ -20,6 +20,7 @@ class TestOpenAICompatibleEmbeddingEngine:
         defaults = {
             "model": "test-model",
             "dimensions": 4096,
+            "max_completion_tokens": 8191,
             "endpoint": "http://localhost:8099",
             "api_key": "test-key",
             "batch_size": 36,
@@ -81,6 +82,11 @@ class TestOpenAICompatibleEmbeddingEngine:
         """get_batch_size returns the configured batch size."""
         engine = self._make_engine(batch_size=50)
         assert engine.get_batch_size() == 50
+
+    def test_max_completion_tokens_is_exposed(self):
+        """The engine exposes max_completion_tokens for chunk sizing logic."""
+        engine = self._make_engine(max_completion_tokens=2048)
+        assert engine.max_completion_tokens == 2048
 
     def test_endpoint_normalization(self):
         """Endpoint without /v1 gets /v1 appended for the SDK base_url."""
