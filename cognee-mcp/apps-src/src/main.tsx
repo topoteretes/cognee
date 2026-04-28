@@ -659,6 +659,7 @@ function WorkspaceApp() {
   const [searchResult, setSearchResult] = useState<string | null>(null);
   const [clientName, setClientName] = useState<string>("");
   const [agentDefaultDataset, setAgentDefaultDataset] = useState<string | null>(null);
+  const [agentScoped, setAgentScoped] = useState<boolean>(true);
 
   const { app, error } = useApp({
     appInfo: { name: "Cognee Workspace", version: "0.1.0" },
@@ -737,9 +738,14 @@ function WorkspaceApp() {
         });
         if (!info.isError) {
           const s = info.structuredContent as
-            | { client?: { name?: string }; default_dataset?: string }
+            | {
+                client?: { name?: string };
+                default_dataset?: string;
+                agent_scoped?: boolean;
+              }
             | undefined;
           if (s?.client?.name) setClientName(s.client.name);
+          if (typeof s?.agent_scoped === "boolean") setAgentScoped(s.agent_scoped);
           if (s?.default_dataset) {
             setAgentDefaultDataset(s.default_dataset);
             preferred = s.default_dataset;
@@ -782,6 +788,11 @@ function WorkspaceApp() {
               {" · Default dataset: "}
               <strong>{agentDefaultDataset}</strong>
             </>
+          )}
+          {!agentScoped && (
+            <span style={{ marginLeft: 8, color: "#9ca3af" }}>
+              (agent scoping off)
+            </span>
           )}
         </div>
       )}

@@ -204,7 +204,7 @@ async def health_check(request):
 @log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
     data: str,
-    dataset_name: str = "main_dataset",
+    dataset_name: str = None,
     graph_model_file: str = None,
     graph_model_name: str = None,
     custom_prompt: str = None,
@@ -314,6 +314,8 @@ async def cognify(
     - Use the cognify_status tool to check the progress of the operation
 
     """
+
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
 
     # Validate file paths before launching background task
     file_error = _validate_file_path(data)
@@ -1000,7 +1002,7 @@ async def prune():
 @log_usage(function_name="MCP remember", log_type="mcp_tool")
 async def remember(
     data: str,
-    dataset_name: str = "main_dataset",
+    dataset_name: str = None,
     session_id: str = None,
     custom_prompt: str = None,
 ) -> list:
@@ -1019,13 +1021,16 @@ async def remember(
     ----------
     data : str
         The data to store (text content).
-    dataset_name : str
-        Target dataset name (default: main_dataset).
+    dataset_name : str, optional
+        Target dataset name. Defaults to the current MCP client's
+        agent-scoped dataset (e.g. "cursor_vscode_memory"), or
+        "main_dataset" if no client identity is detected.
     session_id : str, optional
         Session ID. When set, stores in session cache only.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
     """
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             result = await cognee_client.remember(
@@ -1151,7 +1156,7 @@ async def forget_memory(
 @mcp.tool()
 @log_usage(function_name="MCP improve", log_type="mcp_tool")
 async def improve(
-    dataset_name: str = "main_dataset",
+    dataset_name: str = None,
     session_ids: str = None,
 ) -> list:
     """Enrich the knowledge graph and bridge session data to the permanent graph.
@@ -1166,11 +1171,14 @@ async def improve(
 
     Parameters
     ----------
-    dataset_name : str
-        Dataset to process (default: main_dataset).
+    dataset_name : str, optional
+        Dataset to process. Defaults to the current MCP client's
+        agent-scoped dataset, or "main_dataset" if no client identity is
+        detected.
     session_ids : str, optional
         Comma-separated session IDs to bridge into the permanent graph.
     """
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             session_list = [s.strip() for s in session_ids.split(",")] if session_ids else None
@@ -1200,13 +1208,13 @@ async def improve(
 
 @mcp.tool()
 @log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
-async def cognify_status(dataset_name: str = "main_dataset") -> list:
+async def cognify_status(dataset_name: str = None) -> list:
     """
     Get the current status of the cognify pipeline.
 
-    This function retrieves information about current and recently completed cognify operations
-    in the main_dataset. It provides details on progress, success/failure status, and statistics
-    about the processed data.
+    Defaults to the current MCP client's agent-scoped dataset (e.g.
+    "cursor_vscode_memory") so each agent sees its own status without
+    needing to pass dataset_name explicitly.
 
     Returns
     -------
@@ -1221,6 +1229,7 @@ async def cognify_status(dataset_name: str = "main_dataset") -> list:
     - The status is returned in string format for easy reading
     - This operation is not available in API mode
     """
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
@@ -1363,10 +1372,12 @@ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 async def cognify_file(
     filename: str,
     content_base64: str,
-    dataset_name: str = "main_dataset",
+    dataset_name: str = None,
 ) -> list:
     import base64
     import tempfile
+
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
 
     try:
         data = base64.b64decode(content_base64, validate=True)
@@ -1507,8 +1518,49 @@ async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
 def _sanitize_client_name(name: str) -> str:
     import re
 
-    s = re.sub(r"[^a-z0-9_]+", "_", (name or "").lower()).strip("_")
+    # Strip parenthetical suffixes that bridges like mcp-remote append, e.g.
+    # "cursor-vscode (via mcp-remote 0.1.37)" -> "cursor-vscode".
+    cleaned = re.sub(r"\s*\(.*?\)\s*$", "", (name or "").strip())
+    s = re.sub(r"[^a-z0-9_]+", "_", cleaned.lower()).strip("_")
     return s or "unknown"
+
+
+def _is_agent_scoping_enabled() -> bool:
+    """Whether per-client default datasets are active.
+
+    Controlled by COGNEE_MCP_AGENT_SCOPED env var (default: 'true').
+    When 'false', tools fall back to 'main_dataset' as the default,
+    matching the pre-agent-scoping behavior.
+    """
+    return os.getenv("COGNEE_MCP_AGENT_SCOPED", "true").strip().lower() != "false"
+
+
+def _agent_scoped_default_dataset() -> str:
+    """Return the default dataset for the current MCP request.
+
+    With agent scoping enabled (default), reads clientInfo.name from the
+    active request context and returns '{sanitized}_memory' (e.g.
+    'cursor_vscode_memory'). Falls back to 'main_dataset' when:
+      - agent scoping is disabled via COGNEE_MCP_AGENT_SCOPED=false, or
+      - no client identity is available on the request.
+
+    Used as the runtime default for tool params like dataset_name so each
+    MCP client writes to its own scope automatically when the LLM omits
+    the argument.
+    """
+    if not _is_agent_scoping_enabled():
+        return "main_dataset"
+
+    from mcp.server.lowlevel.server import request_ctx
+
+    try:
+        ctx = request_ctx.get()
+        params = getattr(ctx.session, "client_params", None)
+        if params and params.clientInfo and params.clientInfo.name:
+            return f"{_sanitize_client_name(params.clientInfo.name)}_memory"
+    except LookupError:
+        pass
+    return "main_dataset"
 
 
 @mcp.tool(
@@ -1536,16 +1588,20 @@ async def get_client_info_json() -> types.CallToolResult:
     except LookupError:
         pass
 
-    default_dataset = f"{_sanitize_client_name(client_name)}_memory"
+    agent_scoped = _is_agent_scoping_enabled()
 
-    if not cognee_client.use_api:
-        with redirect_stdout(sys.stderr):
-            from cognee.modules.data.methods.create_authorized_dataset import (
-                create_authorized_dataset,
-            )
+    if agent_scoped:
+        default_dataset = f"{_sanitize_client_name(client_name)}_memory"
+        if not cognee_client.use_api:
+            with redirect_stdout(sys.stderr):
+                from cognee.modules.data.methods.create_authorized_dataset import (
+                    create_authorized_dataset,
+                )
 
-            user = await get_default_user()
-            await create_authorized_dataset(default_dataset, user)
+                user = await get_default_user()
+                await create_authorized_dataset(default_dataset, user)
+    else:
+        default_dataset = "main_dataset"
 
     return types.CallToolResult(
         content=[
@@ -1557,6 +1613,7 @@ async def get_client_info_json() -> types.CallToolResult:
         structuredContent={
             "client": {"name": client_name, "version": client_version},
             "default_dataset": default_dataset,
+            "agent_scoped": agent_scoped,
         },
     )
 
