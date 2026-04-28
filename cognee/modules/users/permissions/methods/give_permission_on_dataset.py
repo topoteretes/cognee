@@ -69,6 +69,5 @@ async def give_permission_on_dataset(
                 session.add(acl)
                 await session.commit()
             except IntegrityError:
-                session.rollback()
-
+                await session.rollback()
                 raise GivePermissionOnDatasetError()

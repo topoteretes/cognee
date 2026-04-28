@@ -13,7 +13,7 @@ from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
-from cognee.context_global_variables import set_database_global_context_variables
+
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -71,9 +71,6 @@ async def run_pipeline_per_dataset(
     incremental_loading=False,
     data_per_batch: int = 20,
 ):
-    # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
-    await set_database_global_context_variables(dataset.id, dataset.owner_id)
-
     if not data:
         data = await get_dataset_data(dataset_id=dataset.id)
 

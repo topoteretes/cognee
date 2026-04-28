@@ -31,23 +31,22 @@ async def create_triplet_embeddings(
             log=False,
         )
 
-    await set_database_global_context_variables(
+    async with set_database_global_context_variables(
         dataset_to_write[0].id, dataset_to_write[0].owner_id
-    )
+    ):
+        extraction_tasks = [Task(get_triplet_datapoints, triplets_batch_size=triplets_batch_size)]
 
-    extraction_tasks = [Task(get_triplet_datapoints, triplets_batch_size=triplets_batch_size)]
+        enrichment_tasks = [
+            Task(index_data_points, task_config={"batch_size": triplets_batch_size}),
+        ]
 
-    enrichment_tasks = [
-        Task(index_data_points, task_config={"batch_size": triplets_batch_size}),
-    ]
-
-    result = await memify(
-        extraction_tasks=extraction_tasks,
-        enrichment_tasks=enrichment_tasks,
-        dataset=dataset_to_write[0].id,
-        data=[{}],
-        user=user,
-        run_in_background=run_in_background,
-    )
+        result = await memify(
+            extraction_tasks=extraction_tasks,
+            enrichment_tasks=enrichment_tasks,
+            dataset=dataset_to_write[0].id,
+            data=[{}],
+            user=user,
+            run_in_background=run_in_background,
+        )
 
     return result
