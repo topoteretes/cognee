@@ -130,9 +130,9 @@ def get_llm_router() -> APIRouter:
     async def infer_schema(
         data: List[UploadFile] = File(default=None),
         text: str = Form(default=None),
-        parameters: Dict[str, Any] = Form(
-            default_factory=dict,
-            description="Additional kwargs forwarded to LLMGateway.",
+        parameters: str = Form(
+            default="{}",
+            description="JSON string of additional kwargs forwarded to LLMGateway.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -158,6 +158,7 @@ def get_llm_router() -> APIRouter:
                 content={"error": "Either text or at least one file must be provided."},
             )
         try:
+            parameters_dict = json.loads(parameters) if isinstance(parameters, str) else parameters
             file_contents = []
             for file in data or []:
                 async with upload_to_temp_path(file) as file_path:
@@ -193,7 +194,7 @@ def get_llm_router() -> APIRouter:
                 text_input=user_prompt,
                 system_prompt=system_prompt,
                 response_model=str,  # type: ignore[arg-type]
-                **_safe_params(parameters),
+                **_safe_params(parameters_dict),
             )
 
             # Parse the LLM output as JSON
