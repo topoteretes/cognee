@@ -495,6 +495,30 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 - **cognee_add_developer_rules**: Ingest core developer rule files into memory
 - **get_developer_rules**: Retrieve all developer rules that were generated based on previous interactions
 
+**Workspace UI Tools** (MCP Apps — Cursor, Claude Desktop, etc.):
+
+- **visualize_graph_ui**: Open the workspace and render the current knowledge graph
+- **upload_file_ui**: Open the workspace for file upload
+- **open_cognee_workspace**: Generic "open the cognee UI" entry point
+- **cognify_file**: Ingest an uploaded file (used by the workspace; accepts base64 content)
+- **list_datasets_json / list_dataset_data_json / create_dataset_json / get_client_info_json**: Structured-JSON helpers powering the workspace dropdown
+
+The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
+
+### Agent Scoping (per-client default datasets)
+
+By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client calls a workspace tool.
+
+LLM-direct calls to `cognify`, `remember`, `improve`, `cognify_status`, and `cognify_file` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
+
+To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
+
+```bash
+COGNEE_MCP_AGENT_SCOPED=false
+```
+
+When disabled, the workspace UI header shows `(agent scoping off)` and no per-client datasets are autocreated.
+
 **Data Management Examples:**
 ```bash
 # List all available datasets and data items
