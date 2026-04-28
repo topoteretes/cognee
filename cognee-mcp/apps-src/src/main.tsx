@@ -657,6 +657,8 @@ function WorkspaceApp() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
   const [searchResult, setSearchResult] = useState<string | null>(null);
+  const [clientName, setClientName] = useState<string>("");
+  const [agentDefaultDataset, setAgentDefaultDataset] = useState<string | null>(null);
 
   const { app, error } = useApp({
     appInfo: { name: "Cognee Workspace", version: "0.1.0" },
@@ -701,7 +703,7 @@ function WorkspaceApp() {
     })();
   }, [app]);
 
-  const reloadDatasets = async () => {
+  const reloadDatasets = async (preferredOverride?: string | null) => {
     if (!app) return;
     try {
       const result = await app.callServerTool({ name: "list_datasets_json", arguments: {} });
@@ -711,7 +713,13 @@ function WorkspaceApp() {
       setSelectedDataset((prev) => {
         if (prev && list.some((d) => d.name === prev)) return prev;
         if (list.length === 0) return null;
-        return (list.find((d) => d.name === "main_dataset") ?? list[0]).name;
+        const preferred =
+          preferredOverride !== undefined ? preferredOverride : agentDefaultDataset;
+        const match =
+          (preferred ? list.find((d) => d.name === preferred) : undefined) ??
+          list.find((d) => d.name === "main_dataset") ??
+          list[0];
+        return match.name;
       });
     } catch {
       /* ignore; selector just stays empty */
@@ -719,7 +727,29 @@ function WorkspaceApp() {
   };
 
   useEffect(() => {
-    void reloadDatasets();
+    if (!app) return;
+    (async () => {
+      let preferred: string | null = null;
+      try {
+        const info = await app.callServerTool({
+          name: "get_client_info_json",
+          arguments: {},
+        });
+        if (!info.isError) {
+          const s = info.structuredContent as
+            | { client?: { name?: string }; default_dataset?: string }
+            | undefined;
+          if (s?.client?.name) setClientName(s.client.name);
+          if (s?.default_dataset) {
+            setAgentDefaultDataset(s.default_dataset);
+            preferred = s.default_dataset;
+          }
+        }
+      } catch {
+        /* ignore; header just stays empty */
+      }
+      await reloadDatasets(preferred);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app]);
 
@@ -736,6 +766,25 @@ function WorkspaceApp() {
 
   return (
     <div style={wrapperStyle}>
+      {clientName && (
+        <div
+          style={{
+            padding: "4px 12px",
+            background: "#f3f4f6",
+            borderBottom: "1px solid #e5e7eb",
+            fontSize: "0.75rem",
+            color: "#4b5563",
+          }}
+        >
+          Agent: <strong>{clientName}</strong>
+          {agentDefaultDataset && (
+            <>
+              {" · Default dataset: "}
+              <strong>{agentDefaultDataset}</strong>
+            </>
+          )}
+        </div>
+      )}
       <Toolbar
         app={app}
         datasets={datasets}

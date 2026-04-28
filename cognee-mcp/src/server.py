@@ -1504,6 +1504,63 @@ async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
     )
 
 
+def _sanitize_client_name(name: str) -> str:
+    import re
+
+    s = re.sub(r"[^a-z0-9_]+", "_", (name or "").lower()).strip("_")
+    return s or "unknown"
+
+
+@mcp.tool(
+    name="get_client_info_json",
+    description=(
+        "Return the current MCP client identity and its agent-scoped default dataset. "
+        "The workspace UI uses this to automatically separate memory per agent "
+        "(e.g. Cursor writes to 'cursor_memory', Claude Code to 'claude_code_memory'). "
+        "The default dataset is created on demand. "
+        "Returns {client: {name, version}, default_dataset} in structuredContent."
+    ),
+)
+@log_usage(function_name="MCP get_client_info_json", log_type="mcp_tool")
+async def get_client_info_json() -> types.CallToolResult:
+    from mcp.server.lowlevel.server import request_ctx
+
+    client_name = "unknown"
+    client_version = ""
+    try:
+        ctx = request_ctx.get()
+        params = getattr(ctx.session, "client_params", None)
+        if params and params.clientInfo:
+            client_name = params.clientInfo.name or "unknown"
+            client_version = params.clientInfo.version or ""
+    except LookupError:
+        pass
+
+    default_dataset = f"{_sanitize_client_name(client_name)}_memory"
+
+    if not cognee_client.use_api:
+        with redirect_stdout(sys.stderr):
+            from cognee.modules.data.methods.create_authorized_dataset import (
+                create_authorized_dataset,
+            )
+
+            user = await get_default_user()
+            await create_authorized_dataset(default_dataset, user)
+
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=f"Agent: {client_name} → default dataset: {default_dataset}",
+            )
+        ],
+        structuredContent={
+            "client": {"name": client_name, "version": client_version},
+            "default_dataset": default_dataset,
+        },
+    )
+
+
 @mcp.tool(
     name="create_dataset_json",
     description=(
