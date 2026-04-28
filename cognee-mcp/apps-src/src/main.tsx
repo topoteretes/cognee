@@ -1,8 +1,9 @@
 /**
- * Cognee workspace MCP App: graph visualization + file upload.
- * The UI fetches its own graph data on mount so it works as the entry
- * for either visualize_graph_ui or upload_file_ui.
+ * Cognee workspace MCP App.
+ * Layout: AgentBar (top) + DatasetRail (left sidebar) + Main column
+ * containing Composer, ResultPanel, and graph iframe wrapped in a stage.
  */
+import "./design.css";
 import type { App, McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -10,6 +11,10 @@ import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_WORKSPACE_HEIGHT = 800;
+const DEFAULT_WORKSPACE_HEIGHT = 720;
+
+// ── Helpers ────────────────────────────────────────────────────
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -50,19 +55,150 @@ function dataItemsOf(result: CallToolResult): DataItem[] {
   return Array.isArray(s?.data) ? s.data : [];
 }
 
-function resolveWrapperHeight(
-  hostContext: McpUiHostContext | undefined,
-): number | string {
+function resolveWrapperHeight(hostContext: McpUiHostContext | undefined): number {
   const dims = hostContext?.containerDimensions as
     | { height?: number; maxHeight?: number }
     | undefined;
-  if (typeof dims?.height === "number") return dims.height;
-  if (typeof dims?.maxHeight === "number") return dims.maxHeight;
-  if (hostContext?.displayMode === "fullscreen") return "100%";
-  return 600;
+  if (typeof dims?.height === "number") return Math.min(dims.height, MAX_WORKSPACE_HEIGHT);
+  if (typeof dims?.maxHeight === "number") return Math.min(dims.maxHeight, MAX_WORKSPACE_HEIGHT);
+  if (hostContext?.displayMode === "fullscreen") return MAX_WORKSPACE_HEIGHT;
+  return DEFAULT_WORKSPACE_HEIGHT;
 }
 
-function DatasetPicker({
+// ── Inline icons (Lucide-style, 24x24 viewBox, stroke 1.8) ─────
+
+const ICON_PATHS = {
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  x: <path d="M18 6 6 18M6 6l12 12" />,
+  caret: <path d="m9 6 6 6-6 6" />,
+  upload: (
+    <>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" x2="12" y1="3" y2="15" />
+    </>
+  ),
+  text: <path d="M4 7V5h16v2M9 5v14M15 19h-6" />,
+  refresh: (
+    <>
+      <path d="M3 12a9 9 0 0 1 15.5-6.5L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15.5 6.5L3 16" />
+      <path d="M3 21v-5h5" />
+    </>
+  ),
+  doc: (
+    <>
+      <path d="M14 3v5h5" />
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    </>
+  ),
+  send: (
+    <>
+      <path d="m22 2-7 20-4-9-9-4z" />
+      <path d="M22 2 11 13" />
+    </>
+  ),
+};
+
+function Icon({
+  name,
+  size = 14,
+  className,
+}: {
+  name: keyof typeof ICON_PATHS;
+  size?: number;
+  className?: string;
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {ICON_PATHS[name]}
+    </svg>
+  );
+}
+
+// ── Cognee mark (5 pillars) ─────────────────────────────────────
+
+function CogneeMark({ size = 16 }: { size?: number }) {
+  const heights = [0.45, 0.85, 1, 0.7, 0.55];
+  return (
+    <span
+      style={{
+        height: size,
+        display: "inline-flex",
+        alignItems: "flex-end",
+        gap: 1.5,
+        color: "var(--cg-purple)",
+      }}
+    >
+      {heights.map((h, i) => (
+        <span
+          key={i}
+          style={{
+            width: 2,
+            height: `${h * size}px`,
+            background: "currentColor",
+            borderRadius: 1,
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
+// ── Agent bar ────────────────────────────────────────────────────
+
+function AgentBar({
+  agentName,
+  defaultDataset,
+  agentScoped,
+}: {
+  agentName: string;
+  defaultDataset: string | null;
+  agentScoped: boolean;
+}) {
+  return (
+    <div className="agentbar">
+      <CogneeMark size={14} />
+      {agentName ? (
+        <span className="ab-pill">
+          <span className="dot" />
+          {agentName}
+        </span>
+      ) : (
+        <span className="ab-pill muted">connecting…</span>
+      )}
+      <div className="ab-sep" />
+      <span className="ab-meta">
+        Default dataset:{" "}
+        <strong>{defaultDataset ?? "—"}</strong>
+      </span>
+      {!agentScoped && <span className="ab-pill muted">scoping off</span>}
+      <div className="ab-spacer" />
+    </div>
+  );
+}
+
+// ── Dataset rail (sidebar) ──────────────────────────────────────
+
+function DatasetRail({
   app,
   datasets,
   selectedDataset,
@@ -83,52 +219,12 @@ function DatasetPicker({
   setStatus: (s: string) => void;
   setBusy: (b: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const [confirmingDataset, setConfirmingDataset] = useState<string | null>(null);
+  const [confirmingItem, setConfirmingItem] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dataItems, setDataItems] = useState<Record<string, DataItem[]>>({});
   const [loadingData, setLoadingData] = useState<Set<string>>(new Set());
-  const [confirmingData, setConfirmingData] = useState<string | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setConfirming(null);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const handleCreate = async () => {
-    const name = newName.trim();
-    if (!name) return;
-    setBusy(true);
-    setStatus(`Creating '${name}'...`);
-    try {
-      const result = await app.callServerTool({
-        name: "create_dataset_json",
-        arguments: { name },
-      });
-      if (result.isError) {
-        setStatus(`Error: ${textOf(result) ?? "create failed"}`);
-        return;
-      }
-      setNewName("");
-      await onDatasetsChanged();
-      onSelectDataset(name);
-      setStatus(`Created '${name}'.`);
-      setOpen(false);
-    } catch (err) {
-      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const loadDataItems = async (datasetId: string) => {
     setLoadingData((s) => new Set(s).add(datasetId));
@@ -173,21 +269,24 @@ function DatasetPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataRefreshToken]);
 
-  const handleDeleteData = async (datasetId: string, dataId: string) => {
+  const handleCreate = async () => {
+    const name = newName.trim();
+    if (!name) return;
     setBusy(true);
-    setStatus("Deleting data item...");
+    setStatus(`Creating '${name}'...`);
     try {
       const result = await app.callServerTool({
-        name: "delete",
-        arguments: { data_id: dataId, dataset_id: datasetId },
+        name: "create_dataset_json",
+        arguments: { name },
       });
       if (result.isError) {
-        setStatus(`Error: ${textOf(result) ?? "delete failed"}`);
+        setStatus(`Error: ${textOf(result) ?? "create failed"}`);
         return;
       }
-      setStatus(textOf(result) ?? "Data item deleted.");
-      setConfirmingData(null);
-      await loadDataItems(datasetId);
+      setNewName("");
+      await onDatasetsChanged();
+      onSelectDataset(name);
+      setStatus(`Created '${name}'.`);
     } catch (err) {
       setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -195,7 +294,7 @@ function DatasetPicker({
     }
   };
 
-  const handleDelete = async (name: string) => {
+  const handleDeleteDataset = async (name: string) => {
     setBusy(true);
     setStatus(`Deleting '${name}'...`);
     try {
@@ -208,7 +307,7 @@ function DatasetPicker({
         return;
       }
       setStatus(textOf(result) ?? `Deleted '${name}'.`);
-      setConfirming(null);
+      setConfirmingDataset(null);
       if (selectedDataset === name) onSelectDataset(null);
       await onDatasetsChanged();
     } catch (err) {
@@ -218,263 +317,249 @@ function DatasetPicker({
     }
   };
 
+  const handleDeleteItem = async (datasetId: string, dataId: string) => {
+    setBusy(true);
+    setStatus("Deleting data item...");
+    try {
+      const result = await app.callServerTool({
+        name: "delete",
+        arguments: { data_id: dataId, dataset_id: datasetId },
+      });
+      if (result.isError) {
+        setStatus(`Error: ${textOf(result) ?? "delete failed"}`);
+        return;
+      }
+      setStatus(textOf(result) ?? "Data item deleted.");
+      setConfirmingItem(null);
+      await loadDataItems(datasetId);
+    } catch (err) {
+      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div ref={rootRef} style={{ position: "relative" }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        disabled={disabled}
-        style={{ minWidth: 160, textAlign: "left", padding: "2px 8px" }}
-      >
-        {selectedDataset ?? "(no dataset)"} ▾
-      </button>
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 2px)",
-            left: 0,
-            zIndex: 10,
-            minWidth: 240,
-            background: "#fff",
-            border: "1px solid #d1d5db",
-            borderRadius: 4,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-            maxHeight: 260,
-            overflowY: "auto",
-          }}
-        >
-          {datasets.length === 0 && (
-            <div style={{ padding: 8, color: "#6b7280" }}>No datasets yet.</div>
-          )}
-          {datasets.map((d) => {
-            if (confirming === d.name) {
-              return (
-                <div
-                  key={d.id}
-                  style={{
-                    padding: "6px 8px",
-                    display: "flex",
-                    gap: 6,
-                    alignItems: "center",
-                    background: "#fef2f2",
-                  }}
-                >
-                  <span style={{ flex: 1, fontSize: "0.8rem" }}>Delete "{d.name}"?</span>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(d.name)}
-                    style={{ color: "#b91c1c" }}
-                  >
-                    Delete
-                  </button>
-                  <button type="button" onClick={() => setConfirming(null)}>
-                    Cancel
-                  </button>
-                </div>
-              );
-            }
-            const isSelected = selectedDataset === d.name;
-            const isExpanded = expanded.has(d.id);
-            const items = dataItems[d.id];
-            const isLoading = loadingData.has(d.id);
+    <aside className="rail">
+      <div className="rail-section">
+        <div className="rail-label">
+          <span>Datasets</span>
+          <span className="count">{datasets.length}</span>
+        </div>
+      </div>
+      <div className="rail-datasets">
+        {datasets.length === 0 && (
+          <div style={{ padding: 8, fontSize: 12, color: "var(--cg-fg-muted)" }}>
+            No datasets yet.
+          </div>
+        )}
+        {datasets.map((d) => {
+          const isActive = selectedDataset === d.name;
+          const isExpanded = expanded.has(d.id);
+          const items = dataItems[d.id];
+          const isLoading = loadingData.has(d.id);
+          if (confirmingDataset === d.name) {
             return (
-              <div key={d.id}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "4px 8px",
-                    background: isSelected ? "#eef2ff" : "transparent",
+              <div key={d.id} className="ds-confirm">
+                <span className="label">Delete "{d.name}"?</span>
+                <button
+                  className="yes"
+                  type="button"
+                  onClick={() => handleDeleteDataset(d.name)}
+                  disabled={disabled}
+                >
+                  Delete
+                </button>
+                <button
+                  className="no"
+                  type="button"
+                  onClick={() => setConfirmingDataset(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div key={d.id}>
+              <div
+                className={`ds-row${isActive ? " active" : ""}${
+                  isExpanded ? " expanded" : ""
+                }`}
+                onClick={() => onSelectDataset(d.name)}
+              >
+                <button
+                  type="button"
+                  className="ds-caret"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleExpand(d.id);
+                  }}
+                  aria-label={isExpanded ? "Collapse" : "Expand"}
+                >
+                  <Icon name="caret" size={14} />
+                </button>
+                <span className="ds-name">{d.name}</span>
+                <button
+                  type="button"
+                  className="ds-x"
+                  title={`Delete ${d.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmingDataset(d.name);
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={() => toggleExpand(d.id)}
-                    title={isExpanded ? "Hide data" : "Show data"}
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      color: "#6b7280",
-                      width: 16,
-                      padding: 0,
-                    }}
-                  >
-                    {isExpanded ? "▾" : "▸"}
-                  </button>
-                  <span
-                    onClick={() => {
-                      onSelectDataset(d.name);
-                      setOpen(false);
-                    }}
-                    style={{ flex: 1, cursor: "pointer" }}
-                  >
-                    {d.name}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setConfirming(d.name)}
-                    title={`Delete ${d.name}`}
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      color: "#6b7280",
-                      padding: "0 4px",
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-                {isExpanded && (
-                  <div style={{ paddingLeft: 28, fontSize: "0.8rem" }}>
-                    {isLoading && (
-                      <div style={{ padding: "4px 8px", color: "#6b7280" }}>Loading...</div>
-                    )}
-                    {!isLoading && items && items.length === 0 && (
-                      <div style={{ padding: "4px 8px", color: "#6b7280" }}>(empty)</div>
-                    )}
-                    {!isLoading &&
-                      items &&
-                      items.map((item) => {
-                        const rowKey = `${d.id}:${item.id}`;
-                        if (confirmingData === rowKey) {
-                          return (
-                            <div
-                              key={item.id}
-                              style={{
-                                padding: "4px 8px",
-                                display: "flex",
-                                gap: 6,
-                                alignItems: "center",
-                                background: "#fef2f2",
-                              }}
-                            >
-                              <span style={{ flex: 1 }}>Delete "{item.name}"?</span>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteData(d.id, item.id)}
-                                style={{ color: "#b91c1c" }}
-                              >
-                                Delete
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmingData(null)}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          );
-                        }
+                  <Icon name="x" size={12} />
+                </button>
+              </div>
+              {isExpanded && (
+                <div className="ds-children">
+                  {isLoading && (
+                    <div className="ds-item empty">Loading…</div>
+                  )}
+                  {!isLoading && items && items.length === 0 && (
+                    <div className="ds-item empty">empty</div>
+                  )}
+                  {!isLoading &&
+                    items &&
+                    items.map((item) => {
+                      const rowKey = `${d.id}:${item.id}`;
+                      if (confirmingItem === rowKey) {
                         return (
-                          <div
-                            key={item.id}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 6,
-                              padding: "2px 8px",
-                              color: "#4b5563",
-                            }}
-                          >
-                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              📄 {item.name}
-                            </span>
+                          <div key={item.id} className="di-confirm">
+                            <span className="label">Delete "{item.name}"?</span>
                             <button
+                              className="yes"
                               type="button"
-                              onClick={() => setConfirmingData(rowKey)}
-                              title={`Delete ${item.name}`}
-                              style={{
-                                border: "none",
-                                background: "transparent",
-                                cursor: "pointer",
-                                color: "#6b7280",
-                                padding: "0 4px",
-                              }}
+                              onClick={() => handleDeleteItem(d.id, item.id)}
+                              disabled={disabled}
                             >
-                              ✕
+                              Delete
+                            </button>
+                            <button
+                              className="no"
+                              type="button"
+                              onClick={() => setConfirmingItem(null)}
+                            >
+                              Cancel
                             </button>
                           </div>
                         );
-                      })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          <div
-            style={{
-              borderTop: "1px solid #e5e7eb",
-              padding: "6px 8px",
-              display: "flex",
-              gap: 6,
-            }}
-          >
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void handleCreate();
-              }}
-              placeholder="New dataset name"
-              style={{ flex: 1, minWidth: 80 }}
-            />
-            <button type="button" onClick={handleCreate} disabled={!newName.trim()}>
-              Create
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+                      }
+                      return (
+                        <div key={item.id} className="ds-item">
+                          <Icon name="doc" size={12} className="di-icon" />
+                          <span className="di-name" title={item.name}>
+                            {item.name}
+                          </span>
+                          <button
+                            type="button"
+                            className="di-x"
+                            title={`Delete ${item.name}`}
+                            onClick={() => setConfirmingItem(rowKey)}
+                          >
+                            <Icon name="x" size={11} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="ds-create">
+        <input
+          type="text"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void handleCreate();
+          }}
+          placeholder="New dataset"
+          disabled={disabled}
+        />
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={disabled || !newName.trim()}
+          aria-label="Create dataset"
+        >
+          <Icon name="plus" size={12} />
+        </button>
+      </div>
+    </aside>
   );
 }
 
-function Toolbar({
+// ── Composer ────────────────────────────────────────────────────
+
+const SEARCH_TYPES = [
+  { id: "GRAPH_COMPLETION", label: "Graph" },
+  { id: "RAG_COMPLETION", label: "RAG" },
+  { id: "CHUNKS", label: "Chunks" },
+];
+
+function Composer({
   app,
-  datasets,
   selectedDataset,
-  onSelectDataset,
-  onDatasetsChanged,
-  onGraphHtml,
-  setGraphStatus,
+  busy,
+  setBusy,
+  status,
+  setStatus,
+  onGraphRefresh,
   onSearchResult,
+  onIngestSucceeded,
 }: {
   app: App;
-  datasets: Dataset[];
   selectedDataset: string | null;
-  onSelectDataset: (name: string | null) => void;
-  onDatasetsChanged: () => Promise<void>;
-  onGraphHtml: (html: string | null) => void;
-  setGraphStatus: (s: string) => void;
-  onSearchResult: (text: string | null) => void;
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  status: string;
+  setStatus: (s: string) => void;
+  onGraphRefresh: () => Promise<void>;
+  onSearchResult: (entry: SearchEntry | null) => void;
+  onIngestSucceeded: () => void;
 }) {
-  const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
+  const [showText, setShowText] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [dataRefreshToken, setDataRefreshToken] = useState(0);
+  const [searchType, setSearchType] = useState("GRAPH_COMPLETION");
 
   const handleSearch = async () => {
     const q = searchQuery.trim();
     if (!q) return;
     setBusy(true);
     setStatus("");
-    onSearchResult("Searching...");
+    onSearchResult({
+      type: searchType,
+      query: q,
+      dataset: selectedDataset ?? "—",
+      body: "Searching…",
+    });
     try {
       const args: Record<string, string> = {
         search_query: q,
-        search_type: "GRAPH_COMPLETION",
+        search_type: searchType,
       };
       if (selectedDataset) args.datasets = selectedDataset;
       const result = await app.callServerTool({ name: "search", arguments: args });
       const msg = textOf(result) ?? JSON.stringify(result.content);
-      onSearchResult(result.isError ? `Error: ${msg}` : msg);
+      onSearchResult({
+        type: searchType,
+        query: q,
+        dataset: selectedDataset ?? "—",
+        body: result.isError ? `Error: ${msg}` : msg,
+      });
     } catch (err) {
-      onSearchResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      onSearchResult({
+        type: searchType,
+        query: q,
+        dataset: selectedDataset ?? "—",
+        body: `Error: ${err instanceof Error ? err.message : String(err)}`,
+      });
     } finally {
       setBusy(false);
     }
@@ -484,7 +569,7 @@ function Toolbar({
     const data = text.trim();
     if (!data) return;
     setBusy(true);
-    setStatus("Adding text...");
+    setStatus("Adding text…");
     try {
       const args: Record<string, string> = { data };
       if (selectedDataset) args.dataset_name = selectedDataset;
@@ -508,7 +593,7 @@ function Toolbar({
       return;
     }
     setBusy(true);
-    setStatus(`Uploading ${file.name}...`);
+    setStatus(`Uploading ${file.name}…`);
     try {
       const content_base64 = arrayBufferToBase64(await file.arrayBuffer());
       const args: Record<string, string> = { filename: file.name, content_base64 };
@@ -517,9 +602,9 @@ function Toolbar({
         name: "cognify_file",
         arguments: args,
       });
-      const text = textOf(result) ?? JSON.stringify(result.content);
-      setStatus(result.isError ? `Error: ${text}` : text);
-      if (!result.isError) setDataRefreshToken((t) => t + 1);
+      const msg = textOf(result) ?? JSON.stringify(result.content);
+      setStatus(result.isError ? `Error: ${msg}` : msg);
+      if (!result.isError) onIngestSucceeded();
     } catch (err) {
       setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -527,142 +612,218 @@ function Toolbar({
     }
   };
 
-  const handleRefresh = async () => {
-    setBusy(true);
-    setGraphStatus("Loading graph...");
-    try {
-      const result = await app.callServerTool({ name: "visualize_graph_ui", arguments: {} });
-      if (result.isError) {
-        setGraphStatus(`Error: ${textOf(result) ?? "refresh failed"}`);
-        return;
-      }
-      const html = htmlOf(result);
-      if (html) {
-        onGraphHtml(html);
-        setGraphStatus("");
-      } else {
-        onGraphHtml(null);
-        setGraphStatus("No graph data yet.");
-      }
-    } catch (err) {
-      setGraphStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const rowStyle: React.CSSProperties = {
-    display: "flex",
-    gap: 12,
-    alignItems: "center",
-  };
-
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        padding: "8px 12px",
-        borderBottom: "1px solid #e5e7eb",
-        fontSize: "0.875rem",
-      }}
-    >
-      <div style={rowStyle}>
-        <label style={{ fontWeight: 500 }}>Dataset:</label>
-        <DatasetPicker
-          app={app}
-          datasets={datasets}
-          selectedDataset={selectedDataset}
-          disabled={busy}
-          dataRefreshToken={dataRefreshToken}
-          onSelectDataset={onSelectDataset}
-          onDatasetsChanged={onDatasetsChanged}
-          setStatus={setStatus}
-          setBusy={setBusy}
-        />
-        <button type="button" onClick={handleRefresh} disabled={busy}>
-          Refresh graph
-        </button>
+    <div className="composer">
+      <div className="composer-row">
+        <div className="composer-search">
+          <Icon name="search" size={14} className="icn" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSearch();
+            }}
+            placeholder={
+              selectedDataset
+                ? `Ask anything about ${selectedDataset}…`
+                : "Ask a question…"
+            }
+            disabled={busy}
+          />
+          <div className="types">
+            {SEARCH_TYPES.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`search-type-btn${searchType === t.id ? " active" : ""}`}
+                onClick={() => setSearchType(t.id)}
+                title={t.id}
+              >
+                {t.label}
+              </button>
+            ))}
+            <span className="types-divider" />
+            <button
+              type="button"
+              className="go-btn"
+              onClick={handleSearch}
+              disabled={busy || !searchQuery.trim()}
+            >
+              <Icon name="send" size={11} />
+              Recall
+            </button>
+          </div>
+        </div>
       </div>
-      <div style={rowStyle}>
-        <label style={{ fontWeight: 500 }}>Upload file:</label>
-        <input type="file" onChange={handleFile} disabled={busy} />
-        <label style={{ fontWeight: 500 }}>Add text:</label>
+
+      <div className="composer-row">
+        <button
+          type="button"
+          className="cmpsr-btn primary"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+        >
+          <Icon name="upload" />
+          Cognify file
+        </button>
         <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleAddText();
-          }}
-          disabled={busy}
-          placeholder="Paste or type text..."
-          style={{ flex: 1, minWidth: 140 }}
+          ref={fileRef}
+          type="file"
+          style={{ display: "none" }}
+          onChange={handleFile}
         />
-        <button type="button" onClick={handleAddText} disabled={busy || !text.trim()}>
-          Add
-        </button>
-      </div>
-      <div style={rowStyle}>
-        <label style={{ fontWeight: 500 }}>Search:</label>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSearch();
-          }}
+        <button
+          type="button"
+          className="cmpsr-btn"
+          onClick={() => setShowText((s) => !s)}
           disabled={busy}
-          placeholder="Ask a question..."
-          style={{ flex: 1, minWidth: 140 }}
-        />
-        <button type="button" onClick={handleSearch} disabled={busy || !searchQuery.trim()}>
-          Go
+        >
+          <Icon name="text" />
+          {showText ? "Hide text" : "Add text"}
         </button>
+        <button
+          type="button"
+          className="cmpsr-btn"
+          onClick={() => void onGraphRefresh()}
+          disabled={busy}
+        >
+          <Icon name="refresh" />
+          Refresh
+        </button>
+        <span className="cmpsr-context">
+          target → <strong>{selectedDataset ?? "—"}</strong>
+        </span>
       </div>
-      {status && <div style={{ color: "#4b5563", fontSize: "0.8rem" }}>{status}</div>}
+
+      {showText && (
+        <div className="composer-row" style={{ alignItems: "stretch" }}>
+          <textarea
+            className="cmpsr-textarea"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Paste or type text to cognify into the selected dataset…"
+            disabled={busy}
+          />
+          <button
+            type="button"
+            className="cmpsr-btn primary"
+            onClick={handleAddText}
+            disabled={busy || !text.trim()}
+            style={{ alignSelf: "flex-end" }}
+          >
+            Cognify text
+          </button>
+        </div>
+      )}
+
+      {status && <div className="cmpsr-status">{status}</div>}
     </div>
   );
 }
 
-function GraphPane({
+// ── Result panel ────────────────────────────────────────────────
+
+interface SearchEntry {
+  type: string;
+  query: string;
+  dataset: string;
+  body: string;
+}
+
+function ResultPanel({
+  entry,
+  onClose,
+}: {
+  entry: SearchEntry | null;
+  onClose: () => void;
+}) {
+  if (!entry) return null;
+  return (
+    <div className="result">
+      <div className="answer-rail" />
+      <div className="answer-body">
+        <div className="answer-eyebrow">
+          {entry.type}
+          <span className="qmeta">· {entry.dataset}</span>
+        </div>
+        <div className="answer-text">
+          <strong style={{ color: "var(--cg-fg-dark)", fontWeight: 500 }}>
+            {entry.query}
+          </strong>
+          {"\n\n"}
+          {entry.body}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="result-close"
+        onClick={onClose}
+        aria-label="Close search result"
+      >
+        <Icon name="x" size={13} />
+      </button>
+    </div>
+  );
+}
+
+// ── Graph stage ─────────────────────────────────────────────────
+
+function GraphStage({
   html,
   status,
+  busy,
 }: {
   html: string | null;
   status: string;
+  busy: boolean;
 }) {
-  if (html) {
-    return (
-      <iframe
-        title="Cognee Knowledge Graph"
-        srcDoc={html}
-        style={{ flex: 1, width: "100%", border: 0 }}
-        sandbox="allow-scripts allow-same-origin"
-      />
-    );
-  }
   return (
-    <div style={{ flex: 1, padding: 16, color: "#6b7280" }}>
-      {status || "No graph data yet. Upload a file above or cognify data to get started."}
+    <div className="graph-wrap">
+      <div className="gtabs">
+        <button type="button" className="gtab active">
+          <span>Graph</span>
+        </button>
+      </div>
+      <div className="gstage">
+        {html ? (
+          <iframe
+            title="Cognee Knowledge Graph"
+            srcDoc={html}
+            sandbox="allow-scripts allow-same-origin"
+          />
+        ) : (
+          <div className="empty-state">
+            {status || "No graph data yet. Cognify content to populate it."}
+          </div>
+        )}
+        <div className={`status-pill${busy ? " processing" : ""}`}>
+          <span className="dot" />
+          {busy ? "Cognifying…" : html ? "live" : "idle"}
+        </div>
+      </div>
     </div>
   );
 }
+
+// ── Workspace root ──────────────────────────────────────────────
 
 function WorkspaceApp() {
   const [hostContext, setHostContext] = useState<McpUiHostContext | undefined>();
   const [graphHtml, setGraphHtml] = useState<string | null>(null);
-  const [graphStatus, setGraphStatus] = useState<string>("Loading graph...");
+  const [graphStatus, setGraphStatus] = useState<string>("Loading graph…");
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string | null>(null);
-  const [searchResult, setSearchResult] = useState<string | null>(null);
+  const [searchEntry, setSearchEntry] = useState<SearchEntry | null>(null);
   const [clientName, setClientName] = useState<string>("");
   const [agentDefaultDataset, setAgentDefaultDataset] = useState<string | null>(null);
   const [agentScoped, setAgentScoped] = useState<boolean>(true);
+  const [composerStatus, setComposerStatus] = useState<string>("");
+  const [busy, setBusy] = useState<boolean>(false);
+  const [dataRefreshToken, setDataRefreshToken] = useState<number>(0);
 
   const { app, error } = useApp({
-    appInfo: { name: "Cognee Workspace", version: "0.1.0" },
+    appInfo: { name: "Cognee Workspace", version: "0.2.0" },
     capabilities: {},
     onAppCreated: (app) => {
       app.ontoolresult = async (result) => {
@@ -682,32 +843,37 @@ function WorkspaceApp() {
     if (app) setHostContext(app.getHostContext());
   }, [app]);
 
-  useEffect(() => {
-    if (!app) return;
-    (async () => {
-      try {
-        const result = await app.callServerTool({ name: "visualize_graph_ui", arguments: {} });
-        if (result.isError) {
-          setGraphStatus(`Error: ${textOf(result) ?? "failed to load graph"}`);
-          return;
-        }
-        const html = htmlOf(result);
-        if (html) {
-          setGraphHtml(html);
-          setGraphStatus("");
-        } else {
-          setGraphStatus("No graph data yet. Upload a file above or cognify data to get started.");
-        }
-      } catch (err) {
-        setGraphStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+  const loadGraph = async (a: App, datasetName: string | null = selectedDataset) => {
+    setGraphStatus("Loading graph…");
+    try {
+      const result = await a.callServerTool({
+        name: "visualize_graph_ui",
+        arguments: datasetName ? { dataset_name: datasetName } : {},
+      });
+      if (result.isError) {
+        setGraphStatus(`Error: ${textOf(result) ?? "failed to load graph"}`);
+        return;
       }
-    })();
-  }, [app]);
+      const html = htmlOf(result);
+      if (html) {
+        setGraphHtml(html);
+        setGraphStatus("");
+      } else {
+        setGraphHtml(null);
+        setGraphStatus("No graph data yet. Cognify content to populate it.");
+      }
+    } catch (err) {
+      setGraphStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   const reloadDatasets = async (preferredOverride?: string | null) => {
     if (!app) return;
     try {
-      const result = await app.callServerTool({ name: "list_datasets_json", arguments: {} });
+      const result = await app.callServerTool({
+        name: "list_datasets_json",
+        arguments: {},
+      });
       if (result.isError) return;
       const list = datasetsOf(result);
       setDatasets(list);
@@ -723,7 +889,7 @@ function WorkspaceApp() {
         return match.name;
       });
     } catch {
-      /* ignore; selector just stays empty */
+      /* ignore; rail just stays empty */
     }
   };
 
@@ -752,9 +918,12 @@ function WorkspaceApp() {
           }
         }
       } catch {
-        /* ignore; header just stays empty */
+        /* ignore; bar just stays empty */
       }
       await reloadDatasets(preferred);
+      // Pass `preferred` explicitly: setSelectedDataset from reloadDatasets
+      // hasn't propagated into loadGraph's closure yet on this mount tick.
+      await loadGraph(app, preferred);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app]);
@@ -762,84 +931,60 @@ function WorkspaceApp() {
   const wrapperStyle: React.CSSProperties = {
     width: "100%",
     height: resolveWrapperHeight(hostContext),
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
   };
 
-  if (error) return <div style={wrapperStyle}>ERROR: {error.message}</div>;
-  if (!app) return <div style={wrapperStyle}>Connecting...</div>;
+  if (error) {
+    return (
+      <div className="cg-root ws" style={wrapperStyle}>
+        <div style={{ padding: 16, color: "var(--cg-status-error)" }}>
+          ERROR: {error.message}
+        </div>
+      </div>
+    );
+  }
+  if (!app) {
+    return (
+      <div className="cg-root ws" style={wrapperStyle}>
+        <div style={{ padding: 16, color: "var(--cg-fg-muted)" }}>Connecting…</div>
+      </div>
+    );
+  }
 
   return (
-    <div style={wrapperStyle}>
-      {clientName && (
-        <div
-          style={{
-            padding: "4px 12px",
-            background: "#f3f4f6",
-            borderBottom: "1px solid #e5e7eb",
-            fontSize: "0.75rem",
-            color: "#4b5563",
-          }}
-        >
-          Agent: <strong>{clientName}</strong>
-          {agentDefaultDataset && (
-            <>
-              {" · Default dataset: "}
-              <strong>{agentDefaultDataset}</strong>
-            </>
-          )}
-          {!agentScoped && (
-            <span style={{ marginLeft: 8, color: "#9ca3af" }}>
-              (agent scoping off)
-            </span>
-          )}
-        </div>
-      )}
-      <Toolbar
-        app={app}
-        datasets={datasets}
-        selectedDataset={selectedDataset}
-        onSelectDataset={setSelectedDataset}
-        onDatasetsChanged={reloadDatasets}
-        onGraphHtml={setGraphHtml}
-        setGraphStatus={setGraphStatus}
-        onSearchResult={setSearchResult}
+    <div className="cg-root ws" style={wrapperStyle}>
+      <AgentBar
+        agentName={clientName}
+        defaultDataset={agentDefaultDataset}
+        agentScoped={agentScoped}
       />
-      {searchResult !== null && (
-        <div
-          style={{
-            maxHeight: 180,
-            overflowY: "auto",
-            padding: "8px 12px",
-            background: "#f9fafb",
-            borderBottom: "1px solid #e5e7eb",
-            fontSize: "0.85rem",
-            position: "relative",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setSearchResult(null)}
-            title="Close search results"
-            style={{
-              position: "absolute",
-              top: 4,
-              right: 8,
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              color: "#6b7280",
-              fontSize: "1rem",
-            }}
-          >
-            ✕
-          </button>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Search result</div>
-          <div style={{ whiteSpace: "pre-wrap", color: "#1f2937" }}>{searchResult}</div>
-        </div>
-      )}
-      <GraphPane html={graphHtml} status={graphStatus} />
+      <div className="ws-body">
+        <DatasetRail
+          app={app}
+          datasets={datasets}
+          selectedDataset={selectedDataset}
+          disabled={busy}
+          dataRefreshToken={dataRefreshToken}
+          onSelectDataset={setSelectedDataset}
+          onDatasetsChanged={reloadDatasets}
+          setStatus={setComposerStatus}
+          setBusy={setBusy}
+        />
+        <main className="main">
+          <Composer
+            app={app}
+            selectedDataset={selectedDataset}
+            busy={busy}
+            setBusy={setBusy}
+            status={composerStatus}
+            setStatus={setComposerStatus}
+            onGraphRefresh={() => loadGraph(app)}
+            onSearchResult={setSearchEntry}
+            onIngestSucceeded={() => setDataRefreshToken((t) => t + 1)}
+          />
+          <ResultPanel entry={searchEntry} onClose={() => setSearchEntry(null)} />
+          <GraphStage html={graphHtml} status={graphStatus} busy={busy} />
+        </main>
+      </div>
     </div>
   );
 }

@@ -519,6 +519,23 @@ COGNEE_MCP_AGENT_SCOPED=false
 
 When disabled, the workspace UI header shows `(agent scoping off)` and no per-client datasets are autocreated.
 
+### Per-dataset isolation (`ENABLE_BACKEND_ACCESS_CONTROL`)
+
+Agent scoping decides which dataset *name* a tool defaults to. Whether two datasets are actually isolated at the storage layer is governed by cognee's `ENABLE_BACKEND_ACCESS_CONTROL` flag:
+
+- **`false` (default)** — all datasets share one Kuzu graph DB and one LanceDB. The dataset filter is honored for top-level data points, but `GRAPH_COMPLETION` traversal can pull connected nodes from any dataset, and `visualize_graph_ui` reflects the full shared graph. Fastest path; fine for single-user local dev.
+- **`true`** — each `(user, dataset)` pair gets its own per-dataset Kuzu + LanceDB under `.cognee_system/databases/<dataset_uuid>/`. `visualize_graph_ui` and search become strictly per-dataset because the workspace passes `dataset_name` and the server routes the visualization through cognee's `visualize_multi_user_graph` to set the right DB context.
+
+**Switching modes wipes nothing automatically — but data does not migrate.** Data ingested in one mode lives at a different on-disk path than the other and won't be visible after the flip. Clean-slate when changing the flag:
+
+```bash
+# Stop server, then:
+rm -rf <DATA_ROOT>/.cognee_system <DATA_ROOT>/.data_storage
+# Edit .env to flip ENABLE_BACKEND_ACCESS_CONTROL, restart, re-cognify.
+```
+
+(Replace `<DATA_ROOT>` with whatever you set via `DATA_ROOT_DIRECTORY` / `SYSTEM_ROOT_DIRECTORY`, or your cognee install dir if you didn't set them.)
+
 **Data Management Examples:**
 ```bash
 # List all available datasets and data items

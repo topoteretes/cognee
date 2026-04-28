@@ -1289,6 +1289,25 @@ def _visualize_graph_ui_resource() -> str:
 _D3_CDN_TAG = '<script src="https://d3js.org/d3.v7.min.js"></script>'
 _d3_source: str | None = None
 
+# CSS overrides appended to cognee's graph HTML so it fits the MCP App
+# iframe better: the floating bottom control bar can wrap to multiple
+# rows when the iframe is narrow, and the standalone "Light mode"
+# toggle is hidden (the workspace owns theming).
+_GRAPH_VIZ_OVERRIDES = """
+<style>
+#theme-toggle { display: none !important; }
+#controls {
+  flex-wrap: wrap;
+  max-width: calc(100vw - 16px);
+  justify-content: center;
+  bottom: 8px;
+  row-gap: 2px;
+}
+#controls .ctrl-btn { padding: 4px 8px; font-size: 10px; }
+#controls .ctrl-sep { margin: 2px 2px; }
+</style>
+"""
+
 
 async def _inline_d3(html: str) -> str:
     global _d3_source
@@ -1304,6 +1323,12 @@ async def _inline_d3(html: str) -> str:
     return html.replace(_D3_CDN_TAG, f"<script>{_d3_source}</script>")
 
 
+def _inject_graph_viz_overrides(html: str) -> str:
+    if "</head>" in html:
+        return html.replace("</head>", _GRAPH_VIZ_OVERRIDES + "</head>", 1)
+    return html
+
+
 @mcp.tool(
     name="visualize_graph_ui",
     description=(
@@ -1313,12 +1338,33 @@ async def _inline_d3(html: str) -> str:
     meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
 )
 @log_usage(function_name="MCP visualize_graph_ui", log_type="mcp_tool")
-async def visualize_graph_ui() -> types.CallToolResult:
+async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
+    """Render the Cognee graph for a specific dataset.
+
+    With ENABLE_BACKEND_ACCESS_CONTROL=true, each (user, dataset) pair has its
+    own graph DB. Without dataset_name we'd hit the global default engine,
+    which is empty in that mode. Resolving dataset_name (explicit, or via
+    agent scoping) and routing through visualize_multi_user_graph picks up
+    the right per-dataset context.
+    """
     from cognee.api.v1.visualize import visualize_graph
 
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
+
     with redirect_stdout(sys.stderr):
-        html = await visualize_graph()
+        html: str | None = None
+        if dataset_name and not cognee_client.use_api:
+            from cognee.api.v1.visualize.visualize import visualize_multi_user_graph
+
+            user = await get_default_user()
+            datasets = await get_datasets_by_name(dataset_name, user.id)
+            if datasets:
+                html = await visualize_multi_user_graph([(user, datasets[0])])
+        if html is None:
+            html = await visualize_graph()
+
     html = await _inline_d3(html)
+    html = _inject_graph_viz_overrides(html)
 
     return types.CallToolResult(
         content=[types.TextContent(type="text", text="Cognee knowledge graph rendered.")],
