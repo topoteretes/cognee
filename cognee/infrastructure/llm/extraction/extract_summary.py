@@ -1,18 +1,17 @@
-from cognee.shared.logging_utils import get_logger
 import os
-from typing import Type
 
 from instructor.core import InstructorRetryException
-from cognee.infrastructure.llm.prompts import read_query_prompt
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.data_models import SummarizedCode
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("extract_summary")
 
 
-def get_mock_summarized_code():
+def get_mock_summarized_code() -> SummarizedCode:
     """Local mock function to avoid circular imports."""
     return SummarizedCode(
         high_level_summary="Mock code summary",
@@ -25,8 +24,8 @@ def get_mock_summarized_code():
     )
 
 
-async def extract_summary(content: str, response_model: Type[BaseModel]):
-    system_prompt = read_query_prompt("summarize_content.txt")
+async def extract_summary(content: str, response_model: type[BaseModel]):
+    system_prompt = read_query_prompt("summarize_content.txt") or ""
 
     llm_output = await LLMGateway.acreate_structured_output(content, system_prompt, response_model)
 

@@ -1,12 +1,13 @@
 import json
 import os
-from typing import Dict, Optional, ClassVar, Any, Union
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Any, ClassVar
+
 from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 try:
-    from baml_py import ClientRegistry
+    from baml_py import ClientRegistry  # ty:ignore[unresolved-import]
 except ImportError:
     ClientRegistry = None
 
@@ -43,8 +44,8 @@ class LLMConfig(BaseSettings):
     llm_provider: str = "openai"
     llm_model: str = "openai/gpt-5-mini"
     llm_endpoint: str = ""
-    llm_api_key: Optional[str] = None
-    llm_api_version: Optional[str] = None
+    llm_api_key: str | None = None
+    llm_api_version: str | None = None
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
@@ -52,7 +53,7 @@ class LLMConfig(BaseSettings):
     baml_llm_provider: str = "openai"
     baml_llm_model: str = "gpt-5-mini"
     baml_llm_endpoint: str = ""
-    baml_llm_api_key: Optional[str] = None
+    baml_llm_api_key: str | None = None
     baml_llm_temperature: float = 0.0
     baml_llm_api_version: str = ""
 
@@ -69,7 +70,7 @@ class LLMConfig(BaseSettings):
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
 
-    llama_cpp_model_path: Optional[str] = None
+    llama_cpp_model_path: str | None = None
     llama_cpp_n_ctx: int = 2048
     llama_cpp_n_gpu_layers: int = 0
     llama_cpp_chat_format: str = "chatml"
@@ -80,20 +81,11 @@ class LLMConfig(BaseSettings):
 
     llm_azure_use_managed_identity: bool = False
 
-    llm_args: Union[str, Dict[str, Any], None] = None
+    llm_args: dict[str, Any] | None = None
 
-    baml_registry: Optional[Any] = None
+    baml_registry: Any | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
-
-    @model_validator(mode="after")
-    def parse_llm_args(self) -> "LLMConfig":
-        if self.llm_args and isinstance(self.llm_args, str):
-            parsed = json.loads(self.llm_args)
-            self.llm_args = parsed
-        elif self.llm_args is None:
-            self.llm_args = {}
-        return self
 
     @model_validator(mode="after")
     def strip_quotes_from_strings(self) -> "LLMConfig":
@@ -229,7 +221,7 @@ class LLMConfig(BaseSettings):
 
         return self
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert the LLMConfig instance into a dictionary representation.
 
@@ -269,7 +261,7 @@ class LLMConfig(BaseSettings):
 
 
 @lru_cache
-def get_llm_config():
+def get_llm_config() -> LLMConfig:
     """
     Retrieve and cache the LLM configuration.
 

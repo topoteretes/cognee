@@ -1,10 +1,11 @@
 import io
 import os.path
-from typing import BinaryIO, TypedDict, Optional
 from pathlib import Path
+from typing import BinaryIO, TypedDict
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
+from cognee.shared.logging_utils import get_logger
+
 from .guess_file_type import guess_file_type
 
 logger = get_logger("FileMetadata")
@@ -19,15 +20,15 @@ class FileMetadata(TypedDict):
     checking.
     """
 
-    name: str
-    file_path: str
+    name: str | None
+    file_path: str | None
     mime_type: str
     extension: str
     content_hash: str
     file_size: int
 
 
-async def get_file_metadata(file: BinaryIO, name: Optional[str] = None) -> FileMetadata:
+async def get_file_metadata(file: BinaryIO, name: str | None = None) -> FileMetadata:
     """
     Retrieve metadata from a file object.
 

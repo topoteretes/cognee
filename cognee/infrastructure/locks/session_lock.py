@@ -20,15 +20,15 @@ are factored so that's a local change.
 """
 
 import asyncio
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Tuple
 
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_lock")
 
 
-_locks: dict[Tuple[str, str], asyncio.Lock] = {}
+_locks: dict[tuple[str, str], asyncio.Lock] = {}
 _registry_lock = asyncio.Lock()
 
 
@@ -43,7 +43,7 @@ async def _get_lock(session_id: str, op: str) -> asyncio.Lock:
 
 
 @asynccontextmanager
-async def session_lock(session_id: str, op: str = "write"):
+async def session_lock(session_id: str, op: str = "write") -> AsyncGenerator[None, None]:
     """Serialize concurrent operations on the same session/op pair.
 
     Usage::
