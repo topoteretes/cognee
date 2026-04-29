@@ -6,12 +6,6 @@ from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
 from instructor.core import InstructorRetryException
 
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm import (
-    _instructor_patches,
-)
-
-_instructor_patches.apply()
-
 import logging
 from tenacity import (
     retry,

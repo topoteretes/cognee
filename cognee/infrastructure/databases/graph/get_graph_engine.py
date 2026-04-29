@@ -7,6 +7,7 @@ from numbers import Number
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
+from .kuzu.adapter import DEFAULT_KUZU_BUFFER_POOL_SIZE, DEFAULT_KUZU_MAX_DB_SIZE
 from .config import get_graph_context_config
 from .graph_db_interface import GraphDBInterface
 from .supported_databases import supported_databases
@@ -78,7 +79,8 @@ def create_graph_engine(
     graph_dataset_database_handler="",
     graph_database_subprocess_enabled=False,
     kuzu_num_threads=0,
-    kuzu_buffer_pool_size=2 * 1024 * 1024 * 1024,
+    kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
+    kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
 ):
     """
     Wrapper function to call create graph engine with caching.
@@ -119,6 +121,7 @@ def create_graph_engine(
         graph_database_subprocess_enabled,
         kuzu_num_threads,
         kuzu_buffer_pool_size,
+        kuzu_max_db_size,
     )
 
 
@@ -136,7 +139,8 @@ def _create_graph_engine(
     graph_dataset_database_handler="",
     graph_database_subprocess_enabled=False,
     kuzu_num_threads=0,
-    kuzu_buffer_pool_size=2 * 1024 * 1024 * 1024,
+    kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
+    kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -204,7 +208,7 @@ def _create_graph_engine(
         if not graph_file_path:
             raise EnvironmentError("Missing required Kuzu database path.")
 
-        from .kuzu.adapter import KuzuAdapter, DEFAULT_MAX_DB_SIZE
+        from .kuzu.adapter import KuzuAdapter
 
         if graph_database_subprocess_enabled:
             # Kuzu expects the parent directory of its db file to already exist.
@@ -230,7 +234,7 @@ def _create_graph_engine(
                     db_path=graph_file_path,
                     buffer_pool_size=kuzu_buffer_pool_size,
                     max_num_threads=kuzu_num_threads,
-                    max_db_size=DEFAULT_MAX_DB_SIZE,
+                    max_db_size=kuzu_max_db_size,
                 )
                 db.init_database()
                 conn = RemoteKuzuConnection(session, db)
@@ -248,6 +252,7 @@ def _create_graph_engine(
                 db_path=graph_file_path,
                 kuzu_num_threads=kuzu_num_threads,
                 kuzu_buffer_pool_size=kuzu_buffer_pool_size,
+                kuzu_max_db_size=kuzu_max_db_size,
                 database=db,
                 connection=conn,
                 session=session,
@@ -257,6 +262,7 @@ def _create_graph_engine(
             db_path=graph_file_path,
             kuzu_num_threads=kuzu_num_threads,
             kuzu_buffer_pool_size=kuzu_buffer_pool_size,
+            kuzu_max_db_size=kuzu_max_db_size,
         )
 
     elif graph_database_provider == "kuzu-remote":

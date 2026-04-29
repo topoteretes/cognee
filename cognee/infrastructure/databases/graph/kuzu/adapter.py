@@ -35,8 +35,8 @@ from cognee.modules.observability.tracing import (
 
 logger = get_logger()
 
-DEFAULT_BUFFER_POOL_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
-DEFAULT_MAX_DB_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
+DEFAULT_KUZU_BUFFER_POOL_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+DEFAULT_KUZU_MAX_DB_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
 
 cache_config = get_cache_config()
 if cache_config.shared_kuzu_lock:
@@ -57,7 +57,8 @@ class KuzuAdapter(GraphDBInterface):
         self,
         db_path: str,
         kuzu_num_threads: int = 0,
-        kuzu_buffer_pool_size: int = DEFAULT_BUFFER_POOL_SIZE,
+        kuzu_buffer_pool_size: int = DEFAULT_KUZU_BUFFER_POOL_SIZE,
+        kuzu_max_db_size: int = DEFAULT_KUZU_MAX_DB_SIZE,
         *,
         database: Optional[Any] = None,
         connection: Optional[Any] = None,
@@ -74,6 +75,10 @@ class KuzuAdapter(GraphDBInterface):
             Kuzu's internal default (one per CPU).
         kuzu_buffer_pool_size:
             Maximum size of the Kuzu buffer pool in bytes.
+        kuzu_max_db_size:
+            Maximum on-disk database size in bytes. Configurable via the
+            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); some users
+            need this above the default 4 GB for large graphs.
         database, connection, session:
             Optional pre-built Database/Connection and a subprocess session.
             When supplied, the adapter runs in subprocess-proxy mode: the
@@ -86,6 +91,7 @@ class KuzuAdapter(GraphDBInterface):
         self.db_path = db_path  # Path for the database directory
         self.kuzu_num_threads = kuzu_num_threads
         self.kuzu_buffer_pool_size = kuzu_buffer_pool_size
+        self.kuzu_max_db_size = kuzu_max_db_size
         self._session = session
         injected = database is not None and connection is not None
         # Remember that this adapter was constructed in subprocess-proxy mode.
@@ -162,8 +168,8 @@ class KuzuAdapter(GraphDBInterface):
                     temp_graph_file = temp_file.name
                     tmp_db = Database(
                         temp_graph_file,
-                        buffer_pool_size=DEFAULT_BUFFER_POOL_SIZE,
-                        max_db_size=DEFAULT_MAX_DB_SIZE,
+                        buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
+                        max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
                     )
                     tmp_db.init_database()
                     connection = Connection(tmp_db)
@@ -184,7 +190,7 @@ class KuzuAdapter(GraphDBInterface):
                     self.temp_graph_file,
                     buffer_pool_size=self.kuzu_buffer_pool_size,
                     max_num_threads=self.kuzu_num_threads,
-                    max_db_size=DEFAULT_MAX_DB_SIZE,
+                    max_db_size=self.kuzu_max_db_size,
                 )
             else:
                 # Ensure the parent directory exists before creating the database
@@ -206,7 +212,7 @@ class KuzuAdapter(GraphDBInterface):
                         self.db_path,
                         buffer_pool_size=self.kuzu_buffer_pool_size,
                         max_num_threads=self.kuzu_num_threads,
-                        max_db_size=DEFAULT_MAX_DB_SIZE,
+                        max_db_size=self.kuzu_max_db_size,
                     )
                 except RuntimeError:
                     from .kuzu_migrate import read_kuzu_storage_version
@@ -231,7 +237,7 @@ class KuzuAdapter(GraphDBInterface):
                         self.db_path,
                         buffer_pool_size=self.kuzu_buffer_pool_size,
                         max_num_threads=self.kuzu_num_threads,
-                        max_db_size=DEFAULT_MAX_DB_SIZE,
+                        max_db_size=self.kuzu_max_db_size,
                     )
 
             self.db.init_database()

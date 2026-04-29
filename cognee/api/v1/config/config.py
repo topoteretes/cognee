@@ -228,6 +228,18 @@ class config:
         )
 
     @staticmethod
+    def set_kuzu_max_db_size(kuzu_max_db_size):
+        """Set the Kuzu maximum on-disk database size in bytes.
+
+        Accepts ``int`` or a string of digits; the CLI path (``config set``)
+        always passes strings. Defaults to 4 GB; raise this for large graphs.
+        """
+        graph_config = get_graph_config()
+        graph_config.kuzu_max_db_size = _coerce_int(
+            kuzu_max_db_size, "kuzu_max_db_size", min_value=1
+        )
+
+    @staticmethod
     def set_llm_provider(llm_provider: str):
         """Set the LLM provider.
 
@@ -642,6 +654,7 @@ class config:
             "graph_database_subprocess_enabled": "set_graph_database_subprocess_enabled",
             "kuzu_num_threads": "set_kuzu_num_threads",
             "kuzu_buffer_pool_size": "set_kuzu_buffer_pool_size",
+            "kuzu_max_db_size": "set_kuzu_max_db_size",
             "vector_db_provider": "set_vector_db_provider",
             "vector_db_subprocess_enabled": "set_vector_db_subprocess_enabled",
             "vector_db_url": "set_vector_db_url",
