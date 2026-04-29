@@ -17,7 +17,7 @@ async def forget(
     data_id: Optional[UUID] = None,
     dataset: Optional[Union[str, UUID]] = None,
     everything: bool = False,
-    graph_only: bool = False,
+    memory_only: bool = False,
     user=None,
 ) -> dict:
     """Remove data from the knowledge graph.
@@ -36,8 +36,8 @@ async def forget(
         # Forget everything the current user owns
         await cognee.forget(everything=True)
 
-        # Forget only graph/vector data for a dataset (keep raw files)
-        await cognee.forget(dataset="scientists", graph_only=True)
+        # Forget only memory (graph + vector) for a dataset (keep raw files)
+        await cognee.forget(dataset="scientists", memory_only=True)
 
     Args:
         data_id: UUID of a specific data item to remove.
@@ -47,8 +47,8 @@ async def forget(
             item from this dataset.
         everything: If True, delete all datasets and data the user owns.
             Ignores ``data_id`` and ``dataset``.
-        graph_only: If True (requires ``dataset``), delete only graph
-            nodes/edges and vector embeddings, and reset pipeline status.
+        memory_only: If True (requires ``dataset``), delete only memory
+            (graph nodes/edges and vector embeddings) and reset pipeline status.
             Raw files and data records are preserved so the dataset can
             be re-cognified with different settings.
         user: User context. Resolved to default user when None.
@@ -61,8 +61,8 @@ async def forget(
 
     if everything:
         target = "everything"
-    elif graph_only and dataset:
-        target = "dataset_graph_only"
+    elif memory_only and dataset:
+        target = "dataset_memory_only"
     elif data_id:
         target = "data_item"
     elif dataset:
@@ -90,7 +90,7 @@ async def forget(
 
         client = get_remote_client()
         if client is not None:
-            result = await client.forget(data_id=data_id, dataset=dataset, everything=everything, graph_only=graph_only)
+            result = await client.forget(data_id=data_id, dataset=dataset, everything=everything, memory_only=memory_only)
             span.set_attribute(
                 COGNEE_RESULT_COUNT,
                 result.get("datasets_removed", 0) if isinstance(result, dict) else 0,
@@ -112,12 +112,12 @@ async def forget(
             span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
             return result
 
-        if graph_only:
+        if memory_only:
             if dataset is None:
-                raise ValueError("graph_only requires dataset to be specified.")
+                raise ValueError("memory_only requires dataset to be specified.")
             if data_id is not None:
-                raise ValueError("graph_only cannot be combined with data_id.")
-            return await _forget_dataset_graph(dataset, user)
+                raise ValueError("memory_only cannot be combined with data_id.")
+            return await _forget_dataset_memory(dataset, user)
 
         if dataset is not None and data_id is not None:
             return await _forget_data_item(data_id, dataset, user)
@@ -207,8 +207,8 @@ async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user) 
     return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
 
 
-async def _forget_dataset_graph(dataset_ref: Union[str, UUID], user) -> dict:
-    """Delete only graph/vector data for a dataset, preserving raw files.
+async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
+    """Delete only memory (graph + vector) for a dataset, preserving raw files.
 
     This allows re-cognifying the dataset with different settings
     (e.g. a new custom prompt or graph model).
@@ -260,7 +260,7 @@ async def _forget_dataset_graph(dataset_ref: Union[str, UUID], user) -> dict:
         await session.commit()
 
     logger.info(
-        "forget: cleared graph data for dataset=%s, user=%s (%d data records reset)",
+        "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
         dataset_id, user.id, len(data_records),
     )
     return {
