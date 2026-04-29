@@ -39,6 +39,9 @@ async def forget(
         # Forget only memory (graph + vector) for a dataset (keep raw files)
         await cognee.forget(dataset="scientists", memory_only=True)
 
+        # Forget only memory for a single file in a dataset
+        await cognee.forget(dataset="scientists", data_id=data_id, memory_only=True)
+
     Args:
         data_id: UUID of a specific data item to remove.
             Requires ``dataset`` to also be set.
@@ -61,6 +64,8 @@ async def forget(
 
     if everything:
         target = "everything"
+    elif memory_only and data_id:
+        target = "data_item_memory_only"
     elif memory_only and dataset:
         target = "dataset_memory_only"
     elif data_id:
@@ -116,7 +121,7 @@ async def forget(
             if dataset is None:
                 raise ValueError("memory_only requires dataset to be specified.")
             if data_id is not None:
-                raise ValueError("memory_only cannot be combined with data_id.")
+                return await _forget_data_memory(data_id, dataset, user)
             return await _forget_dataset_memory(dataset, user)
 
         if dataset is not None and data_id is not None:
@@ -266,6 +271,62 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
     return {
         "dataset_id": str(dataset_id),
         "data_records_reset": len(data_records),
+        "status": "success",
+    }
+
+
+async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user) -> dict:
+    """Delete only memory (graph + vector) for a single data item, preserving the raw file.
+
+    This allows re-cognifying a specific file with different settings
+    without affecting the rest of the dataset.
+
+    Cleanup scope:
+    - Graph DB (nodes, edges for this data item): yes
+    - Vector DB (embeddings for this data item): yes
+    - Pipeline status (for this data item): reset
+    - Relational DB (data record): preserved
+    - Raw file: preserved
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import attributes as orm_attributes
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+    from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
+        delete_data_nodes_and_edges,
+    )
+
+    dataset_id = await _resolve_dataset_id(dataset_ref, user)
+
+    # 1. Delete graph nodes/edges and vector embeddings for this data item
+    await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+
+    # 2. Reset pipeline_status for this data record
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_record = (
+            await session.execute(select(Data).where(Data.id == data_id))
+        ).scalars().first()
+
+        if data_record and data_record.pipeline_status:
+            dataset_id_str = str(dataset_id)
+            updated = False
+            for pipeline_name in list(data_record.pipeline_status.keys()):
+                if dataset_id_str in data_record.pipeline_status[pipeline_name]:
+                    del data_record.pipeline_status[pipeline_name][dataset_id_str]
+                    updated = True
+            if updated:
+                orm_attributes.flag_modified(data_record, "pipeline_status")
+            await session.commit()
+
+    logger.info(
+        "forget: cleared memory for data_id=%s in dataset=%s, user=%s",
+        data_id, dataset_id, user.id,
+    )
+    return {
+        "data_id": str(data_id),
+        "dataset_id": str(dataset_id),
         "status": "success",
     }
 

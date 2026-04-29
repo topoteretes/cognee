@@ -38,8 +38,10 @@ def get_forget_router() -> APIRouter:
         - Set `everything: true` to delete all user data.
         - Set `dataset` alone to delete an entire dataset.
         - Set `dataset` + `data_id` to delete a single item.
-        - Set `dataset` + `memory_only: true` to clear only graph/vector
-          data, preserving raw files so the dataset can be re-cognified.
+        - Set `dataset` + `memory_only: true` to clear memory
+          (graph + vector), preserving raw files so the dataset can be re-cognified.
+        - Set `dataset` + `data_id` + `memory_only: true` to clear memory
+          for a single file only.
         """
         send_telemetry(
             "Forget API Endpoint Invoked",
