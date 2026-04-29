@@ -75,7 +75,7 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
     ```
     LLM_API_KEY="YOUR_OPENAI_API_KEY"
     ```
-7. (Optional, only if you want the MCP App workspace UI) Build the inline workspace bundle. Requires Node.js.
+7. (Optional — running from source only) Build the MCP App workspace UI bundle. Requires Node.js. Docker users skip this; the image build runs it automatically.
     ```
     cd apps-src && npm install && npm run build && cd ..
     ```
@@ -510,7 +510,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
 
-The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html` and is built from `cognee-mcp/apps-src/` via `npm run build` (see [Quick Start](#-quick-start) step 7). The bundle is gitignored — if it's missing the workspace tools raise a `FileNotFoundError` pointing back to the build command.
+The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html`. It is built from `cognee-mcp/apps-src/` via `npm run build` and is gitignored. The Docker image builds it as part of the image; PyPI wheels carry it (the maintainer runs `npm run build` before `uv build`); from-source users build it manually (see [Quick Start](#-quick-start) step 7). If the bundle is missing at runtime, the workspace tools raise a `FileNotFoundError` pointing back to the build command.
 
 ### Agent Scoping (per-client default datasets)
 

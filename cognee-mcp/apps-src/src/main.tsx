@@ -24,6 +24,12 @@ const DEFAULT_WORKSPACE_HEIGHT = 720;
 // loads, so we substitute the CDN tag with d3 inlined from our npm dependency
 // before handing the HTML to the iframe via srcDoc.
 //
+// Brittleness flag: the regex below hard-codes cognee's exact CDN script tag
+// from cognee/modules/visualization/cognee_network_visualization.py. If cognee
+// changes that tag (different version, different host, additional attributes),
+// this regex won't match and the iframe stays blank. Long-term fix: bundle
+// d3 inside cognee's template upstream so consumers don't need this patch.
+//
 // Use the function form of `replace` so JS's $-substitution rules don't fire
 // inside the d3 source (which contains regex code with `$1`, `$'`, etc.).
 const D3_CDN_TAG_RE = /<script\s+src="https:\/\/d3js\.org\/d3\.v7\.min\.js"\s*><\/script>/;

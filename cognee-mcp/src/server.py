@@ -1279,6 +1279,12 @@ _VISUALIZE_APP_URI = "ui://cognee-visualize/graph.html"
     mime_type="text/html;profile=mcp-app",
 )
 def _visualize_graph_ui_resource() -> str:
+    # The bundle path is resolved as a sibling of this file. In a Docker /
+    # PyPI install, that's site-packages/src/app_bundles/. In from-source
+    # dev (running `python src/server.py` directly), it's cognee-mcp/src/
+    # app_bundles/. Both resolutions only work because we read via __file__
+    # rather than a hardcoded `/app/...` or repo-relative path, so the bundle
+    # lookup follows wherever this module was loaded from.
     bundle = Path(__file__).parent / "app_bundles" / "visualize-graph.html"
     if not bundle.is_file():
         raise FileNotFoundError(
