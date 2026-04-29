@@ -8,6 +8,9 @@ logger = get_logger()
 
 
 class BaseBenchmarkAdapter(ABC):
+    async def prepare_corpus(self) -> None:
+        return None
+
     def _filter_instances(
         self,
         instances: List[dict[str, Any]],

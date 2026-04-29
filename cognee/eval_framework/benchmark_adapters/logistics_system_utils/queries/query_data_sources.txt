@@ -1,0 +1,22 @@
+Select the most suitable package carrier while adhering to the rules.
+Estimate the total delivery days, the transportation cost, and the route.
+Use natural-language statements for `carrier_selection_reasons`, `estimated_delivery_days_supporting_facts`, `estimated_transport_price_supporting_facts`, and `route_supporting_facts`.
+Put document names, entity ids, or rule references in the corresponding `*_data_source*` fields.
+Return only valid JSON with double-quoted keys and strings. Do not include trailing commas.
+{
+  "package_id": "string",
+  "retailer_name": "string",
+  "user_name": "string",
+  "selected_carrier": "string",
+  "carrier_selection_reasons": ["string"],
+  "carrier_selection_reasons_data_sources": ["string"],
+  "estimated_delivery_days": int,
+  "estimated_delivery_days_supporting_facts": ["string"],
+  "estimated_delivery_days_supporting_facts_data_sources": ["string"],
+  "estimated_transport_price": float,
+  "estimated_transport_price_supporting_facts": ["string"],
+  "estimated_transport_price_supporting_facts_data_sources": ["string"],
+  "route": "string",
+  "route_supporting_facts": ["string"],
+  "route_supporting_facts_data_source": ["string"]
+}

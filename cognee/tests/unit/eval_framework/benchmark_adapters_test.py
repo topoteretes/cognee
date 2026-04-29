@@ -1,5 +1,8 @@
 import pytest
 from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+from cognee.eval_framework.benchmark_adapters.logistics_system_adapter import (
+    LogisticsSystemAdapter,
+)
 from cognee.eval_framework.benchmark_adapters.musique_adapter import MusiqueQAAdapter
 from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from cognee.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
@@ -30,6 +33,7 @@ MOCK_HOTPOT_CORPUS = [
 
 ADAPTER_CLASSES = [
     HotpotQAAdapter,
+    LogisticsSystemAdapter,
     MusiqueQAAdapter,
     DummyAdapter,
     TwoWikiMultihopAdapter,
@@ -103,3 +107,62 @@ def test_adapter_returns_some_content(AdapterClass):
     for item in qa_pairs:
         assert "question" in item, f"{AdapterClass.__name__} missing 'question' key in QA pair."
         assert "answer" in item, f"{AdapterClass.__name__} missing 'answer' key in QA pair."
+
+
+def test_logistics_adapter_creates_world_when_missing(tmp_path):
+    adapter = LogisticsSystemAdapter(
+        world_name="test_world",
+        worlds_root=tmp_path,
+        user_count=3,
+        retailer_count=2,
+        package_count=2,
+    )
+
+    corpus_list, qa_pairs = adapter.load_corpus(load_golden_context=True)
+
+    assert adapter.world_file.exists()
+    assert len(list(tmp_path.rglob("*.txt"))) > 0
+    assert len(corpus_list) > 0
+    assert len(qa_pairs) == 6
+    assert all(item["world_name"] == "test_world" for item in qa_pairs)
+    assert all("golden_context" in item for item in qa_pairs)
+    assert all("golden_context_data_sources" in item for item in qa_pairs)
+    assert all("package_context" in item for item in qa_pairs)
+    assert {item["question_type"] for item in qa_pairs} == {
+        "carrier",
+        "delivery_days",
+        "transport_cost",
+    }
+
+    answers_by_type = {item["question_type"]: item for item in qa_pairs[:3]}
+    assert isinstance(answers_by_type["delivery_days"]["answer"], str)
+    assert isinstance(answers_by_type["transport_cost"]["answer"], str)
+    assert isinstance(answers_by_type["carrier"]["answer"], str)
+    assert isinstance(answers_by_type["delivery_days"]["golden_answer"], (int, type(None)))
+    assert isinstance(answers_by_type["transport_cost"]["golden_answer"], (float, int, type(None)))
+    assert isinstance(answers_by_type["delivery_days"]["golden_context"], str)
+
+
+def test_logistics_adapter_loads_existing_world(tmp_path):
+    adapter = LogisticsSystemAdapter(
+        world_name="persisted_world",
+        worlds_root=tmp_path,
+        user_count=3,
+        retailer_count=2,
+        package_count=2,
+    )
+    _, first_qa_pairs = adapter.load_corpus()
+    first_world_contents = adapter.world_file.read_text(encoding="utf-8")
+
+    second_adapter = LogisticsSystemAdapter(
+        world_name="persisted_world",
+        worlds_root=tmp_path,
+        user_count=10,
+        retailer_count=10,
+        package_count=10,
+    )
+    _, second_qa_pairs = second_adapter.load_corpus()
+    second_world_contents = second_adapter.world_file.read_text(encoding="utf-8")
+
+    assert first_world_contents == second_world_contents
+    assert [item["id"] for item in first_qa_pairs] == [item["id"] for item in second_qa_pairs]
