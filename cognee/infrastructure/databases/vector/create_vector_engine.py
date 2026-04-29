@@ -4,8 +4,8 @@ from numbers import Number
 
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
-
-from functools import lru_cache
+from cognee.infrastructure.databases.graph.config import get_graph_context_config
+from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 
@@ -56,6 +56,7 @@ def create_vector_engine(
     vector_db_username: str = "",
     vector_db_password: str = "",
     vector_db_host: str = "",
+    vector_db_subprocess_enabled: bool = False,
 ):
     """
     Wrapper function to call create vector engine with caching.
@@ -101,10 +102,11 @@ def create_vector_engine(
         vector_db_username,
         vector_db_password,
         vector_db_host,
+        vector_db_subprocess_enabled,
     )
 
 
-@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
@@ -115,6 +117,7 @@ def _create_vector_engine(
     vector_db_username: str,
     vector_db_password: str,
     vector_db_host: str,
+    vector_db_subprocess_enabled: bool,
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -252,6 +255,29 @@ def _create_vector_engine(
 
     elif vector_db_provider.lower() == "lancedb":
         from .lancedb.LanceDBAdapter import LanceDBAdapter
+
+        if vector_db_subprocess_enabled:
+            from .lancedb.subprocess.proxy import (
+                LanceDBSubprocessSession,
+                RemoteLanceDBConnection,
+            )
+
+            session = LanceDBSubprocessSession.start()
+            try:
+                remote_conn = RemoteLanceDBConnection(
+                    session, url=vector_db_url, api_key=vector_db_key
+                )
+            except Exception:
+                session.shutdown(timeout=2.0)
+                raise
+
+            return LanceDBAdapter(
+                url=vector_db_url,
+                api_key=vector_db_key,
+                embedding_engine=embedding_engine,
+                connection=remote_conn,
+                session=session,
+            )
 
         return LanceDBAdapter(
             url=vector_db_url,

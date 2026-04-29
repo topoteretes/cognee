@@ -30,6 +30,14 @@ class TestConfigSetMethod:
         """Test setting vector DB provider through generic set method."""
         config.set("vector_db_provider", "chromadb")
 
+    def test_set_graph_database_subprocess_enabled(self):
+        """Test enabling graph subprocess adapters through generic set method."""
+        config.set("graph_database_subprocess_enabled", True)
+
+    def test_set_vector_db_subprocess_enabled(self):
+        """Test enabling vector subprocess adapters through generic set method."""
+        config.set("vector_db_subprocess_enabled", True)
+
     def test_set_chunk_size(self):
         """Test setting chunk size through generic set method."""
         config.set("chunk_size", 2048)

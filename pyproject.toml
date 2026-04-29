@@ -211,7 +211,7 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["cognee", "distributed"]
+packages = ["cognee", "cognee_db_workers", "distributed"]
 
 [tool.uv]
 constraint-dependencies = [

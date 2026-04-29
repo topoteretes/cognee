@@ -4,9 +4,10 @@ import inspect
 import os
 from numbers import Number
 
-from functools import lru_cache
+from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
+from .kuzu.adapter import DEFAULT_KUZU_BUFFER_POOL_SIZE, DEFAULT_KUZU_MAX_DB_SIZE
 from .config import get_graph_context_config
 from .graph_db_interface import GraphDBInterface
 from .supported_databases import supported_databases
@@ -76,6 +77,10 @@ def create_graph_engine(
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
+    graph_database_subprocess_enabled=False,
+    kuzu_num_threads=0,
+    kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
+    kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
 ):
     """
     Wrapper function to call create graph engine with caching.
@@ -113,10 +118,14 @@ def create_graph_engine(
         graph_database_port,
         graph_database_key,
         graph_dataset_database_handler,
+        graph_database_subprocess_enabled,
+        kuzu_num_threads,
+        kuzu_buffer_pool_size,
+        kuzu_max_db_size,
     )
 
 
-@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_graph_engine(
     graph_database_provider,
     graph_file_path,
@@ -128,6 +137,10 @@ def _create_graph_engine(
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
+    graph_database_subprocess_enabled=False,
+    kuzu_num_threads=0,
+    kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
+    kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -197,7 +210,60 @@ def _create_graph_engine(
 
         from .kuzu.adapter import KuzuAdapter
 
-        return KuzuAdapter(db_path=graph_file_path)
+        if graph_database_subprocess_enabled:
+            # Kuzu expects the parent directory of its db file to already exist.
+            # The local-mode adapter does this in _initialize_connection; in
+            # subprocess mode we do the equivalent here before spinning up the
+            # worker.
+            db_parent = os.path.dirname(os.path.abspath(graph_file_path))
+            if db_parent:
+                os.makedirs(db_parent, exist_ok=True)
+
+            from .kuzu.subprocess.proxy import (
+                KuzuSubprocessSession,
+                RemoteKuzuConnection,
+                RemoteKuzuDatabase,
+                install_json_extension,
+            )
+
+            session = KuzuSubprocessSession.start()
+            try:
+                install_json_extension(session, kuzu_buffer_pool_size)
+                db = RemoteKuzuDatabase(
+                    session,
+                    db_path=graph_file_path,
+                    buffer_pool_size=kuzu_buffer_pool_size,
+                    max_num_threads=kuzu_num_threads,
+                    max_db_size=kuzu_max_db_size,
+                )
+                db.init_database()
+                conn = RemoteKuzuConnection(session, db)
+                # ``install_json_extension`` on the preceding line already
+                # installed the extension inside the worker; loading it onto
+                # the real connection should succeed. If it doesn't, fail
+                # loudly here rather than letting the first JSON-touching
+                # query blow up with a confusing error inside the worker.
+                conn.load_extension("JSON")
+            except Exception:
+                session.shutdown(timeout=2.0)
+                raise
+
+            return KuzuAdapter(
+                db_path=graph_file_path,
+                kuzu_num_threads=kuzu_num_threads,
+                kuzu_buffer_pool_size=kuzu_buffer_pool_size,
+                kuzu_max_db_size=kuzu_max_db_size,
+                database=db,
+                connection=conn,
+                session=session,
+            )
+
+        return KuzuAdapter(
+            db_path=graph_file_path,
+            kuzu_num_threads=kuzu_num_threads,
+            kuzu_buffer_pool_size=kuzu_buffer_pool_size,
+            kuzu_max_db_size=kuzu_max_db_size,
+        )
 
     elif graph_database_provider == "kuzu-remote":
         if not graph_database_url:

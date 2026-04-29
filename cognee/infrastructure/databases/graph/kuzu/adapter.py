@@ -24,6 +24,7 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
@@ -34,6 +35,8 @@ from cognee.modules.observability.tracing import (
 
 logger = get_logger()
 
+DEFAULT_KUZU_BUFFER_POOL_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+DEFAULT_KUZU_MAX_DB_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
 
 cache_config = get_cache_config()
 if cache_config.shared_kuzu_lock:
@@ -50,22 +53,106 @@ class KuzuAdapter(GraphDBInterface):
     well as for graph metrics and data extraction.
     """
 
-    def __init__(self, db_path: str):
-        """Initialize Kuzu database connection and schema."""
+    def __init__(
+        self,
+        db_path: str,
+        kuzu_num_threads: int = 0,
+        kuzu_buffer_pool_size: int = DEFAULT_KUZU_BUFFER_POOL_SIZE,
+        kuzu_max_db_size: int = DEFAULT_KUZU_MAX_DB_SIZE,
+        *,
+        database: Optional[Any] = None,
+        connection: Optional[Any] = None,
+        session: Optional[Any] = None,
+    ):
+        """Initialize Kuzu database connection and schema.
+
+        Parameters
+        ----------
+        db_path:
+            Path to the Kuzu database directory.
+        kuzu_num_threads:
+            Maximum number of threads Kuzu uses to execute queries. ``0`` keeps
+            Kuzu's internal default (one per CPU).
+        kuzu_buffer_pool_size:
+            Maximum size of the Kuzu buffer pool in bytes.
+        kuzu_max_db_size:
+            Maximum on-disk database size in bytes. Configurable via the
+            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); some users
+            need this above the default 4 GB for large graphs.
+        database, connection, session:
+            Optional pre-built Database/Connection and a subprocess session.
+            When supplied, the adapter runs in subprocess-proxy mode: the
+            native kuzu.Database/Connection live in a dedicated worker process
+            and ``database``/``connection`` are main-side proxies. In this mode
+            the adapter does NOT rebuild the connection lazily on close; the
+            lifecycle is owned by the factory + LRU cache.
+        """
         self.open_connections = 0
-        self._is_closed = False
         self.db_path = db_path  # Path for the database directory
-        self.db: Optional[Database] = None
-        self.connection: Optional[Connection] = None
+        self.kuzu_num_threads = kuzu_num_threads
+        self.kuzu_buffer_pool_size = kuzu_buffer_pool_size
+        self.kuzu_max_db_size = kuzu_max_db_size
+        self._session = session
+        injected = database is not None and connection is not None
+        # Remember that this adapter was constructed in subprocess-proxy mode.
+        # After close(), we must NOT silently fall through to a local
+        # kuzu.Database re-init on the same db_path — that would conflict with
+        # any surviving subprocess holding the Kuzu file lock. If a caller
+        # tries to reuse a closed subprocess-mode adapter we raise explicitly.
+        self._subprocess_mode = injected
+        self._permanently_closed = False
+        self.db: Optional[Database] = database
+        self.connection: Optional[Connection] = connection
+
+        # Always construct the executor — the shared-lock query path still
+        # runs ``blocking_query`` through ``loop.run_in_executor(self.executor,
+        # ...)`` and would hit AttributeError without it.
+        self.executor = ThreadPoolExecutor()
+
         if cache_config.shared_kuzu_lock:
+            if injected:
+                raise RuntimeError(
+                    "Kuzu subprocess mode is incompatible with shared_kuzu_lock."
+                )
             self.redis_lock = get_cache_engine(
                 lock_key="kuzu-lock-" + str(uuid5(NAMESPACE_OID, db_path))
             )
         else:
-            self.executor = ThreadPoolExecutor()
-            self._initialize_connection()
+            if injected:
+                self._ensure_schema()
+            else:
+                self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
-        self._connection_change_lock = asyncio.Lock()
+        self._connection_lock = asyncio.Lock()
+
+    def _ensure_schema(self) -> None:
+        """Create Node + EDGE tables on the current ``self.connection``.
+
+        Extracted from ``_initialize_connection`` so the subprocess path (where
+        the native db/connection are constructed by the factory) can still run
+        the same schema bootstrap.
+        """
+        assert self.connection is not None
+        self.connection.execute("""
+            CREATE NODE TABLE IF NOT EXISTS Node(
+                id STRING PRIMARY KEY,
+                name STRING,
+                type STRING,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                properties STRING
+            )
+        """)
+        self.connection.execute("""
+            CREATE REL TABLE IF NOT EXISTS EDGE(
+                FROM Node TO Node,
+                relationship_name STRING,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                properties STRING
+            )
+        """)
+        logger.debug("Kuzu database schema ensured")
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -81,8 +168,8 @@ class KuzuAdapter(GraphDBInterface):
                     temp_graph_file = temp_file.name
                     tmp_db = Database(
                         temp_graph_file,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                        buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
+                        max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
                     )
                     tmp_db.init_database()
                     connection = Connection(tmp_db)
@@ -101,8 +188,9 @@ class KuzuAdapter(GraphDBInterface):
 
                 self.db = Database(
                     self.temp_graph_file,
-                    buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                    max_db_size=4096 * 1024 * 1024,
+                    buffer_pool_size=self.kuzu_buffer_pool_size,
+                    max_num_threads=self.kuzu_num_threads,
+                    max_db_size=self.kuzu_max_db_size,
                 )
             else:
                 # Ensure the parent directory exists before creating the database
@@ -122,8 +210,9 @@ class KuzuAdapter(GraphDBInterface):
                 try:
                     self.db = Database(
                         self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                        buffer_pool_size=self.kuzu_buffer_pool_size,
+                        max_num_threads=self.kuzu_num_threads,
+                        max_db_size=self.kuzu_max_db_size,
                     )
                 except RuntimeError:
                     from .kuzu_migrate import read_kuzu_storage_version
@@ -146,8 +235,9 @@ class KuzuAdapter(GraphDBInterface):
 
                     self.db = Database(
                         self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                        buffer_pool_size=self.kuzu_buffer_pool_size,
+                        max_num_threads=self.kuzu_num_threads,
+                        max_db_size=self.kuzu_max_db_size,
                     )
 
             self.db.init_database()
@@ -217,9 +307,9 @@ class KuzuAdapter(GraphDBInterface):
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
-        Execute a Kuzu query asynchronously with automatic reconnection.
+        Execute a Kuzu query asynchronously.
 
-        This method runs a database query while managing potential reconnections. It handles
+        This method runs a database query while managing lazy connection initialization. It handles
         parameters in a dictionary and processes results to return structured data. The method
         raises any exceptions encountered during query execution.
 
@@ -242,17 +332,9 @@ class KuzuAdapter(GraphDBInterface):
             loop = asyncio.get_running_loop()
             params = params or {}
 
-            def blocking_query():
-                lock_acquired = False
+            def blocking_query(connection):
                 try:
-                    if cache_config.shared_kuzu_lock:
-                        self.redis_lock.acquire_lock()
-                        lock_acquired = True
-                    if not self.connection:
-                        logger.info("Reconnecting to Kuzu database...")
-                        self._initialize_connection()
-
-                    result = self.connection.execute(query, params)
+                    result = connection.execute(query, params)
                     rows = []
 
                     while result.has_next():
@@ -268,47 +350,128 @@ class KuzuAdapter(GraphDBInterface):
                 except Exception as e:
                     logger.error(f"Query execution failed: {str(e)}")
                     raise
-                finally:
-                    if cache_config.shared_kuzu_lock and lock_acquired:
-                        try:
-                            self.close()
-                        finally:
-                            self.redis_lock.release_lock()
 
             try:
                 if cache_config.shared_kuzu_lock:
-                    async with self._connection_change_lock:
+                    # Shared-lock path: the Redis lock MUST be acquired before
+                    # any native ``kuzu.Database`` is opened on this file.
+                    # Opening Kuzu takes the on-disk file lock, and if we open
+                    # first we race the previous Redis-lock holder that's
+                    # still releasing its own native handles.
+                    assert self.redis_lock is not None
+                    self.redis_lock.acquire_lock()
+                    try:
+                        async with self._connection_lock:
+                            connection = self.get_or_init_connection()
                         self.open_connections += 1
                         logger.info(f"Open connections after open: {self.open_connections}")
                         try:
-                            result = blocking_query()
+                            result = await loop.run_in_executor(
+                                self.executor, blocking_query, connection
+                            )
                         finally:
                             self.open_connections -= 1
-                            logger.info(f"Open connections after close: {self.open_connections}")
+                            logger.info(
+                                f"Open connections after close: {self.open_connections}"
+                            )
+                            # Drop native handles BEFORE releasing the Redis
+                            # lock so the next holder can take the on-disk
+                            # file lock without fighting us.
+                            async with self._connection_lock:
+                                self._drop_native_resources()
+                    finally:
+                        self.redis_lock.release_lock()
                 else:
-                    result = await loop.run_in_executor(self.executor, blocking_query)
+                    # Hold _connection_lock only for initialization, not for
+                    # the full query execution.
+                    async with self._connection_lock:
+                        connection = self.get_or_init_connection()
+                    result = await loop.run_in_executor(
+                        self.executor, blocking_query, connection
+                    )
 
                 otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
                 return result
             except Exception as e:
                 otel_span.set_status(StatusCode.ERROR, str(e))
                 otel_span.record_exception(e)
+                raise
 
-    def close(self):
-        if self.connection:
-            del self.connection
-            self.connection = None
-        if self.db:
-            del self.db
-            self.db = None
-        self._is_closed = True
-        logger.info("Kuzu database closed successfully")
+    def get_or_init_connection(self) -> Connection:
+        """Return the current connection, initializing it first if needed.
 
-    def reopen(self):
-        if self._is_closed:
-            self._is_closed = False
+        In subprocess-proxy mode we never fall through to a local
+        ``kuzu.Database`` init — that would open the same DB path in the main
+        process and conflict with any surviving subprocess on the Kuzu file
+        lock. A closed subprocess-mode adapter is a permanent error state.
+
+        Callers must hold ``_connection_lock`` to prevent races with
+        explicit calls to ``close()``.
+        """
+        if not self.connection:
+            if self._subprocess_mode or self._permanently_closed:
+                raise RuntimeError(
+                    "KuzuAdapter is closed; a new adapter must be created "
+                    "(subprocess-mode adapters cannot be re-initialized)."
+                )
             self._initialize_connection()
-            logger.info("Kuzu database re-opened successfully")
+        assert self.connection is not None
+        return self.connection
+
+    def _drop_native_resources(self) -> None:
+        """Synchronously drop the native Kuzu Database + Connection handles.
+
+        Does **not** latch ``_permanently_closed`` and does **not** touch the
+        subprocess session. Used by the shared_kuzu_lock per-query path (where
+        we want to release the on-disk file lock between queries) and by
+        ``delete_graph`` (which needs the file handles closed before removing
+        the db directory). The adapter remains reusable — a subsequent query
+        will lazily re-initialize via ``get_or_init_connection``.
+        """
+        if self.connection is not None:
+            try:
+                self.connection.close()
+            except Exception as e:
+                logger.warning(f"Error closing Kuzu connection: {e}")
+            self.connection = None
+        if self.db is not None:
+            try:
+                self.db.close()
+            except Exception as e:
+                logger.warning(f"Error closing Kuzu database: {e}")
+            self.db = None
+
+    async def close(self):
+        """Permanently close the adapter, releasing native resources and (in
+        subprocess mode) shutting down the worker process.
+
+        Intentionally does **not** hold ``_connection_lock``: that lock is an
+        ``asyncio.Lock`` bound to the loop on which the adapter was created.
+        LRU eviction may invoke ``close()`` from a different loop (for
+        example via ``asyncio.run`` in ``closing_lru_cache._close_value``),
+        and awaiting a foreign-loop lock raises "got Future attached to a
+        different loop". After this call the adapter is not reusable — see
+        ``_drop_native_resources`` if you want a transient drop.
+
+        Shuts down our ``ThreadPoolExecutor`` with ``wait=True`` first — this
+        serves two purposes: (a) drains any in-flight ``blocking_query``
+        submissions, preventing a race where ``close()`` tears down
+        ``self.connection`` while an executor thread is still mid-
+        ``connection.execute``; (b) reaps the executor threads that would
+        otherwise leak on every LRU eviction.
+        """
+        executor = getattr(self, "executor", None)
+        if executor is not None:
+            executor.shutdown(wait=True)
+        self._drop_native_resources()
+        if self._session is not None:
+            try:
+                self._session.shutdown()
+            except Exception as e:
+                logger.warning(f"Error shutting down Kuzu subprocess: {e}")
+            self._session = None
+        self._permanently_closed = True
+        logger.info("Kuzu database closed successfully")
 
     @asynccontextmanager
     async def get_session(self):
@@ -2026,12 +2189,12 @@ class KuzuAdapter(GraphDBInterface):
         It raises exceptions for failures occurring during deletion processes.
         """
         try:
-            if self.connection:
-                self.connection.close()
-                self.connection = None
-            if self.db:
-                self.db.close()
-                self.db = None
+            # Transient drop: release the file handles so we can delete the
+            # db files, but do NOT latch ``_permanently_closed`` — callers
+            # expect to keep using this adapter after ``delete_graph`` and
+            # have the store lazily reinitialize.
+            async with self._connection_lock:
+                self._drop_native_resources()
 
             db_dir = os.path.dirname(self.db_path)
             db_name = os.path.basename(self.db_path)

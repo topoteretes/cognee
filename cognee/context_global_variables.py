@@ -160,6 +160,9 @@ class DatabaseContextManager:
             "vector_db_password": dataset_database.vector_database_connection_info.get(
                 "password", ""
             ),
+            # Inherit subprocess mode from the global config so that per-dataset DB wrappers
+            # are also spawned as subprocesses when the feature is enabled.
+            "vector_db_subprocess_enabled": get_vectordb_config().vector_db_subprocess_enabled,
         }
 
         graph_config = {
@@ -178,6 +181,12 @@ class DatabaseContextManager:
             ),
             "graph_dataset_database_handler": "",
             "graph_database_port": "",
+            # Inherit subprocess mode and Kuzu tuning from the global config so that
+            # per-dataset DB wrappers are spawned with matching settings.
+            "graph_database_subprocess_enabled": get_graph_config().graph_database_subprocess_enabled,
+            "kuzu_num_threads": get_graph_config().kuzu_num_threads,
+            "kuzu_buffer_pool_size": get_graph_config().kuzu_buffer_pool_size,
+            "kuzu_max_db_size": get_graph_config().kuzu_max_db_size,
         }
 
         storage_config = {

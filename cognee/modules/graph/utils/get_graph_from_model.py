@@ -7,6 +7,27 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
+# Memoized simple-node pydantic classes. Without this, every call to
+# ``get_graph_from_model`` — one per DataPoint added to the graph — re-ran
+# ``copy_model`` and minted a new ``BaseModel`` subclass, each of which
+# attached fresh ``FieldInfo`` / ``SchemaValidator`` / ``SchemaSerializer``
+# state to pydantic's global caches and never released it. Tracemalloc
+# attributed +~50 MB per large-text cognify cycle to pydantic internals;
+# this cache is keyed by ``(DataPoint subclass, sorted excluded fields)`` so
+# different call sites with the same shape share one class.
+_SIMPLE_MODEL_CACHE: dict = {}
+
+
+def _simple_model_for(data_point_type, excluded_fields):
+    key = (data_point_type, tuple(sorted(excluded_fields)))
+    cached = _SIMPLE_MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    model = copy_model(data_point_type, exclude_fields=list(excluded_fields))
+    _SIMPLE_MODEL_CACHE[key] = model
+    return model
+
+
 def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
     """Extract edge metadata and datapoints from a field value."""
     # Handle single DataPoint
@@ -220,9 +241,7 @@ async def get_graph_from_model(
 
     # Create node for current DataPoint if needed
     if include_root and data_point_id not in added_nodes:
-        SimpleDataPointModel = copy_model(
-            type(data_point), exclude_fields=list(excluded_properties)
-        )
+        SimpleDataPointModel = _simple_model_for(type(data_point), excluded_properties)
         nodes.append(SimpleDataPointModel(**data_point_properties))
         added_nodes[data_point_id] = True
 
