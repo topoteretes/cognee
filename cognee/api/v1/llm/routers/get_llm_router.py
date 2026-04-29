@@ -29,6 +29,35 @@ UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"}
 
 _ALLOWED_LLM_PARAMS = {"temperature", "max_tokens", "top_p", "seed"}
 
+import re
+
+def _extract_json(raw: str) -> dict:
+    """Extract a JSON object from LLM output that may contain markdown fences or surrounding text."""
+    if not raw or not raw.strip():
+        raise json.JSONDecodeError("LLM returned empty output", raw or "", 0)
+
+    text = raw.strip()
+
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if fence_match:
+        text = fence_match.group(1).strip()
+
+    # Try parsing directly
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Last resort: find the first { ... } block
+    brace_match = re.search(r"\{.*\}", text, re.DOTALL)
+    if brace_match:
+        return json.loads(brace_match.group(0))
+
+    raise json.JSONDecodeError(
+        "Could not extract valid JSON from LLM output", raw, 0
+    )
+
 
 def _safe_params(params: dict) -> dict:
     return {k: v for k, v in params.items() if k in _ALLOWED_LLM_PARAMS}
@@ -196,8 +225,11 @@ def get_llm_router() -> APIRouter:
                 **_safe_params(parameters),
             )
 
-            # Parse the LLM output as JSON
-            schema_dict = json.loads(llm_output)
+            # Parse the LLM output as JSON.
+            # The LLM may wrap the JSON in markdown fences or add surrounding
+            # text even though the system prompt asks for raw JSON only.
+            # Strip common wrappers before parsing.
+            schema_dict = _extract_json(llm_output)
 
             # Validate by attempting conversion — raises if schema is invalid
             from cognee.shared.graph_model_utils import graph_schema_to_graph_model
