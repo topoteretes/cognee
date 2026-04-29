@@ -4,15 +4,34 @@
  * containing Composer, ResultPanel, and graph iframe wrapped in a stage.
  */
 import "./design.css";
+// d3 ships a UMD bundle but its package.json `exports` doesn't expose it
+// under any modern condition Vite resolves with, so we read the file
+// directly from node_modules. The relative path is stable (npm install
+// always lands d3 here) and avoids a separate copy step.
+import d3MinJs from "../node_modules/d3/dist/d3.min.js?raw";
 import type { App, McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { StrictMode, useEffect, useRef, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_WORKSPACE_HEIGHT = 800;
 const DEFAULT_WORKSPACE_HEIGHT = 720;
+
+// Cognee's graph HTML loads d3 via <script src="https://d3js.org/d3.v7.min.js">.
+// MCP App iframes apply a Content-Security-Policy that blocks external script
+// loads, so we substitute the CDN tag with d3 inlined from our npm dependency
+// before handing the HTML to the iframe via srcDoc.
+//
+// Use the function form of `replace` so JS's $-substitution rules don't fire
+// inside the d3 source (which contains regex code with `$1`, `$'`, etc.).
+const D3_CDN_TAG_RE = /<script\s+src="https:\/\/d3js\.org\/d3\.v7\.min\.js"\s*><\/script>/;
+const D3_INLINE_SCRIPT = `<script>${d3MinJs.replace(/<\/script>/g, "<\\/script>")}</script>`;
+
+function inlineD3(html: string): string {
+  return html.replace(D3_CDN_TAG_RE, () => D3_INLINE_SCRIPT);
+}
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -386,28 +405,30 @@ function DatasetRail({
                 className={`ds-row${isActive ? " active" : ""}${
                   isExpanded ? " expanded" : ""
                 }`}
-                onClick={() => onSelectDataset(d.name)}
               >
                 <button
                   type="button"
                   className="ds-caret"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleExpand(d.id);
-                  }}
+                  onClick={() => toggleExpand(d.id)}
                   aria-label={isExpanded ? "Collapse" : "Expand"}
+                  aria-expanded={isExpanded}
                 >
                   <Icon name="caret" size={14} />
                 </button>
-                <span className="ds-name">{d.name}</span>
+                <button
+                  type="button"
+                  className="ds-name"
+                  onClick={() => onSelectDataset(d.name)}
+                  aria-pressed={isActive}
+                  title={`Select ${d.name}`}
+                >
+                  {d.name}
+                </button>
                 <button
                   type="button"
                   className="ds-x"
                   title={`Delete ${d.name}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmingDataset(d.name);
-                  }}
+                  onClick={() => setConfirmingDataset(d.name)}
                 >
                   <Icon name="x" size={12} />
                 </button>
@@ -576,7 +597,10 @@ function Composer({
       const result = await app.callServerTool({ name: "cognify", arguments: args });
       const msg = textOf(result) ?? JSON.stringify(result.content);
       setStatus(result.isError ? `Error: ${msg}` : msg);
-      if (!result.isError) setText("");
+      if (!result.isError) {
+        setText("");
+        onIngestSucceeded();
+      }
     } catch (err) {
       setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -778,6 +802,9 @@ function GraphStage({
   status: string;
   busy: boolean;
 }) {
+  // d3 source is ~280 KB; recompute the inlined HTML only when the upstream
+  // graph HTML actually changes, not on every parent re-render.
+  const srcDoc = useMemo(() => (html ? inlineD3(html) : null), [html]);
   return (
     <div className="graph-wrap">
       <div className="gtabs">
@@ -786,11 +813,11 @@ function GraphStage({
         </button>
       </div>
       <div className="gstage">
-        {html ? (
+        {srcDoc ? (
           <iframe
             title="Cognee Knowledge Graph"
-            srcDoc={html}
-            sandbox="allow-scripts allow-same-origin"
+            srcDoc={srcDoc}
+            sandbox="allow-scripts"
           />
         ) : (
           <div className="empty-state">

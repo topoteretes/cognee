@@ -11,6 +11,7 @@
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.7.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "d3": "^7.9.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },

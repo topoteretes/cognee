@@ -75,7 +75,12 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
     ```
     LLM_API_KEY="YOUR_OPENAI_API_KEY"
     ```
-7. Run cognee mcp server with stdio (default)
+7. (Optional, only if you want the MCP App workspace UI) Build the inline workspace bundle. Requires Node.js.
+    ```
+    cd apps-src && npm install && npm run build && cd ..
+    ```
+    This produces `src/app_bundles/visualize-graph.html`, which is gitignored. If you skip this step, `visualize_graph_ui` and the workspace tools will raise a clear error pointing back to this command.
+8. Run cognee mcp server with stdio (default)
     ```
     python src/server.py
     ```
@@ -505,6 +510,8 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
 
+The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html` and is built from `cognee-mcp/apps-src/` via `npm run build` (see [Quick Start](#-quick-start) step 7). The bundle is gitignored — if it's missing the workspace tools raise a `FileNotFoundError` pointing back to the build command.
+
 ### Agent Scoping (per-client default datasets)
 
 By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client calls a workspace tool.
@@ -530,11 +537,12 @@ Agent scoping decides which dataset *name* a tool defaults to. Whether two datas
 
 ```bash
 # Stop server, then:
-rm -rf <DATA_ROOT>/.cognee_system <DATA_ROOT>/.data_storage
+DATA_ROOT="/absolute/path/to/data-root"
+rm -rf "$DATA_ROOT/.cognee_system" "$DATA_ROOT/.data_storage"
 # Edit .env to flip ENABLE_BACKEND_ACCESS_CONTROL, restart, re-cognify.
 ```
 
-(Replace `<DATA_ROOT>` with whatever you set via `DATA_ROOT_DIRECTORY` / `SYSTEM_ROOT_DIRECTORY`, or your cognee install dir if you didn't set them.)
+(Set `DATA_ROOT` to whatever you used for `DATA_ROOT_DIRECTORY` / `SYSTEM_ROOT_DIRECTORY`, or your cognee install dir if you didn't set those.)
 
 **Data Management Examples:**
 ```bash

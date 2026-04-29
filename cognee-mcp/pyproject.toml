@@ -28,6 +28,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# The MCP App workspace bundle is gitignored (built artifact). Force-include
+# it into wheels so PyPI users get it when the bundle is built before
+# `hatch build` (handled in the release pipeline).
+"src/app_bundles" = "src/app_bundles"
+
 [dependency-groups]
 dev = [
     "debugpy>=1.8.12,<2.0.0",

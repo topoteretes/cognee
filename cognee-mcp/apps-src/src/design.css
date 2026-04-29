@@ -165,7 +165,6 @@
 .ds-row {
   display: flex; align-items: center; gap: 6px;
   padding: 6px 8px; border-radius: 6px;
-  cursor: pointer;
   transition: background 150ms var(--cg-ease);
   position: relative;
 }
@@ -185,16 +184,34 @@
   color: var(--cg-fg-dark);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   flex: 1; min-width: 0;
+  /* button reset */
+  border: none; background: transparent; padding: 0; margin: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
 }
 .ds-row.active .ds-name { color: var(--cg-purple); }
+.ds-row .ds-name:focus-visible {
+  outline: 2px solid var(--cg-purple);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .ds-row .ds-x {
   width: 18px; height: 18px; border-radius: 4px;
   border: none; background: transparent; cursor: pointer;
   color: var(--cg-fg-muted);
-  display: none; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center;
   flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms var(--cg-ease);
 }
-.ds-row:hover .ds-x { display: inline-flex; }
+.ds-row:hover .ds-x,
+.ds-row:focus-within .ds-x,
+.ds-row .ds-x:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
 .ds-row .ds-x:hover { background: #fff; color: var(--cg-status-error); }
 
 .ds-confirm {
@@ -240,10 +257,18 @@
   width: 16px; height: 16px; border-radius: 4px;
   border: none; background: transparent; cursor: pointer;
   color: var(--cg-fg-muted);
-  display: none; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center;
   flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms var(--cg-ease);
 }
-.ds-item:hover .di-x { display: inline-flex; }
+.ds-item:hover .di-x,
+.ds-item:focus-within .di-x,
+.ds-item .di-x:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
 .ds-item .di-x:hover { background: var(--cg-bg-pressed); color: var(--cg-status-error); }
 .ds-item.empty { color: var(--cg-fg-muted); font-style: italic; }
 .di-confirm {
@@ -432,10 +457,10 @@
   padding: 12px 16px 14px;
   display: flex; gap: 12px;
   position: relative;
-  animation: fadeUp 250ms var(--cg-ease) both;
+  animation: fade-up 250ms var(--cg-ease) both;
   max-height: 240px; overflow-y: auto;
 }
-@keyframes fadeUp {
+@keyframes fade-up {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }

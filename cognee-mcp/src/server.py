@@ -1280,19 +1280,22 @@ _VISUALIZE_APP_URI = "ui://cognee-visualize/graph.html"
 )
 def _visualize_graph_ui_resource() -> str:
     bundle = Path(__file__).parent / "app_bundles" / "visualize-graph.html"
+    if not bundle.is_file():
+        raise FileNotFoundError(
+            f"MCP App bundle not found at {bundle}. "
+            "Build it with: cd cognee-mcp/apps-src && npm install && npm run build"
+        )
     return bundle.read_text(encoding="utf-8")
 
-
-# Cognee's visualization template loads d3 from a CDN; MCP App hosts apply a
-# strict CSP to UI resources that blocks it. Inline d3 into the HTML so the
-# graph renders without network access. visualize_graph itself is unchanged.
-_D3_CDN_TAG = '<script src="https://d3js.org/d3.v7.min.js"></script>'
-_d3_source: str | None = None
 
 # CSS overrides appended to cognee's graph HTML so it fits the MCP App
 # iframe better: the floating bottom control bar can wrap to multiple
 # rows when the iframe is narrow, and the standalone "Light mode"
 # toggle is hidden (the workspace owns theming).
+#
+# Note: d3 is loaded from a CDN by cognee's HTML, which the MCP App iframe
+# blocks via CSP. The workspace bundles d3 from its npm dependency and
+# substitutes the CDN <script> tag client-side before assigning srcDoc.
 _GRAPH_VIZ_OVERRIDES = """
 <style>
 #theme-toggle { display: none !important; }
@@ -1307,20 +1310,6 @@ _GRAPH_VIZ_OVERRIDES = """
 #controls .ctrl-sep { margin: 2px 2px; }
 </style>
 """
-
-
-async def _inline_d3(html: str) -> str:
-    global _d3_source
-    if _D3_CDN_TAG not in html:
-        return html
-    if _d3_source is None:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://d3js.org/d3.v7.min.js")
-            resp.raise_for_status()
-            _d3_source = resp.text.replace("</script>", "<\\/script>")
-    return html.replace(_D3_CDN_TAG, f"<script>{_d3_source}</script>")
 
 
 def _inject_graph_viz_overrides(html: str) -> str:
@@ -1349,7 +1338,26 @@ async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
     """
     from cognee.api.v1.visualize import visualize_graph
 
+    explicit_dataset = dataset_name is not None
     dataset_name = dataset_name or _agent_scoped_default_dataset()
+
+    # Per-dataset graph routing requires direct mode (we set the database
+    # context locally); in API mode the API server controls its own graph
+    # source. Reject explicit dataset selection there instead of silently
+    # falling back to a different graph.
+    if explicit_dataset and cognee_client.use_api:
+        return types.CallToolResult(
+            isError=True,
+            content=[
+                types.TextContent(
+                    type="text",
+                    text=(
+                        "Error: per-dataset graph rendering is only supported in direct mode. "
+                        "Drop the dataset_name argument or run cognee-mcp without --api-url."
+                    ),
+                )
+            ],
+        )
 
     with redirect_stdout(sys.stderr):
         html: str | None = None
@@ -1363,7 +1371,6 @@ async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
         if html is None:
             html = await visualize_graph()
 
-    html = await _inline_d3(html)
     html = _inject_graph_viz_overrides(html)
 
     return types.CallToolResult(
@@ -1479,8 +1486,7 @@ async def cognify_file(
             type="text",
             text=(
                 f"Ingested '{filename}' ({len(data):,} bytes) into dataset '{dataset_name}'. "
-                f"Cognify running in background — use cognify_status to track, "
-                f"or re-run visualize_graph_ui once it finishes."
+                f"Cognify is running in the background; refresh the workspace once it finishes."
             ),
         )
     ]
