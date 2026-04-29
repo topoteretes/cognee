@@ -112,7 +112,11 @@ async def forget(
             span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
             return result
 
-        if graph_only and dataset is not None:
+        if graph_only:
+            if dataset is None:
+                raise ValueError("graph_only requires dataset to be specified.")
+            if data_id is not None:
+                raise ValueError("graph_only cannot be combined with data_id.")
             return await _forget_dataset_graph(dataset, user)
 
         if dataset is not None and data_id is not None:
