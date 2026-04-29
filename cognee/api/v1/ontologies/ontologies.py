@@ -156,6 +156,20 @@ class OntologyService:
                 contents.append(f.read())
         return contents
 
+    def delete_ontology(self, ontology_key: str, user) -> None:
+        user_dir = self._get_user_dir(str(user.id))
+        metadata = self._load_metadata(user_dir)
+
+        if ontology_key not in metadata:
+            raise ValueError(f"Ontology key '{ontology_key}' not found")
+
+        file_path = user_dir / f"{ontology_key}.owl"
+        if file_path.exists():
+            file_path.unlink()
+
+        del metadata[ontology_key]
+        self._save_metadata(user_dir, metadata)
+
     def list_ontologies(self, user) -> dict:
         user_dir = self._get_user_dir(str(user.id))
         return self._load_metadata(user_dir)

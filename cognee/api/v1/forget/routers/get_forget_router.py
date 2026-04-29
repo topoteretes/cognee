@@ -17,6 +17,12 @@ class ForgetPayloadDTO(InDTO):
     data_id: Optional[UUID] = Field(default=None)
     dataset: Optional[Union[str, UUID]] = Field(default=None)
     everything: bool = Field(default=False)
+    memory_only: bool = Field(
+        default=False,
+        description="When True with a dataset, delete only memory (graph nodes/edges and vector embeddings) "
+        "and reset pipeline status — raw files and data records are preserved. "
+        "This allows re-cognifying the dataset from scratch.",
+    )
 
 
 def get_forget_router() -> APIRouter:
@@ -32,6 +38,10 @@ def get_forget_router() -> APIRouter:
         - Set `everything: true` to delete all user data.
         - Set `dataset` alone to delete an entire dataset.
         - Set `dataset` + `data_id` to delete a single item.
+        - Set `dataset` + `memory_only: true` to clear memory
+          (graph + vector), preserving raw files so the dataset can be re-cognified.
+        - Set `dataset` + `data_id` + `memory_only: true` to clear memory
+          for a single file only.
         """
         send_telemetry(
             "Forget API Endpoint Invoked",
@@ -49,6 +59,7 @@ def get_forget_router() -> APIRouter:
                 data_id=payload.data_id,
                 dataset=payload.dataset,
                 everything=payload.everything,
+                memory_only=payload.memory_only,
                 user=user,
             )
             return result
