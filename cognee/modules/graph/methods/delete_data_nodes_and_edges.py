@@ -19,7 +19,6 @@ from cognee.modules.users.methods.get_user import get_user
 
 
 async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: UUID) -> None:
-
     user = await get_user(user_id)
 
     # Check if user has delete permissions for the dataset before proceeding with deletion of related graph/vector nodes and edges.

@@ -305,7 +305,9 @@ async def test_forget_routes_to_data_memory(monkeypatch):
         patch("cognee.low_level.setup", AsyncMock()),
         patch("cognee.modules.users.methods.get_default_user", AsyncMock(return_value=USER)),
     ):
-        result = await forget_module.forget(dataset="my-dataset", data_id=DATA_ID_A, memory_only=True)
+        result = await forget_module.forget(
+            dataset="my-dataset", data_id=DATA_ID_A, memory_only=True
+        )
 
     assert result["status"] == "success"
     mock_forget_data_memory.assert_awaited_once_with(DATA_ID_A, "my-dataset", USER)

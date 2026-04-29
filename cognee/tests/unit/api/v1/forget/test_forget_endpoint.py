@@ -50,7 +50,9 @@ def test_forget_endpoint_passes_memory_only_flag(client, mock_default_user):
         "status": "success",
     }
 
-    with patch("cognee.api.v1.forget.routers.get_forget_router.forget", new_callable=AsyncMock) as mock_forget:
+    with patch(
+        "cognee.api.v1.forget.routers.get_forget_router.forget", new_callable=AsyncMock
+    ) as mock_forget:
         mock_forget.return_value = expected_result
 
         response = client.post(
@@ -69,7 +71,9 @@ def test_forget_endpoint_passes_memory_only_flag(client, mock_default_user):
 
 def test_forget_endpoint_memory_only_defaults_to_false(client):
     """POST /v1/forget without memory_only should default to False."""
-    with patch("cognee.api.v1.forget.routers.get_forget_router.forget", new_callable=AsyncMock) as mock_forget:
+    with patch(
+        "cognee.api.v1.forget.routers.get_forget_router.forget", new_callable=AsyncMock
+    ) as mock_forget:
         mock_forget.return_value = {"status": "success", "datasets_removed": 0}
 
         response = client.post(
@@ -87,7 +91,9 @@ def test_forget_endpoint_memory_only_with_data_id(client):
     dataset_id = str(uuid.uuid4())
     data_id = str(uuid.uuid4())
 
-    with patch("cognee.api.v1.forget.routers.get_forget_router.forget", new_callable=AsyncMock) as mock_forget:
+    with patch(
+        "cognee.api.v1.forget.routers.get_forget_router.forget", new_callable=AsyncMock
+    ) as mock_forget:
         mock_forget.return_value = {
             "data_id": data_id,
             "dataset_id": dataset_id,

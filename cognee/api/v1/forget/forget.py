@@ -95,7 +95,9 @@ async def forget(
 
         client = get_remote_client()
         if client is not None:
-            result = await client.forget(data_id=data_id, dataset=dataset, everything=everything, memory_only=memory_only)
+            result = await client.forget(
+                data_id=data_id, dataset=dataset, everything=everything, memory_only=memory_only
+            )
             span.set_attribute(
                 COGNEE_RESULT_COUNT,
                 result.get("datasets_removed", 0) if isinstance(result, dict) else 0,
@@ -243,12 +245,10 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
     # 2. Reset pipeline_status on all data records in this dataset
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        data_ids_query = select(DatasetData.data_id).where(
-            DatasetData.dataset_id == dataset_id
-        )
+        data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset_id)
         data_records = (
-            await session.execute(select(Data).where(Data.id.in_(data_ids_query)))
-        ).scalars().all()
+            (await session.execute(select(Data).where(Data.id.in_(data_ids_query)))).scalars().all()
+        )
 
         dataset_id_str = str(dataset_id)
         for data_record in data_records:
@@ -266,7 +266,9 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
 
     logger.info(
         "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
-        dataset_id, user.id, len(data_records),
+        dataset_id,
+        user.id,
+        len(data_records),
     )
     return {
         "dataset_id": str(dataset_id),
@@ -306,8 +308,8 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         data_record = (
-            await session.execute(select(Data).where(Data.id == data_id))
-        ).scalars().first()
+            (await session.execute(select(Data).where(Data.id == data_id))).scalars().first()
+        )
 
         if data_record and data_record.pipeline_status:
             dataset_id_str = str(dataset_id)
@@ -322,7 +324,9 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
 
     logger.info(
         "forget: cleared memory for data_id=%s in dataset=%s, user=%s",
-        data_id, dataset_id, user.id,
+        data_id,
+        dataset_id,
+        user.id,
     )
     return {
         "data_id": str(data_id),
