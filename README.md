@@ -331,3 +331,17 @@ We recently published a research paper on optimizing knowledge graphs for LLM re
       url={https://arxiv.org/abs/2505.24478},
 }
 ```
+## Beginner-Friendly Example
+
+This example demonstrates a simple way to understand how the system works.
+
+### Step 1: Provide Input
+Give a small text input to the system.
+
+### Step 2: Process Input
+The system processes the input and constructs a knowledge representation.
+
+### Step 3: Output
+The output shows how information is structured and can be interpreted.
+
+This simple flow helps beginners understand the working of the project.
