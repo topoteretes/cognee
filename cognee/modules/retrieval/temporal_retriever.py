@@ -187,32 +187,46 @@ class TemporalRetriever(GraphCompletionRetriever):
                 has_relevant_events = any(event_groups)
 
         vector_search_results = retrieved_objects.get("vector_search_results")
-        if has_relevant_events and vector_search_results:
-            top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
-            return self.descriptions_to_string(top_k_events)
-
-        if retrieved_objects.get("graph_nodes", None):
-            nodes, edges = retrieved_objects.get("graph_nodes")
-            nodes_by_id = {
-                str(node_id): Node(str(node_id), properties) for node_id, properties in nodes
-            }
-            graph_edges = []
-            for source_id, target_id, relationship_type, properties in edges:
-                source_node = nodes_by_id.get(str(source_id))
-                target_node = nodes_by_id.get(str(target_id))
-                if source_node and target_node:
-                    edge_attributes = dict(properties or {})
-                    edge_attributes["relationship_type"] = relationship_type
-                    graph_edges.append(Edge(source_node, target_node, attributes=edge_attributes))
-
-            if not graph_edges and nodes_by_id:
-                return self.descriptions_to_string(
-                    [node.properties for node in nodes_by_id.values()]
+        if has_relevant_events:
+            if vector_search_results:
+                top_k_events = await self.filter_top_k_events(
+                    relevant_events, vector_search_results
                 )
+                return self.descriptions_to_string(top_k_events)
 
-            return await self.resolve_edges_to_text(graph_edges)
-        else:
-            # In case no events were found, fall back to triplet context
-            triplets = retrieved_objects.get("triplets", [])
-            context_text = await self.resolve_edges_to_text(triplets)
-            return context_text
+            fallback_events = [
+                event
+                for event_group in relevant_events
+                if isinstance(event_group, dict)
+                for event in event_group.get("events", [])
+            ]
+            if fallback_events:
+                return self.descriptions_to_string(fallback_events[: self.top_k])
+
+        graph_nodes = retrieved_objects.get("graph_nodes")
+        if graph_nodes:
+            nodes, edges = graph_nodes
+            if nodes or edges:
+                nodes_by_id = {
+                    str(node_id): Node(str(node_id), properties) for node_id, properties in nodes
+                }
+                graph_edges = []
+                for source_id, target_id, relationship_type, properties in edges:
+                    source_node = nodes_by_id.get(str(source_id))
+                    target_node = nodes_by_id.get(str(target_id))
+                    if source_node and target_node:
+                        edge_attributes = dict(properties or {})
+                        edge_attributes["relationship_type"] = relationship_type
+                        graph_edges.append(Edge(source_node, target_node, attributes=edge_attributes))
+
+                if not graph_edges and nodes_by_id:
+                    return self.descriptions_to_string(
+                        [node.attributes for node in nodes_by_id.values()]
+                    )
+
+                return await self.resolve_edges_to_text(graph_edges)
+
+        # In case no events were found, fall back to triplet context
+        triplets = retrieved_objects.get("triplets", [])
+        context_text = await self.resolve_edges_to_text(triplets)
+        return context_text
