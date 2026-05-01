@@ -7,6 +7,7 @@ from operator import itemgetter
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
@@ -137,6 +138,9 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         if ids:
             relevant_events = await graph_engine.collect_events(ids=ids)
+            ids_list = [i.strip().strip("'") for i in ids.split(",") if i.strip()]
+            graph_data = await graph_engine.get_id_filtered_graph_data(ids_list)
+            graph_nodes = graph_data if isinstance(graph_data, tuple) else ([], [])
         else:
             logger.info(
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
@@ -151,18 +155,46 @@ class TemporalRetriever(GraphCompletionRetriever):
             collection_name="Event_name", query_vector=query_vector, limit=self.top_k
         )
 
-        return {"relevant_events": relevant_events, "vector_search_results": vector_search_results}
+        return {
+            "relevant_events": relevant_events,
+            "graph_nodes": graph_nodes,
+            "vector_search_results": vector_search_results,
+        }
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any:
         """Retrieves context based on the query."""
-        if retrieved_objects.get("relevant_events", None) and retrieved_objects.get(
-            "vector_search_results", None
-        ):
+        relevant_events = retrieved_objects.get("relevant_events", None)
+        has_relevant_events = bool(relevant_events)
+        if has_relevant_events and isinstance(relevant_events, list):
+            event_groups = [
+                event_group.get("events")
+                for event_group in relevant_events
+                if isinstance(event_group, dict) and "events" in event_group
+            ]
+            if event_groups:
+                has_relevant_events = any(event_groups)
+
+        if has_relevant_events and retrieved_objects.get("vector_search_results", None):
             top_k_events = await self.filter_top_k_events(
                 retrieved_objects.get("relevant_events"),
                 retrieved_objects.get("vector_search_results", None),
             )
             return self.descriptions_to_string(top_k_events)
+        elif not has_relevant_events and retrieved_objects.get("graph_nodes", None):
+            nodes, edges = retrieved_objects.get("graph_nodes")
+            nodes_by_id = {
+                str(node_id): Node(str(node_id), properties) for node_id, properties in nodes
+            }
+            graph_edges = []
+            for source_id, target_id, relationship_type, properties in edges:
+                source_node = nodes_by_id.get(str(source_id))
+                target_node = nodes_by_id.get(str(target_id))
+                if source_node and target_node:
+                    edge_attributes = dict(properties or {})
+                    edge_attributes["relationship_type"] = relationship_type
+                    graph_edges.append(Edge(source_node, target_node, attributes=edge_attributes))
+
+            return await self.resolve_edges_to_text(graph_edges)
         else:
             # In case no events were found, fall back to triplet context
             triplets = retrieved_objects.get("triplets", [])
