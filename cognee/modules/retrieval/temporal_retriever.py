@@ -148,12 +148,16 @@ class TemporalRetriever(GraphCompletionRetriever):
             triplets = await self.get_triplets(query)
             return {"triplets": triplets}
 
-        vector_engine = unified.vector
-        query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
-
-        vector_search_results = await vector_engine.search(
-            collection_name="Event_name", query_vector=query_vector, limit=self.top_k
-        )
+        vector_search_results = []
+        if relevant_events and any(event_group.get("events") for event_group in relevant_events):
+            try:
+                vector_engine = unified.vector
+                query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
+                vector_search_results = await vector_engine.search(
+                    collection_name="Event_name", query_vector=query_vector, limit=self.top_k
+                )
+            except Exception:
+                vector_search_results = []
 
         return {
             "relevant_events": relevant_events,
@@ -193,6 +197,11 @@ class TemporalRetriever(GraphCompletionRetriever):
                     edge_attributes = dict(properties or {})
                     edge_attributes["relationship_type"] = relationship_type
                     graph_edges.append(Edge(source_node, target_node, attributes=edge_attributes))
+
+            if not graph_edges and nodes_by_id:
+                return self.descriptions_to_string(
+                    [node.properties for node in nodes_by_id.values()]
+                )
 
             return await self.resolve_edges_to_text(graph_edges)
         else:
