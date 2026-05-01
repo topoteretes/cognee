@@ -76,8 +76,28 @@ class datasets:
         return await has_dataset_data(dataset.id)
 
     @staticmethod
-    async def get_status(dataset_ids: list[UUID]) -> dict:
-        return await get_pipeline_status(dataset_ids, pipeline_name="cognify_pipeline")
+    async def get_status(
+        dataset_ids: list[UUID], pipeline_names: Optional[list[str]] = None
+    ) -> dict:
+        # Backward-compatible default behavior: cognify-only flat map.
+        if not pipeline_names:
+            return await get_pipeline_status(dataset_ids, pipeline_name="cognify_pipeline")
+
+        # Preserve order while removing duplicates.
+        requested_pipelines = list(dict.fromkeys(pipeline_names))
+
+        # For one pipeline, keep flat shape.
+        if len(requested_pipelines) == 1:
+            return await get_pipeline_status(dataset_ids, pipeline_name=requested_pipelines[0])
+
+        # For multiple pipelines, return nested shape.
+        statuses_by_dataset = {str(dataset_id): {} for dataset_id in dataset_ids}
+        for pipeline_name in requested_pipelines:
+            pipeline_status = await get_pipeline_status(dataset_ids, pipeline_name=pipeline_name)
+            for dataset_id, status in pipeline_status.items():
+                statuses_by_dataset.setdefault(dataset_id, {})[pipeline_name] = status
+
+        return statuses_by_dataset
 
     @staticmethod
     async def empty_dataset(dataset_id: UUID, user: Optional[User] = None):

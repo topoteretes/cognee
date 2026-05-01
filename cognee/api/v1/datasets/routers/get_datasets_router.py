@@ -1,7 +1,7 @@
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from typing_extensions import Annotated
 from fastapi import status
 from fastapi import APIRouter
@@ -364,9 +364,13 @@ def get_datasets_router() -> APIRouter:
             for data in dataset_data
         ]
 
-    @router.get("/status", response_model=dict[str, PipelineRunStatus])
+    @router.get(
+        "/status",
+        response_model=Union[dict[str, PipelineRunStatus], dict[str, dict[str, PipelineRunStatus]]],
+    )
     async def get_dataset_status(
         datasets: Annotated[List[UUID], Query(alias="dataset")] = [],
+        pipelines: Annotated[List[str], Query(alias="pipeline")] = [],
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -378,9 +382,18 @@ def get_datasets_router() -> APIRouter:
 
         ## Query Parameters
         - **dataset** (List[UUID]): List of dataset UUIDs to check status for
+        - **pipeline** (List[str], optional): One or more pipeline names to check.
+          - If omitted, defaults to **cognify_pipeline** (backward-compatible behavior)
+          - If one pipeline is provided, response is a flat map
+          - If multiple pipelines are provided, response is nested per dataset and pipeline
+          - **Available options: add_pipeline, cognify_pipeline**
 
         ## Response
-        Returns a dictionary mapping dataset IDs to their processing status:
+        Returns status information in one of two shapes:
+        - Single pipeline (default): {dataset_id: status}
+        - Multiple pipelines: {dataset_id: {pipeline_name: status}}
+
+        Status values:
         - **pending**: Dataset is queued for processing
         - **running**: Dataset is currently being processed
         - **completed**: Dataset processing completed successfully
@@ -395,6 +408,7 @@ def get_datasets_router() -> APIRouter:
             additional_properties={
                 "endpoint": "GET /v1/datasets/status",
                 "datasets": [str(dataset_id) for dataset_id in datasets],
+                "pipelines": pipelines,
                 "cognee_version": cognee_version,
             },
         )
@@ -406,7 +420,8 @@ def get_datasets_router() -> APIRouter:
             authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
 
             datasets_statuses = await cognee_datasets.get_status(
-                [dataset.id for dataset in authorized_datasets]
+                [dataset.id for dataset in authorized_datasets],
+                pipeline_names=pipelines or None,
             )
 
             return datasets_statuses

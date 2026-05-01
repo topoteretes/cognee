@@ -2,6 +2,8 @@ import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 
+from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
+
 
 class CacheDBInterface(ABC):
     """
@@ -77,7 +79,7 @@ class CacheDBInterface(ABC):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
-    ):
+    ) -> None:
         """
         Add a Q/A/context triplet to a cache session.
         Uses the same QA fields as update_qa_entry for consistent structure.
@@ -86,23 +88,27 @@ class CacheDBInterface(ABC):
         """
         pass
 
-    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 5):
+    async def get_latest_qa(
+        self, user_id: str, session_id: str, last_n: int = 5
+    ) -> list[SessionQAEntry]:
         """Backward-compat: delegates to get_latest_qa_entries. :TODO: delete when retrievers are updated"""
         return await self.get_latest_qa_entries(user_id, session_id, last_n)
 
     @abstractmethod
-    async def get_latest_qa_entries(self, user_id: str, session_id: str, last_n: int = 5):
+    async def get_latest_qa_entries(
+        self, user_id: str, session_id: str, last_n: int = 5
+    ) -> list[SessionQAEntry]:
         """
         Retrieve the most recent Q/A/context triplets for a session.
         """
         pass
 
-    async def get_all_qas(self, user_id: str, session_id: str):
+    async def get_all_qas(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """Backward-compat: delegates to get_all_qa_entries. :TODO: delete when retrievers are updated"""
         return await self.get_all_qa_entries(user_id, session_id)
 
     @abstractmethod
-    async def get_all_qa_entries(self, user_id: str, session_id: str):
+    async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """
         Retrieve all Q/A/context triplets for the given session.
         """
@@ -176,7 +182,7 @@ class CacheDBInterface(ABC):
     @abstractmethod
     async def get_agent_trace_session(
         self, user_id: str, session_id: str, last_n: int | None = None
-    ) -> list[dict]:
+    ) -> list[SessionAgentTraceEntry]:
         """
         Retrieve agent trace steps for the given session.
         """

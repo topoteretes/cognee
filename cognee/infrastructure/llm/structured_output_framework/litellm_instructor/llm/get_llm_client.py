@@ -3,12 +3,15 @@
 from enum import Enum
 
 from cognee.infrastructure.llm import get_llm_config
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
-    OllamaAPIAdapter,
-)
 from cognee.infrastructure.llm.exceptions import (
     LLMAPIKeyNotSetError,
     UnsupportedLLMProviderError,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
+    LLMInterface,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
+    OllamaAPIAdapter,
 )
 
 
@@ -38,7 +41,7 @@ class LLMProvider(Enum):
     LLAMA_CPP = "llama_cpp"
 
 
-def get_llm_client(raise_api_key_error: bool = True):
+def get_llm_client(raise_api_key_error: bool = True) -> LLMInterface:
     """
     Get the LLM client based on the configuration using Enums.
 
@@ -71,6 +74,7 @@ def get_llm_client(raise_api_key_error: bool = True):
     else:
         max_completion_tokens = user_max
 
+    llm_api_key: str = llm_config.llm_api_key or ""
     llm_args = llm_config.llm_args
 
     if provider == LLMProvider.AZURE:
@@ -79,7 +83,7 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return AzureOpenAIAdapter(
-            api_key=llm_config.llm_api_key,
+            api_key=llm_api_key,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
             model=llm_config.llm_model,
@@ -103,7 +107,7 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return OpenAIAdapter(
-            api_key=llm_config.llm_api_key,
+            api_key=llm_api_key,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
             model=llm_config.llm_model,
@@ -127,7 +131,7 @@ def get_llm_client(raise_api_key_error: bool = True):
 
         return OllamaAPIAdapter(
             llm_config.llm_endpoint,
-            llm_config.llm_api_key,
+            llm_api_key,
             llm_config.llm_model,
             "Ollama",
             max_completion_tokens,
@@ -141,7 +145,7 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return AnthropicAdapter(
-            llm_config.llm_api_key,
+            llm_api_key,
             llm_config.llm_model,
             max_completion_tokens,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
@@ -157,7 +161,7 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return GenericAPIAdapter(
-            api_key=llm_config.llm_api_key,
+            api_key=llm_api_key,
             model=llm_config.llm_model,
             max_completion_tokens=max_completion_tokens,
             name="Custom",
@@ -178,7 +182,7 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return GeminiAdapter(
-            api_key=llm_config.llm_api_key,
+            api_key=llm_api_key,
             model=llm_config.llm_model,
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
@@ -196,7 +200,7 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return MistralAdapter(
-            api_key=llm_config.llm_api_key,
+            api_key=llm_api_key,
             model=llm_config.llm_model,
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,

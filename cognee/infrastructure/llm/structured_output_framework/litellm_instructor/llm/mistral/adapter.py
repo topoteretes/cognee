@@ -1,27 +1,29 @@
-import litellm
+import logging
+from typing import Any
+
 import instructor
-from pydantic import BaseModel
-from typing import Any, Dict, Type, Optional
+import litellm
 from litellm import JSONSchemaValidationError
+from mistralai import Mistral  # ty:ignore[unresolved-import]
+from pydantic import BaseModel
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    stop_after_delay,
+    wait_exponential_jitter,
+)
+
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.observability.get_observe import get_observe
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
 )
-from cognee.infrastructure.llm.config import get_llm_config
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
-import logging
-from tenacity import (
-    retry,
-    stop_after_delay,
-    wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
-)
 from ..types import TranscriptionReturnType
-from mistralai import Mistral
 
 logger = get_logger()
 observe = get_observe()
@@ -43,12 +45,12 @@ class MistralAdapter(GenericAPIAdapter):
         api_key: str,
         model: str,
         max_completion_tokens: int,
-        endpoint: str = None,
-        transcription_model: str = None,
-        image_transcribe_model: str = None,
-        instructor_mode: str = None,
-        llm_args: Optional[Dict[str, Any]] = None,
-    ):
+        endpoint: str | None = None,
+        transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
+        instructor_mode: str | None = None,
+        llm_args: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(
             api_key=api_key,
             model=model,
@@ -59,7 +61,7 @@ class MistralAdapter(GenericAPIAdapter):
             image_transcribe_model=image_transcribe_model,
             llm_args=llm_args,
         )
-        self.llm_args = llm_args
+        self.llm_args: dict[str, Any] = llm_args or {}
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -81,7 +83,7 @@ class MistralAdapter(GenericAPIAdapter):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a response from the user query.
@@ -143,7 +145,7 @@ class MistralAdapter(GenericAPIAdapter):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input) -> Optional[TranscriptionReturnType]:
+    async def create_transcript(self, input) -> TranscriptionReturnType | None:
         """
         Generate an audio transcript from a user query.
 

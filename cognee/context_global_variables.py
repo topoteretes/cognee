@@ -92,7 +92,7 @@ def backend_access_control_enabled():
     return False
 
 
-VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
+VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "pgvector", "falkor"]
 GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
 
 

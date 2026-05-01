@@ -42,6 +42,7 @@ def get_add_router() -> APIRouter:
         # Note: Literal is needed for Swagger use
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
+        run_in_background: Optional[bool] = Form(default=False),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -60,6 +61,7 @@ def get_add_router() -> APIRouter:
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
+        - **run_in_background** (Optional[bool]): Run add pipeline asynchronously (default: False).
 
         Either datasetName or datasetId must be provided.
 
@@ -104,6 +106,7 @@ def get_add_router() -> APIRouter:
                 datasetName,
                 user=user,
                 dataset_id=datasetId,
+                run_in_background=run_in_background or False,
                 node_set=node_set
                 if node_set != [""]
                 else None,  # Transform default node_set endpoint value to None

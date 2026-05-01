@@ -2,7 +2,7 @@ from cognee.infrastructure.llm.exceptions import MissingSystemPromptPathError
 from cognee.infrastructure.llm.prompts import read_query_prompt
 
 
-def show_prompt(text_input: str, system_prompt: str) -> str:
+def show_prompt(text_input: str, system_prompt: str) -> str | None:
     """
     Format and display the prompt for a user query.
 
@@ -25,7 +25,7 @@ def show_prompt(text_input: str, system_prompt: str) -> str:
         text_input = "No user input provided."
     if not system_prompt:
         raise MissingSystemPromptPathError()
-    system_prompt = read_query_prompt(system_prompt)
+    system_prompt: str | None = read_query_prompt(system_prompt)
 
     formatted_prompt = (
         f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""

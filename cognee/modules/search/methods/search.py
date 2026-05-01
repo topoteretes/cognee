@@ -1,35 +1,35 @@
-import json
 import asyncio
-from uuid import UUID
+import json
 from typing import Any, List, Optional, Tuple, Type, Union
+from uuid import UUID
 
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
 from cognee.context_global_variables import (
     backend_access_control_enabled,
     set_database_global_context_variables,
 )
-
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.data.methods.get_authorized_existing_datasets import (
+    get_authorized_existing_datasets,
+)
+from cognee.modules.data.models import Dataset
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.observability import (
+    COGNEE_SEARCH_QUERY,
+    COGNEE_SEARCH_TYPE,
+    new_span,
+)
+from cognee.modules.search.methods.get_retriever_output import get_retriever_output
+from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.search.types import (
     SearchResult,
     SearchType,
 )
-from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.users.models import User
-from cognee.modules.data.models import Dataset
-from cognee.modules.data.methods.get_authorized_existing_datasets import (
-    get_authorized_existing_datasets,
-)
-from cognee import __version__ as cognee_version
-from cognee.modules.search.methods.get_retriever_output import get_retriever_output
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_SEARCH_TYPE,
-    COGNEE_SEARCH_QUERY,
-)
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
@@ -159,7 +159,7 @@ async def authorized_search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
-) -> List[Tuple[Any, Union[List[Edge], str], List[Dataset]]]:
+) -> List[SearchResultPayload]:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
     Not to be used outside of active access control mode.
@@ -235,7 +235,7 @@ async def search_in_datasets_context(
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = None,
-    ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
+    ) -> SearchResultPayload:
         with new_span("cognee.search.dataset") as span:
             span.set_attribute("cognee.search.dataset_name", dataset.name or "")
             span.set_attribute("cognee.search.dataset_id", str(dataset.id))

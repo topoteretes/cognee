@@ -80,6 +80,38 @@ def get_ontology_router() -> APIRouter:
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
+    @router.delete("/{ontology_key}", response_model=dict)
+    async def delete_ontology(
+        ontology_key: str,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Delete an uploaded ontology by key.
+
+        ## Path Parameters
+        - **ontology_key** (str): The key of the ontology to delete.
+
+        ## Error Codes
+        - **400 Bad Request**: Ontology key not found
+        - **500 Internal Server Error**: File system errors
+        """
+        send_telemetry(
+            "Ontology Delete API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "DELETE /api/v1/ontologies/{ontology_key}",
+                "cognee_version": cognee_version,
+            },
+        )
+
+        try:
+            ontology_service.delete_ontology(ontology_key=ontology_key, user=user)
+            return {"status": "success", "ontology_key": ontology_key}
+        except ValueError as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
     @router.get("", response_model=dict)
     async def list_ontologies(user: User = Depends(get_authenticated_user)):
         """

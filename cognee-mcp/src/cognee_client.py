@@ -301,7 +301,9 @@ class CogneeClient:
                 await self.cognee.prune.prune_system(metadata=metadata)
                 return {"status": "success", "message": "System pruned successfully"}
 
-    async def get_pipeline_status(self, dataset_ids: List[UUID], pipeline_name: str) -> str:
+    async def get_pipeline_status(
+        self, dataset_ids: List[UUID], pipeline_name: str
+    ) -> Dict[str, Any]:
         """
         Get the status of a pipeline run.
 
@@ -314,8 +316,8 @@ class CogneeClient:
 
         Returns
         -------
-        str
-            Status information
+        Dict[str, Any]
+            Status information keyed by dataset ID
         """
         if self.use_api:
             # Note: This would need a custom endpoint on the API side
@@ -326,7 +328,7 @@ class CogneeClient:
 
             with redirect_stdout(sys.stderr):
                 status = await get_pipeline_status(dataset_ids, pipeline_name)
-                return str(status)
+                return status
 
     async def list_datasets(self) -> List[Dict[str, Any]]:
         """

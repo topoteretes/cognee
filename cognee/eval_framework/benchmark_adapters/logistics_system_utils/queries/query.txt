@@ -1,0 +1,11 @@
+Return the requested answer and the supporting facts that justify it.
+Use short, plain natural-language supporting facts that match the gold context style.
+Focus only on the package described in the question and ignore unrelated packages or locations.
+Do not copy graph wrappers such as `Nodes:`, `Connections:`, relationship labels, ids, or metadata fields.
+Turn the evidence into compact fact statements like:
+- `<retailer> ships from <region>`
+- `<user> receives deliveries in <region>`
+- `<carrier> serves <shipping_range> routes`
+- `<transport_mode> supports a <priority> delivery profile`
+- `package is currently <state>`
+Prefer the smallest set of facts that directly supports the answer.

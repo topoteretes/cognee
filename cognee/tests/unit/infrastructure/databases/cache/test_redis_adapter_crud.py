@@ -83,7 +83,7 @@ async def test_create_and_get(adapter):
     """Create a QA entry and retrieve it."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
     entries = await adapter.get_all_qa_entries("u1", "s1")
-    assert len(entries) == 1 and entries[0]["qa_id"] == "id1"
+    assert len(entries) == 1 and entries[0].qa_id == "id1"
 
 
 @pytest.mark.asyncio
@@ -122,7 +122,7 @@ async def test_create_qa_entry_with_used_graph_element_ids_round_trip(adapter):
     )
     entries = await adapter.get_all_qa_entries("u1", "s1")
     assert len(entries) == 1
-    assert entries[0]["used_graph_element_ids"] == used_ids
+    assert entries[0].used_graph_element_ids == used_ids
 
 
 @pytest.mark.asyncio
@@ -168,10 +168,10 @@ async def test_append_agent_trace_step_and_get_session(adapter):
     )
 
     entries = await adapter.get_agent_trace_session("u1", "s1")
-    assert [entry["trace_id"] for entry in entries] == ["t1", "t2"]
-    assert entries[0]["origin_function"] == "plan_trip"
-    assert entries[1]["origin_function"] == "book_hotel"
-    assert entries[1]["error_message"] == "No availability"
+    assert [entry.trace_id for entry in entries] == ["t1", "t2"]
+    assert entries[0].origin_function == "plan_trip"
+    assert entries[1].origin_function == "book_hotel"
+    assert entries[1].error_message == "No availability"
 
 
 @pytest.mark.asyncio
@@ -297,11 +297,11 @@ async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
     )
 
     entries = await adapter.get_agent_trace_session("u1", "s1")
-    assert isinstance(entries[0]["method_params"]["trip_id"], str)
-    assert isinstance(entries[0]["method_params"]["created_at"], str)
-    assert entries[0]["method_params"]["obj"] == {"type": "_Obj", "id": "obj-1"}
-    assert isinstance(entries[0]["method_return_value"]["result_id"], str)
-    assert entries[0]["method_return_value"]["owner"] == {"type": "_Obj", "id": "obj-1"}
+    assert isinstance(entries[0].method_params["trip_id"], str)
+    assert isinstance(entries[0].method_params["created_at"], str)
+    assert entries[0].method_params["obj"] == {"type": "_Obj", "id": "obj-1"}
+    assert isinstance(entries[0].method_return_value["result_id"], str)
+    assert entries[0].method_return_value["owner"] == {"type": "_Obj", "id": "obj-1"}
 
 
 @pytest.mark.asyncio
@@ -352,7 +352,7 @@ async def test_update(adapter):
     """Update a QA entry by qa_id."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
     ok = await adapter.update_qa_entry("u1", "s1", "id1", feedback_score=5)
-    assert ok and (await adapter.get_all_qa_entries("u1", "s1"))[0]["feedback_score"] == 5
+    assert ok and (await adapter.get_all_qa_entries("u1", "s1"))[0].feedback_score == 5
 
 
 @pytest.mark.asyncio
@@ -387,7 +387,7 @@ async def test_delete_feedback(adapter):
     assert ok
     entries = await adapter.get_all_qa_entries("u1", "s1")
     e = entries[0]
-    assert e.get("feedback_text") is None and e.get("feedback_score") is None
+    assert e.feedback_text is None and e.feedback_score is None
 
 
 @pytest.mark.asyncio
@@ -423,7 +423,7 @@ async def test_update_memify_metadata_merges_existing_keys(adapter):
     )
     assert ok
     entries = await adapter.get_all_qa_entries("u1", "s1")
-    assert entries[0]["memify_metadata"] == {
+    assert entries[0].memify_metadata == {
         "persist_sessions_in_knowledge_graph": True,
         MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: False,
     }
@@ -485,8 +485,8 @@ async def test_add_qa_backward_compat(adapter):
     await adapter.add_qa("u1", "s1", "Q", "C", "A")
     entries = await adapter.get_all_qa_entries("u1", "s1")
     assert len(entries) == 1
-    assert "qa_id" in entries[0]
-    assert entries[0]["question"] == "Q" and entries[0]["answer"] == "A"
+    assert entries[0].qa_id is not None
+    assert entries[0].question == "Q" and entries[0].answer == "A"
 
 
 @pytest.mark.asyncio

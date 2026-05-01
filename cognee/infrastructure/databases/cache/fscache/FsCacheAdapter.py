@@ -1,9 +1,9 @@
 import json
-import uuid
 import os
+import uuid
 from datetime import datetime
-import diskcache as dc
 
+import diskcache as dc
 from pydantic import ValidationError
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
@@ -200,7 +200,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
-    ):
+    ) -> None:
         """Append one QA entry to the filesystem-backed session history."""
         try:
             session_key = self._session_key(user_id, session_id)
@@ -223,18 +223,20 @@ class FSCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def get_latest_qa_entries(self, user_id: str, session_id: str, last_n: int = 5):
+    async def get_latest_qa_entries(
+        self, user_id: str, session_id: str, last_n: int = 5
+    ) -> list[SessionQAEntry]:
         """Return the most recent QA entries stored for the given session."""
         session_key = self._session_key(user_id, session_id)
-        entries = self._load_entries(session_key)
+        entries = [SessionQAEntry(**entry) for entry in self._load_entries(session_key)]
         if not entries:
-            return None
+            return []
         return entries[-last_n:] if len(entries) > last_n else entries
 
-    async def get_all_qa_entries(self, user_id: str, session_id: str):
+    async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """Return all QA entries stored for the given session."""
         session_key = self._session_key(user_id, session_id)
-        return self._load_entries(session_key)
+        return [SessionQAEntry(**entry) for entry in self._load_entries(session_key)]
 
     async def update_qa_entry(
         self,
@@ -383,10 +385,10 @@ class FSCacheAdapter(CacheDBInterface):
 
     async def get_agent_trace_session(
         self, user_id: str, session_id: str, last_n: int | None = None
-    ) -> list[dict]:
+    ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
-        entries = self._load_entries(trace_key)
+        entries = [SessionAgentTraceEntry(**entry) for entry in self._load_entries(trace_key)]
         if last_n is not None:
             return entries[-last_n:]
         return entries
@@ -396,7 +398,7 @@ class FSCacheAdapter(CacheDBInterface):
     ) -> list[str]:
         """Retrieve ordered per-step feedback for the given trace session."""
         entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
-        return [entry.get("session_feedback", "") for entry in entries]
+        return [entry.session_feedback for entry in entries]
 
     async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
         """Return the number of stored trace steps for the given session."""

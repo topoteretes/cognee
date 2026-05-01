@@ -173,12 +173,23 @@ def _dispatch_datasets(client: CogneeApiClient, args: argparse.Namespace) -> Non
             )
 
     elif action == "status":
-        statuses = client.datasets_status(args.dataset_ids)
+        statuses = client.datasets_status(
+            args.dataset_ids, pipelines=getattr(args, "pipelines", None)
+        )
         if not statuses:
             fmt.echo("No status information available.")
             return
-        for ds_id, status in statuses.items():
-            fmt.echo(f"{ds_id}: {status}")
+        for ds_id, pipeline_statuses in statuses.items():
+            if isinstance(pipeline_statuses, dict):
+                if not pipeline_statuses:
+                    fmt.echo(f"{ds_id}: <no pipeline runs found>")
+                    continue
+                formatted = ", ".join(
+                    f"{pipeline}={status}" for pipeline, status in pipeline_statuses.items()
+                )
+                fmt.echo(f"{ds_id}: {formatted}")
+            else:
+                fmt.echo(f"{ds_id}: {pipeline_statuses}")
 
     elif action == "graph":
         graph = client.datasets_graph(args.dataset_id)

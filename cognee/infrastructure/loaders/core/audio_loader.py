@@ -88,6 +88,9 @@ class AudioLoader(LoaderInterface):
 
         result = await LLMGateway.create_transcript(file_path)
 
+        if result is None:
+            return ""
+
         if not kwargs.get("persist", True):
             return result.text
 

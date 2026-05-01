@@ -7,7 +7,7 @@ import asyncio
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
 from cognee.modules.data.methods.get_last_added_data import get_last_added_data
 from cognee.modules.users.methods import get_default_user
@@ -1200,23 +1200,27 @@ async def improve(
 
 @mcp.tool()
 @log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
-async def cognify_status(dataset_name: str = "main_dataset") -> list:
+async def cognify_status(
+    dataset_name: str = "main_dataset",
+    pipelines: List[str] = None,
+) -> list:
     """
-    Get the current status of the cognify pipeline.
+    Get the current status of selected pipelines.
 
-    This function retrieves information about current and recently completed cognify operations
-    in the main_dataset. It provides details on progress, success/failure status, and statistics
-    about the processed data.
+    This function retrieves information about current and recently completed
+    pipeline operations in the selected dataset.
 
     Returns
     -------
     list
         A list containing a single TextContent object with the status information as a string.
-        The status includes information about active and completed jobs for the cognify_pipeline.
+        The status includes information about active and completed jobs for the
+        requested pipelines.
 
     Notes
     -----
-    - The function retrieves pipeline status specifically for the "cognify_pipeline" on the "main_dataset"
+    - By default this checks "cognify_pipeline" (backward compatible)
+    - Use `pipelines` to restrict to specific pipeline names
     - Status information includes job progress, execution time, and completion status
     - The status is returned in string format for easy reading
     - This operation is not available in API mode
@@ -1227,9 +1231,21 @@ async def cognify_status(dataset_name: str = "main_dataset") -> list:
             from cognee.modules.users.methods import get_default_user
 
             user = await get_default_user()
-            status = await cognee_client.get_pipeline_status(
-                [await get_unique_dataset_id(dataset_name, user)], "cognify_pipeline"
-            )
+            dataset_id = await get_unique_dataset_id(dataset_name, user)
+            requested_pipelines = list(dict.fromkeys(pipelines or ["cognify_pipeline"]))
+
+            if len(requested_pipelines) == 1:
+                status = await cognee_client.get_pipeline_status(
+                    [dataset_id], requested_pipelines[0]
+                )
+            else:
+                status: dict[str, dict] = {str(dataset_id): {}}
+                for pipeline_name in requested_pipelines:
+                    pipeline_status = await cognee_client.get_pipeline_status(
+                        [dataset_id], pipeline_name
+                    )
+                    if str(dataset_id) in pipeline_status:
+                        status[str(dataset_id)][pipeline_name] = pipeline_status[str(dataset_id)]
 
             # Append any background task errors
             status_text = str(status)

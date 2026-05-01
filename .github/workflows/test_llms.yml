@@ -34,7 +34,7 @@ jobs:
         env:
           LLM_PROVIDER: "gemini"
           LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          LLM_MODEL: "gemini/gemini-2.0-flash"
+          LLM_MODEL: "gemini/gemini-3-flash-preview"
           EMBEDDING_PROVIDER: "gemini"
           EMBEDDING_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EMBEDDING_MODEL: "gemini/gemini-embedding-001"

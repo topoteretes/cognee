@@ -17,8 +17,7 @@ import cognee
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.data.methods import create_dataset, get_dataset_data
+from cognee.modules.data.methods import create_dataset, create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.graph.methods import delete_data_nodes_and_edges, get_data_related_nodes
 from cognee.modules.graph.models import Node, Edge
@@ -201,7 +200,7 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
     user = await get_default_user()
 
     # Create dataset
-    dataset = await create_dataset("test_delete_complete", user=user)
+    dataset = await create_authorized_dataset("test_delete_complete", user=user)
     dataset_id = dataset.id
 
     await set_database_global_context_variables(dataset_id, user.id)

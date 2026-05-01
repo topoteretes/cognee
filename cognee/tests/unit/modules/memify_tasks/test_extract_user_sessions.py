@@ -2,6 +2,7 @@ import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
 from cognee.exceptions import CogneeSystemError
 from cognee.modules.users.models import User
@@ -20,20 +21,20 @@ def mock_user():
 
 @pytest.fixture
 def mock_qa_data():
-    """Create mock Q&A data (same shape as SessionManager.get_session(formatted=False))."""
+    """Create mock Q&A data as SessionQAEntry objects (same as SessionManager.get_session(formatted=False))."""
     return [
-        {
-            "question": "What is cognee?",
-            "context": "context about cognee",
-            "answer": "Cognee is a knowledge graph solution",
-            "time": "2025-01-01T12:00:00",
-        },
-        {
-            "question": "How does it work?",
-            "context": "how it works context",
-            "answer": "It processes data and creates graphs",
-            "time": "2025-01-01T12:05:00",
-        },
+        SessionQAEntry(
+            question="What is cognee?",
+            context="context about cognee",
+            answer="Cognee is a knowledge graph solution",
+            time="2025-01-01T12:00:00",
+        ),
+        SessionQAEntry(
+            question="How does it work?",
+            context="how it works context",
+            answer="It processes data and creates graphs",
+            time="2025-01-01T12:05:00",
+        ),
     ]
 
 

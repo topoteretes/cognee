@@ -3,6 +3,7 @@ import uuid
 from typing import Any
 
 from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
@@ -242,11 +243,7 @@ class SessionManager:
                 system_prompt=system_prompt,
                 response_model=AgentTraceFeedbackSummary,
             )
-            session_feedback = (
-                result.session_feedback.strip()
-                if isinstance(result, AgentTraceFeedbackSummary)
-                else ""
-            )
+            session_feedback = result.session_feedback.strip()
             return session_feedback if session_feedback else fallback_feedback
         except Exception as e:
             logger.warning(
@@ -465,7 +462,9 @@ class SessionManager:
             )
             if isinstance(entries, list) and entries:
                 last_entry = entries[-1]
-                last_qa_id = last_entry.get("qa_id") if isinstance(last_entry, dict) else None
+                last_qa_id = getattr(last_entry, "qa_id", None) or (
+                    last_entry.get("qa_id") if isinstance(last_entry, dict) else None
+                )
 
         (
             completion,
@@ -558,7 +557,7 @@ class SessionManager:
         formatted: bool = False,
         session_id: str | None = None,
         include_context: bool = True,
-    ) -> list[dict[str, str]] | str:
+    ) -> list[SessionQAEntry] | str:
         """
         Get session QAs by (user_id, session_id).
 
@@ -597,7 +596,9 @@ class SessionManager:
             return "" if formatted else []
         entries_list = list(entries)
         return (
-            self.format_entries(entries_list, include_context=include_context)
+            self.format_entries(
+                [entry.model_dump() for entry in entries_list], include_context=include_context
+            )
             if formatted
             else entries_list
         )
@@ -608,7 +609,7 @@ class SessionManager:
         user_id: str,
         session_id: str | None = None,
         last_n: int | None = None,
-    ) -> list[dict]:
+    ) -> list[SessionAgentTraceEntry]:
         """
         Get the agent trace session for the given user/session pair.
         """
@@ -619,7 +620,7 @@ class SessionManager:
             return []
 
         entries = await self._cache.get_agent_trace_session(user_id, session_id, last_n=last_n)
-        return list(entries) if entries else []
+        return entries
 
     async def get_agent_trace_feedback(
         self,

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Annotated
 from fastapi import APIRouter, Depends, File, UploadFile as UF, Form
 from fastapi.responses import JSONResponse
 from pydantic import Field
+from pydantic import ConfigDict, ValidationError
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
@@ -75,6 +76,16 @@ class InferSchemaResponseDTO(OutDTO):
     graph_schema: Dict[str, Any]
 
 
+class InferredGraphSchemaDTO(OutDTO):
+    title: str
+    type: str
+    properties: Dict[str, Any]
+    required: List[str] = Field(default_factory=list)
+    defs: Dict[str, Any] = Field(default_factory=dict, alias="$defs")
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+
 def get_llm_router() -> APIRouter:
     router = APIRouter()
 
@@ -130,9 +141,9 @@ def get_llm_router() -> APIRouter:
     async def infer_schema(
         data: List[UploadFile] = File(default=None),
         text: str = Form(default=None),
-        parameters: Dict[str, Any] = Form(
-            default_factory=dict,
-            description="Additional kwargs forwarded to LLMGateway.",
+        parameters: str = Form(
+            default="{}",
+            description="JSON string of additional kwargs forwarded to LLMGateway.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -158,6 +169,7 @@ def get_llm_router() -> APIRouter:
                 content={"error": "Either text or at least one file must be provided."},
             )
         try:
+            parameters_dict = json.loads(parameters) if isinstance(parameters, str) else parameters
             file_contents = []
             for file in data or []:
                 async with upload_to_temp_path(file) as file_path:
@@ -192,12 +204,11 @@ def get_llm_router() -> APIRouter:
             llm_output = await LLMGateway.acreate_structured_output(
                 text_input=user_prompt,
                 system_prompt=system_prompt,
-                response_model=str,  # type: ignore[arg-type]
-                **_safe_params(parameters),
+                response_model=InferredGraphSchemaDTO,
+                **_safe_params(parameters_dict),
             )
 
-            # Parse the LLM output as JSON
-            schema_dict = json.loads(llm_output)
+            schema_dict = llm_output.model_dump(by_alias=True, exclude_none=True)
 
             # Validate by attempting conversion — raises if schema is invalid
             from cognee.shared.graph_model_utils import graph_schema_to_graph_model
@@ -208,7 +219,12 @@ def get_llm_router() -> APIRouter:
         except json.JSONDecodeError as error:
             return JSONResponse(
                 status_code=422,
-                content={"error": f"LLM output is not valid JSON: {error}"},
+                content={"error": f"Invalid JSON in request parameters: {error}"},
+            )
+        except ValidationError as error:
+            return JSONResponse(
+                status_code=422,
+                content={"error": f"LLM output did not match expected schema: {error}"},
             )
         except Exception as error:
             logger.error("LLM schema inference failed: %s", error)

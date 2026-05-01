@@ -1,9 +1,9 @@
-from typing import Union
-from enum import Enum
 from datetime import datetime
-from typing import get_origin, get_args
+from enum import Enum
+from typing import Union, get_args, get_origin
 
-from baml_py.baml_py import ClassBuilder
+from baml_py.baml_py import ClassBuilder  # ty:ignore[unresolved-import]
+
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

@@ -1,27 +1,30 @@
 import asyncio
-from typing import Type
+import logging
+from typing import TypeVar
+
 from pydantic import BaseModel
 from tenacity import (
+    before_sleep_log,
     retry,
+    retry_if_not_exception_type,
     stop_after_delay,
     wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
 )
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.llm.config import get_llm_config
-from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction.create_dynamic_baml_type import (
-    create_dynamic_baml_type,
-)
+from cognee.infrastructure.llm.structured_output_framework.baml.baml_client import b
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.type_builder import (
     TypeBuilder,
 )
-from cognee.infrastructure.llm.structured_output_framework.baml.baml_client import b
+from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction.create_dynamic_baml_type import (
+    create_dynamic_baml_type,
+)
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-import logging
 
 logger = get_logger()
+
+T = TypeVar("T", bound="BaseModel | str")
 
 
 @retry(
@@ -31,8 +34,8 @@ logger = get_logger()
     reraise=True,
 )
 async def acreate_structured_output(
-    text_input: str, system_prompt: str, response_model: Type[BaseModel]
-):
+    text_input: str, system_prompt: str, response_model: type[T]
+) -> T:
     """
     Generate a response from a user query.
 
@@ -69,22 +72,20 @@ async def acreate_structured_output(
     # Transform BAML response to proper pydantic reponse model
     if response_model is str:
         # Note: when a response model is set to string in python, result is stored in text property in the BAML response model
-        return str(result.text)
-    return response_model.model_validate(result.dict())
+        return str(result.text)  # ty:ignore[invalid-return-type, unresolved-attribute]
+    return response_model.model_validate(result.dict())  # ty:ignore[invalid-argument-type, deprecated]
 
 
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        from typing import Optional, Dict, Any, List, Literal
-
         # Models for representing different entities
         class TestModel(BaseModel):
             type: str
-            source: Optional[str] = None
-            target: Optional[str] = None
-            properties: Optional[Dict[str, List[str]]] = None
+            source: str | None = None
+            target: str | None = None
+            properties: dict[str, list[str]] | None = None
 
         loop.run_until_complete(acreate_structured_output("TEST", "THIS IS A TEST", TestModel))
     finally:

@@ -245,7 +245,13 @@ include = [
     "cognee/infrastructure/data",
     "cognee/infrastructure/engine",
     "cognee/infrastructure/entities",
+    "cognee/infrastructure/files",
+    "cognee/infrastructure/llm",
     "cognee/infrastructure/loaders",
+    "cognee/infrastructure/locks",
     "cognee/infrastructure/session",
-    "cognee/infrastructure/utils"
+    "cognee/infrastructure/utils",
+    "cognee/shared"
 ]
+# Exclude generated files
+exclude = ["cognee/infrastructure/llm/structured_output_framework/baml/baml_client/"]
