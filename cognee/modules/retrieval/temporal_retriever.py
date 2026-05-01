@@ -150,13 +150,21 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         vector_search_results = []
         if relevant_events and any(event_group.get("events") for event_group in relevant_events):
+            collection_name = "Event_name"
             try:
                 vector_engine = unified.vector
                 query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
                 vector_search_results = await vector_engine.search(
-                    collection_name="Event_name", query_vector=query_vector, limit=self.top_k
+                    collection_name=collection_name, query_vector=query_vector, limit=self.top_k
                 )
-            except Exception:
+            except Exception as e:
+                logger.error(
+                    "Temporal retriever vector search failed for query=%r collection_name=%r: %s",
+                    query,
+                    collection_name,
+                    e,
+                    exc_info=True,
+                )
                 vector_search_results = []
 
         return {
@@ -178,13 +186,12 @@ class TemporalRetriever(GraphCompletionRetriever):
             if event_groups:
                 has_relevant_events = any(event_groups)
 
-        if has_relevant_events and retrieved_objects.get("vector_search_results", None):
-            top_k_events = await self.filter_top_k_events(
-                retrieved_objects.get("relevant_events"),
-                retrieved_objects.get("vector_search_results", None),
-            )
+        vector_search_results = retrieved_objects.get("vector_search_results")
+        if has_relevant_events and vector_search_results:
+            top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
             return self.descriptions_to_string(top_k_events)
-        elif not has_relevant_events and retrieved_objects.get("graph_nodes", None):
+
+        if retrieved_objects.get("graph_nodes", None):
             nodes, edges = retrieved_objects.get("graph_nodes")
             nodes_by_id = {
                 str(node_id): Node(str(node_id), properties) for node_id, properties in nodes
