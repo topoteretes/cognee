@@ -6,6 +6,7 @@ This module provides a unified interface for interacting with Cognee, supporting
 - API mode: Makes HTTP requests to a running Cognee FastAPI server
 """
 
+import hashlib
 import sys
 from typing import Optional, Any, List, Dict
 from uuid import UUID
@@ -13,6 +14,23 @@ from contextlib import redirect_stdout
 import httpx
 from cognee.shared.logging_utils import get_logger
 import json
+
+
+def _content_addressed_upload(data: Any) -> Dict[str, tuple]:
+    """Build a multipart file payload with a content-addressed filename.
+
+    Cognee's local file storage refuses to overwrite an existing file. Posting
+    every text payload under a fixed filename (e.g. ``data.txt``) therefore
+    causes the second and subsequent uploads to be silently dropped and the
+    original file's content to be re-ingested instead. Using a filename derived
+    from the payload's content hash ensures distinct payloads land at distinct
+    paths, matching Cognee's documented ``text_<hash>.txt`` convention for
+    file-based ingestion.
+    """
+    content = str(data)
+    digest = hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return {"data": (f"mcp_{digest}.txt", content, "text/plain")}
+
 
 logger = get_logger()
 
@@ -96,7 +114,7 @@ class CogneeClient:
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/add"
 
-            files = {"data": ("data.txt", str(data), "text/plain")}
+            files = _content_addressed_upload(data)
             form_data = {
                 "datasetName": dataset_name,
             }
@@ -374,7 +392,7 @@ class CogneeClient:
         """
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/remember"
-            files = {"data": ("data.txt", str(data), "text/plain")}
+            files = _content_addressed_upload(data)
             form_data = {"datasetName": dataset_name}
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
