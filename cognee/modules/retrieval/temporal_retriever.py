@@ -109,13 +109,32 @@ class TemporalRetriever(GraphCompletionRetriever):
         score_lookup = {res.id: res.score for res in scored_results}
 
         events_with_scores = []
-        for event in relevant_events[0]["events"]:
-            score = score_lookup.get(event["id"], float("inf"))
-            events_with_scores.append({**event, "score": score})
+        for event_group in relevant_events:
+            if not isinstance(event_group, dict):
+                raise TypeError("Event group must be a dictionary")
+            if "events" not in event_group:
+                raise KeyError("events")
+
+            for event in event_group["events"]:
+                score = score_lookup.get(event["id"], float("inf"))
+                events_with_scores.append({**event, "score": score})
 
         events_with_scores.sort(key=itemgetter("score"))
 
         return events_with_scores[: self.top_k]
+
+    def node_attributes_to_description(self, attributes):
+        description = (
+            attributes.get("description") or attributes.get("text") or attributes.get("name")
+        )
+        if description:
+            return {"description": str(description)}
+
+        return {
+            "description": ", ".join(
+                f"{key}: {value}" for key, value in attributes.items() if value is not None
+            )
+        }
 
     async def get_retrieved_objects(self, query: str) -> dict:
         time_from, time_to = await self.extract_time_from_query(query)
@@ -221,7 +240,10 @@ class TemporalRetriever(GraphCompletionRetriever):
 
                 if not graph_edges and nodes_by_id:
                     return self.descriptions_to_string(
-                        [node.attributes for node in nodes_by_id.values()]
+                        [
+                            self.node_attributes_to_description(node.attributes)
+                            for node in nodes_by_id.values()
+                        ]
                     )
 
                 return await self.resolve_edges_to_text(graph_edges)
