@@ -1,8 +1,11 @@
 # Use a Python image with uv pre-installed
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
 
-# Install the project into `/app`
-WORKDIR /app
+# Set build argument
+ARG DEBUG
+
+# Set environment variable based on the build argument
+ENV DEBUG=${DEBUG}
 
 # Enable bytecode compilation
 # ENV UV_COMPILE_BYTECODE=1
@@ -10,11 +13,8 @@ WORKDIR /app
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
 
-# Set build argument
-ARG DEBUG
-
-# Set environment variable based on the build argument
-ENV DEBUG=${DEBUG}
+# Install the project into `/app`
+WORKDIR /app
 
 # Needed when psycopg2 is built from source via cognee[postgres] in linux images.
 # libpq-dev provides pg_config; build-essential provides libc headers and toolchain.
@@ -23,18 +23,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pyproject.toml and lockfile first for better caching
-COPY ./cognee-mcp/pyproject.toml ./cognee-mcp/uv.lock ./cognee-mcp/entrypoint.sh ./
+# Copy cognee-mcp files first (for layer caching)
+COPY ./cognee-mcp/pyproject.toml ./cognee-mcp/entrypoint.sh ./cognee-mcp/README.md ./
 
-# Install the project's dependencies using the lockfile and settings
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev --no-editable
+# Copy cognee repo to /app/cognee (where pyproject.toml expects it)
+COPY ./cognee /app/cognee
 
-# Then, add the rest of the project source code and install it
-# Installing separately from its dependencies allows layer caching
-COPY ./cognee-mcp /app
+# Copy src directory for the MCP server
+COPY ./cognee-mcp/src /app/src
+
+# Install the project's dependencies (no lock file - will resolve from pyproject.toml)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm
 
@@ -71,5 +71,4 @@ LABEL org.opencontainers.image.description="Cognee MCP Server with API mode supp
 USER cognee
 
 # Use the application name from pyproject.toml for normal operation
-# For testing, we'll override this with a direct command
 ENTRYPOINT ["/app/entrypoint.sh"]

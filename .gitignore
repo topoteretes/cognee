@@ -204,3 +204,4 @@ SWE-bench_testsample/
 .chromadb_data/
 
 deployment/helm/values-local.yml
+docker-compose.production.yml

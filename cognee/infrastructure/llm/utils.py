@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import litellm
 
@@ -10,7 +11,8 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-CONNECTION_TEST_TIMEOUT_SECONDS = 30
+# Timeout for LLM connection test - configurable via environment variable
+CONNECTION_TEST_TIMEOUT_SECONDS = int(os.getenv("COGNEE_LLM_CONNECTION_TIMEOUT", "30"))
 
 
 def get_max_chunk_tokens() -> int:

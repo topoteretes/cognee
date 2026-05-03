@@ -37,7 +37,7 @@ from cognee.api.v1.health.routers import get_health_router
 from cognee.api.v1.update.routers import get_update_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
-    get_register_router,
+    get_register_router,  # Enabled for user registration
     get_reset_password_router,
     get_verify_router,
     get_users_router,
@@ -99,7 +99,11 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
+app = FastAPI(
+    debug=app_environment != "prod",
+    root_path=os.getenv("COGNEE_ROOT_PATH", ""),  # Set for reverse proxy (e.g., "/cognee")
+    lifespan=lifespan,
+)
 
 
 # Read allowed origins from environment variable (comma-separated)
@@ -198,11 +202,12 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
 
-app.include_router(
-    get_register_router(),
-    prefix="/api/v1/auth",
-    tags=["auth"],
-)
+# User registration is now enabled
+# app.include_router(
+#     get_register_router(),
+#     prefix="/api/v1/auth",
+#     tags=["auth"],
+# )
 
 app.include_router(
     get_reset_password_router(),
