@@ -353,6 +353,10 @@ async def recall(
 
     session_id = kwargs.get("session_id")
     user = kwargs.get("user")
+    if user is None:
+        from cognee.modules.users.methods import get_default_user
+
+        user = await get_default_user()
 
     # Resolve scope → concrete source list. "auto" (the default) picks
     # sources based on what the caller supplied:
