@@ -107,3 +107,18 @@ def get_cache_engine(
         tapes_model=config.tapes_model,
         tapes_request_timeout=config.tapes_request_timeout,
     )
+
+
+async def close_and_clear_cache_engine() -> None:
+    """Close the cached cache adapter (if any) and reset the factory cache.
+
+    `create_cache_engine` is wrapped in `lru_cache` keyed on host/port/etc.
+    rather than on `data_root_directory`, so rotating the data root leaves
+    an orphan adapter whose underlying file handle (e.g. diskcache's sqlite
+    on `cache.db`) keeps the previous data dir locked. On Windows that
+    blocks `rmtree`. Closing before `cache_clear()` releases the handle.
+    """
+    engine = get_cache_engine()
+    if engine is not None:
+        await engine.close()
+    create_cache_engine.cache_clear()
