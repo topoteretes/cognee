@@ -130,12 +130,20 @@ class CloudClient:
         payload: dict = {"query": query_text}
         if query_type:
             payload["search_type"] = query_type if isinstance(query_type, str) else query_type.value
-        if kwargs.get("datasets"):
+        if kwargs.get("dataset_ids"):
+            payload["dataset_ids"] = [str(dataset_id) for dataset_id in kwargs["dataset_ids"]]
+        elif kwargs.get("datasets"):
             payload["datasets"] = kwargs["datasets"]
         if kwargs.get("top_k"):
             payload["top_k"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
+        if kwargs.get("node_name"):
+            payload["node_name"] = kwargs["node_name"]
+        if kwargs.get("only_context"):
+            payload["only_context"] = kwargs["only_context"]
+        if kwargs.get("verbose"):
+            payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
             payload["session_id"] = kwargs["session_id"]
         if kwargs.get("scope") is not None:
