@@ -2,25 +2,73 @@ name: build test | Docker image
 
 on:
   workflow_call:
+    secrets:
+      OPENAI_API_KEY:
+        required: true
 
 env:
   AWS_ACCOUNT_ID_DEV: "463722570299"
+  AWS_REGION_DEV: "eu-west-1"
+  COGNEE_DOCKER_IMAGE_NAME: "cognee"
 
 jobs:
 
   build_docker:
-    name: Build Cognee Backend Docker App Image
+    name: Build and test Cognee Backend Docker App Image
     runs-on: ubuntu-22.04
     steps:
       - name: Check out Cognee code
         uses: actions/checkout@v6
 
-      - name: Build Cognee Docker image
-        id: cognee-docker-tag
+      - name: Part 1 - Build Cognee Docker image
+        id: build-cognee-docker-image
         run: |
-          export SHA_SHORT="$(git rev-parse --short HEAD)"
-          export CUR_DATE="$(date +%Y%m%d%H%M%S)"
-          export VERSION="dev-$CUR_DATE-$SHA_SHORT"
-          image_name="cognee" docker_login="false" version="$VERSION" account="${{ env.AWS_ACCOUNT_ID_DEV }}" app_dir="." publish="false" ./bin/dockerize
-          export DOCKER_TAG=$(cat /tmp/.DOCKER_IMAGE_VERSION)
-          echo "Successfully built cognee Docker image. Tag is: $DOCKER_TAG"
+          image_name="${COGNEE_DOCKER_IMAGE_NAME}" \
+            account="${AWS_ACCOUNT_ID_DEV}" \
+            app_dir="." \
+            publish="false" \
+            ./bin/dockerize
+
+          DOCKER_VERSION="$(cat /tmp/.DOCKER_IMAGE_VERSION)"
+          DOCKER_REPOSITORY="${AWS_ACCOUNT_ID_DEV}.dkr.ecr.${AWS_REGION_DEV}.amazonaws.com"
+          DOCKER_IMAGE="${DOCKER_REPOSITORY}/${COGNEE_DOCKER_IMAGE_NAME}:${DOCKER_VERSION}"
+          docker image inspect "$DOCKER_IMAGE" >/dev/null
+          echo "image=$DOCKER_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "Successfully built cognee Docker image: $DOCKER_IMAGE"
+
+      - name: Set up Python for Docker E2E test
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.x"
+
+      - name: Install Docker E2E test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pytest>=7.4.4" "httpx>=0.28.1"
+
+      - name: Part 2 - Test remember and graph recall against built Docker image
+        env:
+          COGNEE_DOCKER_E2E_IMAGE: ${{ steps.build-cognee-docker-image.outputs.image }}
+          COGNEE_DOCKER_E2E_ENV_FILE: ${{ runner.temp }}/cognee-docker-e2e.env
+          COGNEE_DOCKER_E2E_NETWORK: host
+          COGNEE_DOCKER_E2E_STARTUP_TIMEOUT: "300"
+          COGNEE_DOCKER_E2E_REMEMBER_TIMEOUT: "420"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          {
+            echo "ENV=dev"
+            echo "LLM_PROVIDER=openai"
+            echo "LLM_MODEL=openai/gpt-4o-mini"
+            echo "LLM_API_KEY=${OPENAI_API_KEY}"
+            echo "OPENAI_API_KEY=${OPENAI_API_KEY}"
+            echo "EMBEDDING_PROVIDER=openai"
+            echo "EMBEDDING_MODEL=openai/text-embedding-3-small"
+            echo "EMBEDDING_DIMENSIONS=1536"
+            echo "EMBEDDING_API_KEY=${OPENAI_API_KEY}"
+            echo "GRAPH_DATABASE_PROVIDER=kuzu"
+            echo "GRAPH_DATASET_DATABASE_HANDLER=kuzu"
+            echo "VECTOR_DB_PROVIDER=lancedb"
+            echo "VECTOR_DATASET_DATABASE_HANDLER=lancedb"
+          } > "$COGNEE_DOCKER_E2E_ENV_FILE"
+
+          python -m pytest cognee/tests/e2e/docker/test_docker_remember_recall.py -q -s
