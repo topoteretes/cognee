@@ -6,7 +6,7 @@ LLM/embedding provider configured in an env file, and can take a few minutes.
 Example:
     COGNEE_DOCKER_E2E_IMAGE=cognee-pr2776:smoke \
     COGNEE_DOCKER_E2E_ENV_FILE=/path/to/cognee/.env \
-    COGNEE_DOCKER_E2E_NETWORK=host \
+    COGNEE_DOCKER_E2E_NETWORK=bridge \
     uv run pytest cognee/tests/e2e/docker/test_docker_remember_recall.py -s
 """
 
@@ -104,8 +104,23 @@ def _container_logs(container_name: str, *, tail: int = 300) -> str:
     return (result.stdout + "\n" + result.stderr).strip()
 
 
+def _container_status(container_name: str) -> str:
+    result = _run(
+        [
+            "docker",
+            "inspect",
+            "--format",
+            "status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}",
+            container_name,
+        ],
+        check=False,
+        timeout=30,
+    )
+    return (result.stdout + "\n" + result.stderr).strip()
+
+
 def _start_container(image: str, env_file: Path, container_name: str, port: int) -> str:
-    network = os.environ.get("COGNEE_DOCKER_E2E_NETWORK", "host").strip().lower()
+    network = os.environ.get("COGNEE_DOCKER_E2E_NETWORK", "bridge").strip().lower()
     if network not in {"host", "bridge"}:
         pytest.fail("COGNEE_DOCKER_E2E_NETWORK must be 'host' or 'bridge'.")
 
@@ -168,9 +183,10 @@ def _start_container(image: str, env_file: Path, container_name: str, port: int)
     return f"http://127.0.0.1:{port}"
 
 
-def _wait_until_ready(base_url: str, *, timeout_seconds: int) -> None:
+def _wait_until_ready(base_url: str, container_name: str, *, timeout_seconds: int) -> None:
     deadline = time.monotonic() + timeout_seconds
     last_error = ""
+    last_status = ""
 
     while time.monotonic() < deadline:
         try:
@@ -181,9 +197,21 @@ def _wait_until_ready(base_url: str, *, timeout_seconds: int) -> None:
         except httpx.HTTPError as exc:
             last_error = repr(exc)
 
+        last_status = _container_status(container_name)
+        if last_status.startswith("status=exited") or last_status.startswith("status=dead"):
+            pytest.fail(
+                "Cognee Docker container exited before becoming healthy: "
+                f"{last_error}\ncontainer status: {last_status}\n"
+                f"--- docker logs ---\n{_container_logs(container_name)}\n--- end docker logs ---"
+            )
+
         time.sleep(2)
 
-    pytest.fail(f"Cognee Docker container did not become healthy: {last_error}")
+    pytest.fail(
+        "Cognee Docker container did not become healthy: "
+        f"{last_error}\ncontainer status: {last_status}\n"
+        f"--- docker logs ---\n{_container_logs(container_name)}\n--- end docker logs ---"
+    )
 
 
 def _assert_env_is_available_in_container(container_name: str) -> None:
@@ -249,6 +277,7 @@ def test_docker_remember_then_graph_recall_returns_remembered_fact() -> None:
     try:
         _wait_until_ready(
             base_url,
+            container_name,
             timeout_seconds=int(os.environ.get("COGNEE_DOCKER_E2E_STARTUP_TIMEOUT", "240")),
         )
         _assert_env_is_available_in_container(container_name)

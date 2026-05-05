@@ -45,13 +45,14 @@ jobs:
         env:
           COGNEE_DOCKER_E2E_IMAGE: ${{ steps.build-cognee-docker-image.outputs.image }}
           COGNEE_DOCKER_E2E_ENV_FILE: ${{ runner.temp }}/cognee-docker-e2e.env
-          COGNEE_DOCKER_E2E_NETWORK: host
+          COGNEE_DOCKER_E2E_NETWORK: bridge
           COGNEE_DOCKER_E2E_STARTUP_TIMEOUT: "300"
           COGNEE_DOCKER_E2E_REMEMBER_TIMEOUT: "420"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           {
             echo "ENV=dev"
+            echo "ENVIRONMENT=dev"
             echo "LLM_PROVIDER=openai"
             echo "LLM_MODEL=openai/gpt-4o-mini"
             echo "LLM_API_KEY=${OPENAI_API_KEY}"
