@@ -36,15 +36,10 @@ jobs:
           echo "image=$DOCKER_IMAGE" >> "$GITHUB_OUTPUT"
           echo "Successfully built cognee Docker image: $DOCKER_IMAGE"
 
-      - name: Set up Python for Docker E2E test
-        uses: actions/setup-python@v5
+      - name: Set up Cognee dependencies for Docker E2E test
+        uses: ./.github/actions/cognee_setup
         with:
           python-version: "3.11.x"
-
-      - name: Install Docker E2E test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "pytest>=7.4.4" "httpx>=0.28.1"
 
       - name: Part 2 - Test remember and graph recall against built Docker image
         env:
@@ -71,4 +66,4 @@ jobs:
             echo "VECTOR_DATASET_DATABASE_HANDLER=lancedb"
           } > "$COGNEE_DOCKER_E2E_ENV_FILE"
 
-          python -m pytest cognee/tests/e2e/docker/test_docker_remember_recall.py -q -s
+          uv run pytest cognee/tests/e2e/docker/test_docker_remember_recall.py -q -s
