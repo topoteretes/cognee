@@ -78,6 +78,30 @@ async def main():
 
     assert len(history) == 6, "Search history is not correct."
 
+    memory_text = (
+        "Grace Hopper designed one of the first compilers and popularized the term "
+        "debugging in computing."
+    )
+    remember_result = await cognee.remember(
+        memory_text,
+        dataset_name=dataset_name,
+        self_improvement=False,
+    )
+    assert remember_result.status == "completed", "Remember did not complete successfully."
+    assert remember_result.dataset_name == dataset_name, "Remember used the wrong dataset."
+
+    recall_results = await cognee.recall(
+        query_text="Grace Hopper compiler debugging",
+        query_type=SearchType.CHUNKS,
+        datasets=[dataset_name],
+        top_k=5,
+        auto_route=False,
+    )
+    assert len(recall_results) != 0, "Recall results list is empty."
+    recall_text = "\n".join(result.text for result in recall_results).lower()
+    assert "grace hopper" in recall_text, "Recall did not return remembered content."
+    assert "compiler" in recall_text, "Recall result is missing the remembered compiler detail."
+
     # Test updating of documents
     # Get Pipeline Run object
     pipeline_run_obj = list(cognify_run_info.values())[0]
