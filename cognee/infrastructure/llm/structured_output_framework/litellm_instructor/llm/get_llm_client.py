@@ -16,6 +16,9 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
     OllamaAPIAdapter,
 )
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.deepseek.adapter import (
+    DeepSeekAPIAdapter,
+)
 
 _LLM_CLIENT_CACHE_MAXSIZE = 32
 _FROZEN_DICT = "__cognee_dict__"
@@ -79,6 +82,8 @@ class LLMProvider(Enum):
     - GEMINI: Represents the Gemini provider.
     - MISTRAL: Represents the Mistral AI provider.
     - BEDROCK: Represents the AWS Bedrock provider.
+    - LLAMA_CPP: Represents the llama.cpp provider.
+    - DEEPSEEK: Represents the DeepSeek provider.
     """
 
     OPENAI = "openai"
@@ -90,6 +95,7 @@ class LLMProvider(Enum):
     AZURE = "azure"
     BEDROCK = "bedrock"
     LLAMA_CPP = "llama_cpp"
+    DEEPSEEK = "deepseek"
 
 
 _API_KEY_REQUIRED_PROVIDERS = {
@@ -99,6 +105,7 @@ _API_KEY_REQUIRED_PROVIDERS = {
     LLMProvider.GEMINI,
     LLMProvider.MISTRAL,
     LLMProvider.ANTHROPIC,
+    LLMProvider.DEEPSEEK,
 }
 
 
@@ -251,6 +258,17 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             llm_api_key,
             cache_key.model,
             "Ollama",
+            max_completion_tokens,
+            instructor_mode=cache_key.instructor_mode,
+            llm_args=llm_args,
+        )
+
+    elif provider == LLMProvider.DEEPSEEK:
+        return DeepSeekAPIAdapter(
+            cache_key.endpoint,
+            llm_api_key,
+            cache_key.model,
+            "DeepSeek",
             max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
             llm_args=llm_args,

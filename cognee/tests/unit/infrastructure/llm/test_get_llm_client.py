@@ -13,6 +13,10 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     _raise_for_missing_api_key,
     _unfreeze_from_cache,
 )
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.deepseek.adapter import (
+    DeepSeekAPIAdapter,
+    THINK_PATTERN,
+)
 
 
 def _llm_config(**overrides):
@@ -116,3 +120,53 @@ def test_api_key_validation_still_happens_before_cache_lookup():
         raise_api_key_error=True,
         use_managed_identity=True,
     )
+
+
+# ── DeepSeek provider tests ────────────────────────────────────────────────
+
+
+def test_deepseek_provider_registered():
+    """DeepSeek is a valid LLMProvider enum member."""
+    assert LLMProvider.DEEPSEEK.value == "deepseek"
+
+
+def test_deepseek_client_creation():
+    """DeepSeekAPIAdapter can be instantiated with standard parameters."""
+    adapter = DeepSeekAPIAdapter(
+        endpoint="https://api.deepseek.com/v1",
+        api_key="test-key",
+        model="deepseek-chat",
+        name="DeepSeek",
+        max_completion_tokens=4096,
+    )
+    assert adapter.name == "DeepSeek"
+    assert adapter.endpoint == "https://api.deepseek.com/v1"
+    assert adapter.model == "deepseek-chat"
+
+
+def test_think_pattern_stripping():
+    """THINK_PATTERN strips <think> blocks in all common variants."""
+    cases = [
+        ("<think>\nreasoning\n</think>\n{\"key\": 1}", '{"key": 1}'),
+        ("<think>a</think><THINK>b</THINK>hello", "hello"),
+        ("<think >stuff</think >{\"a\":1}", '{"a":1}'),
+        ("no think tags here", "no think tags here"),
+    ]
+    for raw, expected in cases:
+        assert THINK_PATTERN.sub("", raw).strip() == expected
+
+
+def test_tokenizer_fallback_for_unlisted_model():
+    """TikTokenTokenizer falls back to cl100k_base for unlisted models."""
+    from cognee.infrastructure.llm.tokenizer.TikToken.adapter import TikTokenTokenizer
+
+    tokenizer = TikTokenTokenizer(model="deepseek-chat")
+    tokens = tokenizer.count_tokens("Hello world")
+    assert tokens > 0
+
+
+def test_deepseek_api_key_is_required():
+    """DEEPSEEK provider requires an API key."""
+    with pytest.raises(LLMAPIKeyNotSetError):
+        _raise_for_missing_api_key(LLMProvider.DEEPSEEK, None, raise_api_key_error=True)
+

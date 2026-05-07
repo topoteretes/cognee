@@ -221,6 +221,27 @@ class LLMConfig(BaseSettings):
 
         return self
 
+    @model_validator(mode="after")
+    def ensure_env_vars_for_deepseek(self) -> "LLMConfig":
+        """
+        Set default values for the DeepSeek provider.
+
+        Only runs when llm_provider is set to 'deepseek'. Sets sensible defaults
+        for endpoint, model, and API key if not already configured. Users can
+        override LLM_ENDPOINT to use local Ollama/vLLM instances.
+        """
+        if self.llm_provider != "deepseek":
+            return self
+
+        if not os.environ.get("LLM_ENDPOINT"):
+            os.environ["LLM_ENDPOINT"] = "https://api.deepseek.com/v1"
+        if not os.environ.get("LLM_MODEL"):
+            os.environ["LLM_MODEL"] = "deepseek-chat"
+        if not os.environ.get("LLM_API_KEY"):
+            os.environ["LLM_API_KEY"] = os.environ.get("DEEPSEEK_API_KEY", "")
+
+        return self
+
     def to_dict(self) -> dict[str, Any]:
         """
         Convert the LLMConfig instance into a dictionary representation.
