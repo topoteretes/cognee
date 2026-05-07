@@ -134,3 +134,45 @@ async def test_metadata_none_does_not_crash():
     assert any("graph_node" in str(call.args[0]) for call in executed), (
         "expected graph_node INSERT to run even when metadata is None"
     )
+
+
+@pytest.mark.asyncio
+async def test_collection_key_round_trip_is_backwards_compatible():
+    """Backwards-compat invariant: the pre-fix lossy ``rsplit("_", 1)``
+    round-trip produced the SAME final collection name as the post-fix
+    tuple-keyed code, because ``PGVectorAdapter.create_vector_index``
+    immediately re-joins its two arguments with the same separator —
+    f-string concatenation across an underscore is associative.
+
+    This means the rsplit cleanup in ``add_nodes_with_vectors`` is a
+    latent-footgun fix, not a live behavior change: existing pgvector
+    tables persist with their pre-fix names, so no data migration is
+    required. This test pins that invariant — if anyone changes
+    ``PGVectorAdapter.create_vector_index`` in a way that breaks the
+    associativity (e.g. uses the args separately for routing), this
+    test fails and surfaces that the cleanup is no longer a no-op.
+    """
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
+        PGVectorAdapter,
+    )
+
+    fake = PGVectorAdapter.__new__(PGVectorAdapter)
+    fake.create_collection = AsyncMock()
+
+    # Pre-fix call shape: rsplit("_", 1) on "CodeGraphEntity_source_code"
+    # yields ("CodeGraphEntity_source", "code"). This is what the buggy
+    # code passed to create_vector_index.
+    await fake.create_vector_index("CodeGraphEntity_source", "code")
+    pre_fix_name = fake.create_collection.await_args_list[-1].args[0]
+
+    # Post-fix call shape: tuple key (type_name, field_name) preserved as
+    # ("CodeGraphEntity", "source_code"). This is what the fixed code passes.
+    await fake.create_vector_index("CodeGraphEntity", "source_code")
+    post_fix_name = fake.create_collection.await_args_list[-1].args[0]
+
+    assert pre_fix_name == post_fix_name == "CodeGraphEntity_source_code", (
+        f"backwards-compat invariant broken: pre-fix produced {pre_fix_name!r}, "
+        f"post-fix produced {post_fix_name!r}. If this fails, the rsplit cleanup "
+        "in add_nodes_with_vectors is no longer a no-op and existing pgvector "
+        "tables may be stranded."
+    )
