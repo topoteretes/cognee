@@ -278,20 +278,27 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         await self._graph.initialize()
         now = datetime.now(timezone.utc)
 
-        # Group data points by (type_name, field_name) for vector indexing
-        vector_groups: Dict[str, List[Tuple[DataPoint, str]]] = {}
+        # Group data points by (type_name, field_name) for vector indexing.
+        # Keying by tuple (not by joined string) avoids the lossy rsplit("_", 1)
+        # round-trip that would corrupt multi-underscore field names like
+        # ``source_code`` into ``("..._source", "code")``.
+        vector_groups: Dict[Tuple[str, str], List[DataPoint]] = {}
         for dp in data_points:
+            # ``metadata`` is Optional on DataPoint; mirror the guard at
+            # ``index_data_points.py:35`` so points lacking metadata are
+            # silently skipped instead of crashing on ``None.get``.
+            if not hasattr(dp, "metadata") or not dp.metadata:
+                continue
+            type_name = type(dp).__name__
             for field_name in dp.metadata.get("index_fields", []):
                 if getattr(dp, field_name, None) is None:
                     continue
-                collection = f"{type(dp).__name__}_{field_name}"
-                vector_groups.setdefault(collection, [])
-                vector_groups[collection].append((dp, field_name))
+                vector_groups.setdefault((type_name, field_name), []).append(dp)
 
-        # Embed all texts grouped by collection
-        embeddings_by_collection: Dict[str, List[Tuple[DataPoint, List[float], str]]] = {}
-        for collection, items in vector_groups.items():
-            valid_items = [(dp, getattr(dp, field_name, None)) for dp, field_name in items]
+        # Embed all texts grouped by (type_name, field_name)
+        embeddings_by_group: Dict[Tuple[str, str], List[Tuple[DataPoint, List[float], str]]] = {}
+        for (type_name, field_name), dps in vector_groups.items():
+            valid_items = [(dp, getattr(dp, field_name, None)) for dp in dps]
             valid_items = [(dp, t.strip() if isinstance(t, str) else t) for dp, t in valid_items]
             valid_items = [(dp, t) for dp, t in valid_items if t is not None]
             if not valid_items:
@@ -301,15 +308,13 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             vectors = []
             for i in range(0, len(texts), batch_size):
                 vectors.extend(await self._vector.embed_data(texts[i : i + batch_size]))
-            embeddings_by_collection[collection] = [
+            embeddings_by_group[(type_name, field_name)] = [
                 (dp, vec, t) for (dp, t), vec in zip(valid_items, vectors)
             ]
 
         # Ensure vector collection tables exist
-        for collection in vector_groups:
-            await self._vector.create_vector_index(
-                collection.rsplit("_", 1)[0], collection.rsplit("_", 1)[1]
-            )
+        for type_name, field_name in vector_groups:
+            await self._vector.create_vector_index(type_name, field_name)
 
         # Build all rows in Python, then one INSERT per table inside the transaction.
         core_keys = {"id", "name", "type"}
@@ -328,7 +333,8 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             )
 
         vector_rows_by_table: Dict[str, List[Dict]] = {}
-        for collection, items in embeddings_by_collection.items():
+        for (type_name, field_name), items in embeddings_by_group.items():
+            collection = f"{type_name}_{field_name}"
             table = _validate_table_name(collection)
             rows = []
             for dp, vector, embed_text in items:
