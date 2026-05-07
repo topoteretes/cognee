@@ -101,7 +101,6 @@ class DeepSeekAPIAdapter(LLMInterface):
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                response_format={"type": "json_object"},
                 **merged_kwargs,
             )
             content = response.choices[0].message.content or ""
