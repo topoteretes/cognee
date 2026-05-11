@@ -307,6 +307,21 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
+    extraction_kwargs = dict(kwargs)
+
+    if cognify_config.ontology_generation == "AUTO_RESTRICTED":
+        if graph_model is KnowledgeGraph:
+            from cognee.tasks.graph.auto_restricted_ontology import (
+                auto_restricted_calculate_chunk_graphs,
+            )
+
+            extraction_kwargs["calculate_chunk_graphs"] = auto_restricted_calculate_chunk_graphs
+        else:
+            logger.warning(
+                "ONTOLOGY_GENERATION=AUTO_RESTRICTED only supports KnowledgeGraph; "
+                "using default extraction for custom graph model "
+                f"{getattr(graph_model, '__name__', str(graph_model))}.",
+            )
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -330,7 +345,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
-            **kwargs,
+            **extraction_kwargs,
         ),
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
