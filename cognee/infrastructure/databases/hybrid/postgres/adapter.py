@@ -13,7 +13,7 @@ import json
 import re
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Union, Optional, Tuple, Type, TYPE_CHECKING
+from typing import Dict, Any, List, Literal, Union, Optional, Tuple, Type, TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import text
@@ -149,7 +149,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         self,
         node_type: Type[Any],
         node_name: List[str],
-        node_name_filter_operator: str = "OR",
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
         return await self._graph.get_nodeset_subgraph(
             node_type, node_name, node_name_filter_operator
@@ -208,7 +208,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
-        node_name_filter_operator: str = "OR",
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ) -> List[ScoredResult]:
         return await self._vector.search(
             collection_name,
@@ -229,6 +229,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         with_vectors: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: Literal["OR", "AND"] = "OR",
     ):
         return await self._vector.batch_search(
             collection_name,
@@ -237,6 +238,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             with_vectors,
             include_payload,
             node_name,
+            node_name_filter_operator,
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
