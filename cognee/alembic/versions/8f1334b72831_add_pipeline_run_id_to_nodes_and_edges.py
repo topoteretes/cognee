@@ -1,17 +1,22 @@
-"""add pipeline_run_id to nodes and edges ownership tables
+"""add_pipeline_run_id_to_nodes_and_edges
 
-Revision ID: e7f8a9b0c1d2
-Revises: d4e5f6a7b8c9
-Create Date: 2026-05-11
+Revision ID: 8f1334b72831
+Revises: 24f5d4f64d0d
+Create Date: 2026-05-11 18:28:09.122374
+
 """
+
+from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "e7f8a9b0c1d2"
-down_revision = "d4e5f6a7b8c9"
-branch_labels = None
-depends_on = None
+
+# revision identifiers, used by Alembic.
+revision: str = "8f1334b72831"
+down_revision: Union[str, None] = "24f5d4f64d0d"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
 def _has_column(insp, table_name: str, column_name: str) -> bool:
