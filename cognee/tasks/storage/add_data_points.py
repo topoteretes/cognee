@@ -79,22 +79,16 @@ async def add_data_points(
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
     edges = ensure_default_edge_properties(edges)
+    custom_edges = (
+        ensure_default_edge_properties(custom_edges)
+        if isinstance(custom_edges, list) and custom_edges
+        else None
+    )
 
     unified = await get_unified_engine()
     graph_engine = unified.graph
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
-
-    if use_hybrid:
-        await graph_engine.add_nodes_with_vectors(nodes)
-    else:
-        await asyncio.gather(
-            graph_engine.add_nodes(nodes),
-            index_data_points(
-                [node.model_copy(deep=True) for node in nodes],
-                vector_engine=vector_engine,
-            ),
-        )
 
     if user and dataset and data_item:
         await upsert_nodes(
@@ -113,6 +107,26 @@ async def add_data_points(
             data_id=data_item.id,
             pipeline_run_id=pipeline_run_id,
         )
+        if custom_edges:
+            await upsert_edges(
+                custom_edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data_item.id,
+                pipeline_run_id=pipeline_run_id,
+            )
+
+    if use_hybrid:
+        await graph_engine.add_nodes_with_vectors(nodes)
+    else:
+        await asyncio.gather(
+            graph_engine.add_nodes(nodes),
+            index_data_points(
+                [node.model_copy(deep=True) for node in nodes],
+                vector_engine=vector_engine,
+            ),
+        )
 
     if use_hybrid:
         await graph_engine.add_edges_with_vectors(edges)
@@ -121,25 +135,14 @@ async def add_data_points(
             graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine)
         )
 
-    if isinstance(custom_edges, list) and custom_edges:
+    if custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
-        custom_edges = ensure_default_edge_properties(custom_edges)
         if use_hybrid:
             await graph_engine.add_edges_with_vectors(custom_edges)
         else:
             await asyncio.gather(
                 graph_engine.add_edges(custom_edges),
                 index_graph_edges(custom_edges, vector_engine=vector_engine),
-            )
-
-        if user and dataset and data_item:
-            await upsert_edges(
-                custom_edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=dataset.id,
-                data_id=data_item.id,
-                pipeline_run_id=pipeline_run_id,
             )
 
         edges.extend(custom_edges)
