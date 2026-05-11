@@ -3,12 +3,9 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict, Unpack
 
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.context_global_variables import set_session_user_context_variable
-from cognee.exceptions import CogneeValidationError
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -32,8 +29,6 @@ from cognee.modules.recall.types.RecallResponse import (
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import UserNotFoundError
-from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("recall")
@@ -43,7 +38,7 @@ _MIN_WORD_LEN = 2
 
 
 class RecallKwargs(TypedDict, total=False):
-    """Backward-compatible export for callers that import RecallKwargs."""
+    """Power-user overrides for recall(). Most users never need these."""
 
     dataset_ids: list[UUID]
     system_prompt: str
@@ -57,7 +52,6 @@ class RecallKwargs(TypedDict, total=False):
     feedback_influence: float
     verbose: bool
     retriever_specific_config: dict
-    user: object
 
 
 def _tokenize(text: str) -> set[str]:
@@ -67,6 +61,8 @@ def _tokenize(text: str) -> set[str]:
 
 async def _resolve_user_id(user: str | None) -> str | None:
     """Return the user id as a string, resolving default if needed."""
+    from cognee.modules.users.methods import get_default_user
+
     if user is None:
         user = await get_default_user()
     return str(user.id) if hasattr(user, "id") else None
@@ -277,7 +273,7 @@ async def _search_trace(
 
     results: list[ResponseAgentTraceEntry] = []
     for _, entry in scored[:top_k]:
-        results.append(ResponseAgentTraceEntry(**entry.model_dump(), source="trace"))
+        results.append(ResponseAgentTraceEntry(entry))
 
     return results
 
@@ -309,7 +305,7 @@ async def _fetch_graph_context(
     if not snapshot:
         return []
 
-    return [ResponseGraphContextEntry(content=snapshot, source="graph_context")]
+    return [ResponseGraphContextEntry(content=snapshot)]
 
 
 async def recall(
@@ -317,24 +313,10 @@ async def recall(
     query_type: SearchType | None = None,
     *,
     datasets: list[str] | None = None,
-    dataset_ids: list[UUID] | None = None,
     top_k: int = 10,
     auto_route: bool = True,
     scope: str | list[str] | None = None,
-    system_prompt: str | None = None,
-    system_prompt_path: str = "answer_simple_question.txt",
-    node_name: list[str] | None = None,
-    node_name_filter_operator: str = "OR",
-    only_context: bool = False,
-    session_id: str | None = None,
-    wide_search_top_k: int | None = 100,
-    triplet_distance_penalty: float | None = 6.5,
-    feedback_influence: float = 0.0,
-    verbose: bool = False,
-    retriever_specific_config: dict | None = None,
-    neighborhood_depth: int | None = None,
-    neighborhood_seed_top_k: int | None = None,
-    user: object | None = None,
+    **kwargs: Unpack[RecallKwargs],
 ) -> list[RecallResponse]:
     """Search the knowledge graph for relevant information.
 
@@ -356,10 +338,10 @@ async def recall(
         query_text: Natural-language query.
         query_type: Search strategy. When provided, the router is bypassed.
         datasets: Dataset names to search within.
-        dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *10*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to GRAPH_COMPLETION.
+        **kwargs: Additional options -- see ``RecallKwargs``.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -368,7 +350,8 @@ async def recall(
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
 
-    telemetry_user = getattr(user, "id", user) or "sdk"
+    session_id = kwargs.get("session_id")
+    user = kwargs.get("user")
 
     # Resolve scope → concrete source list. "auto" (the default) picks
     # sources based on what the caller supplied:
@@ -383,8 +366,7 @@ async def recall(
     # Explicit ``scope`` values bypass this entirely.
     resolved_scope = normalize_scope(scope)
     if resolved_scope == ["auto"]:
-        has_dataset_scope = bool(dataset_ids) or bool(datasets)
-        if session_id and not has_dataset_scope and query_type is None:
+        if session_id and not datasets and query_type is None:
             sources = ["session", "graph"]
             auto_fallthrough = True  # session hit short-circuits graph
         elif session_id and query_type is None:
@@ -401,7 +383,7 @@ async def recall(
 
     send_telemetry(
         "cognee.recall",
-        telemetry_user,
+        kwargs.get("user", "sdk"),
         additional_properties={
             "query_length": len(query_text),
             "scope": span_scope,
@@ -410,7 +392,6 @@ async def recall(
             "search_type": str(query_type.value) if query_type else "auto",
             "session_id": session_id or "",
             "datasets": ",".join(datasets) if datasets else "",
-            "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
             "cognee_version": cognee_version,
         },
     )
@@ -430,14 +411,9 @@ async def recall(
                 query_text,
                 query_type,
                 datasets=datasets,
-                dataset_ids=dataset_ids,
                 top_k=top_k,
                 scope=scope,
-                system_prompt=system_prompt,
-                node_name=node_name,
-                only_context=only_context,
-                session_id=session_id,
-                verbose=verbose,
+                **kwargs,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -475,27 +451,10 @@ async def recall(
             return list(await _fetch_graph_context(session_id=session_id, user=user))
 
         async def _run_graph() -> list[RecallResponse]:
-            nonlocal user
-
             from cognee.modules.recall.methods.normalize_search_payload import (
                 normalize_search_payload,
             )
             from cognee.modules.search.methods.search import authorized_search
-
-            if user is None:
-                try:
-                    user = await get_default_user()
-                except (DatabaseNotCreatedError, UserNotFoundError) as error:
-                    raise CogneeValidationError(
-                        message=(
-                            "Recall prerequisites not met: no database/default user found. "
-                            "Initialize Cognee before recalling by:\n"
-                            "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
-                        ),
-                        name="RecallPreconditionError",
-                    ) from error
-
-            await set_session_user_context_variable(user)
 
             local_query_type = query_type
             if local_query_type is not None:
@@ -518,35 +477,22 @@ async def recall(
                 str(local_query_type.value) if local_query_type else "unknown",
             )
 
-            # Dataset UUIDs take precedence over names, matching /api/v1/search.
-            # String dataset names can only resolve for the current user.
-            search_dataset_ids = dataset_ids or None
-            if search_dataset_ids is None and datasets is not None:
-                search_dataset_ids = [
+            # Transform string based datasets to UUID - String based datasets can only be found for current user
+            dataset_ids: list[UUID] | None = None
+            if datasets is not None:
+                dataset_ids = [
                     dataset.id
                     for dataset in await get_authorized_existing_datasets(datasets, "read", user)
                 ]
-                if not search_dataset_ids:
+                if not dataset_ids:
                     raise DatasetNotFoundError(message="No datasets found.")
 
             graph_results = await authorized_search(
                 query_text=query_text,
                 query_type=local_query_type,
                 user=user,
-                dataset_ids=search_dataset_ids,
-                system_prompt_path=system_prompt_path,
-                system_prompt=system_prompt,
+                dataset_ids=dataset_ids,
                 top_k=top_k,
-                node_name=node_name,
-                node_name_filter_operator=node_name_filter_operator,
-                only_context=only_context,
-                session_id=session_id,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-                feedback_influence=feedback_influence,
-                retriever_specific_config=retriever_specific_config,
-                neighborhood_depth=neighborhood_depth,
-                neighborhood_seed_top_k=neighborhood_seed_top_k,
             )
 
             tagged = []

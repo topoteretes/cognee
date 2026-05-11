@@ -85,12 +85,13 @@ class SQLAlchemyAdapter:
             if pool_args.get("poolclass", "").lower() == "nullpool":
                 pool_args["poolclass"] = NullPool
             else:
-                # Standard QueuePool settings
-                pool_args.setdefault("pool_size", 20)
+                # Standard QueuePool settings - tuned for production with max_connections=100
+                pool_args.setdefault("pool_size", 10)
                 pool_args.setdefault("max_overflow", 20)
                 pool_args.setdefault("pool_pre_ping", True)
                 pool_args.setdefault("pool_recycle", 280)
-                pool_args.setdefault("pool_timeout", 280)
+                pool_args.setdefault("pool_timeout", 30)
+                pool_args.setdefault("pool_reset_on_return", True)
 
             engine_kwargs = {**pool_args}
             if final_connect_args:
