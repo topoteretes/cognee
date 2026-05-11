@@ -46,6 +46,7 @@ async def add_data_points(
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
     dataset = ctx.dataset if ctx else None
+    pipeline_run_id = ctx.pipeline_run_id if ctx else None
 
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
@@ -102,6 +103,7 @@ async def add_data_points(
             user_id=user.id,
             dataset_id=dataset.id,
             data_id=data_item.id,
+            pipeline_run_id=pipeline_run_id,
         )
         await upsert_edges(
             edges,
@@ -109,6 +111,7 @@ async def add_data_points(
             user_id=user.id,
             dataset_id=dataset.id,
             data_id=data_item.id,
+            pipeline_run_id=pipeline_run_id,
         )
 
     if use_hybrid:
@@ -136,6 +139,7 @@ async def add_data_points(
                 user_id=user.id,
                 dataset_id=dataset.id,
                 data_id=data_item.id,
+                pipeline_run_id=pipeline_run_id,
             )
 
         edges.extend(custom_edges)
