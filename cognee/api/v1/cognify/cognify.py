@@ -311,11 +311,11 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     if cognify_config.ontology_generation == "AUTO_RESTRICTED":
         if graph_model is KnowledgeGraph:
-            from cognee.tasks.graph.auto_restricted_ontology import (
-                auto_restricted_calculate_chunk_graphs,
-            )
+            from cognee.tasks.graph.auto_restricted_ontology import AutoRestrictedOntology
 
-            extraction_kwargs["calculate_chunk_graphs"] = auto_restricted_calculate_chunk_graphs
+            extraction_kwargs["calculate_chunk_graphs"] = (
+                AutoRestrictedOntology().calculate_chunk_graphs
+            )
         else:
             logger.warning(
                 "ONTOLOGY_GENERATION=AUTO_RESTRICTED only supports KnowledgeGraph; "
