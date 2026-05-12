@@ -309,17 +309,23 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     embed_triplets = cognify_config.triplet_embedding
     extraction_kwargs = dict(kwargs)
 
-    if cognify_config.ontology_generation == "AUTO_RESTRICTED":
+    if cognify_config.ontology_generation in ("AUTO_RESTRICTED", "AUTO_RESTRICTED_ITERATIVE"):
         if graph_model is KnowledgeGraph:
-            from cognee.tasks.graph.auto_restricted_ontology import AutoRestrictedOntology
-
-            extraction_kwargs["calculate_chunk_graphs"] = (
-                AutoRestrictedOntology().calculate_chunk_graphs
+            from cognee.tasks.graph.auto_restricted_ontology import (
+                AutoRestrictedOntology,
+                AutoRestrictedOntologyIterative,
             )
+
+            ontology = (
+                AutoRestrictedOntologyIterative()
+                if cognify_config.ontology_generation == "AUTO_RESTRICTED_ITERATIVE"
+                else AutoRestrictedOntology()
+            )
+            extraction_kwargs["calculate_chunk_graphs"] = ontology.calculate_chunk_graphs
         else:
             logger.warning(
-                "ONTOLOGY_GENERATION=AUTO_RESTRICTED only supports KnowledgeGraph; "
-                "using default extraction for custom graph model "
+                f"ONTOLOGY_GENERATION={cognify_config.ontology_generation} only supports "
+                "KnowledgeGraph; using default extraction for custom graph model "
                 f"{getattr(graph_model, '__name__', str(graph_model))}.",
             )
 

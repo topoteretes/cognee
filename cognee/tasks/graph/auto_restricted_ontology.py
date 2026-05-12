@@ -46,11 +46,26 @@ def _unique(values: list[str]) -> list[str]:
 
 
 async def generate_restriction_from_chunks(
-    chunks: list[DocumentChunk], **kwargs: Any
+    chunks: list[DocumentChunk],
+    existing: GeneratedOntologyRestriction | None = None,
+    **kwargs: Any,
 ) -> GeneratedOntologyRestriction:
     sample = "\n\n".join(chunk.text for chunk in chunks if getattr(chunk, "text", None))
+
+    existing_context = ""
+    if existing and (existing.entity_types or existing.relations):
+        existing_context = (
+            "EXISTING CANONICAL ONTOLOGY (reuse these names when applicable; "
+            "only add new ones for concepts the existing list doesn't cover):\n"
+            f"- entity_types: {existing.entity_types}\n"
+            f"- relations: {existing.relations}\n\n"
+        )
+
     restriction = await LLMGateway.acreate_structured_output(
-        text_input=f"Generate entity type and relation allowlists for this text:\n\n{sample}",
+        text_input=(
+            f"{existing_context}"
+            f"Generate entity type and relation allowlists for this text:\n\n{sample}"
+        ),
         system_prompt="""
 Generate a small ontology for KnowledgeGraph extraction.
 
@@ -62,16 +77,25 @@ Return:
   (e.g., "painted", "flew", "broke"); prefer stable predicates
   (e.g., "located_in", "uses", "owns").
 
+If EXISTING CANONICAL ONTOLOGY values are provided, reuse them where applicable
+rather than inventing synonyms or near-synonyms.
+
 Infer only from the text. Do not include domain/range triples.
 """,
         response_model=GeneratedOntologyRestriction,
         **kwargs,
     )
+    # Union existing + new so values the LLM didn't echo back are still preserved.
+    existing_types = existing.entity_types if existing else []
+    existing_relations = existing.relations if existing else []
     return GeneratedOntologyRestriction(
         entity_types=_unique(
-            [" ".join(entity_type.strip().split()) for entity_type in restriction.entity_types]
+            [
+                *existing_types,
+                *[" ".join(t.strip().split()) for t in restriction.entity_types],
+            ]
         ),
-        relations=_unique([_snake_case(relation) for relation in restriction.relations]),
+        relations=_unique([*existing_relations, *[_snake_case(r) for r in restriction.relations]]),
     )
 
 
@@ -198,18 +222,23 @@ def _base_prompt(custom_prompt: str | None = None) -> str:
     return render_prompt(os.path.basename(prompt_path), {}, base_directory=base_directory)
 
 
-class AutoRestrictedOntology:
+class _AutoRestrictedOntologyBase:
     """Per-cognify auto-restricted ontology builder.
 
     One instance per cognify run. The pipeline may call `calculate_chunk_graphs`
     multiple times (once per chunk batch); the instance accumulates the
-    canonical across calls and a lock serializes the resolve step so concurrent
-    batches don't race on `self.canonical`.
+    canonical across calls. Subclasses implement `_update_canonical` to compute
+    the new canonical for a batch and manage their own locking.
     """
 
     def __init__(self) -> None:
         self.canonical = GeneratedOntologyRestriction()
         self._lock = asyncio.Lock()
+
+    async def _update_canonical(
+        self, chunks: list[DocumentChunk], **llm_kwargs: Any
+    ) -> GeneratedOntologyRestriction:
+        raise NotImplementedError
 
     async def calculate_chunk_graphs(
         self,
@@ -226,13 +255,7 @@ class AutoRestrictedOntology:
         llm_kwargs = dict(kwargs)
         llm_kwargs.pop("calculate_chunk_graphs", None)
 
-        per_chunk = await asyncio.gather(
-            *[generate_restriction_from_chunks([chunk], **llm_kwargs) for chunk in chunks]
-        )
-
-        async with self._lock:
-            canonical = await resolve_restrictions([self.canonical, *per_chunk], **llm_kwargs)
-            self.canonical = canonical
+        canonical = await self._update_canonical(chunks, **llm_kwargs)
 
         logger.info(
             "AUTO_RESTRICTED canonical: %d types, %d relations: %s",
@@ -259,3 +282,39 @@ class AutoRestrictedOntology:
                 for chunk in chunks
             ]
         )
+
+
+class AutoRestrictedOntology(_AutoRestrictedOntologyBase):
+    """Per-chunk discovery + 2-call resolve.
+
+    Stage 1 is N parallel LLM calls (one per chunk). Stage 2 merges prior
+    canonical + per-chunk restrictions via the resolve step. Lock protects
+    the read-modify-write of `self.canonical`.
+    """
+
+    async def _update_canonical(
+        self, chunks: list[DocumentChunk], **llm_kwargs: Any
+    ) -> GeneratedOntologyRestriction:
+        per_chunk = await asyncio.gather(
+            *[generate_restriction_from_chunks([chunk], **llm_kwargs) for chunk in chunks]
+        )
+        async with self._lock:
+            self.canonical = await resolve_restrictions([self.canonical, *per_chunk], **llm_kwargs)
+            return self.canonical
+
+
+class AutoRestrictedOntologyIterative(_AutoRestrictedOntologyBase):
+    """One discovery LLM call that sees all the batch's chunks plus the prior
+    canonical as context. No separate resolve step — the discovery prompt is
+    asked to reuse existing canonicals where applicable. Lock serializes the
+    full read-modify-write so batches see each other's canonicals.
+    """
+
+    async def _update_canonical(
+        self, chunks: list[DocumentChunk], **llm_kwargs: Any
+    ) -> GeneratedOntologyRestriction:
+        async with self._lock:
+            self.canonical = await generate_restriction_from_chunks(
+                chunks, existing=self.canonical, **llm_kwargs
+            )
+            return self.canonical

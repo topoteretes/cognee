@@ -9,7 +9,9 @@ class CognifyConfig(BaseSettings):
     summarization_model: object = SummarizedContent
     triplet_embedding: bool = False
     chunks_per_batch: Optional[int] = None
-    ontology_generation: Literal["DEFAULT", "AUTO_RESTRICTED"] = "DEFAULT"
+    ontology_generation: Literal["DEFAULT", "AUTO_RESTRICTED", "AUTO_RESTRICTED_ITERATIVE"] = (
+        "DEFAULT"
+    )
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
