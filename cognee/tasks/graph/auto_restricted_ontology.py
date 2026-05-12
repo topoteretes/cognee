@@ -232,6 +232,18 @@ class _AutoRestrictedOntologyBase:
     """
 
     def __init__(self) -> None:
+        # TODO: productionization
+        # 1. in-process canonical won't scale — it's bounded to a single
+        #    cognify run on a single worker, lives only in memory, and is
+        #    lost when the run ends. Treat `self.canonical` as a stand-in
+        #    for an external canonical store (e.g. a DB/cache keyed by
+        #    tenant/dataset) so canonicals persist across runs and are
+        #    shared across workers.
+        # 2. once the canonical grows, we can't pass the whole allowlist
+        #    into every discovery/extraction prompt. Need a retrieval step
+        #    that surfaces only the canonicals relevant to the current
+        #    batch (e.g. embedding/keyword lookup over the canonical store)
+        #    before injecting them as context.
         self.canonical = GeneratedOntologyRestriction()
         self._lock = asyncio.Lock()
 
