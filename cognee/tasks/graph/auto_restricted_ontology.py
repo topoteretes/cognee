@@ -55,41 +55,89 @@ async def generate_restriction_from_chunks(
     existing_context = ""
     if existing and (existing.entity_types or existing.relations):
         existing_context = (
-            "Existing ontology. Reuse matching names; add meaningful gaps:\n"
+            "EXISTING CANONICAL ONTOLOGY (reuse these names when applicable; "
+            "only add new ones for concepts the existing list doesn't cover):\n"
             f"- entity_types: {existing.entity_types}\n"
             f"- relations: {existing.relations}\n\n"
         )
 
     restriction = await LLMGateway.acreate_structured_output(
-        text_input=(f"{existing_context}Create ontology allowlists for this text:\n\n{sample}"),
+        text_input=(
+            f"{existing_context}"
+            f"Generate entity type and relation allowlists for this text:\n\n{sample}"
+        ),
         system_prompt="""
-Create a flexible, descriptive ontology for knowledge graph extraction from any
-kind of text. Return meaningful allowed node types and edge relations, not the
-extracted facts themselves.
+You are designing a compact canonical ontology allowlist for knowledge graph
+extraction from arbitrary text: articles, books, emails, notes, technical
+docs, code, tickets, contracts, tables, logs, scientific text, business text,
+fiction, and mixed-domain documents.
 
-Rules:
-- Infer only from the text. Reuse existing ontology names when they fit.
-- Include enough types/relations to cover important source facts; do not be
-  overly minimal. Prefer domain-specific names when useful.
-- Collapse synonyms. Use one canonical lowercase snake_case name per concept.
-- Omit only noisy, one-off, vague, or unsupported schema items.
+Return only two allowlists:
+1. entity_types: allowed node categories
+2. relations: allowed edge predicates
+
+The goal is not to extract every entity or every fact. The goal is to choose a
+small, reusable schema that lets a later extractor represent the important
+source-grounded facts with consistent names. Small clean allowlists are better
+than large noisy ones. When unsure, omit.
+
+General rules:
+- Infer only from the supplied text. Do not add world knowledge.
+- Prefer names useful across the whole document or dataset, not names tailored
+  to one sentence.
+- Reuse EXISTING CANONICAL ONTOLOGY values verbatim whenever they cover the
+  same concept. Add a new value only when the existing list has no good match.
+- Collapse synonyms and near-duplicates inline. Return one canonical name per
+  concept. Do not return both a relation and its inverse.
+- Use lowercase snake_case for every value.
 
 entity_types:
-- Singular category names, never specific instances: "Ada" -> person,
-  "OpenAI" -> organization, "Python" -> programming_language.
-- Prefer descriptive reusable categories over generic placeholders. Good:
-  person, organization, product, document, law, disease, chemical, dataset,
-  software_package, function, metric, requirement, invoice, location.
-- Roles are allowed when meaningful in the text: author, patient, supplier,
-  regulator, maintainer, customer.
+- Each value must be a singular common-noun category that many instances could
+  belong to, not a specific named entity.
+  Examples:
+    "Ada Lovelace" -> person
+    "OpenAI" -> organization
+    "Paris" -> city
+    "Python" -> programming_language
+    "Invoice #42" -> invoice
+- Prefer broad but informative categories over hyper-specific labels.
+  Good: person, organization, product, disease, chemical, document, law,
+  software_package, function, dataset, location, event, metric
+  Avoid: thing, entity, item, data, topic, concept, object unless the text is
+  explicitly about those categories.
+- Use roles only when the role is central and reusable in the text
+  (e.g. author, patient, supplier, regulator). Otherwise use the broader type
+  (e.g. person, organization).
+- Do not use literal values or properties as types (e.g. price, age, email,
+  phone_number) unless the text treats them as entities that have relationships.
 
 relations:
-- Directed predicates for "source relation target"; lowercase snake_case.
-- Prefer clear, stable, source-grounded predicates. Examples: located_in,
-  part_of, member_of, works_at, owns, created_by, authored_by, uses,
-  depends_on, caused_by, occurs_on, mentions, describes, requires.
-- Convert actions to durable predicates when possible; otherwise omit noisy
-  one-off verbs. Avoid vague catch-alls like related_to unless necessary.
+- Each value must be a snake_case predicate for a directed edge between two
+  entities. It should read naturally as "source relation target".
+- Prefer durable, source-grounded facts over sentence-level action verbs.
+  Historical or fictional facts are allowed when they can be represented as a
+  stable graph fact in the source context.
+- Prefer short predicates, usually 1-3 words: located_in, part_of, member_of,
+  works_at, owns, created_by, authored_by, uses, depends_on, caused_by,
+  occurs_on, participant_in, mentions, describes.
+- Rewrite one-off or past-tense actions into stable predicates when possible:
+    wrote / authored / published -> authored_by or author_of, not both
+    founded / built / created -> created_by or creator_of, not both
+    joined / enrolled in -> member_of
+    held at / housed at / based in -> located_in
+    caused / led to -> caused_by or causes
+    happened on / dated -> occurs_on
+  If no stable rewrite fits, omit the relation.
+- Keep predicates atomic. Prefer has_width and has_height over has_dimensions.
+- Do not encode source and target types into the name
+  (e.g. use works_at, not person_works_at_company).
+- Avoid vague catch-all predicates such as related_to, associated_with,
+  connected_to, has, includes unless the text truly requires that generality.
+
+Size guidance:
+- For a short chunk, return only the few types and relations clearly needed.
+- For a diverse batch, include enough coverage for the central recurring
+  concepts, but keep the ontology compact and canonical.
 """,
         response_model=GeneratedOntologyRestriction,
         **kwargs,
