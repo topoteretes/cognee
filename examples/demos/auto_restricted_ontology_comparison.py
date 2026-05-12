@@ -11,7 +11,6 @@ import asyncio
 import html
 import random
 import sys
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -28,9 +27,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.shared.logging_utils import ERROR, setup_logging
 
-from simple_cognee_example import job_1, job_2, job_3, job_4, job_5
-
-JOBS = [job_1, job_2, job_3, job_4, job_5]
+from _comparison_datasets import DATASETS
 
 # How many sample triplets to surface per approach in the dashboard.
 TRIPLET_SAMPLE_SIZE = 6
@@ -167,40 +164,37 @@ async def collect_stats() -> dict:
     }
 
 
-async def run_approach(name: str, ontology_generation: str) -> dict:
-    print(f"\n=== {name} (ONTOLOGY_GENERATION={ontology_generation}) ===")
+async def run_approach(name: str, ontology_generation: str, texts: list[str]) -> dict:
+    print(f"  --- {name} (ONTOLOGY_GENERATION={ontology_generation}) ---")
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    print("Pruned.")
+    print("  Pruned.")
 
     get_cognify_config().ontology_generation = ontology_generation
 
-    for text in JOBS:
+    for text in texts:
         await cognee.add(text)
-    print(f"Added {len(JOBS)} CVs.")
+    print(f"  Added {len(texts)} texts.")
 
     TRACKER.reset()
-    started = time.perf_counter()
     await cognee.cognify()
-    elapsed = time.perf_counter() - started
-    print(f"Cognify done in {elapsed:.1f}s.")
+    print("  Cognify done.")
 
     stats = await collect_stats()
     print(
-        f"  entities: {stats['entity_count']}, nodes: {stats['node_count']}, "
+        f"    entities: {stats['entity_count']}, nodes: {stats['node_count']}, "
         f"edges: {stats['edge_count']}, entity types: {len(stats['entity_types'])}, "
         f"edge types: {len(stats['edge_types'])}"
     )
     print(
-        f"  LLM calls: {TRACKER.calls}, prompt tokens: {TRACKER.prompt_tokens}, "
+        f"    LLM calls: {TRACKER.calls}, prompt tokens: {TRACKER.prompt_tokens}, "
         f"completion tokens: {TRACKER.completion_tokens}, total tokens: {TRACKER.total_tokens}"
     )
 
     return {
         "name": name,
         "ontology_generation": ontology_generation,
-        "cognify_seconds": elapsed,
         "llm_calls": TRACKER.calls,
         "prompt_tokens": TRACKER.prompt_tokens,
         "completion_tokens": TRACKER.completion_tokens,
@@ -234,13 +228,8 @@ def _fmt_int(n: int) -> str:
     return f"{n:,}"
 
 
-def _fmt_seconds(s: float) -> str:
-    return f"{s:.1f}s"
-
-
 def _metrics_table(results: list[dict]) -> str:
     metrics = [
-        ("Cognify wall-clock time", lambda r: _fmt_seconds(r["cognify_seconds"])),
         ("LLM calls", lambda r: _fmt_int(r["llm_calls"])),
         ("Prompt tokens", lambda r: _fmt_int(r["prompt_tokens"])),
         ("Completion tokens", lambda r: _fmt_int(r["completion_tokens"])),
@@ -350,7 +339,12 @@ def _triplet_table(results: list[dict]) -> str:
     )
 
 
-def render_dashboard(results: list[dict], output_path: Path) -> None:
+def render_dashboard(
+    results: list[dict],
+    output_path: Path,
+    dataset_label: str,
+    dataset_description: str,
+) -> None:
     all_entity_types = sorted({et for r in results for et in r["entity_types"]})
     all_edge_types = sorted({et for r in results for et in r["edge_types"]})
 
@@ -370,7 +364,6 @@ def render_dashboard(results: list[dict], output_path: Path) -> None:
               <h3>{html.escape(r["name"])}</h3>
               <p class="config">ONTOLOGY_GENERATION = <code>{html.escape(r["ontology_generation"])}</code></p>
               <div class="counts">
-                <span class="pill pill-time">{_fmt_seconds(r["cognify_seconds"])}</span>
                 <span class="pill pill-time">{_fmt_int(r["llm_calls"])} LLM calls</span>
                 <span class="pill pill-time">{_fmt_int(r["total_tokens"])} tokens</span>
               </div>
@@ -396,7 +389,7 @@ def render_dashboard(results: list[dict], output_path: Path) -> None:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Auto-Restricted Ontology Comparison</title>
+<title>Auto-Restricted Ontology Comparison &mdash; {html.escape(dataset_label)}</title>
 <style>
   :root {{
     --border: #e5e7eb; --muted: #6b7280; --text: #111827;
@@ -461,8 +454,8 @@ def render_dashboard(results: list[dict], output_path: Path) -> None:
 </script>
 </head>
 <body>
-<h1>Auto-Restricted Ontology &mdash; Approach Comparison</h1>
-<p class="subtitle">Generated {datetime.now().strftime("%Y-%m-%d %H:%M")} &middot; 5 CVs ingested via simple_cognee_example</p>
+<h1>Auto-Restricted Ontology &mdash; {html.escape(dataset_label)}</h1>
+<p class="subtitle">Generated {datetime.now().strftime("%Y-%m-%d %H:%M")} &middot; {html.escape(dataset_description)}</p>
 
 <h2>Per-batch flow &mdash; how each approach works</h2>
 {_diagrams_panel(results)}
@@ -488,13 +481,28 @@ def render_dashboard(results: list[dict], output_path: Path) -> None:
 
 
 async def main():
-    results = []
-    for name, ontology_generation in RUNS:
-        results.append(await run_approach(name, ontology_generation))
+    written: list[Path] = []
+    for dataset_key, dataset in DATASETS.items():
+        print(f"\n========== Dataset: {dataset['label']} ==========")
+        results = []
+        for name, ontology_generation in RUNS:
+            results.append(
+                await run_approach(name, ontology_generation, dataset["texts"])
+            )
 
-    output_path = SCRIPT_DIR / "auto_restricted_ontology_comparison.html"
-    render_dashboard(results, output_path)
-    print(f"\nDashboard: {output_path}")
+        output_path = SCRIPT_DIR / f"auto_restricted_ontology_comparison_{dataset_key}.html"
+        render_dashboard(
+            results,
+            output_path,
+            dataset_label=dataset["label"],
+            dataset_description=dataset["description"],
+        )
+        print(f"Dashboard: {output_path}")
+        written.append(output_path)
+
+    print("\nGenerated dashboards:")
+    for path in written:
+        print(f"  - {path}")
 
 
 if __name__ == "__main__":

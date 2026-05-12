@@ -67,20 +67,77 @@ async def generate_restriction_from_chunks(
             f"Generate entity type and relation allowlists for this text:\n\n{sample}"
         ),
         system_prompt="""
-Generate a small ontology for KnowledgeGraph extraction.
+You are designing a compact canonical ontology allowlist for knowledge graph
+extraction from arbitrary text: articles, books, emails, notes, technical
+docs, code, tickets, contracts, tables, logs, scientific text, business text,
+fiction, and mixed-domain documents.
 
-Return:
-- entity_types: allowed values for node.type. TYPES not instance names.
-  Use snake_case nouns. Prefer broad recurring types.
-- relations: allowed values for edge.relationship_name. snake_case PREDICATES,
-  not past-tense narrative verbs. Reject one-off actions
-  (e.g., "painted", "flew", "broke"); prefer stable predicates
-  (e.g., "located_in", "uses", "owns").
+Return only two allowlists:
+1. entity_types: allowed node categories
+2. relations: allowed edge predicates
 
-If EXISTING CANONICAL ONTOLOGY values are provided, reuse them where applicable
-rather than inventing synonyms or near-synonyms.
+The goal is not to extract every entity or every fact. The goal is to choose a
+small, reusable schema that lets a later extractor represent the important
+source-grounded facts with consistent names. Small clean allowlists are better
+than large noisy ones. When unsure, omit.
 
-Infer only from the text. Do not include domain/range triples.
+General rules:
+- Infer only from the supplied text. Do not add world knowledge.
+- Prefer names useful across the whole document or dataset, not names tailored
+  to one sentence.
+- Reuse EXISTING CANONICAL ONTOLOGY values verbatim whenever they cover the
+  same concept. Add a new value only when the existing list has no good match.
+- Collapse synonyms and near-duplicates inline. Return one canonical name per
+  concept. Do not return both a relation and its inverse.
+- Use lowercase snake_case for every value.
+
+entity_types:
+- Each value must be a singular common-noun category that many instances could
+  belong to, not a specific named entity.
+  Examples:
+    "Ada Lovelace" -> person
+    "OpenAI" -> organization
+    "Paris" -> city
+    "Python" -> programming_language
+    "Invoice #42" -> invoice
+- Prefer broad but informative categories over hyper-specific labels.
+  Good: person, organization, product, disease, chemical, document, law,
+  software_package, function, dataset, location, event, metric
+  Avoid: thing, entity, item, data, topic, concept, object unless the text is
+  explicitly about those categories.
+- Use roles only when the role is central and reusable in the text
+  (e.g. author, patient, supplier, regulator). Otherwise use the broader type
+  (e.g. person, organization).
+- Do not use literal values or properties as types (e.g. price, age, email,
+  phone_number) unless the text treats them as entities that have relationships.
+
+relations:
+- Each value must be a snake_case predicate for a directed edge between two
+  entities. It should read naturally as "source relation target".
+- Prefer durable, source-grounded facts over sentence-level action verbs.
+  Historical or fictional facts are allowed when they can be represented as a
+  stable graph fact in the source context.
+- Prefer short predicates, usually 1-3 words: located_in, part_of, member_of,
+  works_at, owns, created_by, authored_by, uses, depends_on, caused_by,
+  occurs_on, participant_in, mentions, describes.
+- Rewrite one-off or past-tense actions into stable predicates when possible:
+    wrote / authored / published -> authored_by or author_of, not both
+    founded / built / created -> created_by or creator_of, not both
+    joined / enrolled in -> member_of
+    held at / housed at / based in -> located_in
+    caused / led to -> caused_by or causes
+    happened on / dated -> occurs_on
+  If no stable rewrite fits, omit the relation.
+- Keep predicates atomic. Prefer has_width and has_height over has_dimensions.
+- Do not encode source and target types into the name
+  (e.g. use works_at, not person_works_at_company).
+- Avoid vague catch-all predicates such as related_to, associated_with,
+  connected_to, has, includes unless the text truly requires that generality.
+
+Size guidance:
+- For a short chunk, return only the few types and relations clearly needed.
+- For a diverse batch, include enough coverage for the central recurring
+  concepts, but keep the ontology compact and canonical.
 """,
         response_model=GeneratedOntologyRestriction,
         **kwargs,
@@ -91,11 +148,16 @@ Infer only from the text. Do not include domain/range triples.
     return GeneratedOntologyRestriction(
         entity_types=_unique(
             [
-                *existing_types,
-                *[" ".join(t.strip().split()) for t in restriction.entity_types],
+                *[_snake_case(t) for t in existing_types],
+                *[_snake_case(t) for t in restriction.entity_types],
             ]
         ),
-        relations=_unique([*existing_relations, *[_snake_case(r) for r in restriction.relations]]),
+        relations=_unique(
+            [
+                *[_snake_case(r) for r in existing_relations],
+                *[_snake_case(r) for r in restriction.relations],
+            ]
+        ),
     )
 
 
