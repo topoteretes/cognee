@@ -35,14 +35,21 @@ RUNS = [
 ]
 
 
-async def collect_types() -> tuple[set[str], set[str]]:
+async def collect_stats() -> dict:
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
     entity_types: set[str] = set()
+    node_types: set[str] = set()
+    entity_count = 0
     for _node_id, props in nodes:
         props = props or {}
-        if props.get("type") == "EntityType":
+        node_type = props.get("type")
+        if isinstance(node_type, str) and node_type:
+            node_types.add(node_type)
+        if node_type == "Entity":
+            entity_count += 1
+        if node_type == "EntityType":
             name = props.get("name")
             if isinstance(name, str) and name.strip():
                 entity_types.add(name.strip())
@@ -55,7 +62,14 @@ async def collect_types() -> tuple[set[str], set[str]]:
         if isinstance(rel, str) and rel.strip() and rel not in SYSTEM_EDGE_TYPES:
             edge_types.add(rel.strip())
 
-    return entity_types, edge_types
+    return {
+        "entity_types": sorted(entity_types),
+        "edge_types": sorted(edge_types),
+        "node_types": sorted(node_types),
+        "entity_count": entity_count,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+    }
 
 
 async def run_approach(name: str, ontology_generation: str) -> dict:
@@ -74,14 +88,17 @@ async def run_approach(name: str, ontology_generation: str) -> dict:
     await cognee.cognify()
     print("Cognify done.")
 
-    entity_types, edge_types = await collect_types()
-    print(f"  entity types: {len(entity_types)}, edge types: {len(edge_types)}")
+    stats = await collect_stats()
+    print(
+        f"  entities: {stats['entity_count']}, nodes: {stats['node_count']}, "
+        f"edges: {stats['edge_count']}, node types: {len(stats['node_types'])}, "
+        f"entity types: {len(stats['entity_types'])}, edge types: {len(stats['edge_types'])}"
+    )
 
     return {
         "name": name,
         "ontology_generation": ontology_generation,
-        "entity_types": sorted(entity_types),
-        "edge_types": sorted(edge_types),
+        **stats,
     }
 
 
@@ -99,6 +116,34 @@ def _comparison_table(category: str, all_items: list[str], results: list[dict]) 
                 f"<td class='cell {'present' if present else 'absent'}'>"
                 f"{'&check;' if present else '&mdash;'}</td>"
             )
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return (
+        f"<table><thead><tr>{header_cells}</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def _metrics_table(results: list[dict]) -> str:
+    metrics = [
+        ("Entities extracted", "entity_count"),
+        ("Total nodes", "node_count"),
+        ("Total edges", "edge_count"),
+        ("Unique entity types", lambda r: len(r["entity_types"])),
+        ("Unique edge types", lambda r: len(r["edge_types"])),
+    ]
+    header_cells = "<th>Metric</th>" + "".join(
+        f"<th>{html.escape(r['name'])}</th>" for r in results
+    )
+
+    def value_for(r: dict, accessor):
+        return accessor(r) if callable(accessor) else r[accessor]
+
+    rows = []
+    for label, accessor in metrics:
+        values = [value_for(r, accessor) for r in results]
+        cells = [f"<td class='label'>{html.escape(label)}</td>"]
+        for v in values:
+            cells.append(f"<td class='cell num'>{v}</td>")
         rows.append("<tr>" + "".join(cells) + "</tr>")
     return (
         f"<table><thead><tr>{header_cells}</tr></thead>"
@@ -126,8 +171,14 @@ def render_dashboard(results: list[dict], output_path: Path) -> None:
               <h3>{html.escape(r["name"])}</h3>
               <p class="config">ONTOLOGY_GENERATION = <code>{html.escape(r["ontology_generation"])}</code></p>
               <div class="counts">
-                <span class="pill">{len(r["entity_types"])} entity types</span>
-                <span class="pill">{len(r["edge_types"])} edge types</span>
+                <span class="pill pill-strong">{r["entity_count"]} entities</span>
+                <span class="pill">{r["node_count"]} nodes</span>
+                <span class="pill">{r["edge_count"]} edges</span>
+              </div>
+              <div class="counts">
+                <span class="pill pill-alt">{len(r["node_types"])} node types</span>
+                <span class="pill pill-alt">{len(r["entity_types"])} entity types</span>
+                <span class="pill pill-alt">{len(r["edge_types"])} edge types</span>
               </div>
               <h4>Entity types</h4>
               <ul>{et_items}</ul>
@@ -165,6 +216,10 @@ def render_dashboard(results: list[dict], output_path: Path) -> None:
   .counts {{ display: flex; gap: .35rem; margin: .25rem 0 .5rem; }}
   .pill {{ background: var(--pill-bg); color: var(--pill-fg);
     padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 600; }}
+  .pill-strong {{ background: #fef3c7; color: #92400e; }}
+  .pill-alt {{ background: #f5f3ff; color: #6d28d9; }}
+  td.num {{ text-align: right; font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
   ul {{ margin: 0; padding-left: 1.2rem; font-size: .85rem;
     max-height: 220px; overflow-y: auto; }}
   table {{ width: 100%; border-collapse: collapse; font-size: .9rem;
@@ -181,6 +236,9 @@ def render_dashboard(results: list[dict], output_path: Path) -> None:
 <body>
 <h1>Auto-Restricted Ontology &mdash; Approach Comparison</h1>
 <p class="subtitle">Generated {datetime.now().strftime("%Y-%m-%d %H:%M")} &middot; 5 CVs ingested via simple_cognee_example</p>
+
+<h2>Graph metrics &mdash; at a glance</h2>
+{_metrics_table(results)}
 
 <h2>Per-approach results</h2>
 <div class="cards">{"".join(cards)}</div>
