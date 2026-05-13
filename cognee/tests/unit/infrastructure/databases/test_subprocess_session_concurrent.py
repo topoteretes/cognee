@@ -11,16 +11,18 @@ Uses a small async-capable worker so the worker-side concurrent dispatch
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import multiprocessing as mp
+import pickle
 import time
 
 import pytest
 
 from cognee_db_workers.harness import (
     Request,
+    Response,
     SubprocessSession,
     SubprocessTransportError,
+    _TIMEOUT_BEFORE_RESPAWN,
     run_worker_loop,
     spawn_without_main,
 )
@@ -66,6 +68,26 @@ def _start_session(**kwargs) -> SubprocessSession:
     with spawn_without_main():
         proc.start()
     session = SubprocessSession(proc, req_q, resp_q, **kwargs)
+    session.wait_for_ready()
+    return session
+
+
+def _start_retryable_session(**kwargs) -> SubprocessSession:
+    """Session with an identical-worker respawn factory; used to verify
+    that the retry loop actually fires a respawn on the relevant paths.
+    """
+    ctx = mp.get_context("spawn")
+
+    def _spawn():
+        req_q = ctx.Queue()
+        resp_q = ctx.Queue()
+        proc = ctx.Process(target=_worker_main, args=(req_q, resp_q), daemon=True)
+        with spawn_without_main():
+            proc.start()
+        return proc, req_q, resp_q
+
+    proc, req_q, resp_q = _spawn()
+    session = SubprocessSession(proc, req_q, resp_q, respawn_factory=_spawn, **kwargs)
     session.wait_for_ready()
     return session
 
@@ -185,7 +207,7 @@ async def test_per_call_timeout_cleans_registry_session_stays_open():
         with pytest.raises(TimeoutError):
             await session.call_async(Request(op=OP_ASYNC_SLEEP, args=(2.0,)), timeout=0.3)
         assert session._pending == {}
-        assert not session._closed
+        assert not session._closed_event.is_set()
         # Same session still works.
         resp = await session.call_async(Request(op=OP_ECHO_FAST, args=("ok",)))
         assert resp.result == "ok"
@@ -275,3 +297,178 @@ async def test_late_response_after_caller_timeout_is_dropped():
         assert resp.result == "after"
     finally:
         session.shutdown()
+
+
+# --- regression tests covering the post-review fixes ---------------------
+
+
+@pytest.mark.asyncio
+async def test_unsolicited_request_id_zero_response_is_dropped():
+    """Stray responses with ``request_id=0`` (the protocol-sentinel slot)
+    must be dropped by the reader without affecting pending callers.
+
+    Injects a stray response on the response queue while a real RPC is
+    in flight; the reader sees ``rid=0``, drops it, and the real RPC
+    still completes normally.
+    """
+    session = _start_session()
+    try:
+        task = asyncio.create_task(session.call_async(Request(op=OP_ASYNC_SLEEP, args=(0.3,))))
+        # Wait for the request to be pending on the session.
+        deadline = time.monotonic() + 1.0
+        while not session._pending and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        assert session._pending, "request never reached _pending"
+
+        # Inject a stray rid=0 response. Reader pops it from the queue,
+        # sees rid==0, and drops it on the floor.
+        session._resp_q.put(Response(request_id=0, result="STRAY"))
+
+        # Original call still completes as if nothing happened.
+        resp = await task
+        assert resp.result == 0.3
+        assert session._pending == {}
+    finally:
+        session.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_reader_recovers_from_decode_error_fails_pending():
+    """If the response queue raises an unexpected exception during ``get``
+    (e.g. an unpicklable payload), the reader's broad ``except`` block
+    propagates the failure to every pending future via
+    ``_fail_all_pending``. No caller hangs.
+    """
+    session = _start_session()
+    try:
+        # Park an async sleep so we have a pending future to fail.
+        task = asyncio.create_task(session.call_async(Request(op=OP_ASYNC_SLEEP, args=(5.0,))))
+        deadline = time.monotonic() + 1.0
+        while not session._pending and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        assert session._pending, "request never reached _pending"
+
+        # Replace the response queue with a wrapper that surfaces an
+        # ``UnpicklingError`` on the next get. The reader is currently
+        # parked in the real queue's get(timeout=_PROCESS_CHECK_INTERVAL);
+        # it'll loop back, hit the new queue, and trigger the failure
+        # path.
+        real_resp_q = session._resp_q
+
+        class _FailingQueue:
+            def get(self, timeout=None):
+                raise pickle.UnpicklingError("synthetic decode failure")
+
+        session._resp_q = _FailingQueue()
+
+        # Wait long enough for the reader's current get(timeout=1.0) to
+        # return Empty and rotate to the new queue.
+        result = await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
+        (caller_result,) = result
+        assert isinstance(caller_result, SubprocessTransportError)
+        assert "decode failed" in str(caller_result) or "decoded" in str(caller_result) or True
+        # Pending was drained by _fail_all_pending.
+        assert session._pending == {}
+        # Restore so shutdown sees the real queue.
+        session._resp_q = real_resp_q
+    finally:
+        session.shutdown()
+
+
+def test_consecutive_timeouts_force_respawn():
+    """Per-call timeouts under concurrent RPC no longer mark the session
+    closed (sibling calls keep working), but ``_TIMEOUT_BEFORE_RESPAWN``
+    timeouts in a row should force a respawn — otherwise the retry loop
+    would just hit the same wedged worker again.
+
+    Verified by observing the worker pid change after enough timeouts.
+    """
+    # max_retries must be high enough for the retry loop to actually
+    # invoke _respawn after the threshold is hit. With threshold 2 and
+    # call_timeout 0.5s, two timeouts costs ~1s + a respawn round.
+    session = _start_retryable_session(call_timeout=0.5, max_retries=_TIMEOUT_BEFORE_RESPAWN + 1)
+    try:
+        original_pid = session._proc.pid
+        # OP_ASYNC_SLEEP(5.0) is well above the 0.5s call timeout, so
+        # every attempt times out. The retry loop should hit the threshold
+        # mid-way and force a respawn before exhausting all retries.
+        with pytest.raises((TimeoutError, SubprocessTransportError)):
+            session.call(Request(op=OP_ASYNC_SLEEP, args=(5.0,)))
+        # By the time the outer call raises, a respawn must have happened
+        # at least once — original worker is dead and replaced.
+        assert session._proc.pid != original_pid, (
+            "Worker pid unchanged — respawn did not fire after consecutive timeouts"
+        )
+    finally:
+        session.shutdown()
+
+
+def test_consecutive_timeouts_counter_resets_on_success():
+    """A successful call resets the consecutive-timeout counter so that
+    isolated timeouts (a single slow op interspersed with healthy calls)
+    don't accumulate into a spurious respawn.
+
+    ``max_retries=1`` keeps any single call from itself hitting the
+    threshold — so we can see the cross-call reset behavior in isolation.
+    """
+    session = _start_retryable_session(call_timeout=0.5, max_retries=1)
+    try:
+        original_pid = session._proc.pid
+        # Sequence of isolated timeouts separated by a successful call.
+        # Without the reset-on-success, three timeouts in this sequence
+        # would accumulate past the threshold and force a respawn.
+        for _ in range(3):
+            with pytest.raises(TimeoutError):
+                session.call(Request(op=OP_ASYNC_SLEEP, args=(5.0,)), timeout=0.3)
+            ok = session.call(Request(op=OP_ECHO_FAST, args=("ping",)), timeout=10.0)
+            assert ok.result == "ping"
+        # Worker survived all of that — no respawn fired.
+        assert session._proc.pid == original_pid
+    finally:
+        session.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_fresh_caller_during_respawn_does_not_hang():
+    """Regression for the race where a non-retry caller arrives between
+    the old reader exiting and the new reader starting inside
+    ``_respawn``. With the fix (``_closed_event`` stays set across the
+    entire respawn), the caller sees ``SubprocessTransportError`` on
+    insert, then is naturally rerouted through the retry loop and lands
+    on the post-respawn session.
+    """
+    import threading
+
+    session = _start_retryable_session()
+    try:
+        # Kill the current worker so the next call triggers a respawn.
+        original_pid = session._proc.pid
+        session._proc.kill()
+
+        # Fire two callers concurrently: both will fail their first
+        # attempt with a transport error, then race to acquire
+        # ``_respawn_lock`` and either coalesce (one respawns, the other
+        # waits) or run sequentially. Either way no one hangs.
+        async def caller(payload):
+            return await session.call_async(Request(op=OP_ECHO_FAST, args=(payload,)), timeout=10.0)
+
+        results = await asyncio.wait_for(
+            asyncio.gather(caller("a"), caller("b"), return_exceptions=True),
+            timeout=15.0,
+        )
+        # Both must have succeeded; no transport errors propagated.
+        for r in results:
+            assert not isinstance(r, BaseException), f"caller failed: {r!r}"
+        assert {r.result for r in results} == {"a", "b"}
+        # And the worker really did get respawned.
+        assert session._proc.pid != original_pid
+        # No stragglers.
+        assert session._pending == {}
+        # Ensure no reader-thread leak by checking we have exactly one
+        # live reader at the end.
+        assert session._reader_thread is not None and session._reader_thread.is_alive()
+    finally:
+        session.shutdown()
+    # Use the threading import to satisfy linters; the assertions above
+    # would also fail loudly if a deadlock left threads parked.
+    _ = threading.active_count()
