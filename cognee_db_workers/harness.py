@@ -312,7 +312,12 @@ def run_worker_loop(
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     registry = HandleRegistry()
-    max_inflight = _env_int("SUBPROCESS_WORKER_MAX_INFLIGHT", 16)
+    # ``SUBPROCESS_WORKER_MAX_INFLIGHT`` <= 0 would create a zero-permit
+    # semaphore that every ``async with sem`` deadlocks on. Clamp to at
+    # least 1 so a misconfigured env var degrades to serial dispatch
+    # rather than wedging the worker. Callers wanting "no cap" can pass
+    # a sufficiently large value explicitly.
+    max_inflight = max(1, _env_int("SUBPROCESS_WORKER_MAX_INFLIGHT", 16))
     sem = asyncio.Semaphore(max_inflight)
 
     try:
@@ -738,9 +743,7 @@ class SubprocessSession:
             with self._pending_lock:
                 self._pending.pop(rid, None)
 
-    async def _issue_async(
-        self, req: Request, timeout, loop: asyncio.AbstractEventLoop
-    ) -> Response:
+    async def _issue_async(self, req: Request, timeout) -> Response:
         """Async counterpart of ``_issue``. Wraps the ``concurrent.futures.Future``
         for the current event loop and awaits with ``asyncio.wait_for`` so
         per-call deadlines work uniformly across sync / async callers.
@@ -755,7 +758,11 @@ class SubprocessSession:
         try:
             self.touch()
             self._req_q.put(req_to_send)
-            aio_fut = asyncio.wrap_future(fut, loop=loop)
+            # ``wrap_future`` auto-detects the running loop. Passing
+            # ``loop=`` explicitly is deprecated (and removed in newer
+            # Pythons) so we let asyncio infer it from the running
+            # context here.
+            aio_fut = asyncio.wrap_future(fut)
             timeout_s = None if deadline is None else max(0.0, deadline - time.monotonic())
             try:
                 resp = await asyncio.wait_for(aio_fut, timeout=timeout_s)
@@ -840,7 +847,7 @@ class SubprocessSession:
         attempts_left = self._max_retries
         while True:
             try:
-                resp = await self._issue_async(req, timeout, loop)
+                resp = await self._issue_async(req, timeout)
             except TimeoutError:
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
@@ -1049,11 +1056,18 @@ class SubprocessSession:
         self.touch()
         self._req_q.put(req_to_send)
         _deadline, effective_timeout = self._resolve_deadline(...)
-        timeout_s = effective_timeout if effective_timeout is not None else 60.0
-        try:
-            resp = self._resp_q.get(timeout=timeout_s)
-        except std_queue.Empty:
-            raise TimeoutError(f"Subprocess replay call exceeded {timeout_s}s deadline")
+        # ``effective_timeout is None`` means the caller explicitly
+        # disabled per-call deadlines (``SUBPROCESS_CALL_TIMEOUT<=0``).
+        # Honor that here by issuing a blocking ``get()`` rather than
+        # inventing an arbitrary fallback; otherwise benchmark runs that
+        # disable the timeout would still see a 60s ceiling on replay.
+        if effective_timeout is None:
+            resp = self._resp_q.get()
+        else:
+            try:
+                resp = self._resp_q.get(timeout=effective_timeout)
+            except std_queue.Empty:
+                raise TimeoutError(f"Subprocess replay call exceeded {effective_timeout}s deadline")
         assert resp.request_id == rid, (
             f"Replay response id mismatch: expected {rid}, got {resp.request_id!r}"
         )
