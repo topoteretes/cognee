@@ -366,7 +366,8 @@ async def test_reader_recovers_from_decode_error_fails_pending():
         result = await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5.0)
         (caller_result,) = result
         assert isinstance(caller_result, SubprocessTransportError)
-        assert "decode failed" in str(caller_result) or "decoded" in str(caller_result) or True
+        msg = str(caller_result).lower()
+        assert "decode" in msg or "unpickl" in msg, caller_result
         # Pending was drained by _fail_all_pending.
         assert session._pending == {}
         # Restore so shutdown sees the real queue.
