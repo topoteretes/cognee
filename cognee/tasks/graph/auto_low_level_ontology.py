@@ -382,8 +382,23 @@ def build_low_level_extraction_model(
     return extraction_model, container_to_class
 
 
+# Same-named EntityType subclass whose default metadata has empty
+# `index_fields`, so the auto-attached EntityType nodes don't end up in the
+# vector index. The class name stays "EntityType" so the stored `.type` and
+# graph dedup are identical to regular EntityType nodes. A per-instance
+# metadata override is not enough because `get_graph_from_model` drops the
+# `metadata` field during node serialization and falls back to the class
+# default when rebuilding the node — so the default itself has to change.
+_NoIndexEntityType = create_model(
+    "EntityType",
+    __base__=EntityType,
+    __module__=__name__,
+    metadata=(dict, {"index_fields": []}),
+)
+
+
 def _build_entity_type_datapoint(class_name: str) -> EntityType:
-    return EntityType(
+    return _NoIndexEntityType(
         id=uuid5(NAMESPACE_OID, f"EntityType:{class_name}"),
         name=class_name,
         description=class_name,
