@@ -31,6 +31,7 @@ from cognee.tasks.temporal_graph.extract_events_and_entities import extract_even
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_RESULT_SUMMARY
 
 
@@ -308,19 +309,27 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
     extraction_kwargs = dict(kwargs)
+    extraction_graph_model = graph_model
 
-    if cognify_config.ontology_generation in ("AUTO_RESTRICTED", "AUTO_RESTRICTED_ITERATIVE"):
+    if cognify_config.ontology_generation in (
+        "AUTO_RESTRICTED",
+        "AUTO_RESTRICTED_ITERATIVE",
+        "AUTO_LOW_LEVEL",
+    ):
         if graph_model is KnowledgeGraph:
             from cognee.tasks.graph.auto_restricted_ontology import (
+                AutoLowLevelOntology,
                 AutoRestrictedOntology,
                 AutoRestrictedOntologyIterative,
             )
 
-            ontology = (
-                AutoRestrictedOntologyIterative()
-                if cognify_config.ontology_generation == "AUTO_RESTRICTED_ITERATIVE"
-                else AutoRestrictedOntology()
-            )
+            if cognify_config.ontology_generation == "AUTO_LOW_LEVEL":
+                ontology = AutoLowLevelOntology()
+                extraction_graph_model = DataPoint
+            elif cognify_config.ontology_generation == "AUTO_RESTRICTED_ITERATIVE":
+                ontology = AutoRestrictedOntologyIterative()
+            else:
+                ontology = AutoRestrictedOntology()
             extraction_kwargs["calculate_chunk_graphs"] = ontology.calculate_chunk_graphs
         else:
             logger.warning(
@@ -347,7 +356,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         # COGNIFY: LLM-summarize each chunk for hierarchical retrieval
         Task(
             extract_graph_and_summarize,
-            graph_model=graph_model,
+            graph_model=extraction_graph_model,
             config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
