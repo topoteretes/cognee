@@ -317,18 +317,20 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         "AUTO_LOW_LEVEL",
     ):
         if graph_model is KnowledgeGraph:
-            from cognee.tasks.graph.auto_restricted_ontology import (
-                AutoLowLevelOntology,
-                AutoRestrictedOntology,
-                AutoRestrictedOntologyIterative,
-            )
-
             if cognify_config.ontology_generation == "AUTO_LOW_LEVEL":
+                from cognee.tasks.graph.auto_low_level_ontology import AutoLowLevelOntology
+
                 ontology = AutoLowLevelOntology()
                 extraction_graph_model = DataPoint
             elif cognify_config.ontology_generation == "AUTO_RESTRICTED_ITERATIVE":
+                from cognee.tasks.graph.auto_restricted_iterative_ontology import (
+                    AutoRestrictedOntologyIterative,
+                )
+
                 ontology = AutoRestrictedOntologyIterative()
             else:
+                from cognee.tasks.graph.auto_restricted_ontology import AutoRestrictedOntology
+
                 ontology = AutoRestrictedOntology()
             extraction_kwargs["calculate_chunk_graphs"] = ontology.calculate_chunk_graphs
         else:
