@@ -430,14 +430,19 @@ def test_init_signal_killed_worker_surfaces_signal_name():
 
 
 def test_call_timeout_on_hung_worker():
-    """A request that doesn't return within the deadline raises TimeoutError
-    and marks the session closed so callers don't wait forever.
+    """A request that doesn't return within the deadline raises TimeoutError.
+
+    Under the concurrent-RPC design a per-call timeout no longer marks the
+    whole session closed — sibling in-flight calls can still complete and
+    callers can issue fresh requests against the same session. The hung
+    op stays pending on the worker until ``shutdown()`` reaps it.
     """
     session = _start_session(call_timeout=1.0)
     try:
         with pytest.raises(TimeoutError):
             session.call(Request(op=OP_SLEEP, args=()))
-        assert session._closed is True
+        # Session remains operational despite the per-call timeout.
+        assert session._closed is False
     finally:
         session.shutdown()
 
