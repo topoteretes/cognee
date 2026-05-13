@@ -264,9 +264,7 @@ class AutoRestrictedOntology:
             *[_generate_per_chunk_restriction(chunk, **llm_kwargs) for chunk in chunks]
         )
         async with self._lock:
-            self.canonical = await _resolve_restrictions(
-                [self.canonical, *per_chunk], **llm_kwargs
-            )
+            self.canonical = await _resolve_restrictions([self.canonical, *per_chunk], **llm_kwargs)
             return self.canonical
 
     async def calculate_chunk_graphs(
