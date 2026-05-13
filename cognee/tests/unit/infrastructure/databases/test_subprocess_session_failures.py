@@ -228,7 +228,7 @@ def test_worker_killed_mid_request_flips_closed():
             session.call(Request(op=OP_ECHO, args=("hi",)))
         # Session should now be flipped to closed; next call gets the faster,
         # explicit "session is closed" message.
-        assert session._closed is True
+        assert session._closed_event.is_set()
         with pytest.raises(SubprocessTransportError, match="session is closed"):
             session.call(Request(op=OP_ECHO, args=("hi",)))
     finally:
@@ -246,7 +246,7 @@ def test_init_timeout_raises():
     session = SubprocessSession(proc, req_q, resp_q, init_timeout=1.0)
     with pytest.raises(RuntimeError, match="init timed out"):
         session.wait_for_ready()
-    assert session._closed is True
+    assert session._closed_event.is_set()
 
 
 def test_init_failure_propagates():
@@ -260,7 +260,7 @@ def test_init_failure_propagates():
     session = SubprocessSession(proc, req_q, resp_q, init_timeout=5.0)
     with pytest.raises(RuntimeError, match="init failed"):
         session.wait_for_ready()
-    assert session._closed is True
+    assert session._closed_event.is_set()
 
 
 def test_call_timeout_on_hung_worker():
@@ -276,7 +276,7 @@ def test_call_timeout_on_hung_worker():
         with pytest.raises(TimeoutError):
             session.call(Request(op=OP_SLEEP, args=()))
         # Session remains operational despite the per-call timeout.
-        assert session._closed is False
+        assert not session._closed_event.is_set()
     finally:
         session.shutdown()
 
