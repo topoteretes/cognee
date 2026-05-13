@@ -37,6 +37,7 @@ RUNS = [
     ("Default", "DEFAULT"),
     ("AUTO_RESTRICTED", "AUTO_RESTRICTED"),
     ("AUTO_RESTRICTED_ITERATIVE", "AUTO_RESTRICTED_ITERATIVE"),
+    ("AUTO_LOW_LEVEL", "AUTO_LOW_LEVEL"),
 ]
 
 
@@ -118,23 +119,27 @@ async def collect_stats() -> dict:
 
     entity_types: set[str] = set()
     node_types: set[str] = set()
-    entity_count = 0
     id_to_name: dict[str, str] = {}
-    entity_ids: set[str] = set()
+    type_by_id: dict[str, str] = {}
     for node_id, props in nodes:
         props = props or {}
         node_type = props.get("type")
         if isinstance(node_type, str) and node_type:
             node_types.add(node_type)
+            type_by_id[str(node_id)] = node_type
         name = props.get("name")
         if isinstance(name, str) and name.strip():
             id_to_name[str(node_id)] = name.strip()
-        if node_type == "Entity":
-            entity_count += 1
-            entity_ids.add(str(node_id))
         if node_type == "EntityType":
             if isinstance(name, str) and name.strip():
                 entity_types.add(name.strip())
+
+    # Mode-agnostic instance count: in KG-based modes data nodes have type="Entity";
+    # in AUTO_LOW_LEVEL data nodes carry the LLM-designed class name as `type`,
+    # which equals an EntityType node's `name`. Union covers both.
+    instance_types = entity_types | {"Entity"}
+    entity_ids = {nid for nid, t in type_by_id.items() if t in instance_types}
+    entity_count = len(entity_ids)
 
     edge_types: set[str] = set()
     triplet_pool: list[tuple[str, str, str]] = []
@@ -291,6 +296,18 @@ APPROACH_DIAGRAMS: dict[str, str] = {
     classDef par fill:#eff6ff,stroke:#3b82f6,color:#000
     classDef seq fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#000
     classDef state fill:#fee2e2,stroke:#991b1b,color:#000""",
+    "AUTO_LOW_LEVEL": """flowchart TB
+    A([Batch: N chunks]):::input
+    A --> D["1 - Design (PARALLEL)<br/>N LLM calls<br/>chunk-local DataPoint classes"]:::par
+    D --> C["2 - Compile (no LLM)<br/>pydantic.create_model<br/>extraction model + DataPoint classes"]:::compile
+    C --> E["3 - Extract (PARALLEL)<br/>N LLM calls<br/>records + relationships"]:::par
+    E --> I["4 - Instantiate (no LLM)<br/>build DataPoint tree<br/>attach is_a → EntityType"]:::compile
+    I --> O([DataPoint instances<br/>stored as typed nodes]):::output
+
+    classDef input fill:#dbeafe,stroke:#1e40af,color:#000
+    classDef output fill:#dcfce7,stroke:#166534,color:#000
+    classDef par fill:#eff6ff,stroke:#3b82f6,color:#000
+    classDef compile fill:#ecfeff,stroke:#0e7490,color:#000""",
 }
 
 def _diagrams_panel(results: list[dict]) -> str:
