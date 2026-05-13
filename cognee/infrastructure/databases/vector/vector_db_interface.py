@@ -89,6 +89,7 @@ class VectorDBInterface(Protocol):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -179,6 +180,13 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     # Optional methods that may be implemented by adapters
+    async def run_migrations(self):
+        """
+        Run adapter-specific vector storage migrations.
+        Default implementation is a no-op.
+        """
+        return None
+
     async def get_connection(self):
         """
         Get a connection to the vector database.

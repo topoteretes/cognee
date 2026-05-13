@@ -250,7 +250,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """
         Fetch a subgraph consisting of a specific set of nodes and their relationships.
@@ -274,6 +274,30 @@ class GraphDBInterface(ABC):
         -----------
 
             - node_id (Union[str, UUID]): Unique identifier of the node for which to retrieve connections.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_neighborhood(
+        self,
+        node_ids: List[str],
+        depth: int = 1,
+        edge_types: Optional[List[str]] = None,
+    ) -> Tuple[List[Node], List[EdgeData]]:
+        """
+        Get the k-hop neighborhood subgraph around a set of seed nodes.
+
+        Returns all nodes and edges within `depth` hops of any seed node,
+        in the same format as get_graph_data().
+        Optional edge_type filtering to constrain traversal paths.
+
+        Parameters:
+        -----------
+
+            - node_ids (List[str]): Seed node identifiers to start traversal from.
+            - depth (int): Number of hops to traverse from each seed node. (default 1)
+            - edge_types (Optional[List[str]]): If provided, only traverse edges of these
+              relationship types. (default None)
         """
         raise NotImplementedError
 
@@ -323,3 +347,49 @@ class GraphDBInterface(ABC):
         Returns per-id update success.
         """
         raise NotImplementedError("set_edge_feedback_weights is not implemented for this adapter")
+
+    async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+        """Retrieve a batch of triplets (source, edge, target).
+
+        Optional extension — implemented by PostgresAdapter, Neo4jAdapter,
+        and LadybugAdapter but not NeptuneGraphDB.
+
+        Parameters
+        ----------
+
+            - offset: Number of triplets to skip.
+            - limit: Maximum number of triplets to return.
+        """
+        raise NotImplementedError("get_triplets_batch is not implemented for this adapter")
+
+    async def get_node_frequency_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve node frequency weights for multiple node ids.
+        Returns only found node ids.
+        """
+        raise NotImplementedError("get_node_frequency_weights is not implemented for this adapter")
+
+    async def set_node_frequency_weights(
+        self, node_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist node frequency weights for multiple node ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_node_frequency_weights is not implemented for this adapter")
+
+    async def get_edge_frequency_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve edge frequency weights for multiple edge_object_ids.
+        Returns only found edge ids.
+        """
+        raise NotImplementedError("get_edge_frequency_weights is not implemented for this adapter")
+
+    async def set_edge_frequency_weights(
+        self, edge_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist edge frequency weights for multiple edge_object_ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_edge_frequency_weights is not implemented for this adapter")

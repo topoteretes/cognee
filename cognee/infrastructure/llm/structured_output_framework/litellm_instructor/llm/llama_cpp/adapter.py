@@ -1,25 +1,26 @@
 """Adapter for Instructor-backed Structured Output Framework for Llama CPP"""
 
-import litellm
 import logging
+from typing import Any, cast
+
 import instructor
-from typing import Any, Dict, Type, Optional
+import litellm
+from instructor.core.patch import InstructorChatCompletionCreate
 from openai import AsyncOpenAI
 from pydantic import BaseModel
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    stop_after_delay,
+    wait_exponential_jitter,
+)
 
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-
-from tenacity import (
-    retry,
-    stop_after_delay,
-    wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
-)
 
 logger = get_logger()
 
@@ -50,8 +51,8 @@ class LlamaCppAPIAdapter(LLMInterface):
     """
 
     name: str
-    model: Optional[str]
-    model_path: Optional[str]
+    model: str | None
+    model_path: str | None
     mode_type: str  # "server" or "local"
     default_instructor_mode = instructor.Mode.JSON
 
@@ -59,21 +60,21 @@ class LlamaCppAPIAdapter(LLMInterface):
         self,
         name: str = "LlamaCpp",
         max_completion_tokens: int = 2048,
-        instructor_mode: Optional[str] = None,
+        instructor_mode: str | None = None,
         # Server mode parameters
-        endpoint: Optional[str] = None,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
         # Local mode parameters
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         n_ctx: int = 2048,
         n_gpu_layers: int = 0,
         chat_format: str = "chatml",
-        llm_args: Optional[Dict[str, Any]] = None,
-    ):
+        llm_args: dict[str, Any] | None = None,
+    ) -> None:
         self.name = name
         self.max_completion_tokens = max_completion_tokens
-        self.llm_args = llm_args
+        self.llm_args: dict[str, Any] = llm_args or {}
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         # Determine which mode to use
@@ -86,10 +87,12 @@ class LlamaCppAPIAdapter(LLMInterface):
                 "Must provide either 'model_path' (for local mode) or 'endpoint' (for server mode)"
             )
 
-    def _init_local_mode(self, model_path: str, n_ctx: int, n_gpu_layers: int, chat_format: str):
+    def _init_local_mode(
+        self, model_path: str, n_ctx: int, n_gpu_layers: int, chat_format: str
+    ) -> None:
         """Initialize local mode using llama-cpp-python library directly"""
         try:
-            import llama_cpp
+            import llama_cpp  # ty:ignore[unresolved-import]
         except ImportError:
             raise ImportError(
                 "llama-cpp-python is not installed. Install with: pip install llama-cpp-python"
@@ -115,7 +118,7 @@ class LlamaCppAPIAdapter(LLMInterface):
             mode=instructor.Mode(self.instructor_mode),
         )
 
-    def _init_server_mode(self, endpoint: str, api_key: Optional[str], model: Optional[str]):
+    def _init_server_mode(self, endpoint: str, api_key: str | None, model: str | None) -> None:
         """Initialize server mode connecting to llama-cpp-python server"""
         logger.info(f"Initializing LlamaCpp in SERVER mode with endpoint: {endpoint}")
 
@@ -141,7 +144,7 @@ class LlamaCppAPIAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a structured output from the LLM using the provided text and system prompt.
@@ -167,9 +170,11 @@ class LlamaCppAPIAdapter(LLMInterface):
 
             merged_kwargs = {**self.llm_args, **kwargs}
             if self.mode_type == "server":
-                response = await self.aclient.chat.completions.create(
+                response = await cast(
+                    instructor.AsyncInstructor, self.aclient
+                ).chat.completions.create(
                     model=self.model,
-                    messages=messages,
+                    messages=messages,  # ty:ignore[invalid-argument-type]
                     response_model=response_model,
                     max_retries=2,
                     **merged_kwargs,
@@ -179,7 +184,7 @@ class LlamaCppAPIAdapter(LLMInterface):
                 import asyncio
 
                 def _call_sync():
-                    return self.aclient(
+                    return cast(InstructorChatCompletionCreate, self.aclient)(
                         messages=messages,
                         response_model=response_model,
                         **merged_kwargs,

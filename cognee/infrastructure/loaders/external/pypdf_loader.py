@@ -1,8 +1,9 @@
-from typing import List
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.shared.logging_utils import get_logger
+from typing import Any
+
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -15,17 +16,15 @@ class PyPdfLoader(LoaderInterface):
     structured page information and handling PDF-specific errors.
     """
 
+    loader_name = "pypdf_loader"
+
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return ["pdf"]
 
     @property
-    def supported_mime_types(self) -> List[str]:
+    def supported_mime_types(self) -> list[str]:
         return ["application/pdf"]
-
-    @property
-    def loader_name(self) -> str:
-        return "pypdf_loader"
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
@@ -35,7 +34,7 @@ class PyPdfLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, strict: bool = False, **kwargs) -> str:
+    async def load(self, file_path: str, strict: bool = False, **kwargs: Any) -> str:
         """
         Load PDF file and extract text content.
 
@@ -82,6 +81,9 @@ class PyPdfLoader(LoaderInterface):
 
                 # Combine all content
                 full_content = "\n".join(content_parts)
+
+                if not kwargs.get("persist", True):
+                    return full_content
 
                 storage_config = get_storage_config()
                 data_root_directory = storage_config["data_root_directory"]

@@ -35,19 +35,20 @@ class GraphConfig(BaseSettings):
 
     # Using Field we are able to dynamically load current GRAPH_DATABASE_PROVIDER value in the model validator part
     # and determine default graph db file and path based on this parameter if no values are provided
-    graph_database_provider: str = Field("kuzu", env="GRAPH_DATABASE_PROVIDER")
+    graph_database_provider: str = Field("ladybug", env="GRAPH_DATABASE_PROVIDER")
 
     graph_database_url: str = ""
     graph_database_name: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
+    graph_database_allow_anonymous: bool = False
     graph_database_port: int = 123
     graph_database_key: str = ""
     graph_file_path: str = ""
     graph_filename: str = ""
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
-    graph_dataset_database_handler: str = "kuzu"
+    graph_dataset_database_handler: str = "ladybug"
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
@@ -55,11 +56,24 @@ class GraphConfig(BaseSettings):
     @pydantic.model_validator(mode="after")
     def fill_derived(self):
         provider = self.graph_database_provider.lower()
+        self.graph_database_provider = provider
+        graph_dataset_database_handler = self.graph_dataset_database_handler.lower()
+        self.graph_dataset_database_handler = graph_dataset_database_handler
+        if provider == "kuzu" and graph_dataset_database_handler == "ladybug":
+            self.graph_dataset_database_handler = "kuzu"
         base_config = get_base_config()
 
-        # Set default filename if no filename is provided
+        databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
+
+        # Set default filename if no filename is provided. For the Ladybug rename, keep using an
+        # existing default Kuzu database path so local users do not silently start with an empty graph.
         if not self.graph_filename:
+            graph_directory = self.graph_file_path or databases_directory_path
             self.graph_filename = f"cognee_graph_{provider}"
+            if provider == "ladybug":
+                legacy_graph_path = os.path.join(graph_directory, "cognee_graph_kuzu")
+                if os.path.exists(legacy_graph_path):
+                    self.graph_filename = "cognee_graph_kuzu"
 
         # Handle graph file path
         if self.graph_file_path:
@@ -69,7 +83,6 @@ class GraphConfig(BaseSettings):
             )
         else:
             # Default path
-            databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
             self.graph_file_path = os.path.join(databases_directory_path, self.graph_filename)
 
         return self
@@ -92,6 +105,7 @@ class GraphConfig(BaseSettings):
             "graph_database_url": self.graph_database_url,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
+            "graph_database_allow_anonymous": self.graph_database_allow_anonymous,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
@@ -120,6 +134,7 @@ class GraphConfig(BaseSettings):
             "graph_database_name": self.graph_database_name,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
+            "graph_database_allow_anonymous": self.graph_database_allow_anonymous,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,

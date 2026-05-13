@@ -76,8 +76,28 @@ class datasets:
         return await has_dataset_data(dataset.id)
 
     @staticmethod
-    async def get_status(dataset_ids: list[UUID]) -> dict:
-        return await get_pipeline_status(dataset_ids, pipeline_name="cognify_pipeline")
+    async def get_status(
+        dataset_ids: list[UUID], pipeline_names: Optional[list[str]] = None
+    ) -> dict:
+        # Backward-compatible default behavior: cognify-only flat map.
+        if not pipeline_names:
+            return await get_pipeline_status(dataset_ids, pipeline_name="cognify_pipeline")
+
+        # Preserve order while removing duplicates.
+        requested_pipelines = list(dict.fromkeys(pipeline_names))
+
+        # For one pipeline, keep flat shape.
+        if len(requested_pipelines) == 1:
+            return await get_pipeline_status(dataset_ids, pipeline_name=requested_pipelines[0])
+
+        # For multiple pipelines, return nested shape.
+        statuses_by_dataset = {str(dataset_id): {} for dataset_id in dataset_ids}
+        for pipeline_name in requested_pipelines:
+            pipeline_status = await get_pipeline_status(dataset_ids, pipeline_name=pipeline_name)
+            for dataset_id, status in pipeline_status.items():
+                statuses_by_dataset.setdefault(dataset_id, {})[pipeline_name] = status
+
+        return statuses_by_dataset
 
     @staticmethod
     async def empty_dataset(dataset_id: UUID, user: Optional[User] = None):
@@ -91,32 +111,31 @@ class datasets:
         if not dataset:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
-        await set_database_global_context_variables(dataset.id, dataset.owner_id)
+        async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+            await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-        await delete_dataset_nodes_and_edges(dataset_id, user.id)
+            dataset_data = await get_dataset_data(dataset.id)
 
-        dataset_data = await get_dataset_data(dataset.id)
+            # Delete dataset record first while DatasetData junction rows still exist,
+            # so pipeline_status cleanup can find related Data records.
+            result = await delete_dataset(dataset)
 
-        # Delete dataset record first while DatasetData junction rows still exist,
-        # so pipeline_status cleanup can find related Data records.
-        result = await delete_dataset(dataset)
-
-        # Delete individual data records; use return_exceptions so all are attempted
-        # even if some fail.
-        if dataset_data:
-            results = await asyncio.gather(
-                *[delete_data(data, dataset_id) for data in dataset_data],
-                return_exceptions=True,
-            )
-            deletion_errors = [r for r in results if isinstance(r, Exception)]
-            if deletion_errors:
-                logger.error(
-                    "Failed to delete %d/%d data items from dataset %s: %s",
-                    len(deletion_errors),
-                    len(dataset_data),
-                    dataset_id,
-                    deletion_errors,
+            # Delete individual data records; use return_exceptions so all are attempted
+            # even if some fail.
+            if dataset_data:
+                results = await asyncio.gather(
+                    *[delete_data(data, dataset_id) for data in dataset_data],
+                    return_exceptions=True,
                 )
+                deletion_errors = [r for r in results if isinstance(r, Exception)]
+                if deletion_errors:
+                    logger.error(
+                        "Failed to delete %d/%d data items from dataset %s: %s",
+                        len(deletion_errors),
+                        len(dataset_data),
+                        dataset_id,
+                        deletion_errors,
+                    )
 
         return result
 
@@ -147,30 +166,29 @@ class datasets:
 
         if not data:
             # If data is not found in the system, user is using a custom graph model.
-            await set_database_global_context_variables(dataset_id, dataset.owner_id)
-            await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+            async with set_database_global_context_variables(dataset_id, dataset.owner_id):
+                await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
-            dataset_data = await get_dataset_data(dataset.id)
-            if not dataset_data and delete_dataset_if_empty:
-                await delete_dataset(dataset)
+                dataset_data = await get_dataset_data(dataset.id)
+                if not dataset_data and delete_dataset_if_empty:
+                    await delete_dataset(dataset)
 
             return {"status": "success"}
 
         if not any(ds.id == dataset_id for ds in data.datasets):
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
-        await set_database_global_context_variables(dataset_id, dataset.owner_id)
+        async with set_database_global_context_variables(dataset_id, dataset.owner_id):
+            if not await has_data_related_nodes(dataset_id, data_id):
+                await legacy_delete(data, "soft")
+            else:
+                await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
-        if not await has_data_related_nodes(dataset_id, data_id):
-            await legacy_delete(data, "soft")
-        else:
-            await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+            await delete_data(data, dataset_id)
 
-        await delete_data(data, dataset_id)
-
-        dataset_data = await get_dataset_data(dataset.id)
-        if not dataset_data and delete_dataset_if_empty:
-            await delete_dataset(dataset)
+            dataset_data = await get_dataset_data(dataset.id)
+            if not dataset_data and delete_dataset_if_empty:
+                await delete_dataset(dataset)
 
         return {"status": "success"}
 
@@ -182,6 +200,4 @@ class datasets:
         user_datasets = await get_authorized_existing_datasets([], "delete", user)
 
         for dataset in user_datasets:
-            await set_database_global_context_variables(dataset.id, dataset.owner_id)
-
             await datasets.empty_dataset(dataset.id, user)

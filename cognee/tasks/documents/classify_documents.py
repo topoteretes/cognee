@@ -136,6 +136,9 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
             name=data_item.name,
             mime_type=data_item.mime_type,
             external_metadata=json.dumps(data_item.external_metadata, indent=4),
+            importance_weight=data_item.importance_weight
+            if data_item.importance_weight is not None
+            else 0.5,
         )
         update_node_set(document)
         documents.append(document)

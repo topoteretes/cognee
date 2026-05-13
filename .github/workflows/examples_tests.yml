@@ -154,6 +154,36 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./examples/demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py
 
+  test-feedback-score-shifting-example:
+    name: Run Feedback Score Shifting Example
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Feedback Score Shifting Example
+        env:
+          ENV: 'dev'
+          CACHING: 'true'
+          CACHE_BACKEND: 'fs'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./examples/demos/feedback_score_shifting_example.py
+
   test-agentic-reasoning:
     name: Run Agentic Reasoning Tests
     runs-on: ubuntu-22.04
@@ -353,4 +383,6 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_add_docling_document.py
+        run: |
+          uv sync --extra docling
+          uv run python ./cognee/tests/test_add_docling_document.py

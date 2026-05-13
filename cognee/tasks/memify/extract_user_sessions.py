@@ -62,8 +62,8 @@ async def extract_user_sessions(
                         )
                         session_string = f"Session ID: {session_id}\n\n"
                         for qa_pair in qa_data:
-                            question = qa_pair.get("question", "")
-                            answer = qa_pair.get("answer", "")
+                            question = qa_pair.question
+                            answer = qa_pair.answer
                             session_string += f"Question: {question}\n\nAnswer: {answer}\n\n"
                         yield session_string
                 except Exception as e:

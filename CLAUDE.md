@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Cognee is an open-source AI memory platform that transforms raw data into persistent knowledge graphs for AI agents. It replaces traditional RAG (Retrieval-Augmented Generation) with an ECL (Extract, Cognify, Load) pipeline combining vector search, graph databases, and LLM-powered entity extraction.
 
-**Requirements**: Python 3.9 - 3.12
+**Requirements**: Python 3.10 - 3.14
 
 ## Development Commands
 
@@ -56,7 +56,7 @@ pre-commit install
 - **posthog** - PostHog analytics
 - **monitoring** - Sentry + Langfuse observability
 - **distributed** - Modal distributed execution
-- **dev** - All development tools (pytest, mypy, ruff, etc.)
+- **dev** - All development tools (pytest, ty, ruff, etc.)
 - **debug** - Debugpy for debugging
 
 ### Testing
@@ -94,11 +94,8 @@ ruff format .
 # Run both linting and formatting (pre-commit)
 pre-commit run --all-files
 
-# Type checking with mypy
-mypy cognee/
-
-# Run pylint
-pylint cognee/
+# Type checking with ty
+ty check .
 ```
 
 ### Running Cognee
@@ -132,7 +129,7 @@ All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks
 
 #### 2. Interface-Based Database Adapters
 Multiple backends are supported through adapter interfaces:
-- **Graph**: Kuzu (default), Neo4j, Neptune via `GraphDBInterface`
+- **Graph**: Ladybug (default), Neo4j, Neptune, Postgres via `GraphDBInterface`
 - **Vector**: LanceDB (default), ChromaDB, PGVector via `VectorDBInterface`
 - **Relational**: SQLite (default), PostgreSQL
 
@@ -141,7 +138,7 @@ Key files:
 - `cognee/infrastructure/databases/vector/vector_db_interface.py`
 
 #### 3. Multi-Tenant Access Control
-User → Dataset → Data hierarchy with permission-based filtering. Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`. Each user+dataset combination can have isolated graph/vector databases (when using supported backends: Kuzu, LanceDB, SQLite, Postgres).
+User → Dataset → Data hierarchy with permission-based filtering. Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`. Each user+dataset combination can have isolated graph/vector databases (when using supported backends: Ladybug, LanceDB, SQLite, Postgres).
 
 ### Layer Structure
 
@@ -158,7 +155,7 @@ Domain Modules (graph, retrieval, ingestion, etc.)
     ↓
 Infrastructure Adapters (LLM, databases)
     ↓
-External Services (OpenAI, Kuzu, LanceDB, etc.)
+External Services (OpenAI, Ladybug, LanceDB, etc.)
 ```
 
 ### Critical Data Flow Paths
@@ -239,7 +236,7 @@ LLM_MODEL="openai/gpt-4o-mini"  # Default model
 Default databases (no extra setup needed):
 - **Relational**: SQLite (metadata and state storage)
 - **Vector**: LanceDB (embeddings for semantic search)
-- **Graph**: Kuzu (knowledge graph and relationships)
+- **Graph**: Ladybug (knowledge graph and relationships)
 
 All stored in `.venv` by default. Override with `DATA_ROOT_DIRECTORY` and `SYSTEM_ROOT_DIRECTORY`.
 
@@ -268,7 +265,7 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: kuzu (default), neo4j, neptune, kuzu-remote
+Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -277,11 +274,16 @@ GRAPH_DATABASE_NAME=neo4j
 GRAPH_DATABASE_USERNAME=neo4j
 GRAPH_DATABASE_PASSWORD=yourpassword
 
-# Remote Kuzu
-GRAPH_DATABASE_PROVIDER=kuzu-remote
+# Remote Ladybug
+GRAPH_DATABASE_PROVIDER=ladybug-remote
 GRAPH_DATABASE_URL=http://localhost:8000
 GRAPH_DATABASE_USERNAME=your_username
 GRAPH_DATABASE_PASSWORD=your_password
+
+# Postgres (requires postgres extra: pip install cognee[postgres])
+# Does not support raw Cypher queries, natural language search, or Graphiti.
+GRAPH_DATABASE_PROVIDER=postgres
+GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
 ### LLM Provider Configuration
@@ -430,7 +432,7 @@ git checkout -b feature/your-feature-name
 - **Line length**: 100 characters
 - **String quotes**: Use double quotes `"` not single quotes `'` (enforced by ruff-format)
 - **Pre-commit hooks**: Run ruff linting and formatting automatically
-- **Type hints**: Encouraged (mypy checks enabled)
+- **Type hints**: Encouraged (ty checks enabled)
 - **Important**: Always run `pre-commit run --all-files` before committing to catch formatting issues
 
 ## Testing Strategy
@@ -532,7 +534,7 @@ Atomic knowledge units that form the foundation of graph structures. All graph n
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset
 - Enable with `ENABLE_BACKEND_ACCESS_CONTROL=True`
-- Supports isolated databases per user+dataset (Kuzu, LanceDB, SQLite, Postgres)
+- Supports isolated databases per user+dataset (Ladybug, LanceDB, SQLite, Postgres)
 
 ### Graph Visualization
 Launch visualization server:

@@ -95,12 +95,18 @@ Search Types & Use Cases:
             # Run the async search function
             async def run_search():
                 try:
+                    from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+
+                    user = await resolve_cli_user(getattr(args, "user_id", None))
+
                     results = await cognee.search(
                         query_text=args.query_text,
                         query_type=query_type,
+                        user=user,
                         datasets=args.datasets,
                         system_prompt_path=args.system_prompt or "answer_simple_question.txt",
                         top_k=args.top_k,
+                        session_id=scoped_session_id(user.id),
                     )
                     return results
                 except Exception as e:

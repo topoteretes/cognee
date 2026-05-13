@@ -23,6 +23,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
 )
 from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
+from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import run_tasks_with_telemetry
 from ..tasks.task import Task
 
@@ -36,7 +37,7 @@ async def run_tasks_data_item_incremental(
     pipeline_name: str,
     pipeline_id: str,
     pipeline_run_id: str,
-    context: Optional[Dict[str, Any]],
+    ctx: Optional[PipelineContext],
     user: User,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
@@ -108,7 +109,7 @@ async def run_tasks_data_item_incremental(
             data=[data_item],
             user=user,
             pipeline_name=pipeline_id,
-            context=context,
+            ctx=ctx,
         ):
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
@@ -161,7 +162,7 @@ async def run_tasks_data_item_regular(
     tasks: list[Task],
     pipeline_id: str,
     pipeline_run_id: str,
-    context: Optional[Dict[str, Any]],
+    ctx: Optional[PipelineContext],
     user: User,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
@@ -188,7 +189,7 @@ async def run_tasks_data_item_regular(
         data=[data_item],
         user=user,
         pipeline_name=pipeline_id,
-        context=context,
+        ctx=ctx,
     ):
         yield PipelineRunYield(
             pipeline_run_id=pipeline_run_id,
@@ -213,7 +214,7 @@ async def run_tasks_data_item(
     pipeline_name: str,
     pipeline_id: str,
     pipeline_run_id: str,
-    context: Optional[Dict[str, Any]],
+    ctx: Optional[PipelineContext],
     user: User,
     incremental_loading: bool,
 ) -> Optional[Dict[str, Any]]:
@@ -248,7 +249,7 @@ async def run_tasks_data_item(
             pipeline_name=pipeline_name,
             pipeline_id=pipeline_id,
             pipeline_run_id=pipeline_run_id,
-            context=context,
+            ctx=ctx,
             user=user,
         ):
             pass
@@ -259,7 +260,7 @@ async def run_tasks_data_item(
             tasks=tasks,
             pipeline_id=pipeline_id,
             pipeline_run_id=pipeline_run_id,
-            context=context,
+            ctx=ctx,
             user=user,
         ):
             pass

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "name": "Cognee AI Memory Platform",
+  "description": "Deploy Cognee — an open-source AI memory platform that replaces traditional RAG with knowledge graphs.",
+  "services": [
+    {
+      "name": "cognee-api",
+      "build": {
+        "dockerfilePath": "Dockerfile"
+      },
+      "deploy": {
+        "healthcheckPath": "/health",
+        "restartPolicyType": "ON_FAILURE"
+      },
+      "networking": {
+        "internal": false,
+        "tcpProxies": {},
+        "serviceDomains": {}
+      },
+      "variables": {
+        "LLM_API_KEY": {
+          "description": "Your LLM API key (OpenAI, Anthropic, etc.)",
+          "required": true
+        },
+        "LLM_MODEL": {
+          "description": "LLM model to use",
+          "default": "openai/gpt-4o-mini"
+        },
+        "LLM_PROVIDER": {
+          "description": "LLM provider",
+          "default": "openai"
+        },
+        "DB_PROVIDER": {
+          "description": "Database provider (sqlite or postgres)",
+          "default": "postgres"
+        },
+        "DB_HOST": {
+          "default": "${{postgres.PGHOST}}"
+        },
+        "DB_PORT": {
+          "default": "${{postgres.PGPORT}}"
+        },
+        "DB_USERNAME": {
+          "default": "${{postgres.PGUSER}}"
+        },
+        "DB_PASSWORD": {
+          "default": "${{postgres.PGPASSWORD}}"
+        },
+        "DB_NAME": {
+          "default": "${{postgres.PGDATABASE}}"
+        },
+        "VECTOR_DB_PROVIDER": {
+          "description": "Vector database provider",
+          "default": "pgvector"
+        },
+        "VECTOR_DB_URL": {
+          "default": "postgresql://${{postgres.PGUSER}}:${{postgres.PGPASSWORD}}@${{postgres.PGHOST}}:${{postgres.PGPORT}}/${{postgres.PGDATABASE}}"
+        },
+        "HOST": {
+          "default": "0.0.0.0"
+        },
+        "ENVIRONMENT": {
+          "default": "prod"
+        },
+        "CORS_ALLOWED_ORIGINS": {
+          "description": "Comma-separated allowed CORS origins",
+          "default": "*"
+        }
+      }
+    },
+    {
+      "name": "postgres",
+      "plugin": "postgresql"
+    }
+  ]
+}

@@ -15,7 +15,7 @@
 
 | Path | Description |
 |------|-------------|
-| `configurations/database_examples/kuzu_graph_database_configuration.py` | KuzuDB graph database |
+| `configurations/database_examples/ladybug_graph_database_configuration.py` | Ladybug graph database |
 | `configurations/database_examples/neo4j_graph_database_configuration.py` | Neo4j graph database |
 | `configurations/database_examples/neptune_analytics_aws_database_configuration.py` | AWS Neptune Analytics |
 | `configurations/database_examples/pgvector_postgres_vector_database_configuration.py` | PostgreSQL with PGVector |
@@ -29,7 +29,7 @@
 | Path | Description |
 |------|-------------|
 | `database_examples/chromadb_example.py` | ChromaDB example |
-| `database_examples/kuzu_example.py` | KuzuDB example |
+| `database_examples/ladybug_example.py` | Ladybug example |
 | `database_examples/neo4j_example.py` | Neo4j example |
 | `database_examples/neptune_analytics_example.py` | AWS Neptune Analytics example |
 | `database_examples/pgvector_example.py` | PGVector example |

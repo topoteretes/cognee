@@ -1,8 +1,12 @@
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    SQLAlchemyAdapter,
+)
+
 from .config import get_relational_config
 from .create_relational_engine import create_relational_engine
 
 
-def get_relational_engine():
+def get_relational_engine() -> SQLAlchemyAdapter:
     """
     Create and return a relational engine instance.
 

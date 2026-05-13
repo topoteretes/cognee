@@ -2,18 +2,18 @@ import asyncio
 
 import litellm
 
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
     get_llm_client,
 )
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger()
 
 CONNECTION_TEST_TIMEOUT_SECONDS = 30
 
 
-def get_max_chunk_tokens():
+def get_max_chunk_tokens() -> int:
     """
     Calculate the maximum number of tokens allowed in a chunk.
 
@@ -43,7 +43,7 @@ def get_max_chunk_tokens():
     return max_chunk_tokens
 
 
-def get_model_max_completion_tokens(model_name: str):
+def get_model_max_completion_tokens(model_name: str) -> int | None:
     """
     Retrieve the maximum token limit for a specified model name if it exists.
 
@@ -61,18 +61,23 @@ def get_model_max_completion_tokens(model_name: str):
 
         Number of max tokens of model, or None if model is unknown
     """
-    max_completion_tokens = None
+    max_completion_tokens: int | None = None
 
     if model_name in litellm.model_cost:
-        max_completion_tokens = litellm.model_cost[model_name]["max_tokens"]
-        logger.debug(f"Max input tokens for {model_name}: {max_completion_tokens}")
+        if "max_tokens" in litellm.model_cost[model_name]:
+            max_completion_tokens = litellm.model_cost[model_name]["max_tokens"]
+            logger.debug(f"Max input tokens for {model_name}: {max_completion_tokens}")
+        else:
+            logger.debug(
+                f"Model max_tokens not found in LiteLLM's model_cost for model {model_name}."
+            )
     else:
         logger.debug("Model not found in LiteLLM's model_cost.")
 
     return max_completion_tokens
 
 
-async def test_llm_connection():
+async def test_llm_connection() -> None:
     """
     Test connectivity to the LLM endpoint using a simple completion call.
     """
@@ -107,7 +112,7 @@ async def test_llm_connection():
         raise e
 
 
-async def test_embedding_connection():
+async def test_embedding_connection() -> None:
     """
     Test the connection to the embedding engine by embedding a sample text.
 
@@ -121,7 +126,7 @@ async def test_embedding_connection():
 
         logger.info("Testing connection to Embedding endpoint...")
         await asyncio.wait_for(
-            get_vector_engine().embedding_engine.embed_text("test"),
+            get_vector_engine().embedding_engine.embed_text(["test"]),
             timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:

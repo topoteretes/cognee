@@ -39,15 +39,17 @@ async def create_pg_database(vector_config):
         database=maintenance_db_name,
     )
     maintenance_engine = create_async_engine(maintenance_db_url)
-
-    # Connect to maintenance db in order to create new database
-    # Make sure to execute CREATE DATABASE outside of transaction block, and set AUTOCOMMIT isolation level
-    connection = await maintenance_engine.connect()
-    connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-    await connection.execute(text(f'CREATE DATABASE "{vector_config["vector_db_name"]}";'))
-
-    # Clean up resources
-    await connection.close()
+    try:
+        # Connect to maintenance db in order to create new database
+        # Make sure to execute CREATE DATABASE outside of transaction block, and set AUTOCOMMIT isolation level
+        connection = await maintenance_engine.connect()
+        try:
+            connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await connection.execute(text(f'CREATE DATABASE "{vector_config["vector_db_name"]}";'))
+        finally:
+            await connection.close()
+    finally:
+        await maintenance_engine.dispose()
 
     vector_engine = create_vector_engine(**vector_config)
     async with vector_engine.engine.begin() as connection:
@@ -75,17 +77,23 @@ async def delete_pg_database(dataset_database: DatasetDatabase):
     )
     maintenance_engine = create_async_engine(maintenance_db_url)
 
-    connection = await maintenance_engine.connect()
-    connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-    # We first have to kill all active sessions on the database, then delete it
-    await connection.execute(
-        text(
-            "SELECT pg_terminate_backend(pid) "
-            "FROM pg_stat_activity "
-            "WHERE datname = :db AND pid <> pg_backend_pid()"
-        ),
-        {"db": dataset_database.vector_database_name},
-    )
-    await connection.execute(text(f'DROP DATABASE "{dataset_database.vector_database_name}";'))
-
-    await connection.close()
+    try:
+        connection = await maintenance_engine.connect()
+        try:
+            connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            # We first have to kill all active sessions on the database, then delete it
+            await connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) "
+                    "FROM pg_stat_activity "
+                    "WHERE datname = :db AND pid <> pg_backend_pid()"
+                ),
+                {"db": dataset_database.vector_database_name},
+            )
+            await connection.execute(
+                text(f'DROP DATABASE "{dataset_database.vector_database_name}";')
+            )
+        finally:
+            await connection.close()
+    finally:
+        await maintenance_engine.dispose()

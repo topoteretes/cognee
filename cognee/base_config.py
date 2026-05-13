@@ -12,9 +12,7 @@ class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     system_root_directory: str = get_absolute_path(".cognee_system")
     cache_root_directory: str = get_absolute_path(".cognee_cache")
-    logs_root_directory: str = os.getenv(
-        "COGNEE_LOGS_DIR", str(os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs"))
-    )
+    logs_root_directory: str = os.getenv("COGNEE_LOGS_DIR", str(Path.home() / ".cognee" / "logs"))
     monitoring_tool: object = Observer.NONE
 
     @pydantic.model_validator(mode="after")

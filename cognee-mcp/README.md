@@ -38,12 +38,13 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 ## ✨ Features
 
 - Multiple transports – choose Streamable HTTP --transport http (recommended for web deployments), SSE --transport sse (real‑time streaming), or stdio (classic pipe, default)
-- **API Mode** – connect to an already running Cognee FastAPI server instead of using cognee directly (see [API Mode](#-api-mode) below)
+- **Cloud Mode** – connect to [Cognee Cloud](https://www.cognee.ai) via `--serve-url` or `COGNEE_SERVICE_URL` env var (see [Connection Modes](#-connection-modes))
+- **API Mode** – connect to an already running Cognee FastAPI server (see [Connection Modes](#-connection-modes))
+- **Minimal Memory API** – exposes only `remember`, `recall`, and `forget` for agent memory workflows
 - Integrated logging – all actions written to a rotating file (see get_log_file_location()) and mirrored to console in dev
-- Local file ingestion – feed .md, source files, Cursor rule‑sets, etc. straight from disk
-- Background pipelines – long‑running cognify & codify jobs spawn off‑thread; check progress with status tools
-- Developer rules bootstrap – one call indexes .cursorrules, .cursor/rules, AGENT.md, and friends into the developer_rules nodeset
-- Prune & reset – wipe memory clean with a single prune call when you want to start fresh
+- Session-aware memory – store fast session cache entries or permanent graph memory through one `remember` tool
+- Focused recall – query memory through one `recall` tool with optional session and search controls
+- Simple deletion – remove a dataset or all owned memory through one `forget` tool
 
 Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/deployment/mcp) for further information.
 
@@ -366,12 +367,43 @@ You can configure both transports simultaneously for testing:
 
 **Note:** Only enable the server you're actually running to avoid connection errors.
 
-## 🌐 API Mode
+## 🌐 Connection Modes
 
-The MCP server can operate in two modes:
+The MCP server supports three connection modes:
 
 ### **Direct Mode** (Default)
-The MCP server directly imports and uses the cognee library. This is the default mode with full feature support.
+The MCP server directly imports and uses the cognee library with local databases (SQLite, LanceDB, Ladybug). This is the default mode with full feature support.
+
+### **Cloud Mode**
+Connect to [Cognee Cloud](https://www.cognee.ai) or a remote Cognee instance. The server calls `cognee.serve()` at startup, and all SDK operations transparently route to the cloud. No local databases needed.
+
+**Via CLI flags:**
+```bash
+python src/server.py --serve-url https://your-instance.cognee.ai --serve-api-key ck_...
+```
+
+**Via environment variables (zero-config):**
+```bash
+export COGNEE_SERVICE_URL="https://your-instance.cognee.ai"
+export COGNEE_API_KEY="ck_..."
+python src/server.py
+```
+
+**Cloud Mode with Docker:**
+```bash
+docker run \
+  -e TRANSPORT_MODE=sse \
+  -e COGNEE_SERVICE_URL=https://your-instance.cognee.ai \
+  -e COGNEE_API_KEY=ck_... \
+  -p 8000:8000 \
+  --rm -it cognee/cognee-mcp:main
+```
+
+**Cloud Mode arguments / environment variables:**
+- `--serve-url` / `COGNEE_SERVICE_URL`: Cognee Cloud or remote instance URL
+- `--serve-api-key` / `COGNEE_API_KEY`: API key for the instance
+
+Database migrations are automatically skipped in Cloud mode.
 
 ### **API Mode**
 The MCP server connects to an already running Cognee FastAPI server via HTTP requests. This is useful when:
@@ -426,15 +458,11 @@ docker run \
 - `API_URL`: Base URL of the running Cognee FastAPI server
 - `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
 
-**API Mode limitations:**
-Some features are only available in direct mode:
-- `codify` (code graph pipeline)
-- `cognify_status` / `codify_status` (pipeline status tracking)
-- `prune` (data reset)
-- `get_developer_rules` (developer rules retrieval)
-- `list_data` with specific dataset_id (detailed data listing)
-
-Basic operations like `cognify`, `search`, `delete`, and `list_data` (all datasets) work in both modes.
+**API Mode behavior:**
+The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget`.
+In API mode these tools call the Cognee API server endpoints directly. Operational helpers such as
+`cognify`, `search`, `list_data`, `delete`, `prune`, `improve`, and document retrieval helpers are
+kept internal and are not exposed as MCP tools.
 
 ## 💻 Basic Usage
 
@@ -443,39 +471,25 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
-- **cognify**: Turns your data into a structured knowledge graph and stores it in memory
+The MCP server exposes three tools:
 
-- **cognee_add_developer_rules**: Ingest core developer rule files into memory
+- **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory
+- **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
+- **forget**: Delete memory by dataset name, or delete all owned memory with `everything=True`
 
-- **codify**: Analyse a code repository, build a code graph, stores it in memory
-
-- **delete**: Delete specific data from a dataset (supports soft/hard deletion modes)
-
-- **get_developer_rules**: Retrieve all developer rules that were generated based on previous interactions
-
-- **list_data**: List all datasets and their data items with IDs for deletion operations
-
-- **save_interaction**: Logs user-agent interactions and query-answer pairs
-
-- **prune**: Reset cognee for a fresh start (removes all data)
-
-- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, SUMMARIES, CYPHER, and FEELING_LUCKY
-
-- **cognify_status / codify_status**: Track pipeline progress
-
-**Data Management Examples:**
+**Examples:**
 ```bash
-# List all available datasets and data items
-list_data()
+# Store permanent memory
+remember(data="Cognee MCP now exposes a focused memory API.", dataset_name="main_dataset")
 
-# List data items in a specific dataset
-list_data(dataset_id="your-dataset-id-here")
+# Store session memory
+remember(data="Temporary working note", session_id="agent-session-1")
 
-# Delete specific data (soft deletion - safer, preserves shared entities)
-delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="soft")
+# Recall from memory
+recall(query="What changed in the MCP server?", session_id="agent-session-1")
 
-# Delete specific data (hard deletion - removes orphaned entities)
-delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="hard")
+# Delete one dataset
+forget(dataset="main_dataset")
 ```
 
 

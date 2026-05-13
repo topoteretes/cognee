@@ -48,13 +48,20 @@ async def run_question_answering(
             raise ValueError(f"Error decoding JSON from {params['questions_path']}: {e}")
 
         logger.info(f"Loaded {len(questions)} questions from {params['questions_path']}")
-        answer_generator = AnswerGeneratorExecutor()
-        answers = await answer_generator.question_answering_non_parallel(
-            questions=questions,
-            retriever=retriever_options[params["qa_engine"]](
-                system_prompt_path=system_prompt, top_k=top_k
-            ),
-        )
+
+        if params["qa_engine"] == "beam_router":
+            from cognee.eval_framework.answer_generation.beam_router import BEAMRouter
+
+            router = BEAMRouter()
+            answers = await router.answer_questions(questions)
+        else:
+            answer_generator = AnswerGeneratorExecutor()
+            answers = await answer_generator.question_answering_non_parallel(
+                questions=questions,
+                retriever=retriever_options[params["qa_engine"]](
+                    system_prompt_path=system_prompt, top_k=top_k
+                ),
+            )
         with open(params["answers_path"], "w", encoding="utf-8") as f:
             json.dump(answers, f, ensure_ascii=False, indent=4)
 

@@ -74,6 +74,7 @@ async def summarize_text(
             id=uuid5(chunk.id, "TextSummary"),
             made_from=chunk,
             text=chunk_summaries[chunk_index].summary,
+            importance_weight=chunk.importance_weight,
         )
         for (chunk_index, chunk) in enumerate(non_dlt_chunks)
     ]

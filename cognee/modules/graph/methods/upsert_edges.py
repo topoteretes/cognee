@@ -7,6 +7,7 @@ from cognee.modules.engine.utils import generate_edge_id
 
 from cognee.modules.graph.models.Edge import Edge
 from cognee.infrastructure.databases.relational.with_async_session import with_async_session
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 
 
 @with_async_session
@@ -31,6 +32,10 @@ async def upsert_edges(
         edge_text = (
             edge[3]["edge_text"] if edge[2] == "contains" and "edge_text" in edge[3] else edge[2]
         )
+        sanitized_edge_text = sanitize_relational_payload(edge_text)
+        sanitized_label = (
+            sanitize_relational_payload(edge[2]) if edge[2] == "contains" else sanitized_edge_text
+        )
 
         edges_to_add.append(
             {
@@ -40,18 +45,18 @@ async def upsert_edges(
                     + str(user_id)
                     + str(dataset_id)
                     + str(edge[0])
-                    + str(edge_text)
+                    + str(sanitized_edge_text)
                     + str(edge[1]),
                 ),
-                "slug": generate_edge_id(edge_text),
+                "slug": generate_edge_id(sanitized_edge_text),
                 "user_id": user_id,
                 "data_id": data_id,
                 "dataset_id": dataset_id,
                 "source_node_id": edge[0],
                 "destination_node_id": edge[1],
-                "relationship_name": edge_text,
-                "label": edge[2],
-                "attributes": jsonable_encoder(edge[3]),
+                "relationship_name": sanitized_edge_text,
+                "label": sanitized_label,
+                "attributes": sanitize_relational_payload(jsonable_encoder(edge[3])),
             }
         )
 

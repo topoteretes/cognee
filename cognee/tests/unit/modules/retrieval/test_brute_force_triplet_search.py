@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     brute_force_triplet_search,
     get_memory_fragment,
@@ -353,8 +354,55 @@ async def test_brute_force_triplet_search_passes_top_k_to_importance_calculation
         await brute_force_triplet_search(query="test", top_k=custom_top_k, node_name=["n"])
 
         mock_fragment.calculate_top_triplet_importances.assert_called_once_with(
-            k=custom_top_k, query_list_length=None
+            k=custom_top_k, query_list_length=None, feedback_influence=0.0
         )
+
+
+@pytest.mark.asyncio
+async def test_get_memory_fragment_projects_feedback_weight_only_when_feedback_influence_enabled():
+    """Test that feedback_weight properties are projected only when feedback_influence > 0."""
+    mock_graph_engine = AsyncMock()
+    mock_fragment = MagicMock(spec=CogneeGraph)
+    mock_fragment.project_graph_from_db = AsyncMock()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.CogneeGraph",
+            return_value=mock_fragment,
+        ),
+    ):
+        await get_memory_fragment(feedback_influence=0.0)
+        kwargs_without_feedback = mock_fragment.project_graph_from_db.call_args.kwargs
+        assert "feedback_weight" not in kwargs_without_feedback["node_properties_to_project"]
+        assert "feedback_weight" not in kwargs_without_feedback["edge_properties_to_project"]
+
+        await get_memory_fragment(feedback_influence=0.2)
+        kwargs_with_feedback = mock_fragment.project_graph_from_db.call_args.kwargs
+        assert "feedback_weight" in kwargs_with_feedback["node_properties_to_project"]
+        assert "feedback_weight" in kwargs_with_feedback["edge_properties_to_project"]
+        assert kwargs_with_feedback["feedback_influence"] == 0.2
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_invalid_feedback_influence_raises():
+    """Test feedback_influence value range validation."""
+    with pytest.raises(
+        CogneeValidationError, match="feedback_influence must be in range \\[0, 1\\]"
+    ):
+        await brute_force_triplet_search(query="test query", feedback_influence=1.5)
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_negative_feedback_influence_raises():
+    """Test feedback_influence lower bound validation."""
+    with pytest.raises(
+        CogneeValidationError, match="feedback_influence must be in range \\[0, 1\\]"
+    ):
+        await brute_force_triplet_search(query="test query", feedback_influence=-0.1)
 
 
 @pytest.mark.asyncio
@@ -1051,6 +1099,6 @@ async def test_cognee_graph_mapping_batch_shapes():
         edge_distances=edge_distances_batch, query_list_length=2
     )
 
-    assert node1.attributes.get("vector_distance") == [0.95, 3.5]
-    assert node2.attributes.get("vector_distance") == [3.5, 0.87]
+    assert node1.attributes.get("vector_distance") == [0.95, 6.5]
+    assert node2.attributes.get("vector_distance") == [6.5, 0.87]
     assert edge.attributes.get("vector_distance") == [0.92, 0.88]

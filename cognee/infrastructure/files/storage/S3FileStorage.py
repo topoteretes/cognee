@@ -1,11 +1,12 @@
 import os
-from typing import TYPE_CHECKING, BinaryIO, Union
-from contextlib import asynccontextmanager
 import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, BinaryIO
 
+from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.utils.run_async import run_async
-from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from cognee.shared.logging_utils import get_logger
 
 from .storage import Storage
@@ -16,7 +17,7 @@ logger = get_logger(__name__)
 S3_SLOW_OPERATION_THRESHOLD_SEC = 30.0
 
 if TYPE_CHECKING:
-    import s3fs
+    import s3fs  # ty:ignore[unresolved-import]
 
 
 class S3FileStorage(Storage):
@@ -30,7 +31,7 @@ class S3FileStorage(Storage):
 
     def __init__(self, storage_path: str):
         try:
-            import s3fs
+            import s3fs  # ty:ignore[unresolved-import]
         except ImportError:
             raise ImportError(
                 's3fs is required for S3FileStorage. Install it with: pip install cognee"[aws]"'
@@ -50,9 +51,7 @@ class S3FileStorage(Storage):
         else:
             raise ValueError("S3 credentials are not set in the configuration.")
 
-    async def store(
-        self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False
-    ) -> str:
+    async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
         Store data into a specified file path. The data can be either a string or a binary
         stream.
@@ -96,7 +95,7 @@ class S3FileStorage(Storage):
         return "s3://" + full_file_path
 
     @asynccontextmanager
-    async def open(self, file_path: str, mode: str = "r"):
+    async def open(self, file_path: str, mode: str = "r") -> AsyncGenerator[FileBufferedReader]:
         """
         Retrieve data from a specified file path, returning the content as bytes.
 
@@ -168,7 +167,7 @@ class S3FileStorage(Storage):
                 },
             )
 
-    async def file_exists(self, file_path: str):
+    async def file_exists(self, file_path: str) -> bool:
         """
         Check if a specified file exists in the filesystem.
 
@@ -209,7 +208,7 @@ class S3FileStorage(Storage):
             self.s3.size, os.path.join(self.storage_path.replace("s3://", ""), file_path)
         )
 
-    async def ensure_directory_exists(self, directory_path: str = ""):
+    async def ensure_directory_exists(self, directory_path: str = "") -> None:
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -227,7 +226,7 @@ class S3FileStorage(Storage):
         # path/ and path/to/ are implicitly created. No explicit action needed.
         pass
 
-    async def copy_file(self, source_file_path: str, destination_file_path: str):
+    async def copy_file(self, source_file_path: str, destination_file_path: str) -> str:
         """
         Copy a file from a source path to a destination path.
 
@@ -252,7 +251,7 @@ class S3FileStorage(Storage):
 
         return await run_async(copy)
 
-    async def remove(self, file_path: str):
+    async def remove(self, file_path: str) -> None:
         """
         Remove the specified file from the filesystem if it exists.
 
@@ -318,7 +317,7 @@ class S3FileStorage(Storage):
 
         return await run_async(list_files_sync)
 
-    async def remove_all(self, tree_path: str):
+    async def remove_all(self, root_path: str | None = None) -> None:
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.
@@ -330,15 +329,15 @@ class S3FileStorage(Storage):
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
-        if tree_path is None:
-            tree_path = self.storage_path.replace("s3://", "")
+        if root_path is None:
+            root_path = self.storage_path.replace("s3://", "")
         else:
-            tree_path = os.path.join(self.storage_path.replace("s3://", ""), tree_path)
+            root_path = os.path.join(self.storage_path.replace("s3://", ""), root_path)
 
         # async_remove_all = run_async(lambda: self.s3.rm(tree_path, recursive=True))
 
         try:
             # await async_remove_all()
-            await run_async(self.s3.rm, tree_path, recursive=True)
+            await run_async(self.s3.rm, root_path, recursive=True)
         except FileNotFoundError:
             pass

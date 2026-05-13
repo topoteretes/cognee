@@ -1,35 +1,35 @@
 """Adapter for Generic API LLM provider API"""
 
 import base64
+import logging
 import mimetypes
-import litellm
-import instructor
-from typing import Any, Dict, Type, Optional
-from pydantic import BaseModel
-from openai import ContentFilterFinishReasonError
-from litellm.exceptions import ContentPolicyViolationError
-from instructor.core import InstructorRetryException
+from typing import Any
 
+import instructor
+import litellm
+from instructor.core import InstructorRetryException
+from litellm.exceptions import ContentPolicyViolationError
+from openai import ContentFilterFinishReasonError
+from pydantic import BaseModel
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    stop_after_delay,
+    wait_exponential_jitter,
+)
+
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.modules.observability.get_observe import get_observe
-import logging
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-from cognee.shared.logging_utils import get_logger
-from tenacity import (
-    retry,
-    stop_after_delay,
-    wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
-)
-
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
 observe = get_observe()
@@ -43,7 +43,8 @@ def _enrich_llm_span(model: str, name: str) -> None:
         return
 
     try:
-        from opentelemetry import trace as otel_trace
+        from opentelemetry import trace as otel_trace  # ty:ignore[unresolved-import]
+
         from cognee.modules.observability.tracing import COGNEE_LLM_MODEL, COGNEE_LLM_PROVIDER
 
         current_span = otel_trace.get_current_span()
@@ -76,16 +77,16 @@ class GenericAPIAdapter(LLMInterface):
         model: str,
         max_completion_tokens: int,
         name: str,
-        endpoint: str = None,
-        api_version: str = None,
-        transcription_model: str = None,
-        image_transcribe_model: str = None,
-        instructor_mode: str = None,
-        fallback_model: str = None,
-        fallback_api_key: str = None,
-        fallback_endpoint: str = None,
-        llm_args: Optional[Dict[str, Any]] = None,
-    ):
+        endpoint: str | None = None,
+        api_version: str | None = None,
+        transcription_model: str | None = None,
+        image_transcribe_model: str | None = None,
+        instructor_mode: str | None = None,
+        fallback_model: str | None = None,
+        fallback_api_key: str | None = None,
+        fallback_endpoint: str | None = None,
+        llm_args: dict[str, Any] | None = None,
+    ) -> None:
         self.name = name
         self.model = model
         self.api_key = api_key
@@ -97,9 +98,17 @@ class GenericAPIAdapter(LLMInterface):
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
-        self.llm_args = llm_args
+        self._base_llm_args: dict[str, Any] = llm_args or {}
+        self.llm_args = self._base_llm_args
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+
+        if self.model.startswith("hosted_vllm/"):
+            model_without_prefix = self.model.replace("hosted_vllm/", "", 1)
+            self.model = "openai/" + model_without_prefix
+            extra_body = dict(self.llm_args.get("extra_body", {}))
+            extra_body["strict"] = False
+            self.llm_args["extra_body"] = extra_body
 
         self.aclient = instructor.from_litellm(
             litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
@@ -116,7 +125,7 @@ class GenericAPIAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs: Any
     ) -> BaseModel:
         """
         Generate a response from a user query.
@@ -148,12 +157,12 @@ class GenericAPIAdapter(LLMInterface):
                     model=self.model,
                     messages=[
                         {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
                             "role": "system",
                             "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
                         },
                     ],
                     max_retries=2,
@@ -180,25 +189,34 @@ class GenericAPIAdapter(LLMInterface):
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
                 ) from error
 
+            fallback_model = self.fallback_model
+            fallback_llm_args = {**self._base_llm_args, **kwargs}
+            if fallback_model and fallback_model.startswith("hosted_vllm/"):
+                fallback_model = fallback_model.replace("hosted_vllm/", "", 1)
+                fallback_model = "openai/" + fallback_model
+                fallback_extra_body = dict(fallback_llm_args.get("extra_body", {}))
+                fallback_extra_body["strict"] = False
+                fallback_llm_args["extra_body"] = fallback_extra_body
+
             try:
                 async with llm_rate_limiter_context_manager():
                     return await self.aclient.chat.completions.create(
-                        model=self.fallback_model,
+                        model=fallback_model,
                         messages=[
-                            {
-                                "role": "user",
-                                "content": f"""{text_input}""",
-                            },
                             {
                                 "role": "system",
                                 "content": system_prompt,
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
                             },
                         ],
                         max_retries=2,
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
-                        **merged_kwargs,
+                        **fallback_llm_args,
                     )
             except (
                 ContentFilterFinishReasonError,
@@ -225,7 +243,7 @@ class GenericAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input) -> TranscriptionReturnType:
+    async def create_transcript(self, input: str) -> TranscriptionReturnType:
         """
         Generate an audio transcript from a user query.
 
@@ -281,7 +299,7 @@ class GenericAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def transcribe_image(self, input) -> BaseModel:
+    async def transcribe_image(self, input: str) -> litellm.ModelResponse:
         """
         Generate a transcription of an image from a user query.
 
@@ -304,7 +322,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        response = await litellm.acompletion(
+        response: litellm.ModelResponse = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {

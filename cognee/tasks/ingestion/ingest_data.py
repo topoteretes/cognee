@@ -30,6 +30,7 @@ async def ingest_data(
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
+    importance_weight: float = 0.5,
 ):
     if not user:
         user = await get_default_user()
@@ -199,6 +200,7 @@ async def ingest_data(
                     pipeline_status={},
                     token_count=-1,
                     label=current_label,
+                    importance_weight=importance_weight,
                 )
 
                 new_datapoints.append(data_point)

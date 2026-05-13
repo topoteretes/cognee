@@ -1,22 +1,24 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+from cognee.modules.observability import (
+    COGNEE_RESULT_COUNT,
+    COGNEE_RESULT_SUMMARY,
+    COGNEE_SEARCH_TYPE,
+    new_span,
+)
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
+from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_SEARCH_TYPE,
-    COGNEE_RESULT_COUNT,
-    COGNEE_RESULT_SUMMARY,
-)
 
 logger = get_logger()
 
 
-async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs):
+async def get_retriever_output(
+    query_type: SearchType, query_text: str, **kwargs
+) -> SearchResultPayload:
     graph_engine = await get_graph_engine()
     is_empty = await graph_engine.is_empty()
 

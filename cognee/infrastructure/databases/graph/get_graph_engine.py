@@ -1,10 +1,55 @@
 """Factory function to get the appropriate graph client based on the graph type."""
 
+import inspect
+import os
+from numbers import Number
+
 from functools import lru_cache
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from .config import get_graph_context_config
 from .graph_db_interface import GraphDBInterface
 from .supported_databases import supported_databases
+
+
+def _normalize_graph_database_provider(provider: str) -> str:
+    return provider.lower() if isinstance(provider, str) else provider
+
+
+def _get_create_graph_engine_optional_defaults() -> dict:
+    """Return default values for optional create_graph_engine parameters."""
+    signature = inspect.signature(create_graph_engine)
+    return {
+        name: parameter.default
+        for name, parameter in signature.parameters.items()
+        if parameter.default is not inspect.Parameter.empty
+    }
+
+
+def _normalize_optional_create_graph_engine_params(params: dict) -> dict:
+    """
+    Normalize optional create_graph_engine parameters:
+    - replace None with the function defaults
+    - convert numeric graph_database_port values to string
+    """
+    defaults = _get_create_graph_engine_optional_defaults()
+    normalized = dict(params)
+
+    for key, default_value in defaults.items():
+        if normalized.get(key) is None:
+            normalized[key] = default_value
+
+    if isinstance(normalized.get("graph_database_port"), Number) and not isinstance(
+        normalized["graph_database_port"], bool
+    ):
+        normalized["graph_database_port"] = str(normalized["graph_database_port"])
+
+    if not normalized.get("graph_dataset_database_handler"):
+        normalized["graph_dataset_database_handler"] = os.getenv(
+            "GRAPH_DATASET_DATABASE_HANDLER", "ladybug"
+        )
+
+    return normalized
 
 
 async def get_graph_engine() -> GraphDBInterface:
@@ -31,6 +76,7 @@ def create_graph_engine(
     graph_database_name="",
     graph_database_username="",
     graph_database_password="",
+    graph_database_allow_anonymous=False,
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
@@ -39,6 +85,28 @@ def create_graph_engine(
     Wrapper function to call create graph engine with caching.
     For a detailed description, see _create_graph_engine.
     """
+
+    normalized_optional_params = _normalize_optional_create_graph_engine_params(locals())
+    graph_database_url = normalized_optional_params["graph_database_url"]
+    graph_database_provider = _normalize_graph_database_provider(graph_database_provider)
+    graph_database_name = normalized_optional_params["graph_database_name"]
+    graph_database_username = normalized_optional_params["graph_database_username"]
+    graph_database_password = normalized_optional_params["graph_database_password"]
+    graph_database_allow_anonymous = normalized_optional_params["graph_database_allow_anonymous"]
+    graph_database_port = normalized_optional_params["graph_database_port"]
+    graph_database_key = normalized_optional_params["graph_database_key"]
+    graph_dataset_database_handler = normalized_optional_params["graph_dataset_database_handler"]
+
+    # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
+    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    if unified_provider == "pghybrid":
+        from .postgres.adapter import PostgresAdapter
+        from cognee.infrastructure.databases.relational.get_relational_engine import (
+            get_relational_engine,
+        )
+
+        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+
     return _create_graph_engine(
         graph_database_provider,
         graph_file_path,
@@ -46,13 +114,14 @@ def create_graph_engine(
         graph_database_name,
         graph_database_username,
         graph_database_password,
+        graph_database_allow_anonymous,
         graph_database_port,
         graph_database_key,
         graph_dataset_database_handler,
     )
 
 
-@lru_cache
+@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_graph_engine(
     graph_database_provider,
     graph_file_path,
@@ -60,6 +129,7 @@ def _create_graph_engine(
     graph_database_name="",
     graph_database_username="",
     graph_database_password="",
+    graph_database_allow_anonymous=False,
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
@@ -74,7 +144,7 @@ def _create_graph_engine(
     Parameters:
     -----------
 
-        - graph_database_provider: The type of graph database provider to use (e.g., neo4j, falkor, kuzu).
+        - graph_database_provider: The type of graph database provider to use (e.g., neo4j, falkor, ladybug).
         - graph_database_url: The URL for the graph database instance. Required for neo4j and falkordb providers.
         - graph_database_username: The username for authentication with the graph database.
           Required for neo4j provider.
@@ -82,7 +152,7 @@ def _create_graph_engine(
           Required for neo4j provider.
         - graph_database_port: The port number for the graph database connection. Required
           for the falkordb provider
-        - graph_file_path: The filesystem path to the graph file. Required for the kuzu
+        - graph_file_path: The filesystem path to the graph file. Required for the ladybug
           provider.
 
     Returns:
@@ -115,23 +185,32 @@ def _create_graph_engine(
             graph_database_username=graph_database_username or None,
             graph_database_password=graph_database_password or None,
             graph_database_name=graph_database_name or None,
+            graph_database_allow_anonymous=graph_database_allow_anonymous,
         )
 
-    elif graph_database_provider == "kuzu":
-        if not graph_file_path:
-            raise EnvironmentError("Missing required Kuzu database path.")
-
-        from .kuzu.adapter import KuzuAdapter
-
-        return KuzuAdapter(db_path=graph_file_path)
-
-    elif graph_database_provider == "kuzu-remote":
+    elif graph_database_provider == "postgres":
         if not graph_database_url:
-            raise EnvironmentError("Missing required Kuzu remote URL.")
+            raise EnvironmentError("Missing required Postgres GRAPH_DATABASE_URL.")
 
-        from .kuzu.remote_kuzu_adapter import RemoteKuzuAdapter
+        from .postgres.adapter import PostgresAdapter
 
-        return RemoteKuzuAdapter(
+        return PostgresAdapter(connection_string=graph_database_url)
+
+    elif graph_database_provider in ("ladybug", "kuzu"):
+        if not graph_file_path:
+            raise EnvironmentError("Missing required Ladybug database path.")
+
+        from .ladybug.adapter import LadybugAdapter
+
+        return LadybugAdapter(db_path=graph_file_path)
+
+    elif graph_database_provider in ("ladybug-remote", "kuzu-remote"):
+        if not graph_database_url:
+            raise EnvironmentError("Missing required Ladybug remote URL.")
+
+        from .ladybug.remote_ladybug_adapter import RemoteLadybugAdapter
+
+        return RemoteLadybugAdapter(
             api_url=graph_database_url,
             username=graph_database_username,
             password=graph_database_password,
@@ -193,7 +272,17 @@ def _create_graph_engine(
             graph_id=graph_identifier,
         )
 
+    all_providers = list(supported_databases.keys()) + [
+        "neo4j",
+        "ladybug",
+        "ladybug-remote",
+        "kuzu",
+        "kuzu-remote",
+        "postgres",
+        "neptune",
+        "neptune_analytics",
+    ]
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(all_providers)}"
     )

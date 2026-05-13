@@ -7,14 +7,14 @@ class EvalConfig(BaseSettings):
     # Corpus builder params
     building_corpus_from_scratch: bool = True
     number_of_samples_in_corpus: int = 1
-    benchmark: str = "Dummy"  # Options: 'HotPotQA', 'Dummy', 'TwoWikiMultiHop'
+    benchmark: str = "Dummy"  # Options: 'HotPotQA', 'Dummy', 'TwoWikiMultiHop', 'BEAM'
     task_getter_type: str = (
         "Default"  # Options: 'Default', 'CascadeGraph', 'NoSummaries', 'JustChunks'
     )
 
     # Question answering params
     answering_questions: bool = True
-    qa_engine: str = "cognee_graph_completion"  # Options: 'cognee_completion' or 'cognee_graph_completion' or 'cognee_graph_completion_cot' or 'cognee_graph_completion_context_extension'
+    qa_engine: str = "cognee_graph_completion"  # Options: 'cognee_completion', 'cognee_graph_completion', 'cognee_graph_completion_cot', 'cognee_graph_completion_context_extension', 'beam_router'
 
     # Evaluation params
     evaluating_answers: bool = True

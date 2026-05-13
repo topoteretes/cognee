@@ -2,12 +2,8 @@ import asyncio
 from typing import Type, List, Optional, Dict
 from pydantic import BaseModel
 
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
-from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.tasks.storage import index_graph_edges
-from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
     get_default_ontology_resolver,
@@ -27,7 +23,6 @@ from cognee.tasks.graph.exceptions import (
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
-from cognee.modules.cognify.config import get_cognify_config
 
 from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -101,8 +96,6 @@ async def integrate_chunk_graphs(
             type(ontology_resolver).__name__ if ontology_resolver else "None"
         )
 
-    graph_engine = await get_graph_engine()
-
     if graph_model is not KnowledgeGraph:
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
@@ -114,39 +107,14 @@ async def integrate_chunk_graphs(
         chunk_graphs,
     )
 
-    graph_nodes, graph_edges = expand_with_nodes_and_edges(
+    data_chunks, entity_nodes = expand_with_nodes_and_edges(
         data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
     )
 
-    cognify_config = get_cognify_config()
-    embed_triplets = cognify_config.triplet_embedding
-
-    if len(graph_nodes) > 0:
+    if entity_nodes:
         if pipeline_name or task_name:
-            for node in graph_nodes:
+            for node in entity_nodes:
                 _stamp_provenance_deep(node, pipeline_name, task_name)
-
-        await add_data_points(
-            data_points=graph_nodes,
-            context=context,
-            custom_edges=graph_edges,
-            embed_triplets=embed_triplets,
-        )
-
-    if len(graph_edges) > 0:
-        await graph_engine.add_edges(graph_edges)
-        await index_graph_edges(graph_edges)
-
-        user = context["user"] if "user" in context else None
-
-        if user:
-            await upsert_edges(
-                graph_edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=context["dataset"].id,
-                data_id=context["data"].id,
-            )
 
     return data_chunks
 

@@ -49,21 +49,28 @@ async def mark_ledger_edges_as_deleted(
     if not edge_relationship_names:
         return
 
-    stmt = (
-        update(GraphRelationshipLedger)
-        .where(
-            and_(
-                GraphRelationshipLedger.deleted_at.is_(None),
-                GraphRelationshipLedger.node_label.is_(None),
-                or_(
-                    *[
-                        GraphRelationshipLedger.creator_function.ilike(f"%{name}")
-                        for name in edge_relationship_names
-                    ]
-                ),
+    relationship_names = list(set(edge_relationship_names))
+    batch_size = 250
+    deleted_at = datetime.now(timezone.utc)
+
+    for start_index in range(0, len(relationship_names), batch_size):
+        relationship_batch = relationship_names[start_index : start_index + batch_size]
+        stmt = (
+            update(GraphRelationshipLedger)
+            .where(
+                and_(
+                    GraphRelationshipLedger.deleted_at.is_(None),
+                    GraphRelationshipLedger.node_label.is_(None),
+                    or_(
+                        *[
+                            GraphRelationshipLedger.creator_function.ilike(f"%{name}")
+                            for name in relationship_batch
+                        ]
+                    ),
+                )
             )
+            .values(deleted_at=deleted_at)
         )
-        .values(deleted_at=datetime.now(timezone.utc))
-    )
-    await session.execute(stmt)
+        await session.execute(stmt)
+
     await session.commit()

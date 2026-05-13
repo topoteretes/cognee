@@ -1,8 +1,12 @@
 import tempfile
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+import pytest
+
+from cognee.infrastructure.session.feedback_models import (
+    AgentTraceFeedbackSummary,
+    FeedbackDetectionResult,
+)
 from cognee.infrastructure.session.session_manager import SessionManager
 
 
@@ -24,13 +28,13 @@ def fs_adapter():
 
 
 @pytest.fixture
-def session_manager(fs_adapter):
+def session_manager(fs_adapter) -> SessionManager:
     """SessionManager wired to FsCacheAdapter."""
     return SessionManager(cache_engine=fs_adapter)
 
 
 @pytest.mark.asyncio
-async def test_add_qa_and_get_session(session_manager):
+async def test_add_qa_and_get_session(session_manager: SessionManager):
     """Add QA via SessionManager and retrieve via get_session."""
     qa_id = await session_manager.add_qa(
         user_id="u1", question="Q1?", context="ctx1", answer="A1.", session_id="s1"
@@ -39,13 +43,13 @@ async def test_add_qa_and_get_session(session_manager):
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert len(entries) == 1
-    assert entries[0]["question"] == "Q1?"
-    assert entries[0]["answer"] == "A1."
-    assert entries[0]["qa_id"] == qa_id
+    assert entries[0].question == "Q1?"
+    assert entries[0].answer == "A1."
+    assert entries[0].qa_id == qa_id
 
 
 @pytest.mark.asyncio
-async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
+async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager: SessionManager):
     """add_qa with used_graph_element_ids stores and returns it via get_session."""
     used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
     qa_id = await session_manager.add_qa(
@@ -59,11 +63,11 @@ async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
     assert qa_id is not None
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert len(entries) == 1
-    assert entries[0]["used_graph_element_ids"] == used_ids
+    assert entries[0].used_graph_element_ids == used_ids
 
 
 @pytest.mark.asyncio
-async def test_get_session_formatted(session_manager):
+async def test_get_session_formatted(session_manager: SessionManager):
     """get_session with formatted=True returns prompt string."""
     await session_manager.add_qa(
         user_id="u1", question="Q?", context="C", answer="A", session_id="s1"
@@ -74,7 +78,112 @@ async def test_get_session_formatted(session_manager):
 
 
 @pytest.mark.asyncio
-async def test_update_qa(session_manager):
+async def test_add_agent_trace_step_and_get_trace_session(session_manager: SessionManager):
+    """Trace steps appended via SessionManager are returned in append order."""
+    with (
+        patch(
+            "cognee.infrastructure.session.session_manager.read_query_prompt",
+            return_value="summarize this",
+        ),
+        patch(
+            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=AgentTraceFeedbackSummary(session_feedback="Plan created successfully."),
+        ),
+    ):
+        trace_id_1 = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="plan_trip",
+            status="success",
+            memory_query="trip preferences",
+            memory_context="User likes quiet places",
+            method_params={"city": "Tokyo"},
+            method_return_value="Plan created",
+        )
+        trace_id_2 = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="book_hotel",
+            status="error",
+            method_params={"area": "Shibuya"},
+            error_message="No availability",
+        )
+
+    entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    feedback = await session_manager.get_agent_trace_feedback(user_id="u1", session_id="s1")
+
+    assert [entry.trace_id for entry in entries] == [trace_id_1, trace_id_2]
+    assert entries[0].origin_function == "plan_trip"
+    assert entries[1].origin_function == "book_hotel"
+    assert feedback == [
+        "Plan created successfully.",
+        "book_hotel failed. Reason: No availability.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_add_agent_trace_step_can_disable_llm_feedback_generation(
+    session_manager: SessionManager,
+):
+    """Disabling LLM feedback generation stores deterministic fallback feedback."""
+    with patch(
+        "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+        new_callable=AsyncMock,
+    ) as mock_llm:
+        trace_id = await session_manager.add_agent_trace_step(
+            user_id="u1",
+            session_id="s1",
+            origin_function="plan_trip",
+            status="success",
+            method_return_value="Plan created",
+            generate_feedback_with_llm=False,
+        )
+
+    assert trace_id is not None
+    mock_llm.assert_not_awaited()
+    entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    assert len(entries) == 1
+    assert entries[0].session_feedback == "plan_trip succeeded."
+
+
+@pytest.mark.asyncio
+async def test_agent_trace_session_isolated_by_user_and_session(session_manager: SessionManager):
+    """Agent trace sessions remain isolated by user_id and session_id."""
+    await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="plan_trip",
+        status="success",
+    )
+    await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s2",
+        origin_function="book_hotel",
+        status="error",
+        error_message="No availability",
+    )
+    await session_manager.add_agent_trace_step(
+        user_id="u2",
+        session_id="s1",
+        origin_function="book_flight",
+        status="success",
+    )
+
+    u1s1 = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    u1s2 = await session_manager.get_agent_trace_session(user_id="u1", session_id="s2")
+    u2s1 = await session_manager.get_agent_trace_session(user_id="u2", session_id="s1")
+
+    assert len(u1s1) == 1
+    assert u1s1[0].origin_function == "plan_trip"
+    assert len(u1s2) == 1
+    assert u1s2[0].origin_function == "book_hotel"
+    assert len(u2s1) == 1
+    assert u2s1[0].origin_function == "book_flight"
+
+
+@pytest.mark.asyncio
+async def test_update_qa(session_manager: SessionManager):
     """update_qa updates entry via FsCacheAdapter."""
     qa_id = await session_manager.add_qa(
         user_id="u1", question="Q", context="C", answer="A", session_id="s1"
@@ -85,11 +194,11 @@ async def test_update_qa(session_manager):
     assert ok
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
-    assert entries[0]["question"] == "Q updated?"
+    assert entries[0].question == "Q updated?"
 
 
 @pytest.mark.asyncio
-async def test_add_feedback(session_manager):
+async def test_add_feedback(session_manager: SessionManager):
     """add_feedback sets feedback on entry."""
     qa_id = await session_manager.add_qa(
         user_id="u1", question="Q", context="C", answer="A", session_id="s1"
@@ -100,11 +209,11 @@ async def test_add_feedback(session_manager):
     assert ok
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
-    assert entries[0]["feedback_score"] == 5
+    assert entries[0].feedback_score == 5
 
 
 @pytest.mark.asyncio
-async def test_delete_feedback(session_manager):
+async def test_delete_feedback(session_manager: SessionManager):
     """delete_feedback clears feedback."""
     qa_id = await session_manager.add_qa(
         user_id="u1",
@@ -119,12 +228,12 @@ async def test_delete_feedback(session_manager):
     assert ok
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
-    assert entries[0].get("feedback_score") is None
-    assert entries[0].get("feedback_text") is None
+    assert entries[0].feedback_score is None
+    assert entries[0].feedback_text is None
 
 
 @pytest.mark.asyncio
-async def test_delete_qa(session_manager):
+async def test_delete_qa(session_manager: SessionManager):
     """delete_qa removes single entry."""
     qa1 = await session_manager.add_qa(
         user_id="u1", question="Q1", context="C1", answer="A1", session_id="s1"
@@ -137,24 +246,33 @@ async def test_delete_qa(session_manager):
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert len(entries) == 1
-    assert entries[0]["question"] == "Q2"
+    assert entries[0].question == "Q2"
 
 
 @pytest.mark.asyncio
 async def test_delete_session(session_manager):
-    """delete_session clears all entries."""
+    """delete_session clears both QA and trace session entries."""
     await session_manager.add_qa(
         user_id="u1", question="Q", context="C", answer="A", session_id="s1"
     )
+    trace_id = await session_manager.add_agent_trace_step(
+        user_id="u1",
+        session_id="s1",
+        origin_function="plan_trip",
+        status="success",
+    )
+    assert trace_id is not None
     ok = await session_manager.delete_session(user_id="u1", session_id="s1")
     assert ok
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert entries == []
+    trace_entries = await session_manager.get_agent_trace_session(user_id="u1", session_id="s1")
+    assert trace_entries == []
 
 
 @pytest.mark.asyncio
-async def test_generate_completion_with_session_saves_qa(session_manager):
+async def test_generate_completion_with_session_saves_qa(session_manager: SessionManager):
     """generate_completion_with_session runs completion and saves QA to session (LLM mocked)."""
     mock_user = MagicMock()
     mock_user.id = "u1"
@@ -185,13 +303,15 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
     assert result == "Integration test answer"
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert len(entries) == 1
-    assert entries[0]["question"] == "What is X?"
-    assert entries[0]["answer"] == "Integration test answer"
-    assert entries[0]["used_graph_element_ids"] == used_ids
+    assert entries[0].question == "What is X?"
+    assert entries[0].answer == "Integration test answer"
+    assert entries[0].used_graph_element_ids == used_ids
 
 
 @pytest.mark.asyncio
-async def test_generate_completion_with_session_feedback_only_no_new_qa(session_manager):
+async def test_generate_completion_with_session_feedback_only_no_new_qa(
+    session_manager: SessionManager,
+):
     """When feedback only is detected: feedback persisted on last QA, no new QA added."""
     qa_id = await session_manager.add_qa(
         user_id="u1",
@@ -240,14 +360,16 @@ async def test_generate_completion_with_session_feedback_only_no_new_qa(session_
     assert result == "Thanks for your feedback!"
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert len(entries) == 1
-    assert entries[0]["qa_id"] == qa_id
-    assert entries[0]["question"] == "What is X?"
-    assert entries[0].get("feedback_text") == "User said thanks."
-    assert entries[0].get("feedback_score") == 5
+    assert entries[0].qa_id == qa_id
+    assert entries[0].question == "What is X?"
+    assert entries[0].feedback_text == "User said thanks."
+    assert entries[0].feedback_score == 5
 
 
 @pytest.mark.asyncio
-async def test_generate_completion_with_session_feedback_and_followup_adds_qa(session_manager):
+async def test_generate_completion_with_session_feedback_and_followup_adds_qa(
+    session_manager: SessionManager,
+):
     """When feedback + follow-up: feedback on last QA and new QA added with answer."""
     qa_id_first = await session_manager.add_qa(
         user_id="u1",
@@ -297,13 +419,13 @@ async def test_generate_completion_with_session_feedback_and_followup_adds_qa(se
     assert "Paris is the capital of France." in result
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert len(entries) == 2
-    first_qa = next((e for e in entries if e.get("qa_id") == qa_id_first), None)
+    first_qa = next((e for e in entries if e.qa_id == qa_id_first), None)
     followup_qa = next(
-        (e for e in entries if e.get("question") == "thanks! What is the capital of France?"),
+        (e for e in entries if e.question == "thanks! What is the capital of France?"),
         None,
     )
     assert first_qa is not None
-    assert first_qa.get("feedback_text") == "User gave thanks and asked follow-up."
-    assert first_qa.get("feedback_score") == 5
+    assert first_qa.feedback_text == "User gave thanks and asked follow-up."
+    assert first_qa.feedback_score == 5
     assert followup_qa is not None
-    assert followup_qa["answer"] == "Paris is the capital of France."
+    assert followup_qa.answer == "Paris is the capital of France."

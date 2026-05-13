@@ -1,8 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+import pytest
+
 from cognee.infrastructure.session.feedback_detection import detect_feedback
+from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
 
 
 class TestDetectFeedback:
@@ -94,24 +95,6 @@ class TestDetectFeedback:
         with patch(
             "cognee.infrastructure.session.feedback_detection.read_query_prompt",
             return_value=None,
-        ):
-            result = await detect_feedback("thanks!")
-
-        assert result.feedback_detected is False
-
-    @pytest.mark.asyncio
-    async def test_detect_feedback_llm_returns_wrong_type_returns_not_detected(self):
-        """When LLM returns non-FeedbackDetectionResult, returns feedback_detected=False."""
-        with (
-            patch(
-                "cognee.infrastructure.session.feedback_detection.read_query_prompt",
-                return_value="System prompt",
-            ),
-            patch(
-                "cognee.infrastructure.session.feedback_detection.LLMGateway.acreate_structured_output",
-                new_callable=AsyncMock,
-                return_value={"feedback_detected": True},
-            ),
         ):
             result = await detect_feedback("thanks!")
 

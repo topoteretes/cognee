@@ -1,5 +1,5 @@
 import { NodeObject } from "react-force-graph-2d";
-import getColorForNodeType from './getColorForNodeType';
+import getColorForNodeType from "./getColorForNodeType";
 
 interface GraphLegendProps {
   data?: NodeObject[];

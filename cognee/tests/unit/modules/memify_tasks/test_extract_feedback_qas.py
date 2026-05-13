@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
 from cognee.tasks.memify.feedback_weights_constants import (
@@ -11,6 +12,16 @@ from cognee.tasks.memify.feedback_weights_constants import (
 )
 
 extract_feedback_qas_module = sys.modules["cognee.tasks.memify.extract_feedback_qas"]
+
+
+def _make_entry(**kwargs) -> SessionQAEntry:
+    defaults = {
+        "time": "2026-01-01T10:00:00",
+        "question": "Test question",
+        "context": "Test context",
+        "answer": "Test answer",
+    }
+    return SessionQAEntry(**{**defaults, **kwargs})
 
 
 @pytest.fixture
@@ -23,27 +34,25 @@ def mock_user():
 @pytest.mark.asyncio
 async def test_extract_feedback_qas_filters_eligible_entries(mock_user):
     entries = [
-        {
-            "qa_id": "q1",
-            "time": "2026-01-01T10:00:00",
-            "feedback_score": 5,
-            "used_graph_element_ids": {"node_ids": ["n1"], "edge_ids": ["e1"]},
-            "memify_metadata": None,
-        },
-        {
-            "qa_id": "q2",
-            "time": "2026-01-01T10:01:00",
-            "feedback_score": 3,
-            "used_graph_element_ids": {"node_ids": ["n2"]},
-            "memify_metadata": {MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True},
-        },
-        {
-            "qa_id": "q3",
-            "time": "2026-01-01T10:02:00",
-            "feedback_score": None,
-            "used_graph_element_ids": {"node_ids": ["n3"]},
-            "memify_metadata": {},
-        },
+        _make_entry(
+            qa_id="q1",
+            feedback_score=5,
+            used_graph_element_ids={"node_ids": ["n1"], "edge_ids": ["e1"]},
+            memify_metadata=None,
+        ),
+        _make_entry(
+            qa_id="q2",
+            time="2026-01-01T10:01:00",
+            feedback_score=3,
+            used_graph_element_ids={"node_ids": ["n2"]},
+            memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True},
+        ),
+        _make_entry(
+            qa_id="q3",
+            time="2026-01-01T10:02:00",
+            feedback_score=None,
+            used_graph_element_ids={"node_ids": ["n3"]},
+        ),
     ]
 
     mock_session_manager = MagicMock()
@@ -77,22 +86,19 @@ async def test_extract_feedback_qas_respects_session_ids(mock_user):
     mock_session_manager.get_session = AsyncMock(
         side_effect=[
             [
-                {
-                    "qa_id": "qa-a",
-                    "time": "2026-01-01T10:00:00",
-                    "feedback_score": 4,
-                    "used_graph_element_ids": {"node_ids": ["n1"]},
-                    "memify_metadata": {},
-                }
+                _make_entry(
+                    qa_id="qa-a",
+                    feedback_score=4,
+                    used_graph_element_ids={"node_ids": ["n1"]},
+                )
             ],
             [
-                {
-                    "qa_id": "qa-b",
-                    "time": "2026-01-01T10:01:00",
-                    "feedback_score": 2,
-                    "used_graph_element_ids": {"edge_ids": ["e1"]},
-                    "memify_metadata": {},
-                }
+                _make_entry(
+                    qa_id="qa-b",
+                    time="2026-01-01T10:01:00",
+                    feedback_score=2,
+                    used_graph_element_ids={"edge_ids": ["e1"]},
+                )
             ],
         ]
     )
@@ -118,20 +124,18 @@ async def test_extract_feedback_qas_respects_session_ids(mock_user):
 @pytest.mark.asyncio
 async def test_extract_feedback_qas_preserves_session_entry_order(mock_user):
     entries = [
-        {
-            "qa_id": "q2",
-            "time": "2026-01-01T11:00:00",
-            "feedback_score": 4,
-            "used_graph_element_ids": {"node_ids": ["n2"]},
-            "memify_metadata": {},
-        },
-        {
-            "qa_id": "q1",
-            "time": "2026-01-01T10:00:00",
-            "feedback_score": 5,
-            "used_graph_element_ids": {"node_ids": ["n1"]},
-            "memify_metadata": {},
-        },
+        _make_entry(
+            qa_id="q2",
+            time="2026-01-01T11:00:00",
+            feedback_score=4,
+            used_graph_element_ids={"node_ids": ["n2"]},
+        ),
+        _make_entry(
+            qa_id="q1",
+            time="2026-01-01T10:00:00",
+            feedback_score=5,
+            used_graph_element_ids={"node_ids": ["n1"]},
+        ),
     ]
 
     mock_session_manager = MagicMock()

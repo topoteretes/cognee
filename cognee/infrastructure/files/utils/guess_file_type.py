@@ -1,8 +1,9 @@
 import io
 from pathlib import Path
-from typing import BinaryIO, Optional, Any
-import filetype
 from tempfile import SpooledTemporaryFile
+from typing import Any, BinaryIO, Optional
+
+import filetype
 from filetype.types.base import Type
 
 
@@ -25,7 +26,7 @@ class FileTypeException(Exception):
         self.message = message
 
 
-def guess_file_type(file: BinaryIO, name: Optional[str] = None) -> filetype.Type:
+def guess_file_type(file: BinaryIO, name: str | None = None) -> filetype.Type:
     """
     Guess the file type from the given binary file stream.
 

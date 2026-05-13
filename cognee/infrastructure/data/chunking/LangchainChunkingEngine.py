@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import re
+from collections.abc import Iterable
 
 from cognee.infrastructure.data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from cognee.shared.data_models import ChunkStrategy
@@ -10,19 +12,23 @@ class LangchainChunkEngine:
     Handles chunking of data using specified strategies.
     """
 
-    def __init__(self, chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None):
+    def __init__(
+        self,
+        chunk_strategy: ChunkStrategy,
+        chunk_size: int,
+        chunk_overlap: int,
+    ) -> None:
         self.chunk_strategy = chunk_strategy
-        self.source_data = source_data
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
     def chunk_data(
         self,
-        chunk_strategy=None,
-        source_data=None,
-        chunk_size=None,
-        chunk_overlap=None,
-    ):
+        chunk_strategy: ChunkStrategy,
+        source_data: Iterable[str],
+        chunk_size: int,
+        chunk_overlap: int,
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data based on the specified strategy.
 
@@ -58,10 +64,16 @@ class LangchainChunkEngine:
                 source_data, self.chunk_size, self.chunk_overlap
             )
         else:
-            chunked_data, chunk_number = "Invalid chunk strategy.", [0, "Invalid chunk strategy."]
+            chunked_data, chunk_number = ["Invalid chunk strategy."], [0]
         return chunked_data, chunk_number
 
-    def chunk_data_by_code(self, data_chunks, chunk_size, chunk_overlap=10, language=None):
+    def chunk_data_by_code(
+        self,
+        data_chunks: Iterable[str],
+        chunk_size: int,
+        chunk_overlap: int = 10,
+        language=None,
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data specifically for code snippets.
 
@@ -83,7 +95,7 @@ class LangchainChunkEngine:
 
             A tuple with the contents of the code chunks and their respective numbered lists.
         """
-        from langchain_text_splitters import (
+        from langchain_text_splitters import (  # ty:ignore[unresolved-import]
             Language,
             RecursiveCharacterTextSplitter,
         )
@@ -104,7 +116,9 @@ class LangchainChunkEngine:
 
         return only_content, numbered_chunks
 
-    def chunk_data_by_character(self, data_chunks, chunk_size=1500, chunk_overlap=10):
+    def chunk_data_by_character(
+        self, data_chunks: Iterable[str], chunk_size: int = 1500, chunk_overlap: int = 10
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data based on character count.
 
@@ -124,7 +138,9 @@ class LangchainChunkEngine:
             A tuple comprising the content of the character chunks and their indexed
             representations.
         """
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        from langchain_text_splitters import (  # ty:ignore[unresolved-import]
+            RecursiveCharacterTextSplitter,
+        )
 
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size, chunk_overlap=chunk_overlap

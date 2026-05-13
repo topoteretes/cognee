@@ -42,6 +42,7 @@ async def test_init_custom_params():
         validation_system_prompt_path="custom_validation_system.txt",
         followup_system_prompt_path="custom_followup_system.txt",
         followup_user_prompt_path="custom_followup_user.txt",
+        feedback_influence=0.25,
     )
 
     assert retriever.top_k == 10
@@ -51,6 +52,7 @@ async def test_init_custom_params():
     assert retriever.validation_system_prompt_path == "custom_validation_system.txt"
     assert retriever.followup_system_prompt_path == "custom_followup_system.txt"
     assert retriever.followup_user_prompt_path == "custom_followup_user.txt"
+    assert retriever.feedback_influence == 0.25
 
 
 @pytest.mark.asyncio
@@ -590,7 +592,14 @@ async def test_get_completion_batch_queries(mock_edge):
             "cognee.modules.retrieval.utils.completion.generate_completion",
             return_value="Generated answer",
         ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
     ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
         objects = await retriever.get_retrieved_objects(
             query_batch=["test query 1", "test query 2"]
         )
@@ -693,7 +702,14 @@ async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
             "cognee.modules.retrieval.utils.completion.generate_completion",
             return_value="Generated answer",
         ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
     ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
         objects = await retriever.get_retrieved_objects(
             query_batch=["test query 1", "test query 1"]
         )

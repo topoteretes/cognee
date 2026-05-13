@@ -16,6 +16,13 @@ ARG DEBUG
 # Set environment variable based on the build argument
 ENV DEBUG=${DEBUG}
 
+# Needed when psycopg2 is built from source via cognee[postgres] in linux images.
+# libpq-dev provides pg_config; build-essential provides libc headers and toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy pyproject.toml and lockfile first for better caching
 COPY ./cognee-mcp/pyproject.toml ./cognee-mcp/uv.lock ./cognee-mcp/entrypoint.sh ./
 
@@ -31,7 +38,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.12-slim-bookworm
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -44,6 +51,12 @@ COPY --from=uv /app /app
 # Strip Windows carriage returns (fixes "no such file" on Windows Docker)
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
+# Run as a non-root user. Create the user before copying ownership so the
+# /app tree (which already exists from the COPY above) is readable.
+RUN groupadd --system --gid 1000 cognee \
+    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
+    && chown -R cognee:cognee /app
+
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
@@ -54,6 +67,8 @@ ENV PYTHONPATH=/app
 
 # Add labels for API mode usage
 LABEL org.opencontainers.image.description="Cognee MCP Server with API mode support"
+
+USER cognee
 
 # Use the application name from pyproject.toml for normal operation
 # For testing, we'll override this with a direct command

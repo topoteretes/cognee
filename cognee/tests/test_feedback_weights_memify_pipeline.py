@@ -7,7 +7,6 @@ import os
 import pathlib
 
 import cognee
-
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -63,7 +62,7 @@ async def main():
 
     qa_entry = None
     for entry in entries:
-        ids = entry.get("used_graph_element_ids")
+        ids = entry.used_graph_element_ids
         if isinstance(ids, dict) and (ids.get("node_ids") or ids.get("edge_ids")):
             qa_entry = entry
             break
@@ -72,7 +71,7 @@ async def main():
 
     ok = await cognee.session.add_feedback(
         session_id=session_id,
-        qa_id=qa_entry["qa_id"],
+        qa_id=qa_entry.qa_id,
         feedback_text="Helpful answer",
         feedback_score=5,
         user=user,
@@ -93,19 +92,14 @@ async def main():
         session_id=session_id,
         formatted=False,
     )
-    updated_qa = next(
-        (entry for entry in updated_entries if entry.get("qa_id") == qa_entry["qa_id"]), None
-    )
+    updated_qa = next((entry for entry in updated_entries if entry.qa_id == qa_entry.qa_id), None)
     assert updated_qa is not None, "Updated QA entry not found."
-    assert (
-        updated_qa.get("memify_metadata", {}).get(MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY)
-        is True
-    ), (
+    assert updated_qa.memify_metadata.get(MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY) is True, (
         f"Pipeline should mark {MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY}=True on successful QA update."
     )
 
     graph_engine = await get_graph_engine()
-    used_ids = updated_qa.get("used_graph_element_ids", {})
+    used_ids = updated_qa.used_graph_element_ids
     node_ids = [
         node_id for node_id in used_ids.get("node_ids", []) if isinstance(node_id, str) and node_id
     ]

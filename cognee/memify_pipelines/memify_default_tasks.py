@@ -6,6 +6,10 @@ from cognee.tasks.storage.index_data_points import index_data_points
 
 
 def get_default_memify_extraction_tasks():
+    from cognee.modules.cognify.config import get_cognify_config
+
+    if not get_cognify_config().triplet_embedding:
+        return []
     return [Task(get_triplet_datapoints, triplets_batch_size=100)]
 
 
