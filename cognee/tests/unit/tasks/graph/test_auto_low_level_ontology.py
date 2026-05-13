@@ -2,7 +2,7 @@ import pytest
 from typing import get_args
 
 from cognee.modules.graph.utils import get_graph_from_model
-from cognee.tasks.graph.auto_restricted_ontology import (
+from cognee.tasks.graph.auto_low_level_ontology import (
     GeneratedLowLevelDataPointClass,
     GeneratedLowLevelDataPointModel,
     GeneratedLowLevelField,
