@@ -953,6 +953,12 @@ class SubprocessSession:
                 resp = fut.result(timeout=remaining)
             except concurrent.futures.TimeoutError:
                 raise TimeoutError(f"Subprocess call exceeded {eff}s deadline")
+            # The worker responded — even an application error proves it
+            # is still serving. Reset the consecutive-timeout counter
+            # BEFORE ``_handle_response`` so a worker-side raise doesn't
+            # leave the counter pointing at a wedged-worker state and
+            # trigger a spurious respawn on the next per-call timeout.
+            self._reset_timeout_counter()
             return self._handle_response(resp)
         finally:
             with self._pending_lock:
@@ -987,6 +993,9 @@ class SubprocessSession:
                 if not fut.done():
                     fut.cancel()
                 raise TimeoutError(f"Subprocess call_async exceeded {eff}s deadline")
+            # Worker responded — reset the streak (see ``_issue`` for why
+            # this is unconditional, not gated on success vs app error).
+            self._reset_timeout_counter()
             return self._handle_response(resp)
         finally:
             with self._pending_lock:
@@ -1032,7 +1041,7 @@ class SubprocessSession:
         attempts_left = self._max_retries
         while True:
             try:
-                resp = self._issue(req, timeout)
+                return self._issue(req, timeout)
             except TimeoutError:
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
@@ -1040,15 +1049,11 @@ class SubprocessSession:
                     self._force_respawn_after_timeouts()
                 attempts_left -= 1
                 self._respawn()
-                continue
             except SubprocessTransportError:
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
                 attempts_left -= 1
                 self._respawn()
-                continue
-            self._reset_timeout_counter()
-            return resp
 
     async def call_async(self, req: Request, timeout: Optional[float] = ...) -> Response:
         """Async counterpart of ``call`` with identical retry semantics.
@@ -1062,7 +1067,7 @@ class SubprocessSession:
         attempts_left = self._max_retries
         while True:
             try:
-                resp = await self._issue_async(req, timeout)
+                return await self._issue_async(req, timeout)
             except TimeoutError:
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
@@ -1070,15 +1075,11 @@ class SubprocessSession:
                     self._force_respawn_after_timeouts()
                 attempts_left -= 1
                 await loop.run_in_executor(None, self._respawn)
-                continue
             except SubprocessTransportError:
                 if attempts_left <= 0 or not self._can_respawn():
                     raise
                 attempts_left -= 1
                 await loop.run_in_executor(None, self._respawn)
-                continue
-            self._reset_timeout_counter()
-            return resp
 
     def _can_respawn(self) -> bool:
         return self._respawn_factory is not None
@@ -1174,6 +1175,19 @@ class SubprocessSession:
             self._closed_event.set()
             if self._reader_thread is not None and self._reader_thread.is_alive():
                 self._reader_thread.join(timeout=self._shutdown_timeout)
+                if self._reader_thread.is_alive():
+                    # The old reader is still running. If we proceeded
+                    # and reassigned ``self._resp_q`` below, the old
+                    # reader's next iteration would pull from the NEW
+                    # queue (it dereferences ``self._resp_q`` per loop),
+                    # producing two consumers on the same queue and
+                    # nondeterministic response routing. Bail out
+                    # instead — the session is now bricked and callers
+                    # will see this as a transport error.
+                    raise SubprocessTransportError(
+                        f"Reader thread did not stop within "
+                        f"{self._shutdown_timeout}s; refusing to respawn"
+                    )
             self._reader_thread = None
 
             self._terminate()
@@ -1262,9 +1276,11 @@ class SubprocessSession:
         Replay runs while the reader thread is NOT live (we stopped the old
         one before reseting state, and we haven't started the new one yet),
         so we can read responses directly from ``_resp_q``. The
-        ``request_id`` assertion below catches a stale response lingering
+        ``request_id`` check below catches a stale response lingering
         from the previous worker — that response would never line up with
         the freshly-spawned worker's reply and silently corrupt replay.
+        It's an ``if/raise`` (not ``assert``) so it stays in place under
+        ``python -O`` / ``PYTHONOPTIMIZE``, where ``assert`` is stripped.
         """
         rid = next(self._id_counter)
         req_to_send = replace(req, request_id=rid)
@@ -1283,9 +1299,10 @@ class SubprocessSession:
                 resp = self._resp_q.get(timeout=effective_timeout)
             except std_queue.Empty:
                 raise TimeoutError(f"Subprocess replay call exceeded {effective_timeout}s deadline")
-        assert resp.request_id == rid, (
-            f"Replay response id mismatch: expected {rid}, got {resp.request_id!r}"
-        )
+        if resp.request_id != rid:
+            raise SubprocessTransportError(
+                f"Replay response id mismatch: expected {rid}, got {resp.request_id!r}"
+            )
         return self._handle_response(resp)
 
     def shutdown(self, timeout: Optional[float] = None) -> None:
@@ -1308,30 +1325,56 @@ class SubprocessSession:
         with self._pending_lock:
             self._closed_event.set()
 
-        # Stop the reader and let its ``finally`` drain pending futures.
-        # Joining before sending SHUTDOWN avoids racing the reader for the
-        # ack message on ``_resp_q``.
+        # Try to stop the reader cleanly. If it joins within ``t`` we
+        # own ``_resp_q`` exclusively and can drain the SHUTDOWN ack
+        # ourselves. If it doesn't, the reader is still alive — we let
+        # ``_terminate`` break the queue pipes below, which forces the
+        # reader's ``get()`` to raise (EOFError / OSError caught by the
+        # reader loop's exception clauses) and then we do a second
+        # join. Importantly: we do NOT reassign ``_resp_q``, so an
+        # in-flight reader can't end up as a second consumer of a
+        # fresh queue (contrast ``_respawn``, which DOES reassign and
+        # therefore raises if the join times out).
+        reader_owned = False
         if self._reader_thread is not None and self._reader_thread.is_alive():
             self._reader_thread.join(timeout=t)
-        self._reader_thread = None
+            reader_owned = not self._reader_thread.is_alive()
+        else:
+            reader_owned = True
 
         if not already_closed and self._proc.is_alive():
             try:
                 self._req_q.put(SHUTDOWN)
-                # Best-effort drain of the SHUTDOWN ack. The reader is
-                # already gone, so the ack arrives directly here. We
-                # don't care about its contents.
-                try:
-                    self._resp_q.get(timeout=t)
-                except std_queue.Empty:
-                    pass
+                # Only drain the ack here if the reader is confirmed
+                # gone. With a still-running reader we'd race it for
+                # the message; it'll drop the ack (request_id=0) on
+                # its own.
+                if reader_owned:
+                    try:
+                        self._resp_q.get(timeout=t)
+                    except std_queue.Empty:
+                        pass
             except Exception:
                 pass
 
+        # ``_terminate`` reaps the worker process, which closes the
+        # multiprocessing queue's underlying pipe; that unblocks any
+        # reader still parked in ``get()``.
         self._terminate(timeout=t)
 
+        # Second join opportunity for a reader that was stuck inside
+        # ``get()`` — the queue pipe just died, so its exception path
+        # should run and the thread should exit promptly. If it
+        # doesn't, the thread is a daemon and the process will reap
+        # it at exit; nothing more we can do without unsafe forcible
+        # cancellation.
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=t)
+        self._reader_thread = None
+
         # Safety net: if the reader didn't drain pending (e.g. it was
-        # never started because ``wait_for_ready`` failed), do it now.
+        # never started because ``wait_for_ready`` failed, or it was
+        # still wedged above), do it now.
         self._fail_all_pending(SubprocessTransportError("Subprocess session is closed"))
 
         # Break the ref cycle: each ReplayStep's ``make_request`` is a
