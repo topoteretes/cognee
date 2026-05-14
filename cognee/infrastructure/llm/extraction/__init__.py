@@ -1,5 +1,8 @@
 from .extract_categories import extract_categories
 from .extract_event_entities import extract_event_entities
 from .extract_summary import extract_code_summary, extract_summary
-from .knowledge_graph.extract_content_graph import extract_content_graph
+from .knowledge_graph.extract_content_graph import (
+    extract_content_graph,
+    extract_content_graph_and_summary,
+)
 from .knowledge_graph.extract_event_graph import extract_event_graph

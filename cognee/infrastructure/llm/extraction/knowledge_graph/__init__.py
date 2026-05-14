@@ -1,2 +1,2 @@
-from .extract_content_graph import extract_content_graph
+from .extract_content_graph import extract_content_graph, extract_content_graph_and_summary
 from .extract_event_graph import extract_event_graph
