@@ -193,8 +193,8 @@ async def cognify(
 
         Optional (same as add function):
         - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
-        - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
-        - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
+        - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: True)
+        - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 450)
     """
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client

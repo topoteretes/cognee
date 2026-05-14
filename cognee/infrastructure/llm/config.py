@@ -61,9 +61,9 @@ class LLMConfig(BaseSettings):
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
-    llm_rate_limit_enabled: bool = False
-    llm_rate_limit_requests: int = 60
-    llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
+    llm_rate_limit_enabled: bool = True
+    llm_rate_limit_requests: int = 450
+    llm_rate_limit_interval: int = 60  # in seconds (default is 450 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
     embedding_rate_limit_enabled: bool = False
     embedding_rate_limit_requests: int = 60
