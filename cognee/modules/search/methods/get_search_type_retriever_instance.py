@@ -110,6 +110,12 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
+                "include_global_context_index": retriever_specific_config.get(
+                    "include_global_context_index", False
+                ),
+                "global_context_index_top_k": retriever_specific_config.get(
+                    "global_context_index_top_k", 3
+                ),
             },
         ),
         SearchType.GRAPH_COMPLETION_DECOMPOSITION: (
