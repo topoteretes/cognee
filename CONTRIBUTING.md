@@ -99,7 +99,7 @@ git checkout -b feature/your-feature-name
 
 ### Running Tests
 
-Rename `.env.example` into `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
+Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
 ```shell
 uv run python cognee/tests/test_library.py
@@ -107,7 +107,7 @@ uv run python cognee/tests/test_library.py
 
 ### Running Simple Example
 
-Rename `.env.example` into `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
+Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
 Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
 
@@ -122,7 +122,7 @@ uv run python examples/python/simple_example.py
 
 ### Running Simple Example
 
-Change .env.example into .env and provide your OPENAI_API_KEY as LLM_API_KEY
+Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
 Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
 

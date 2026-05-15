@@ -223,3 +223,138 @@ class CogneeApiClient:
     def datasets_delete_all(self) -> None:
         r = self._get_client().delete(self._url("/api/v1/datasets"))
         self._raise_for_status(r)
+
+    # -- remember --------------------------------------------------------
+
+    def remember(
+        self,
+        data_items: list[str],
+        dataset_name: str = "main_dataset",
+        session_id: Optional[str] = None,
+        node_set: Optional[list[str]] = None,
+        run_in_background: bool = False,
+        chunk_size: Optional[int] = None,
+        chunks_per_batch: Optional[int] = None,
+        custom_prompt: Optional[str] = None,
+    ) -> dict:
+        files = []
+        opened = []
+        try:
+            for item in data_items:
+                if os.path.isfile(item):
+                    mime, _ = mimetypes.guess_type(item)
+                    fh = open(item, "rb")  # noqa: SIM115
+                    opened.append(fh)
+                    files.append(
+                        ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
+                    )
+                else:
+                    files.append(
+                        (
+                            "data",
+                            (f"text_{len(files)}.txt", io.BytesIO(item.encode()), "text/plain"),
+                        )
+                    )
+            form_data: dict[str, Any] = {
+                "datasetName": dataset_name,
+                "run_in_background": "true" if run_in_background else "false",
+            }
+            if session_id:
+                form_data["session_id"] = session_id
+            if chunk_size is not None:
+                form_data["chunk_size"] = str(chunk_size)
+            if chunks_per_batch is not None:
+                form_data["chunks_per_batch"] = str(chunks_per_batch)
+            if custom_prompt:
+                form_data["custom_prompt"] = custom_prompt
+            if node_set:
+                form_data["node_set"] = node_set
+            r = self._get_client().post(
+                self._url("/api/v1/remember"),
+                files=files,
+                data=form_data,
+            )
+            self._raise_for_status(r)
+            return r.json()
+        finally:
+            for fh in opened:
+                fh.close()
+
+    # -- recall ----------------------------------------------------------
+
+    def recall(
+        self,
+        query: str,
+        search_type: Optional[str] = "GRAPH_COMPLETION",
+        datasets: Optional[list[str]] = None,
+        top_k: int = 10,
+        system_prompt: Optional[str] = None,
+        session_id: Optional[str] = None,
+        node_name: Optional[list[str]] = None,
+        only_context: bool = False,
+        verbose: bool = False,
+    ) -> list:
+        # search_type=None opts the server into auto-routing (session-only
+        # mode when session_id is set, graph otherwise).
+        payload: dict[str, Any] = {
+            "query": query,
+            "search_type": search_type,
+            "top_k": top_k,
+            "only_context": only_context,
+            "verbose": verbose,
+        }
+        if datasets:
+            payload["datasets"] = datasets
+        if system_prompt:
+            payload["system_prompt"] = system_prompt
+        if session_id:
+            payload["session_id"] = session_id
+        if node_name:
+            payload["node_name"] = node_name
+        r = self._get_client().post(self._url("/api/v1/recall"), json=payload)
+        self._raise_for_status(r)
+        return r.json()
+
+    # -- improve ---------------------------------------------------------
+
+    def improve(
+        self,
+        dataset_name: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        node_name: Optional[list[str]] = None,
+        session_ids: Optional[list[str]] = None,
+        run_in_background: bool = False,
+    ) -> dict:
+        payload: dict[str, Any] = {"run_in_background": run_in_background}
+        if dataset_name:
+            payload["dataset_name"] = dataset_name
+        if dataset_id:
+            payload["dataset_id"] = str(dataset_id)
+        if node_name:
+            payload["node_name"] = node_name
+        if session_ids:
+            payload["session_ids"] = session_ids
+        r = self._get_client().post(self._url("/api/v1/improve"), json=payload)
+        self._raise_for_status(r)
+        return r.json()
+
+    # -- forget ----------------------------------------------------------
+
+    def forget(
+        self,
+        dataset: Optional[str] = None,
+        data_id: Optional[str] = None,
+        everything: bool = False,
+        memory_only: bool = False,
+    ) -> dict:
+        payload: dict[str, Any] = {
+            "everything": everything,
+            "memory_only": memory_only,
+        }
+        if dataset is not None:
+            payload["dataset"] = str(dataset)
+        if data_id is not None:
+            payload["data_id"] = str(data_id)
+        r = self._get_client().post(self._url("/api/v1/forget"), json=payload)
+        self._raise_for_status(r)
+        return r.json()

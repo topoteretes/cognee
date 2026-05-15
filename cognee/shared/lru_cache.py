@@ -7,4 +7,4 @@ lru_cache used by the graph, vector, and relational DB engine factories (default
 
 import os
 
-DATABASE_MAX_LRU_CACHE_SIZE: int = int(os.getenv("DATABASE_MAX_LRU_CACHE_SIZE", "128"))
+DATABASE_MAX_LRU_CACHE_SIZE: int = int(os.getenv("DATABASE_MAX_LRU_CACHE_SIZE", "10"))

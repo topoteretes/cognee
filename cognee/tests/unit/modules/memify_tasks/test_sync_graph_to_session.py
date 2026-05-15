@@ -995,6 +995,10 @@ def _get_recall_module():
 
 
 class TestRecallSessionMode:
+    @pytest.fixture(autouse=True)
+    def _disable_telemetry(self, monkeypatch):
+        monkeypatch.setattr("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None)
+
     @pytest.mark.asyncio
     async def test_session_only_when_no_datasets_no_type(self):
         """recall(session_id=X) without datasets/type searches session."""
@@ -1119,3 +1123,96 @@ class TestRecallSessionMode:
         assert len(results) == 1
         assert results[0].source == "graph"
         assert results[0].text == "graph result"
+
+    @pytest.mark.asyncio
+    async def test_api_style_recall_kwargs_forward_search_options_once(self):
+        """API recall kwargs should not duplicate or leak into authorized_search."""
+        recall_mod = _get_recall_module()
+        user = MagicMock()
+        user.id = uuid4()
+        dataset_id = uuid4()
+        captured_kwargs = {}
+        mock_payload = SearchResultPayload(
+            result_object="graph result", search_type=SearchType.GRAPH_COMPLETION
+        )
+
+        async def dummy_authorized_search(**kwargs):
+            captured_kwargs.update(kwargs)
+            return [mock_payload]
+
+        with patch.object(
+            _mod_search_methods,
+            "authorized_search",
+            dummy_authorized_search,
+        ):
+            results = await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                user=user,
+                datasets=["ignored-when-ids-exist"],
+                dataset_ids=[dataset_id],
+                system_prompt="Use concise answers.",
+                node_name=["ImportantNode"],
+                top_k=4,
+                verbose=True,
+                only_context=True,
+                session_id="s1",
+            )
+
+        assert len(results) == 1
+        assert captured_kwargs["user"] is user
+        assert captured_kwargs["dataset_ids"] == [dataset_id]
+        assert captured_kwargs["system_prompt"] == "Use concise answers."
+        assert captured_kwargs["node_name"] == ["ImportantNode"]
+        assert captured_kwargs["top_k"] == 4
+        assert captured_kwargs["only_context"] is True
+        assert captured_kwargs["session_id"] == "s1"
+        assert "verbose" not in captured_kwargs
+
+    @pytest.mark.asyncio
+    async def test_session_with_dataset_ids_also_runs_graph_search(self):
+        """dataset_ids should count as graph scope, same as datasets by name."""
+        recall_mod = _get_recall_module()
+        user = MagicMock()
+        user.id = uuid4()
+        dataset_id = uuid4()
+
+        session_entries = [
+            ResponseQAEntry(
+                time=datetime.utcnow().isoformat(),
+                question="test",
+                context="",
+                answer="session result",
+                source="session",
+            )
+        ]
+        mock_payload = SearchResultPayload(
+            result_object="graph result", search_type=SearchType.GRAPH_COMPLETION
+        )
+
+        with (
+            patch.object(
+                recall_mod,
+                "_search_session",
+                AsyncMock(return_value=session_entries),
+            ),
+            patch.object(
+                _mod_search_methods,
+                "authorized_search",
+                AsyncMock(return_value=[mock_payload]),
+            ) as authorized_search_mock,
+            patch.object(
+                _mod_query_router,
+                "route_query",
+                return_value=MagicMock(search_type=SearchType.GRAPH_COMPLETION),
+            ),
+        ):
+            results = await recall_mod.recall(
+                "test",
+                session_id="s1",
+                dataset_ids=[dataset_id],
+                user=user,
+            )
+
+        assert [result.source for result in results] == ["session", "graph"]
+        assert authorized_search_mock.await_args.kwargs["dataset_ids"] == [dataset_id]

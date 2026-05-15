@@ -21,10 +21,13 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
+
+observe = get_observe()
 
 
 class OllamaAPIAdapter(LLMInterface):
@@ -73,6 +76,7 @@ class OllamaAPIAdapter(LLMInterface):
             mode=instructor.Mode(self.instructor_mode),
         )
 
+    @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
@@ -125,6 +129,7 @@ class OllamaAPIAdapter(LLMInterface):
 
         return response
 
+    @observe(as_type="transcription")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),

@@ -213,7 +213,7 @@ async def health_check(request):
 @log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
     data: str,
-    dataset_name: str = "main_dataset",
+    dataset_name: str = None,
     graph_model_file: str = None,
     graph_model_name: str = None,
     custom_prompt: str = None,
@@ -323,6 +323,8 @@ async def cognify(
     - Check the log file for progress
 
     """
+
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
 
     try:
         parsed_data = parse_cognify_data(data)
@@ -1075,7 +1077,7 @@ async def prune():
 @log_usage(function_name="MCP remember", log_type="mcp_tool")
 async def remember(
     data: str,
-    dataset_name: str = "main_dataset",
+    dataset_name: str = None,
     session_id: str = None,
     custom_prompt: str = None,
 ) -> list:
@@ -1094,13 +1096,16 @@ async def remember(
     ----------
     data : str
         The data to store (text content).
-    dataset_name : str
-        Target dataset name (default: main_dataset).
+    dataset_name : str, optional
+        Target dataset name. Defaults to the current MCP client's
+        agent-scoped dataset (e.g. "cursor_vscode_memory"), or
+        "main_dataset" if no client identity is detected.
     session_id : str, optional
         Session ID. When set, stores in session cache only.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
     """
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             result = await cognee_client.remember(
@@ -1219,7 +1224,7 @@ async def forget(
 
 @log_usage(function_name="MCP improve", log_type="mcp_tool")
 async def improve(
-    dataset_name: str = "main_dataset",
+    dataset_name: str = None,
     session_ids: str = None,
 ) -> list:
     """Enrich the knowledge graph and bridge session data to the permanent graph.
@@ -1234,11 +1239,14 @@ async def improve(
 
     Parameters
     ----------
-    dataset_name : str
-        Dataset to process (default: main_dataset).
+    dataset_name : str, optional
+        Dataset to process. Defaults to the current MCP client's
+        agent-scoped dataset, or "main_dataset" if no client identity is
+        detected.
     session_ids : str, optional
         Comma-separated session IDs to bridge into the permanent graph.
     """
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             session_list = parse_csv_list(session_ids)
@@ -1268,14 +1276,16 @@ async def improve(
 
 @log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
 async def cognify_status(
-    dataset_name: str = "main_dataset",
+    dataset_name: str = None,
     pipelines: List[str] = None,
 ) -> list:
     """
     Get the current status of selected pipelines.
 
     This function retrieves information about current and recently completed
-    pipeline operations in the selected dataset.
+    pipeline operations in the selected dataset. When `dataset_name` is omitted
+    it defaults to the current MCP client's agent-scoped dataset (e.g.
+    "cursor_vscode_memory") so each agent sees its own status.
 
     Returns
     -------
@@ -1292,6 +1302,7 @@ async def cognify_status(
     - The status is returned in string format for easy reading
     - This operation is not available in API mode
     """
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             if cognee_client.use_api:
@@ -1347,6 +1358,455 @@ async def cognify_status(
                 error_msg += "\n".join(error_lines)
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
+
+
+# MCP App: interactive graph visualization UI. Rendered by MCP Apps-capable
+# hosts (Cursor, Claude Desktop) via the _meta.ui.resourceUri contract.
+_VISUALIZE_APP_URI = "ui://cognee-visualize/graph.html"
+
+
+@mcp.resource(
+    _VISUALIZE_APP_URI,
+    name="Cognee Graph Visualization UI",
+    description="Interactive MCP App UI that renders a Cognee knowledge graph.",
+    mime_type="text/html;profile=mcp-app",
+)
+def _visualize_graph_ui_resource() -> str:
+    # The bundle path is resolved as a sibling of this file. In a Docker /
+    # PyPI install, that's site-packages/src/app_bundles/. In from-source
+    # dev (running `python src/server.py` directly), it's cognee-mcp/src/
+    # app_bundles/. Both resolutions only work because we read via __file__
+    # rather than a hardcoded `/app/...` or repo-relative path, so the bundle
+    # lookup follows wherever this module was loaded from.
+    bundle = Path(__file__).parent / "app_bundles" / "visualize-graph.html"
+    if not bundle.is_file():
+        raise FileNotFoundError(
+            f"MCP App bundle not found at {bundle}. "
+            "Build it with: cd cognee-mcp/apps-src && npm install && npm run build"
+        )
+    return bundle.read_text(encoding="utf-8")
+
+
+# CSS overrides appended to cognee's graph HTML so it fits the MCP App
+# iframe better: the floating bottom control bar can wrap to multiple
+# rows when the iframe is narrow, and the standalone "Light mode"
+# toggle is hidden (the workspace owns theming).
+#
+# Note: d3 is loaded from a CDN by cognee's HTML, which the MCP App iframe
+# blocks via CSP. The workspace bundles d3 from its npm dependency and
+# substitutes the CDN <script> tag client-side before assigning srcDoc.
+_GRAPH_VIZ_OVERRIDES = """
+<style>
+#theme-toggle { display: none !important; }
+#controls {
+  flex-wrap: wrap;
+  max-width: calc(100vw - 16px);
+  justify-content: center;
+  bottom: 8px;
+  row-gap: 2px;
+}
+#controls .ctrl-btn { padding: 4px 8px; font-size: 10px; }
+#controls .ctrl-sep { margin: 2px 2px; }
+</style>
+"""
+
+
+def _inject_graph_viz_overrides(html: str) -> str:
+    if "</head>" in html:
+        return html.replace("</head>", _GRAPH_VIZ_OVERRIDES + "</head>", 1)
+    return html
+
+
+@mcp.tool(
+    name="visualize_graph_ui",
+    description=(
+        "Open the Cognee workspace UI and render the current knowledge graph. "
+        "The UI also lets the user upload files to memory."
+    ),
+    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
+)
+@log_usage(function_name="MCP visualize_graph_ui", log_type="mcp_tool")
+async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
+    """Render the Cognee graph for a specific dataset.
+
+    With ENABLE_BACKEND_ACCESS_CONTROL=true, each (user, dataset) pair has its
+    own graph DB. Without dataset_name we'd hit the global default engine,
+    which is empty in that mode. Resolving dataset_name (explicit, or via
+    agent scoping) and routing through visualize_multi_user_graph picks up
+    the right per-dataset context.
+    """
+    from cognee.api.v1.visualize import visualize_graph
+
+    explicit_dataset = dataset_name is not None
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
+
+    # Per-dataset graph routing requires direct mode (we set the database
+    # context locally); in API mode the API server controls its own graph
+    # source. Reject explicit dataset selection there instead of silently
+    # falling back to a different graph.
+    if explicit_dataset and cognee_client.use_api:
+        return types.CallToolResult(
+            isError=True,
+            content=[
+                types.TextContent(
+                    type="text",
+                    text=(
+                        "Error: per-dataset graph rendering is only supported in direct mode. "
+                        "Drop the dataset_name argument or run cognee-mcp without --api-url."
+                    ),
+                )
+            ],
+        )
+
+    with redirect_stdout(sys.stderr):
+        html: str | None = None
+        if dataset_name and not cognee_client.use_api:
+            from cognee.api.v1.visualize.visualize import visualize_multi_user_graph
+
+            user = await get_default_user()
+            datasets = await get_datasets_by_name(dataset_name, user.id)
+            if datasets:
+                html = await visualize_multi_user_graph([(user, datasets[0])])
+        if html is None:
+            html = await visualize_graph()
+
+    html = _inject_graph_viz_overrides(html)
+
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text="Cognee knowledge graph rendered.")],
+        structuredContent={"html": html},
+    )
+
+
+@mcp.tool(
+    name="upload_file_ui",
+    description=(
+        "Open the Cognee workspace UI so the user can upload files to memory. "
+        "The UI also shows the current knowledge graph."
+    ),
+    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
+)
+@log_usage(function_name="MCP upload_file_ui", log_type="mcp_tool")
+async def upload_file_ui() -> types.CallToolResult:
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text="Cognee workspace opened.")],
+    )
+
+
+@mcp.tool(
+    name="open_cognee_workspace",
+    description=(
+        "Open the Cognee workspace UI. Use for generic intents like "
+        "'run the cognee UI', 'show the cognee app', 'open cognee'. "
+        "The UI provides dataset management, file upload, text ingestion, "
+        "search, and graph visualization."
+    ),
+    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
+)
+@log_usage(function_name="MCP open_cognee_workspace", log_type="mcp_tool")
+async def open_cognee_workspace() -> types.CallToolResult:
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text="Cognee workspace opened.")],
+    )
+
+
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+@mcp.tool(
+    name="cognify_file",
+    description=(
+        "Ingest an uploaded file into Cognee memory. Accepts the file as base64. "
+        "Runs add synchronously, then launches cognify in the background."
+    ),
+)
+@log_usage(function_name="MCP cognify_file", log_type="mcp_tool")
+async def cognify_file(
+    filename: str,
+    content_base64: str,
+    dataset_name: str = None,
+) -> list:
+    import base64
+    import tempfile
+
+    dataset_name = dataset_name or _agent_scoped_default_dataset()
+
+    try:
+        data = base64.b64decode(content_base64, validate=True)
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"Error: invalid base64 content ({e}).")]
+
+    if len(data) > _MAX_UPLOAD_BYTES:
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Error: file exceeds 10 MB limit ({len(data):,} bytes).",
+            )
+        ]
+
+    # Sanitize to a basename with a fallback extension; preserves the original
+    # name so cognee's Data.name comes out as e.g. "alice_notes" rather than
+    # a tempfile slug like "tmp231sj_ac".
+    safe_name = Path(filename).name or "upload"
+    if not Path(safe_name).suffix:
+        safe_name += ".txt"
+
+    with redirect_stdout(sys.stderr):
+        tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
+        tmp_path = os.path.join(tmp_dir, safe_name)
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(data)
+            await cognee_client.add(tmp_path, dataset_name=dataset_name)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            try:
+                os.rmdir(tmp_dir)
+            except OSError:
+                pass
+
+    async def _cognify_bg():
+        with redirect_stdout(sys.stderr):
+            try:
+                await cognee_client.cognify(datasets=[dataset_name])
+                logger.info(f"cognify_file: background cognify finished for '{dataset_name}'.")
+            except Exception as e:
+                ts = datetime.now(timezone.utc).isoformat()
+                _task_errors.setdefault(dataset_name, []).append((ts, str(e)))
+                logger.error(f"cognify_file: background cognify failed for '{dataset_name}': {e}")
+
+    asyncio.create_task(_cognify_bg())
+
+    return [
+        types.TextContent(
+            type="text",
+            text=(
+                f"Ingested '{filename}' ({len(data):,} bytes) into dataset '{dataset_name}'. "
+                f"Cognify is running in the background; refresh the workspace once it finishes."
+            ),
+        )
+    ]
+
+
+@mcp.tool(
+    name="list_datasets_json",
+    description=(
+        "List datasets as structured JSON for the Cognee workspace UI. "
+        "Returns {datasets: [{id, name}, ...]} in structuredContent."
+    ),
+)
+@log_usage(function_name="MCP list_datasets_json", log_type="mcp_tool")
+async def list_datasets_json() -> types.CallToolResult:
+    with redirect_stdout(sys.stderr):
+        raw = await cognee_client.list_datasets()
+
+    datasets = []
+    for ds in raw or []:
+        if isinstance(ds, dict):
+            datasets.append({"id": str(ds.get("id", "")), "name": ds.get("name", "")})
+        else:
+            datasets.append({"id": str(ds.id), "name": ds.name})
+
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=f"{len(datasets)} dataset(s).")],
+        structuredContent={"datasets": datasets},
+    )
+
+
+@mcp.tool(
+    name="list_dataset_data_json",
+    description=(
+        "List data items in a dataset as structured JSON for the Cognee workspace UI. "
+        "Returns {data: [{id, name}, ...]} in structuredContent."
+    ),
+)
+@log_usage(function_name="MCP list_dataset_data_json", log_type="mcp_tool")
+async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
+    from uuid import UUID
+    from cognee.modules.data.methods import get_dataset, get_dataset_data
+
+    if cognee_client.use_api:
+        return types.CallToolResult(
+            isError=True,
+            content=[
+                types.TextContent(
+                    type="text",
+                    text="Error: list_dataset_data_json is only available in direct mode.",
+                )
+            ],
+        )
+
+    try:
+        dataset_uuid = UUID(dataset_id)
+    except ValueError as e:
+        return types.CallToolResult(
+            isError=True,
+            content=[types.TextContent(type="text", text=f"Error: invalid dataset_id ({e}).")],
+        )
+
+    with redirect_stdout(sys.stderr):
+        user = await get_default_user()
+        dataset = await get_dataset(user.id, dataset_uuid)
+        if not dataset:
+            return types.CallToolResult(
+                isError=True,
+                content=[
+                    types.TextContent(type="text", text=f"Error: dataset not found: {dataset_id}.")
+                ],
+            )
+        items = await get_dataset_data(dataset.id)
+
+    data = [{"id": str(item.id), "name": item.name or "(unnamed)"} for item in items]
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=f"{len(data)} data item(s).")],
+        structuredContent={"data": data},
+    )
+
+
+def _sanitize_client_name(name: str) -> str:
+    import re
+
+    # Strip parenthetical suffixes that bridges like mcp-remote append, e.g.
+    # "cursor-vscode (via mcp-remote 0.1.37)" -> "cursor-vscode".
+    cleaned = re.sub(r"\s*\(.*?\)\s*$", "", (name or "").strip())
+    s = re.sub(r"[^a-z0-9_]+", "_", cleaned.lower()).strip("_")
+    return s or "unknown"
+
+
+def _is_agent_scoping_enabled() -> bool:
+    """Whether per-client default datasets are active.
+
+    Controlled by COGNEE_MCP_AGENT_SCOPED env var (default: 'true').
+    When 'false', tools fall back to 'main_dataset' as the default,
+    matching the pre-agent-scoping behavior.
+    """
+    return os.getenv("COGNEE_MCP_AGENT_SCOPED", "true").strip().lower() != "false"
+
+
+def _agent_scoped_default_dataset() -> str:
+    """Return the default dataset for the current MCP request.
+
+    With agent scoping enabled (default), reads clientInfo.name from the
+    active request context and returns '{sanitized}_memory' (e.g.
+    'cursor_vscode_memory'). Falls back to 'main_dataset' when:
+      - agent scoping is disabled via COGNEE_MCP_AGENT_SCOPED=false, or
+      - no client identity is available on the request.
+
+    Used as the runtime default for tool params like dataset_name so each
+    MCP client writes to its own scope automatically when the LLM omits
+    the argument.
+    """
+    if not _is_agent_scoping_enabled():
+        return "main_dataset"
+
+    from mcp.server.lowlevel.server import request_ctx
+
+    try:
+        ctx = request_ctx.get()
+        params = getattr(ctx.session, "client_params", None)
+        if params and params.clientInfo and params.clientInfo.name:
+            return f"{_sanitize_client_name(params.clientInfo.name)}_memory"
+    except LookupError:
+        pass
+    return "main_dataset"
+
+
+@mcp.tool(
+    name="get_client_info_json",
+    description=(
+        "Return the current MCP client identity and its agent-scoped default dataset. "
+        "The workspace UI uses this to automatically separate memory per agent "
+        "(e.g. Cursor writes to 'cursor_memory', Claude Code to 'claude_code_memory'). "
+        "The default dataset is created on demand. "
+        "Returns {client: {name, version}, default_dataset} in structuredContent."
+    ),
+)
+@log_usage(function_name="MCP get_client_info_json", log_type="mcp_tool")
+async def get_client_info_json() -> types.CallToolResult:
+    from mcp.server.lowlevel.server import request_ctx
+
+    client_name = "unknown"
+    client_version = ""
+    try:
+        ctx = request_ctx.get()
+        params = getattr(ctx.session, "client_params", None)
+        if params and params.clientInfo:
+            client_name = params.clientInfo.name or "unknown"
+            client_version = params.clientInfo.version or ""
+    except LookupError:
+        pass
+
+    agent_scoped = _is_agent_scoping_enabled()
+
+    if agent_scoped:
+        default_dataset = f"{_sanitize_client_name(client_name)}_memory"
+        if not cognee_client.use_api:
+            with redirect_stdout(sys.stderr):
+                from cognee.modules.data.methods.create_authorized_dataset import (
+                    create_authorized_dataset,
+                )
+
+                user = await get_default_user()
+                await create_authorized_dataset(default_dataset, user)
+    else:
+        default_dataset = "main_dataset"
+
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=f"Agent: {client_name} → default dataset: {default_dataset}",
+            )
+        ],
+        structuredContent={
+            "client": {"name": client_name, "version": client_version},
+            "default_dataset": default_dataset,
+            "agent_scoped": agent_scoped,
+        },
+    )
+
+
+@mcp.tool(
+    name="create_dataset_json",
+    description=(
+        "Create an empty dataset with the given name (idempotent). "
+        "Returns {dataset: {id, name}} in structuredContent."
+    ),
+)
+@log_usage(function_name="MCP create_dataset_json", log_type="mcp_tool")
+async def create_dataset_json(name: str) -> types.CallToolResult:
+    name = (name or "").strip()
+    if not name:
+        return types.CallToolResult(
+            isError=True,
+            content=[types.TextContent(type="text", text="Error: dataset name is required.")],
+        )
+    if cognee_client.use_api:
+        return types.CallToolResult(
+            isError=True,
+            content=[
+                types.TextContent(
+                    type="text",
+                    text="Error: create_dataset_json is only available in direct mode.",
+                )
+            ],
+        )
+
+    with redirect_stdout(sys.stderr):
+        from cognee.modules.data.methods.create_authorized_dataset import (
+            create_authorized_dataset,
+        )
+
+        user = await get_default_user()
+        dataset = await create_authorized_dataset(name, user)
+
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=f"Dataset '{dataset.name}' ready.")],
+        structuredContent={"dataset": {"id": str(dataset.id), "name": dataset.name}},
+    )
 
 
 def node_to_string(node):

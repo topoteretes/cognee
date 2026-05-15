@@ -42,6 +42,8 @@ class AnthropicAdapter(GenericAPIAdapter):
         instructor_mode: str | None = None,
         llm_args: dict[str, Any] | None = None,
     ) -> None:
+        # Support both "model" and "anthropic/model" formats for model names, stripping the "anthropic/" prefix
+        model = model.removeprefix("anthropic/") if model.startswith("anthropic/") else model
         super().__init__(
             api_key=api_key,
             model=model,
@@ -50,6 +52,10 @@ class AnthropicAdapter(GenericAPIAdapter):
             llm_args=llm_args,
         )
         self.llm_args: dict[str, Any] = llm_args or {}
+        # Anthropic's messages.create requires max_tokens. Unlike the litellm path used by
+        # GenericAPIAdapter, instructor.patch around the raw Anthropic SDK does not auto-inject
+        # it, so we surface max_completion_tokens here.
+        self.llm_args.setdefault("max_tokens", max_completion_tokens)
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient: AsyncInstructorChatCompletionCreate = instructor.patch(

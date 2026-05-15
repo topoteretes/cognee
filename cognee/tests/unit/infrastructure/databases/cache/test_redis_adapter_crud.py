@@ -78,6 +78,69 @@ def adapter(redis_store):
         yield RedisAdapter(host="localhost", port=6379)
 
 
+class _FakeRedisLock:
+    def __init__(self):
+        self.acquired = False
+        self.released = False
+
+    def acquire(self):
+        self.acquired = True
+        return True
+
+    def release(self):
+        self.released = True
+
+
+def test_acquire_lock_returns_handle_and_disables_thread_local(redis_store):
+    """Kuzu releases Redis locks from worker threads, so the lock token cannot be thread-local."""
+    fake_lock = _FakeRedisLock()
+    sync_redis = MagicMock(ping=MagicMock())
+    sync_redis.lock.return_value = fake_lock
+
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    with (
+        patch(f"{patch_mod}.redis.Redis", return_value=sync_redis),
+        patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        adapter = RedisAdapter(host="localhost", port=6379)
+
+    lock = adapter.acquire_lock()
+
+    assert lock is fake_lock
+    assert fake_lock.acquired
+    sync_redis.lock.assert_called_once_with(
+        name="default_lock",
+        timeout=240,
+        blocking_timeout=300,
+        thread_local=False,
+    )
+
+
+def test_release_lock_releases_passed_handle_without_clobbering_current_lock(redis_store):
+    """Concurrent Kuzu queries must release their own lock, not whichever lock is latest."""
+    first_lock = _FakeRedisLock()
+    second_lock = _FakeRedisLock()
+
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    with (
+        patch(f"{patch_mod}.redis.Redis", return_value=MagicMock(ping=MagicMock())),
+        patch(f"{patch_mod}.aioredis.Redis", return_value=redis_store),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        adapter = RedisAdapter(host="localhost", port=6379)
+
+    adapter.lock = second_lock
+
+    adapter.release_lock(first_lock)
+
+    assert first_lock.released
+    assert not second_lock.released
+    assert adapter.lock is second_lock
+
+
 @pytest.mark.asyncio
 async def test_create_and_get(adapter):
     """Create a QA entry and retrieve it."""

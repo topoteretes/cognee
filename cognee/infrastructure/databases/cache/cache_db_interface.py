@@ -30,7 +30,7 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
-    def release_lock(self):
+    def release_lock(self, lock=None):
         """
         Release the lock if it is held.
         Must be implemented by subclasses.
@@ -42,11 +42,11 @@ class CacheDBInterface(ABC):
         """
         Context manager for safely acquiring and releasing the lock.
         """
-        self.acquire()
+        lock = self.acquire_lock()
         try:
             yield
         finally:
-            self.release()
+            self.release_lock(lock)
 
     async def add_qa(
         self,

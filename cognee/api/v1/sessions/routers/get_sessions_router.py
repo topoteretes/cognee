@@ -58,6 +58,25 @@ async def _permitted_dataset_ids_for(user: User) -> list[UUIDType]:
         return []
 
 
+async def _child_agent_user_ids(user_id: UUIDType) -> list[UUIDType]:
+    """Return user IDs of agents whose parent_user_id matches this user."""
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        from cognee.modules.users.models import User as UserModel
+
+        rows = (
+            await session.execute(select(UserModel.id).where(UserModel.parent_user_id == user_id))
+        ).all()
+        return [row.id for row in rows]
+
+
+async def _visible_user_ids(user: User) -> list[UUIDType]:
+    """User's own ID plus any child agent IDs."""
+    ids = [user.id]
+    ids.extend(await _child_agent_user_ids(user.id))
+    return ids
+
+
 def get_sessions_router() -> APIRouter:
     router = APIRouter()
 
@@ -86,8 +105,9 @@ def get_sessions_router() -> APIRouter:
         since = _range_since(range)
         try:
             permitted = await _permitted_dataset_ids_for(user)
+            visible_ids = await _visible_user_ids(user)
             page = await list_session_rows(
-                user_id=user.id,
+                user_ids=visible_ids,
                 permitted_dataset_ids=permitted,
                 since=since,
                 status_filter=status,
@@ -118,10 +138,11 @@ def get_sessions_router() -> APIRouter:
         since = _range_since(range)
         eff = get_effective_status_sql()
         permitted = await _permitted_dataset_ids_for(user)
+        visible_ids = await _visible_user_ids(user)
 
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
-            visibility_terms = [SessionRecord.user_id == user.id]
+            visibility_terms = [SessionRecord.user_id.in_(visible_ids)]
             if permitted:
                 visibility_terms.append(SessionRecord.dataset_id.in_(permitted))
             base_filter = [
@@ -209,9 +230,10 @@ def get_sessions_router() -> APIRouter:
         """
         since = _range_since(range)
         permitted = await _permitted_dataset_ids_for(user)
+        visible_ids = await _visible_user_ids(user)
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
-            visibility_terms = [SessionRecord.user_id == user.id]
+            visibility_terms = [SessionRecord.user_id.in_(visible_ids)]
             if permitted:
                 visibility_terms.append(SessionRecord.dataset_id.in_(permitted))
             stmt = (
@@ -257,8 +279,12 @@ def get_sessions_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ):
         permitted = await _permitted_dataset_ids_for(user)
+        visible_ids = await _visible_user_ids(user)
         row = await get_session_row(
-            session_id=session_id, user_id=user.id, permitted_dataset_ids=permitted
+            session_id=session_id,
+            user_id=user.id,
+            user_ids=visible_ids,
+            permitted_dataset_ids=permitted,
         )
         if row is None:
             raise HTTPException(status_code=404, detail="session not found")

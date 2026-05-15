@@ -555,6 +555,7 @@ jobs:
       - name: Run delete dataset test in Neo4j case
         env:
           ENV: 'dev'
+          ENABLE_BACKEND_ACCESS_CONTROL: false
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -1598,27 +1599,8 @@ jobs:
 
   test-adapter-caching:
     name: Test Vector and Graph Adapter Caching
-    runs-on: ubuntu-22.04
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run adapter caching test
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_adapter_object_caching.py
+    uses: ./.github/workflows/adapter_caching_tests.yml
+    with:
+      python-version: ${{ inputs.python-version }}
+      ci-image: ${{ inputs.ci-image }}
+    secrets: inherit

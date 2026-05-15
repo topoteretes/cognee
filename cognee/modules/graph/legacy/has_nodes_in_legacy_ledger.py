@@ -9,29 +9,34 @@ from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.models import Node
 from .GraphRelationshipLedger import GraphRelationshipLedger
 
+BATCH_SIZE = 1000
+
 
 @with_async_session
 async def has_nodes_in_legacy_ledger(nodes: List[Node], session: AsyncSession):
     node_ids = [node.slug for node in nodes]
 
-    query = (
-        select(
-            GraphRelationshipLedger.node_label,
-            GraphRelationshipLedger.source_node_id,
-        )
-        .where(
-            and_(
-                GraphRelationshipLedger.node_label.is_not(None),
-                GraphRelationshipLedger.deleted_at.is_(None),
-                GraphRelationshipLedger.source_node_id.in_(node_ids),
-                GraphRelationshipLedger.source_node_id
-                == GraphRelationshipLedger.destination_node_id,
+    legacy_nodes = []
+    for start_index in range(0, len(node_ids), BATCH_SIZE):
+        node_id_batch = node_ids[start_index : start_index + BATCH_SIZE]
+        query = (
+            select(
+                GraphRelationshipLedger.node_label,
+                GraphRelationshipLedger.source_node_id,
             )
+            .where(
+                and_(
+                    GraphRelationshipLedger.node_label.is_not(None),
+                    GraphRelationshipLedger.deleted_at.is_(None),
+                    GraphRelationshipLedger.source_node_id.in_(node_id_batch),
+                    GraphRelationshipLedger.source_node_id
+                    == GraphRelationshipLedger.destination_node_id,
+                )
+            )
+            .distinct()
         )
-        .distinct()
-    )
 
-    legacy_nodes = (await session.execute(query)).all()
+        legacy_nodes.extend((await session.execute(query)).all())
 
     if len(legacy_nodes) == 0:
         return [False for __ in nodes]

@@ -11,21 +11,46 @@ Test Coverage:
 import os
 import pathlib
 import pytest
+import pytest_asyncio
 from uuid import UUID, uuid4, uuid5, NAMESPACE_OID
 
 import cognee
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.relational.create_relational_engine import (
+    create_relational_engine,
+)
 from cognee.modules.data.methods import create_dataset, create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.graph.methods import delete_data_nodes_and_edges, get_data_related_nodes
+from cognee.modules.graph.methods import (
+    delete_data_nodes_and_edges,
+    get_data_related_nodes,
+    get_global_data_related_nodes,
+    get_orphaned_nodeset_labels_for_dataset,
+    get_shared_slugs_losing_dataset_anchor,
+)
 from cognee.modules.graph.models import Node, Edge
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from sqlalchemy import select
 
 logger = get_logger()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _dispose_relational_engine_after_test():
+    yield
+
+    try:
+        db_engine = get_relational_engine()
+        engine = getattr(db_engine, "engine", None)
+        if engine is not None:
+            await engine.dispose(close=True)
+    except Exception:
+        pass
+
+    create_relational_engine.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -331,8 +356,296 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
     logger.info("✅ test_delete_data_nodes_and_edges_removes_from_all_systems PASSED")
 
 
+@pytest.mark.asyncio
+async def test_get_global_data_related_nodes_scopes_by_dataset():
+    """
+    Regression test for shared-data-across-datasets: when the same `data_id`
+    is linked to multiple datasets in a single global DB (non-multi-user
+    mode, e.g. pgvector + neo4j), deleting it from one dataset must not
+    hard-delete slugs still co-owned by another dataset. The un-scoped
+    legacy path would return every such slug as "exclusive to this
+    data_id" and wipe the graph/vector rows for both datasets; the
+    dataset-scoped path excludes co-owned slugs.
+
+    Setup:
+      - Single dataset row, but two `(dataset_id, data_id)` ledger pairs:
+          (alfa, maria) and (beta, maria) — same `data_id=maria`.
+      - Slug `S` is written under both pairs (shared file).
+      - Slug `S_alfa_only` written only under (alfa, maria).
+
+    Expected:
+      - `get_global_data_related_nodes(maria)`                → both slugs
+        (legacy, un-scoped — dangerous for shared data)
+      - `get_global_data_related_nodes(maria, dataset_id=alfa)` → [S_alfa_only]
+        (S co-owned by beta, must be preserved)
+      - `get_global_data_related_nodes(maria, dataset_id=beta)` → []
+        (beta's only slug S is co-owned by alfa)
+    """
+    data_directory_path = os.path.join(
+        pathlib.Path(__file__).parent.parent.parent.parent,
+        ".data_storage/test_global_dataset_scoped",
+    )
+    cognee.config.data_root_directory(data_directory_path)
+
+    cognee_directory_path = os.path.join(
+        pathlib.Path(__file__).parent.parent.parent.parent,
+        ".cognee_system/test_global_dataset_scoped",
+    )
+    cognee.config.system_root_directory(cognee_directory_path)
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await setup()
+
+    user = await get_default_user()
+
+    dataset = await create_dataset("test_shared_data_across_datasets", user=user)
+    alfa_dataset_id = dataset.id
+    beta_dataset_id = uuid4()  # synthetic second dataset for ledger-only scenario
+
+    await set_database_global_context_variables(alfa_dataset_id, user.id)
+
+    maria_data_id = uuid4()
+    shared_slug = uuid5(NAMESPACE_OID, "shared-slug")
+    alfa_only_slug = uuid5(NAMESPACE_OID, "alfa-only-slug")
+
+    shared_in_alfa = Node(
+        id=uuid4(),
+        slug=shared_slug,
+        user_id=user.id,
+        data_id=maria_data_id,
+        dataset_id=alfa_dataset_id,
+        type="Entity",
+        indexed_fields=["name"],
+    )
+    shared_in_beta = Node(
+        id=uuid4(),
+        slug=shared_slug,
+        user_id=user.id,
+        data_id=maria_data_id,
+        dataset_id=beta_dataset_id,
+        type="Entity",
+        indexed_fields=["name"],
+    )
+    alfa_only = Node(
+        id=uuid4(),
+        slug=alfa_only_slug,
+        user_id=user.id,
+        data_id=maria_data_id,
+        dataset_id=alfa_dataset_id,
+        type="Entity",
+        indexed_fields=["name"],
+    )
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add_all([shared_in_alfa, shared_in_beta, alfa_only])
+        await session.commit()
+
+    legacy = await get_global_data_related_nodes(maria_data_id)
+    legacy_slugs = {str(n.slug) for n in legacy}
+    assert legacy_slugs == {str(shared_slug), str(alfa_only_slug)}, (
+        "Un-scoped legacy query should still return both slugs (demonstrates the bug)"
+    )
+
+    alfa_scope = await get_global_data_related_nodes(maria_data_id, dataset_id=alfa_dataset_id)
+    alfa_scope_slugs = {str(n.slug) for n in alfa_scope}
+    assert alfa_scope_slugs == {str(alfa_only_slug)}, (
+        f"Scoped to alfa should only return alfa-exclusive slug, got {alfa_scope_slugs}"
+    )
+
+    beta_scope = await get_global_data_related_nodes(maria_data_id, dataset_id=beta_dataset_id)
+    beta_scope_slugs = {str(n.slug) for n in beta_scope}
+    assert beta_scope_slugs == set(), (
+        f"Scoped to beta should return nothing (shared slug co-owned by alfa), got {beta_scope_slugs}"
+    )
+
+    logger.info("✅ test_get_global_data_related_nodes_scopes_by_dataset PASSED")
+
+
+@pytest.mark.asyncio
+async def test_get_shared_slugs_losing_dataset_anchor():
+    """
+    Regression test for the stale `belongs_to_set` label problem.
+
+    When the same data item is linked to multiple datasets and one of those
+    links is removed, slugs that are co-owned by another dataset survive in
+    the graph but silently keep the removed dataset's label in their
+    `belongs_to_set` array. The orchestrator needs to know which slugs
+    need a targeted detag — this helper returns them.
+
+    Ledger setup:
+      (alfa, maria)  owns slugs  [shared_slug, alfa_only_slug]
+      (beta,  maria) owns slugs  [shared_slug]
+      (alfa, mock)   owns slugs  [mock_only_slug]
+
+    Deleting (alfa, maria):
+      - `shared_slug`  → loses alfa's anchor (no other (alfa, _) row) AND
+        has another owner (beta, maria) → MUST detag "alfa"
+      - `alfa_only_slug` → loses alfa's anchor but has NO other owner
+        (will be hard-deleted upstream) → excluded
+      - `mock_only_slug` → has another (alfa, mock) row anchoring the
+        label → excluded
+
+    Expected: only `shared_slug` is returned.
+    """
+    data_directory_path = os.path.join(
+        pathlib.Path(__file__).parent.parent.parent.parent,
+        ".data_storage/test_shared_slugs_detag_anchor",
+    )
+    cognee.config.data_root_directory(data_directory_path)
+
+    cognee_directory_path = os.path.join(
+        pathlib.Path(__file__).parent.parent.parent.parent,
+        ".cognee_system/test_shared_slugs_detag_anchor",
+    )
+    cognee.config.system_root_directory(cognee_directory_path)
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await setup()
+
+    user = await get_default_user()
+
+    dataset = await create_dataset("test_shared_detag_anchor", user=user)
+    alfa_dataset_id = dataset.id
+    beta_dataset_id = uuid4()  # ledger-only: simulate second dataset's rows
+
+    await set_database_global_context_variables(alfa_dataset_id, user.id)
+
+    maria_data_id = uuid4()
+    mock_data_id = uuid4()
+    shared_slug = uuid5(NAMESPACE_OID, "shared")
+    alfa_only_slug = uuid5(NAMESPACE_OID, "alfa_only")
+    mock_only_slug = uuid5(NAMESPACE_OID, "mock_only")
+
+    def _make_node(slug, dataset_id, data_id):
+        return Node(
+            id=uuid4(),
+            slug=slug,
+            user_id=user.id,
+            data_id=data_id,
+            dataset_id=dataset_id,
+            type="Entity",
+            indexed_fields=["name"],
+        )
+
+    rows = [
+        _make_node(shared_slug, alfa_dataset_id, maria_data_id),
+        _make_node(alfa_only_slug, alfa_dataset_id, maria_data_id),
+        _make_node(shared_slug, beta_dataset_id, maria_data_id),
+        _make_node(mock_only_slug, alfa_dataset_id, mock_data_id),
+    ]
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add_all(rows)
+        await session.commit()
+
+    result = await get_shared_slugs_losing_dataset_anchor(alfa_dataset_id, maria_data_id)
+    result_slugs = {str(slug) for slug in result}
+
+    assert result_slugs == {str(shared_slug)}, (
+        f"Expected only the co-owned shared_slug to need detag, got {result_slugs}"
+    )
+
+    logger.info("✅ test_get_shared_slugs_losing_dataset_anchor PASSED")
+
+
+@pytest.mark.asyncio
+async def test_get_orphaned_nodeset_labels_for_dataset():
+    """
+    The shared-slug scoped detag must strip NodeSet *names* (the values
+    stored in `belongs_to_set`), not dataset names. This helper returns
+    the NodeSet labels a `(dataset_id, data_id)` row is fully losing for
+    the dataset — i.e. NodeSet ledger rows it owns whose anchor no other
+    `(dataset_id, *)` row carries.
+
+    Ledger setup (single dataset `alfa`):
+      (alfa, maria)  owns NodeSet rows  ["T_only_maria", "T_shared"]
+      (alfa, marko)  owns NodeSet rows  ["T_shared", "T_only_marko"]
+      (alfa, maria)  also owns an Entity slug (unrelated, ignored).
+
+    Deleting (alfa, maria):
+      - `T_only_maria` → no other `(alfa, *)` row anchors this NodeSet → MUST be returned
+      - `T_shared`     → `(alfa, marko)` still anchors it → EXCLUDED
+      - `T_only_marko` → not owned by (alfa, maria) → EXCLUDED
+      - Entity row     → wrong `type` → EXCLUDED
+
+    Expected: only `T_only_maria` is returned.
+    """
+    data_directory_path = os.path.join(
+        pathlib.Path(__file__).parent.parent.parent.parent,
+        ".data_storage/test_orphaned_nodeset_labels",
+    )
+    cognee.config.data_root_directory(data_directory_path)
+
+    cognee_directory_path = os.path.join(
+        pathlib.Path(__file__).parent.parent.parent.parent,
+        ".cognee_system/test_orphaned_nodeset_labels",
+    )
+    cognee.config.system_root_directory(cognee_directory_path)
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await setup()
+
+    user = await get_default_user()
+
+    dataset = await create_dataset("test_orphaned_nodeset_labels", user=user)
+    alfa_dataset_id = dataset.id
+
+    await set_database_global_context_variables(alfa_dataset_id, user.id)
+
+    maria_data_id = uuid4()
+    marko_data_id = uuid4()
+
+    t_only_maria_slug = uuid5(NAMESPACE_OID, "NodeSet:T_only_maria")
+    t_shared_slug = uuid5(NAMESPACE_OID, "NodeSet:T_shared")
+    t_only_marko_slug = uuid5(NAMESPACE_OID, "NodeSet:T_only_marko")
+    entity_slug = uuid5(NAMESPACE_OID, "Entity:apple")
+
+    def _make_node(slug, dataset_id, data_id, type_, label):
+        return Node(
+            id=uuid4(),
+            slug=slug,
+            user_id=user.id,
+            data_id=data_id,
+            dataset_id=dataset_id,
+            type=type_,
+            label=label,
+            indexed_fields=["name"],
+        )
+
+    rows = [
+        _make_node(t_only_maria_slug, alfa_dataset_id, maria_data_id, "NodeSet", "T_only_maria"),
+        _make_node(t_shared_slug, alfa_dataset_id, maria_data_id, "NodeSet", "T_shared"),
+        _make_node(t_shared_slug, alfa_dataset_id, marko_data_id, "NodeSet", "T_shared"),
+        _make_node(t_only_marko_slug, alfa_dataset_id, marko_data_id, "NodeSet", "T_only_marko"),
+        _make_node(entity_slug, alfa_dataset_id, maria_data_id, "Entity", "Apple"),
+    ]
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add_all(rows)
+        await session.commit()
+
+    result = await get_orphaned_nodeset_labels_for_dataset(alfa_dataset_id, maria_data_id)
+
+    assert sorted(result) == ["T_only_maria"], (
+        f"Expected only 'T_only_maria' to be returned (T_shared still anchored by marko; "
+        f"T_only_marko not owned by maria; Entity row excluded by type), got {result}"
+    )
+
+    logger.info("✅ test_get_orphaned_nodeset_labels_for_dataset PASSED")
+
+
 if __name__ == "__main__":
     import asyncio
 
     asyncio.run(test_get_data_related_nodes_excludes_shared())
     asyncio.run(test_delete_data_nodes_and_edges_removes_from_all_systems())
+    asyncio.run(test_get_global_data_related_nodes_scopes_by_dataset())
+    asyncio.run(test_get_shared_slugs_losing_dataset_anchor())
+    asyncio.run(test_get_orphaned_nodeset_labels_for_dataset())
+    asyncio.run(test_get_shared_slugs_losing_dataset_anchor())

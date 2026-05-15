@@ -23,10 +23,10 @@
 # -----------------------------------------------------------------------------
 # Retrieval / memory tasks (V2 memory + agentic retrievers)
 # -----------------------------------------------------------------------------
-/cognee/modules/retrieval/                         @hajdul88 @lazarobradovic
-/cognee/tasks/memify/                              @lazarobradovic @hajdul88
-/cognee/tasks/temporal_awareness/                  @lazarobradovic @hajdul88
-/cognee/tasks/temporal_graph/                      @lazarobradovic @hajdul88
+/cognee/modules/retrieval/                         @hajdul88 @lxobr
+/cognee/tasks/memify/                              @lxobr @hajdul88
+/cognee/tasks/temporal_awareness/                  @lxobr @hajdul88
+/cognee/tasks/temporal_graph/                      @lxobr @hajdul88
 
 # -----------------------------------------------------------------------------
 # Pipelines & tasks (the cognify ECL pipeline + composable tasks)
