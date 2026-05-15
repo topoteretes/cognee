@@ -11,7 +11,7 @@ from .capabilities import EngineCapability
 class UnifiedStoreEngine:
     """Facade that wraps graph and vector engines with capability flags.
 
-    For separate backends (e.g. Kuzu + LanceDB), holds two independent engine
+    For separate backends (e.g. Ladybug + LanceDB), holds two independent engine
     instances.  For hybrid backends (e.g. Neptune Analytics), both properties
     point to the same adapter object.
 

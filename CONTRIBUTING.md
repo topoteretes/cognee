@@ -99,7 +99,7 @@ git checkout -b feature/your-feature-name
 
 ### Running Tests
 
-Rename `.env.example` into `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
+Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
 ```shell
 uv run python cognee/tests/test_library.py
@@ -107,7 +107,7 @@ uv run python cognee/tests/test_library.py
 
 ### Running Simple Example
 
-Rename `.env.example` into `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
+Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
 Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
 
@@ -122,7 +122,7 @@ uv run python examples/python/simple_example.py
 
 ### Running Simple Example
 
-Change .env.example into .env and provide your OPENAI_API_KEY as LLM_API_KEY
+Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
 Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
 
@@ -150,6 +150,10 @@ git push origin feature/your-feature-name
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
    - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
+
+> **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS)
+> file to request reviews automatically based on the directories your PR touches.
+> No manual ping required — the right person will get notified when you open the PR.
 
 ## 5. 📜 Developer Certificate of Origin (DCO)
 

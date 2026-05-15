@@ -1,11 +1,48 @@
-from sqlalchemy import URL
+import os
+import inspect
+from numbers import Number
 
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
-from cognee.infrastructure.databases.graph.config import get_graph_context_config
-
-from functools import lru_cache
+from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
+
+
+def _get_create_vector_engine_optional_defaults() -> dict:
+    """Return default values for optional create_vector_engine parameters."""
+    signature = inspect.signature(create_vector_engine)
+    return {
+        name: parameter.default
+        for name, parameter in signature.parameters.items()
+        if parameter.default is not inspect.Parameter.empty
+    }
+
+
+def _normalize_optional_create_vector_engine_params(params: dict) -> dict:
+    """
+    Normalize optional create_vector_engine parameters:
+    - replace None with the function defaults
+    - convert numeric vector_db_port values to string
+    """
+    defaults = _get_create_vector_engine_optional_defaults()
+    normalized = dict(params)
+
+    for key, default_value in defaults.items():
+        if normalized.get(key) is None:
+            normalized[key] = default_value
+
+    if isinstance(normalized.get("vector_db_port"), Number) and not isinstance(
+        normalized["vector_db_port"], bool
+    ):
+        normalized["vector_db_port"] = str(normalized["vector_db_port"])
+
+    if not normalized.get("vector_dataset_database_handler"):
+        # We use lancedb as the default, otherwise it is expected that the user defined VECTOR_DATASET_DATABASE_HANDLER
+        normalized["vector_dataset_database_handler"] = os.getenv(
+            "VECTOR_DATASET_DATABASE_HANDLER", "lancedb"
+        )
+
+    return normalized
 
 
 def create_vector_engine(
@@ -18,14 +55,26 @@ def create_vector_engine(
     vector_db_username: str = "",
     vector_db_password: str = "",
     vector_db_host: str = "",
+    vector_db_subprocess_enabled: bool = True,
 ):
     """
     Wrapper function to call create vector engine with caching.
     For a detailed description, see _create_vector_engine.
     """
-    # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    import os
 
+    normalized_optional_params = _normalize_optional_create_vector_engine_params(locals())
+    vector_db_port = normalized_optional_params["vector_db_port"]
+    vector_db_key = normalized_optional_params["vector_db_key"]
+    vector_dataset_database_handler = normalized_optional_params["vector_dataset_database_handler"]
+    vector_db_username = normalized_optional_params["vector_db_username"]
+    vector_db_password = normalized_optional_params["vector_db_password"]
+    vector_db_host = normalized_optional_params["vector_db_host"]
+    # ``vector_db_subprocess_enabled`` also went through normalization;
+    # reassign so callers passing ``None`` see the function-default applied
+    # instead of having ``None`` flow into the cache key + factory.
+    vector_db_subprocess_enabled = normalized_optional_params["vector_db_subprocess_enabled"]
+
+    # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
     if unified_provider == "pghybrid":
         from cognee.infrastructure.databases.relational import get_relational_config
@@ -56,10 +105,11 @@ def create_vector_engine(
         vector_db_username,
         vector_db_password,
         vector_db_host,
+        vector_db_subprocess_enabled,
     )
 
 
-@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
@@ -70,6 +120,7 @@ def _create_vector_engine(
     vector_db_username: str,
     vector_db_password: str,
     vector_db_host: str,
+    vector_db_subprocess_enabled: bool,
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -207,6 +258,13 @@ def _create_vector_engine(
 
     elif vector_db_provider.lower() == "lancedb":
         from .lancedb.LanceDBAdapter import LanceDBAdapter
+
+        if vector_db_subprocess_enabled:
+            return LanceDBAdapter.create_subprocess(
+                url=vector_db_url,
+                api_key=vector_db_key,
+                embedding_engine=embedding_engine,
+            )
 
         return LanceDBAdapter(
             url=vector_db_url,

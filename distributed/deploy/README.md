@@ -151,7 +151,7 @@ Open the repo in VS Code and select "Reopen in Container".
 For running on your own infrastructure, use the existing docker-compose setup:
 
 ```bash
-# Minimal (SQLite + LanceDB + KuzuDB — no external deps)
+# Minimal (SQLite + LanceDB + Ladybug - no external deps)
 docker-compose up cognee
 
 # With Postgres + pgvector
@@ -168,7 +168,7 @@ docker-compose --profile ui up
 
 ## Production Recommendations
 
-1. **Use Postgres + PgVector** instead of file-based databases. SQLite/LanceDB/KuzuDB don't handle concurrent writes well in containerized environments.
+1. **Use Postgres + PgVector** instead of file-based databases. SQLite/LanceDB/Ladybug don't handle concurrent writes well in containerized environments.
 
 2. **Set `CORS_ALLOWED_ORIGINS`** to your actual frontend domain instead of `*`.
 
@@ -194,6 +194,6 @@ docker-compose --profile ui up
 | `DB_PASSWORD` | If postgres | — | Database password |
 | `DB_NAME` | If postgres | — | Database name |
 | `VECTOR_DB_PROVIDER` | No | `lancedb` | `lancedb`, `pgvector`, `chromadb` |
-| `GRAPH_DATABASE_PROVIDER` | No | `kuzu` | `kuzu`, `neo4j` |
+| `GRAPH_DATABASE_PROVIDER` | No | `ladybug` | `ladybug`, `neo4j` |
 | `CORS_ALLOWED_ORIGINS` | No | `*` | Allowed CORS origins |
 | `REQUIRE_AUTHENTICATION` | No | `False` | Enable API auth |

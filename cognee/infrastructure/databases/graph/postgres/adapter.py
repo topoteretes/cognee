@@ -66,7 +66,7 @@ class PostgresAdapter(GraphDBInterface):
         """
         raise NotImplementedError(
             "The Postgres graph backend does not support raw Cypher queries. "
-            "Use a graph-native backend (Neo4j, Kuzu) for raw query support, "
+            "Use a graph-native backend (Neo4j, Ladybug) for raw query support, "
             "or use the typed adapter methods (add_nodes, get_neighbors, etc.)."
         )
 

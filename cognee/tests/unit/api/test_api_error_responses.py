@@ -6,10 +6,12 @@ Tests cover:
 - Basic endpoint functionality (happy path with mocked backends)
 """
 
-import pytest
+import importlib
 from types import SimpleNamespace
 from uuid import uuid4
 from unittest.mock import AsyncMock
+
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -20,6 +22,7 @@ from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.cognify.routers.get_cognify_router import get_cognify_router
 from cognee.api.v1.memify.routers.get_memify_router import get_memify_router
+from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 from cognee.api.v1.search.routers.get_search_router import get_search_router
 from cognee.api.v1.update.routers.get_update_router import get_update_router
 
@@ -58,6 +61,7 @@ def app():
     app.include_router(get_add_router(), prefix="/add")
     app.include_router(get_cognify_router(), prefix="/cognify")
     app.include_router(get_memify_router(), prefix="/memify")
+    app.include_router(get_remember_router(), prefix="/remember")
     app.include_router(get_search_router(), prefix="/search")
     app.include_router(get_update_router(), prefix="/update")
 
@@ -133,6 +137,33 @@ class TestAddEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Remember endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestRememberEndpoint:
+    def test_remember_passes_chunk_size(self, client, monkeypatch):
+        remember_pkg = importlib.import_module("cognee.api.v1.remember")
+
+        class RememberResultStub:
+            def to_dict(self):
+                return {"status": "completed", "dataset_name": "test_dataset"}
+
+        remember = AsyncMock(return_value=RememberResultStub())
+        monkeypatch.setattr(remember_pkg, "remember", remember)
+
+        resp = client.post(
+            "/remember",
+            data={"datasetName": "test_dataset", "chunk_size": "42"},
+            files={"data": ("test.txt", b"Cognee is an AI memory platform.", "text/plain")},
+        )
+
+        assert resp.status_code == 200
+        remember.assert_awaited_once()
+        assert remember.await_args.kwargs["chunk_size"] == 42
+
+
+# ---------------------------------------------------------------------------
 # Cognify endpoint
 # ---------------------------------------------------------------------------
 
@@ -166,6 +197,22 @@ class TestCognifyEndpoint:
             json={"datasets": ["test_dataset"], "run_in_background": False},
         )
         assert resp.status_code == 200
+
+    def test_cognify_passes_chunk_size(self, client, monkeypatch):
+        import cognee.api.v1.cognify as cognify_pkg
+
+        completed = _make_completed()
+        cognify = AsyncMock(return_value={str(MOCK_DATASET_ID): completed})
+        monkeypatch.setattr(cognify_pkg, "cognify", cognify)
+
+        resp = client.post(
+            "/cognify",
+            json={"datasets": ["test_dataset"], "chunk_size": 42},
+        )
+
+        assert resp.status_code == 200
+        cognify.assert_awaited_once()
+        assert cognify.await_args.kwargs["chunk_size"] == 42
 
     def test_cognify_internal_error_returns_500(self, client):
         import cognee.api.v1.cognify as cognify_pkg

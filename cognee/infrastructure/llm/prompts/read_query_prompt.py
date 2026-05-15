@@ -1,9 +1,10 @@
 from os import path
-from cognee.shared.logging_utils import get_logger, ERROR
+
 from cognee.root_dir import get_absolute_path
+from cognee.shared.logging_utils import ERROR, get_logger
 
 
-def read_query_prompt(prompt_file_name: str, base_directory: str = None):
+def read_query_prompt(prompt_file_name: str, base_directory: str | None = None) -> str | None:
     """
     Read a query prompt from a file.
 
@@ -33,7 +34,7 @@ def read_query_prompt(prompt_file_name: str, base_directory: str = None):
 
         file_path = path.join(base_directory, prompt_file_name)
 
-        with open(file_path, "r", encoding="utf-8") as file:
+        with open(file_path, encoding="utf-8") as file:
             return file.read()
     except FileNotFoundError:
         logger.error(f"Error: Prompt file not found. Attempted to read: {file_path}")

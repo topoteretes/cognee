@@ -42,6 +42,12 @@ Subcommands:
         # status
         p_status = sub.add_parser("status", help="Show processing status")
         p_status.add_argument("dataset_ids", nargs="+", help="One or more dataset UUIDs")
+        p_status.add_argument(
+            "--pipelines",
+            nargs="+",
+            default=None,
+            help=("Optional pipeline names to check (defaults to: cognify_pipeline)"),
+        )
 
         # graph
         p_graph = sub.add_parser("graph", help="Export knowledge graph (JSON)")
@@ -132,12 +138,21 @@ Subcommands:
             import cognee
 
             ids = [UUID(i) for i in args.dataset_ids]
-            statuses = await cognee.datasets.get_status(ids)
+            statuses = await cognee.datasets.get_status(ids, pipeline_names=args.pipelines)
             if not statuses:
                 fmt.echo("No status information available.")
                 return
-            for ds_id, status in statuses.items():
-                fmt.echo(f"{ds_id}: {status}")
+            for ds_id, pipeline_statuses in statuses.items():
+                if isinstance(pipeline_statuses, dict):
+                    if not pipeline_statuses:
+                        fmt.echo(f"{ds_id}: <no pipeline runs found>")
+                        continue
+                    formatted = ", ".join(
+                        f"{pipeline}={status}" for pipeline, status in pipeline_statuses.items()
+                    )
+                    fmt.echo(f"{ds_id}: {formatted}")
+                else:
+                    fmt.echo(f"{ds_id}: {pipeline_statuses}")
 
         asyncio.run(run())
 

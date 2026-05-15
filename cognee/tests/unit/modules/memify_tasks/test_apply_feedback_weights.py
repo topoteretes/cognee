@@ -169,7 +169,7 @@ async def test_apply_feedback_weights_neo4j_success_marks_applied_true():
 
 
 @pytest.mark.asyncio
-async def test_apply_feedback_weights_kuzu_success_marks_applied_true():
+async def test_apply_feedback_weights_ladybug_success_marks_applied_true():
     graph = InMemoryGraphWithNestedEdgeProperties()
     session_manager = MagicMock()
     session_manager.is_available = True

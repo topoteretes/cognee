@@ -1,26 +1,33 @@
 import base64
-import litellm
 import logging
+from typing import Any
+
 import instructor
-from typing import Any, Dict, Type, Optional
+import litellm
 from openai import OpenAI
 from pydantic import BaseModel
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    stop_after_delay,
+    wait_exponential_jitter,
+)
 
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-from tenacity import (
-    retry,
-    stop_after_delay,
-    wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
-)
 
 logger = get_logger()
+
+observe = get_observe()
 
 
 class OllamaAPIAdapter(LLMInterface):
@@ -52,15 +59,15 @@ class OllamaAPIAdapter(LLMInterface):
         model: str,
         name: str,
         max_completion_tokens: int,
-        instructor_mode: str = None,
-        llm_args: Optional[Dict[str, Any]] = None,
-    ):
+        instructor_mode: str | None = None,
+        llm_args: dict[str, Any] | None = None,
+    ) -> None:
         self.name = name
         self.model = model
         self.api_key = api_key
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
-        self.llm_args = llm_args
+        self.llm_args: dict[str, Any] = llm_args or {}
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -69,6 +76,7 @@ class OllamaAPIAdapter(LLMInterface):
             mode=instructor.Mode(self.instructor_mode),
         )
 
+    @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
@@ -79,7 +87,7 @@ class OllamaAPIAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
+        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a structured output from the LLM using the provided text and system prompt.
@@ -121,6 +129,7 @@ class OllamaAPIAdapter(LLMInterface):
 
         return response
 
+    @observe(as_type="transcription")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
@@ -130,7 +139,7 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input: str, **kwargs) -> str:
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         """
         Generate an audio transcript from a user query.
 
@@ -160,7 +169,7 @@ class OllamaAPIAdapter(LLMInterface):
         if not hasattr(transcription, "text"):
             raise ValueError("Transcription failed. No text returned.")
 
-        return transcription.text
+        return TranscriptionReturnType(transcription.text, transcription)
 
     @retry(
         stop=stop_after_delay(128),
@@ -171,7 +180,7 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def transcribe_image(self, input: str, **kwargs) -> str:
+    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
         """
         Transcribe content from an image using base64 encoding.
 
@@ -209,7 +218,7 @@ class OllamaAPIAdapter(LLMInterface):
                 }
             ],
             max_completion_tokens=300,
-        )
+        )  # ty:ignore[no-matching-overload]
 
         # Ensure response is valid before accessing .choices[0].message.content
         if not hasattr(response, "choices") or not response.choices:

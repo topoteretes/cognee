@@ -115,7 +115,7 @@ class NaturalLanguageRetriever(BaseRetriever):
             raise SearchTypeNotSupported(
                 "Natural language search is not supported with the Postgres graph backend. "
                 "This retriever generates and executes Cypher queries, which require a "
-                "graph-native backend (Neo4j, Kuzu)."
+                "graph-native backend (Neo4j, Ladybug)."
             )
 
         is_empty = await graph_engine.is_empty()

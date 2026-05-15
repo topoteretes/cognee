@@ -38,6 +38,10 @@ jobs:
           python-version: ${{ inputs.python-version }}
           cognee_version: ${{ inputs.cognee_version }}
 
+      - name: Run MCP unit tests
+        working-directory: cognee-mcp
+        run: uv run --no-sync pytest tests/
+
       - name: Run MCP test
         env:
           ENV: 'dev'

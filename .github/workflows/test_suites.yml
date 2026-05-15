@@ -169,7 +169,7 @@ jobs:
     if: ${{ !cancelled() && needs.basic-tests.result == 'success' }}
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
-      python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x"]'
+      python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
       os: '["ubuntu-22.04"]'
     secrets: inherit
 

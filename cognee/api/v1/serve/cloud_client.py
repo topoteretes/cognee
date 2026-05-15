@@ -59,6 +59,10 @@ class CloudClient:
             form.add_field("run_in_background", "true")
         if kwargs.get("custom_prompt"):
             form.add_field("custom_prompt", kwargs["custom_prompt"])
+        if kwargs.get("chunk_size") is not None:
+            form.add_field("chunk_size", str(kwargs["chunk_size"]))
+        if kwargs.get("chunks_per_batch") is not None:
+            form.add_field("chunks_per_batch", str(kwargs["chunks_per_batch"]))
 
         # Handle data — string or file-like objects
         if isinstance(data, str):
@@ -130,12 +134,20 @@ class CloudClient:
         payload: dict = {"query": query_text}
         if query_type:
             payload["search_type"] = query_type if isinstance(query_type, str) else query_type.value
-        if kwargs.get("datasets"):
+        if kwargs.get("dataset_ids"):
+            payload["dataset_ids"] = [str(dataset_id) for dataset_id in kwargs["dataset_ids"]]
+        elif kwargs.get("datasets"):
             payload["datasets"] = kwargs["datasets"]
         if kwargs.get("top_k"):
             payload["top_k"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
+        if kwargs.get("node_name"):
+            payload["node_name"] = kwargs["node_name"]
+        if kwargs.get("only_context"):
+            payload["only_context"] = kwargs["only_context"]
+        if kwargs.get("verbose"):
+            payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
             payload["session_id"] = kwargs["session_id"]
         if kwargs.get("scope") is not None:
@@ -220,6 +232,14 @@ class CloudClient:
             payload["datasets"] = (
                 [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
             )
+        if kwargs.get("run_in_background"):
+            payload["run_in_background"] = True
+        if kwargs.get("custom_prompt"):
+            payload["custom_prompt"] = kwargs["custom_prompt"]
+        if kwargs.get("chunk_size") is not None:
+            payload["chunk_size"] = kwargs["chunk_size"]
+        if kwargs.get("chunks_per_batch") is not None:
+            payload["chunks_per_batch"] = kwargs["chunks_per_batch"]
 
         async with session.post(
             f"{self.service_url}/api/v1/cognify",

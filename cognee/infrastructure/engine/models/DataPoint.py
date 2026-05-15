@@ -53,7 +53,7 @@ class DataPoint(BaseModel):
     topological_rank: int | None = 0
     metadata: MetaData = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
-    belongs_to_set: list[str] | None = None
+    belongs_to_set: "list[DataPoint] | list[str] | None" = None
     source_pipeline: str | None = None
     source_task: str | None = None
     source_node_set: str | None = None

@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.infrastructure.session.feedback_models import (
     AgentTraceFeedbackSummary,
@@ -396,7 +397,7 @@ class TestSessionManager:
     async def test_get_session_formatted(self, sm, mock_cache):
         """get_session with formatted=True returns string."""
         mock_cache.get_all_qa_entries.return_value = [
-            {"qa_id": "1", "question": "Q", "context": "C", "answer": "A", "time": "t"}
+            SessionQAEntry(qa_id="1", question="Q", context="C", answer="A", time="t")
         ]
         out = await sm.get_session(user_id="u1", formatted=True, session_id="s1")
         assert isinstance(out, str)
@@ -487,6 +488,7 @@ class TestSessionManager:
             answer=None,
             feedback_text=None,
             feedback_score=None,
+            used_graph_element_ids=None,
             memify_metadata=None,
         )
 
@@ -682,7 +684,7 @@ class TestSessionManager:
             mock_config.auto_feedback = True
             mock_config_cls.return_value = mock_config
             mock_cache.get_latest_qa_entries.return_value = [
-                {"qa_id": "last-qa-123", "question": "Q", "answer": "A", "time": "t"}
+                SessionQAEntry(qa_id="last-qa-123", question="Q", context="", answer="A", time="t")
             ]
 
             result = await sm.generate_completion_with_session(
@@ -735,7 +737,7 @@ class TestSessionManager:
             mock_config.auto_feedback = True
             mock_config_cls.return_value = mock_config
             mock_cache.get_latest_qa_entries.return_value = [
-                {"qa_id": "last-qa-456", "question": "Q", "answer": "A", "time": "t"}
+                SessionQAEntry(qa_id="last-qa-456", question="Q", context="", answer="A", time="t")
             ]
 
             result = await sm.generate_completion_with_session(
@@ -846,7 +848,7 @@ class TestSessionManager:
         """When feedback detected but add_feedback raises: still return response_to_user."""
         mock_cache.update_qa_entry = AsyncMock(side_effect=Exception("Cache write failed"))
         mock_cache.get_latest_qa_entries.return_value = [
-            {"qa_id": "last-qa-789", "question": "Q", "answer": "A", "time": "t"}
+            SessionQAEntry(qa_id="last-qa-789", question="Q", context="", answer="A", time="t")
         ]
         with (
             patch(
@@ -894,7 +896,7 @@ class TestSessionManager:
     ):
         """When feedback only and response_to_user empty: return fallback thanks message."""
         mock_cache.get_latest_qa_entries.return_value = [
-            {"qa_id": "last-qa-999", "question": "Q", "answer": "A", "time": "t"}
+            SessionQAEntry(qa_id="last-qa-999", question="Q", context="", answer="A", time="t")
         ]
         with (
             patch(
@@ -942,7 +944,7 @@ class TestSessionManager:
     ):
         """Feedback score is normalized to int 1-5 when persisting."""
         mock_cache.get_latest_qa_entries.return_value = [
-            {"qa_id": "last-qa-norm", "question": "Q", "answer": "A", "time": "t"}
+            SessionQAEntry(qa_id="last-qa-norm", question="Q", context="", answer="A", time="t")
         ]
         with (
             patch(

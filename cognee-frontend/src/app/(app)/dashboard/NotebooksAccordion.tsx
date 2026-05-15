@@ -3,10 +3,10 @@
 import { FormEvent, useCallback } from "react";
 import { useBoolean } from "@/utils";
 import { Accordion, CTAButton, GhostButton, IconButton, Input, Modal } from "@/ui/elements";
-import { CloseIcon, MinusIcon, NotebookIcon, PlusIcon } from "@/ui/Icons";
+import { CloseIcon, MinusIcon, NotebookIcon, PlusIcon } from "@/ui/icons";
 import { Notebook } from "@/ui/elements/Notebook/types";
 import { useModal } from "@/ui/elements/Modal";
-import { LoadingIndicator } from "@/ui/App";
+import { LoadingIndicator } from "@/ui/app";
 
 interface NotebooksAccordionProps {
   notebooks: Notebook[];

@@ -1,9 +1,21 @@
-try:
-    from .server import main as server_main
-except ImportError:
-    from server import main as server_main
 import warnings
 import sys
+
+
+def _load_server_main():
+    """Import the heavy server module lazily.
+
+    Importing server eagerly at package-import time pulls in the MCP SDK
+    and uvicorn/starlette, which aren't available in environments that
+    only depend on the core cognee library (e.g. the unit-tests CI job).
+    Deferring the import lets `import src.cognee_client` succeed without
+    those dependencies.
+    """
+    try:
+        from .server import main as server_main
+    except ImportError:
+        from server import main as server_main
+    return server_main
 
 
 def main():
@@ -50,11 +62,11 @@ as possible.
     print("⚠️  DEPRECATION WARNING", file=sys.stderr)
     print(deprecation_notice, file=sys.stderr)
 
-    asyncio.run(server_main())
+    asyncio.run(_load_server_main()())
 
 
 def main_mcp():
     """Clean main entry point for cognee-mcp command."""
     import asyncio
 
-    asyncio.run(server_main())
+    asyncio.run(_load_server_main()())

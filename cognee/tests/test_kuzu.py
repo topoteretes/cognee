@@ -18,18 +18,18 @@ async def main():
     # Clean up test directories before starting
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_kuzu")
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_ladybug")
         ).resolve()
     )
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_kuzu")
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_ladybug")
         ).resolve()
     )
 
     try:
-        # Set Kuzu as the graph database provider
-        cognee.config.set_graph_database_provider("kuzu")
+        # Set Ladybug as the graph database provider
+        cognee.config.set_graph_database_provider("ladybug")
         cognee.config.data_root_directory(data_directory_path)
         cognee.config.system_root_directory(cognee_directory_path)
 
@@ -57,7 +57,7 @@ async def main():
 
         is_empty = await graph_engine.is_empty()
 
-        assert is_empty, "Kuzu graph database is not empty"
+        assert is_empty, "Ladybug graph database is not empty"
 
         await cognee.add([explanation_file_path_quantum], dataset_name, node_set=node_set_b)
 
@@ -67,13 +67,13 @@ async def main():
 
         is_empty = await graph_engine.is_empty()
 
-        assert is_empty, "Kuzu graph database should be empty before cognify"
+        assert is_empty, "Ladybug graph database should be empty before cognify"
 
         await cognee.cognify([dataset_name])
 
         is_empty = await graph_engine.is_empty()
 
-        assert not is_empty, "Kuzu graph database should not be empty"
+        assert not is_empty, "Ladybug graph database should not be empty"
 
         from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -188,7 +188,7 @@ async def main():
 
         is_empty = await graph_engine.is_empty()
 
-        assert is_empty, "Kuzu graph database is not empty"
+        assert is_empty, "Ladybug graph database is not empty"
 
     finally:
         # Ensure cleanup even if tests fail

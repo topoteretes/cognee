@@ -4,7 +4,7 @@ version = "0.1.1"
 description = "Starter project which can be harvested for parts"
 readme = "README.md"
 
-requires-python = ">=3.10, <=3.13"
+requires-python = ">=3.10,<3.15"
 
 dependencies = [
     "cognee>=0.1.38,<1.0.0",

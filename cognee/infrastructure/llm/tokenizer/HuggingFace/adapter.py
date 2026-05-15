@@ -1,4 +1,4 @@
-from typing import List, Any
+from typing import Any
 
 from ..tokenizer_interface import TokenizerInterface
 
@@ -22,16 +22,16 @@ class HuggingFaceTokenizer(TokenizerInterface):
         self,
         model: str,
         max_completion_tokens: int = 512,
-    ):
+    ) -> None:
         self.model = model
         self.max_completion_tokens = max_completion_tokens
 
         # Import here to make it an optional dependency
-        from transformers import AutoTokenizer
+        from transformers import AutoTokenizer  # ty:ignore[unresolved-import]
 
         self.tokenizer = AutoTokenizer.from_pretrained(model)
 
-    def extract_tokens(self, text: str) -> List[Any]:
+    def extract_tokens(self, text: str) -> list[Any]:
         """
         Extract tokens from the given text using the tokenizer.
 
@@ -64,7 +64,7 @@ class HuggingFaceTokenizer(TokenizerInterface):
         """
         return len(self.tokenizer.tokenize(text))
 
-    def decode_single_token(self, encoding: int):
+    def decode_single_token(self, token: int) -> str:
         """
         Attempt to decode a single token from its encoding, which is not implemented in this
         tokenizer.

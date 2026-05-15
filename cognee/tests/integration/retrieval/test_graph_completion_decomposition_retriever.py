@@ -2,12 +2,13 @@ import pathlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import cognee
 import pytest
 import pytest_asyncio
 
+import cognee
 from cognee.infrastructure.session.session_manager import SessionManager
-from cognee.low_level import DataPoint, setup as cognee_setup
+from cognee.low_level import DataPoint
+from cognee.low_level import setup as cognee_setup
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
     QueryDecomposition,
@@ -20,10 +21,10 @@ SUBQUERIES = ["Who works at Figma?", "Who works at Canva?"]
 
 def _clear_engine_caches() -> None:
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
-    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
+    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -70,7 +71,7 @@ async def setup_test_environment_simple():
         base_dir / ".data_storage/test_graph_completion_decomposition_context_simple"
     )
 
-    cognee.config.set_graph_database_provider("kuzu")
+    cognee.config.set_graph_database_provider("ladybug")
     cognee.config.set_vector_db_config({"vector_db_provider": "lancedb"})
     cognee.config.set_relational_db_config({"db_provider": "sqlite"})
     cognee.config.system_root_directory(system_directory_path)
@@ -120,7 +121,7 @@ async def setup_test_environment_empty():
         base_dir / ".data_storage/test_graph_completion_decomposition_context_empty"
     )
 
-    cognee.config.set_graph_database_provider("kuzu")
+    cognee.config.set_graph_database_provider("ladybug")
     cognee.config.set_vector_db_config({"vector_db_provider": "lancedb"})
     cognee.config.set_relational_db_config({"db_provider": "sqlite"})
     cognee.config.system_root_directory(system_directory_path)
@@ -303,6 +304,6 @@ async def test_graph_completion_decomposition_combined_mode_session_stores_only_
 
     entries = await session_manager.get_session(user_id="user-1", session_id="session-1")
     assert len(entries) == 1
-    assert entries[0]["question"] == ORIGINAL_QUERY
-    assert entries[0]["answer"] == "Combined answer for both companies."
-    assert entries[0]["used_graph_element_ids"] is not None
+    assert entries[0].question == ORIGINAL_QUERY
+    assert entries[0].answer == "Combined answer for both companies."
+    assert entries[0].used_graph_element_ids is not None

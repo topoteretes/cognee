@@ -41,6 +41,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def is_empty(self) -> bool:
+        """Return True when the graph contains no nodes."""
         logger.warning("is_empty() is not implemented")
         return True
 
@@ -108,6 +109,27 @@ class GraphDBInterface(ABC):
             - node_ids (List[str]): A list of unique identifiers for the nodes to delete.
         """
         raise NotImplementedError
+
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Remove the given tag names from every node's `belongs_to_set` property
+        array. Keeps the property consistent with the additive
+        `belongs_to_set` edges after a NodeSet or its containing dataset is
+        deleted.
+
+        When `node_ids` is provided, the detag only applies to nodes whose
+        id appears in the list — used to reconcile shared nodes that lose
+        membership in one dataset without disturbing unrelated nodes that
+        legitimately still carry the tag.
+
+        Default no-op; only Neo4j overrides this today. Other
+        list-property-storing adapters are free to implement it later.
+        """
+        return None
 
     @abstractmethod
     async def get_node(self, node_id: str) -> Optional[NodeData]:
@@ -352,12 +374,44 @@ class GraphDBInterface(ABC):
         """Retrieve a batch of triplets (source, edge, target).
 
         Optional extension — implemented by PostgresAdapter, Neo4jAdapter,
-        and KuzuAdapter but not NeptuneGraphDB.
+        and LadybugAdapter but not NeptuneGraphDB.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
 
             - offset: Number of triplets to skip.
             - limit: Maximum number of triplets to return.
         """
         raise NotImplementedError("get_triplets_batch is not implemented for this adapter")
+
+    async def get_node_frequency_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve node frequency weights for multiple node ids.
+        Returns only found node ids.
+        """
+        raise NotImplementedError("get_node_frequency_weights is not implemented for this adapter")
+
+    async def set_node_frequency_weights(
+        self, node_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist node frequency weights for multiple node ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_node_frequency_weights is not implemented for this adapter")
+
+    async def get_edge_frequency_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """
+        Retrieve edge frequency weights for multiple edge_object_ids.
+        Returns only found edge ids.
+        """
+        raise NotImplementedError("get_edge_frequency_weights is not implemented for this adapter")
+
+    async def set_edge_frequency_weights(
+        self, edge_frequency_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
+        """
+        Persist edge frequency weights for multiple edge_object_ids.
+        Returns per-id update success.
+        """
+        raise NotImplementedError("set_edge_frequency_weights is not implemented for this adapter")

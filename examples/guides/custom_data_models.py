@@ -18,8 +18,7 @@ class Person(DataPoint):
 
 async def main():
     # Start clean (optional in your app)
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     alice = Person(name="Alice")
     bob = Person(name="Bob")

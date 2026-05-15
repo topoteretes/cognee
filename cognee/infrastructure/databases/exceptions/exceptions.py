@@ -184,20 +184,23 @@ class SessionParameterValidationError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
-class SharedKuzuLockRequiresRedisError(CogneeConfigurationError):
+class SharedLadybugLockRequiresRedisError(CogneeConfigurationError):
     """
-    Raised when shared Kuzu locking is requested without configuring the Redis backend.
+    Raised when shared Ladybug locking is requested without configuring the Redis backend.
     """
 
     def __init__(
         self,
         message: str = (
-            "Shared Kuzu lock requires Redis cache backend. Configure Redis to enable shared Kuzu locking."
+            "Shared Ladybug lock requires Redis cache backend. Configure Redis to enable shared Ladybug locking."
         ),
-        name: str = "SharedKuzuLockRequiresRedisError",
+        name: str = "SharedLadybugLockRequiresRedisError",
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+SharedKuzuLockRequiresRedisError = SharedLadybugLockRequiresRedisError
 
 
 class DatabaseCredentialsError(CogneeConfigurationError):

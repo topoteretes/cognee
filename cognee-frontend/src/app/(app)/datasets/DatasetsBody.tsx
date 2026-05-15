@@ -11,11 +11,11 @@ import CreateNewDatasetModal from "@/app/(app)/dashboard/elements/CreateNewDatas
 import CTAButton from "@/ui/elements/CTAButton";
 import GhostButton from "@/ui/elements/GhostButton";
 import IconButton from "@/ui/elements/IconButton";
-import { LoadingIndicator } from "@/ui/App";
-import DeleteIcon from "@/ui/Icons/DeleteIcon";
-import CloseIcon from "@/ui/Icons/CloseIcon";
+import { LoadingIndicator } from "@/ui/app";
+import DeleteIcon from "@/ui/icons/DeleteIcon";
+import CloseIcon from "@/ui/icons/CloseIcon";
 import { trackEvent } from "@/modules/analytics";
-import PlusIcon from "@/ui/Icons/PlusIcon";
+import PlusIcon from "@/ui/icons/PlusIcon";
 import addData from "@/modules/ingestion/addData";
 import { notifications } from "@mantine/notifications";
 

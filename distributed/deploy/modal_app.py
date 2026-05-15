@@ -2,7 +2,7 @@
 Cognee on Modal — 1-click serverless deployment.
 
 Deploys the Cognee FastAPI server as a Modal ASGI app with:
-- Persistent volume for file-based databases (SQLite, LanceDB, KuzuDB)
+- Persistent volume for file-based databases (SQLite, LanceDB, Ladybug)
 - Secret injection for LLM_API_KEY and other credentials
 - Auto-scaling with configurable concurrency
 

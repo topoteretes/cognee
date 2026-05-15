@@ -41,10 +41,12 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
+        vector_config = get_vectordb_config()
         vector_engine = create_vector_engine(
             vector_db_provider=dataset_database.vector_database_provider,
             vector_db_url=dataset_database.vector_database_url,
             vector_db_key=dataset_database.vector_database_key,
             vector_db_name=dataset_database.vector_database_name,
+            vector_db_subprocess_enabled=vector_config.vector_db_subprocess_enabled,
         )
         await vector_engine.prune()

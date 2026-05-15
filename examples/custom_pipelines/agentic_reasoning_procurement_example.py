@@ -14,8 +14,8 @@ from cognee.shared.logging_utils import setup_logging
 load_dotenv()
 
 os.environ["LLM_API_KEY"] = ""
-# Notes: Nodesets cognee feature only works with kuzu and Neo4j graph databases
-os.environ["GRAPH_DATABASE_PROVIDER"] = "kuzu"
+# Notes: Nodesets cognee feature only works with Ladybug and Neo4j graph databases
+os.environ["GRAPH_DATABASE_PROVIDER"] = "ladybug"
 
 
 class ProcurementMemorySystem:

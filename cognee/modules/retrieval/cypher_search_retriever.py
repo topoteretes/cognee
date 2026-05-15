@@ -43,7 +43,7 @@ class CypherSearchRetriever(BaseRetriever):
             if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
                 raise SearchTypeNotSupported(
                     "Cypher search is not supported with the Postgres graph backend. "
-                    "Use a graph-native backend (Neo4j, Kuzu) for raw Cypher queries."
+                    "Use a graph-native backend (Neo4j, Ladybug) for raw Cypher queries."
                 )
 
             is_empty = await graph_engine.is_empty()

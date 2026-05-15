@@ -1,10 +1,10 @@
 import asyncio
-from typing import List, Optional, get_type_hints
+from typing import Any, Dict, List, Optional, get_type_hints
 from uuid import UUID
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func
+from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func, text
 from sqlalchemy import exc
 from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -30,6 +30,7 @@ from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from .serialize_data import serialize_data
 
 logger = get_logger("PGVectorAdapter")
+QUERY_BATCH_SIZE = 1000
 
 
 class IndexSchema(DataPoint):
@@ -48,6 +49,8 @@ class IndexSchema(DataPoint):
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
+    """Vector-database adapter backed by Postgres + pgvector; implements VectorDBInterface."""
+
     name = "PGVector"
 
     def __init__(
@@ -56,6 +59,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
     ):
+        """Initialize the adapter and, when possible, reuse the relational engine."""
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
@@ -148,6 +152,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
     async def create_collection(self, collection_name: str, payload_schema=None):
+        """Create the pgvector table for `collection_name` if it does not already exist."""
         data_point_types = get_type_hints(DataPoint)
         vector_size = self.embedding_engine.get_vector_size()
 
@@ -178,6 +183,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         vector = Column(self.Vector(vector_size))
 
                         def __init__(self, id, payload, vector):
+                            """Initialize the pgvector row with id, JSON payload, and vector."""
                             self.id = id
                             self.payload = payload
                             self.vector = vector
@@ -198,6 +204,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     )
     @override_distributed(queued_add_data_points)
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+        """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
         data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
             await self.create_collection(
@@ -261,25 +268,81 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
 
             def to_dict(obj):
+                """Dump a mapped PGVectorDataPoint row to a plain column→value dict."""
                 return {
                     column.key: getattr(obj, column.key)
                     for column in inspect(obj).mapper.column_attrs
                 }
 
+            # Dedup by id within the batch — with ON CONFLICT DO UPDATE,
+            # Postgres raises "cannot affect row a second time" if the same
+            # id appears twice in one INSERT. The prior ON CONFLICT DO NOTHING
+            # path silently tolerated duplicates, so entity extraction may
+            # still emit same-UUID5 rows in one batch. Union the duplicates'
+            # belongs_to_set arrays before collapsing so a tag that only
+            # appears on one duplicate isn't dropped (mirrors the in-batch
+            # tag merge in Neo4jAdapter.add_nodes).
+            deduped_by_id: dict = {}
+            for dp in pgvector_data_points:
+                existing = deduped_by_id.get(dp.id)
+                if existing is None:
+                    deduped_by_id[dp.id] = dp
+                    continue
+                existing_payload = existing.payload or {}
+                incoming_payload = dp.payload or {}
+                existing_tags = existing_payload.get("belongs_to_set") or []
+                incoming_tags = incoming_payload.get("belongs_to_set") or []
+                if existing_tags or incoming_tags:
+                    merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                    # Keep the latest row as representative (refreshing any
+                    # non-tag payload fields) and overwrite only the tag list.
+                    dp.payload = {**incoming_payload, "belongs_to_set": merged_tags}
+                deduped_by_id[dp.id] = dp
+            pgvector_data_points = list(deduped_by_id.values())
+
             # session.add_all(pgvector_data_points)
-            insert_statement = insert(PGVectorDataPoint).values(
-                [to_dict(data_point) for data_point in pgvector_data_points]
-            )
-            insert_statement = insert_statement.on_conflict_do_nothing(index_elements=["id"])
-            await session.execute(insert_statement)
+            point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
+
+            for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
+                point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
+                insert_statement = insert(PGVectorDataPoint).values(point_batch)
+                # On conflict, merge the `belongs_to_set` arrays so a DataPoint
+                # cognified into multiple datasets keeps every dataset tag. Take
+                # the incoming payload as the base (refreshing any other fields)
+                # and rewrite only `belongs_to_set` with the union of existing
+                # and incoming values. `collection_name` is cognee-controlled,
+                # not user input, so interpolation is safe.
+                quoted_table = f'"{collection_name}"'
+                merged_payload_expr = text(
+                    f"""
+                                jsonb_set(
+                                    EXCLUDED.payload::jsonb,
+                                    '{{belongs_to_set}}',
+                                    (
+                                        SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
+                                        FROM jsonb_array_elements_text(
+                                            COALESCE({quoted_table}.payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                                            || COALESCE(EXCLUDED.payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                                        ) AS val
+                                    )
+                                )::json
+                                """
+                )
+                insert_statement = insert_statement.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={"payload": merged_payload_expr},
+                )
+                await session.execute(insert_statement)
             await session.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
+        """Create the underlying index collection (table) for the given name/property pair."""
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
+        """Write index rows derived from `data_points` into the `{index}_{property}` table."""
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
@@ -316,6 +379,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
+        """Return rows from `collection_name` matching any of `data_point_ids`."""
         # Get PGVectorDataPoint Table from database
         try:
             PGVectorDataPoint = await self.get_table(collection_name)
@@ -324,14 +388,25 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return []
 
         async with self.get_async_session() as session:
-            results = await session.execute(
-                select(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(data_point_ids))
-            )
-            results = results.all()
+            results = []
+            for start_index in range(0, len(data_point_ids), QUERY_BATCH_SIZE):
+                id_batch = data_point_ids[start_index : start_index + QUERY_BATCH_SIZE]
+                batch_results = await session.execute(
+                    select(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(id_batch))
+                )
+                results.extend(batch_results.all())
+
+            seen_ids = set()
+            unique_results = []
+            for result in results:
+                if result.id in seen_ids:
+                    continue
+                seen_ids.add(result.id)
+                unique_results.append(result)
 
             return [
                 ScoredResult(id=parse_id(result.id), payload=result.payload, score=0)
-                for result in results
+                for result in unique_results
             ]
 
     async def search(
@@ -345,6 +420,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
     ) -> List[ScoredResult]:
+        """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
 
@@ -449,6 +525,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
     ):
+        """Run `search` concurrently for each query text and return a list of result lists."""
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
         return await asyncio.gather(
@@ -466,6 +543,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        """Delete rows from `collection_name` whose id is in `data_point_ids`."""
         # Skip deletion if collection doesn't exist
         if not await self.has_collection(collection_name):
             return None
@@ -473,13 +551,148 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         async with self.get_async_session() as session:
             # Get PGVectorDataPoint Table from database
             PGVectorDataPoint = await self.get_table(collection_name)
-            results = await session.execute(
-                delete(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(data_point_ids))
-            )
+
+            results = None
+            if not data_point_ids:
+                results = await session.execute(
+                    delete(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(data_point_ids))
+                )
+            else:
+                for start_index in range(0, len(data_point_ids), QUERY_BATCH_SIZE):
+                    id_batch = data_point_ids[start_index : start_index + QUERY_BATCH_SIZE]
+                    results = await session.execute(
+                        delete(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(id_batch))
+                    )
             await session.commit()
             return results
 
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Strip the given tag names from `belongs_to_set` arrays in every
+        vector collection and delete rows whose array is now empty. Used to
+        reconcile surviving shared rows when a dataset/NodeSet is deleted.
+
+        When `node_ids` is provided, the detag only applies to rows whose
+        id is in the list — used to reconcile shared rows that lose a
+        dataset's anchor while that dataset still exists for other rows.
+
+        Cognee vector collections follow the `{PascalCaseType}_{field}`
+        naming convention (e.g. `Entity_name`, `DocumentChunk_text`) and
+        coexist in the same schema as lowercase relational tables — filter
+        to collections by requiring an uppercase first character.
+        """
+        if not tags:
+            return None
+
+        if node_ids is not None and not node_ids:
+            return None
+
+        # `get_table_names()` returns the raw SQLAlchemy reflection keys; for
+        # Postgres those may be schema-qualified (`schema.table`) when the
+        # reflected schema isn't the search-path default, while SQLite and
+        # same-schema Postgres return plain table names. Strip any leading
+        # `schema.` prefix first, then keep only PascalCase names — cognee's
+        # vector collections are `Entity_name` / `DocumentChunk_text` etc.,
+        # whereas relational tables (`users`, `nodes`, …) are snake_case.
+        def _table_only(name: str) -> str:
+            """Strip any leading `schema.` prefix from a reflected table name."""
+            return name.rpartition(".")[2] if "." in name else name
+
+        candidate_tables: list[str] = []
+        for name in await self.get_table_names():
+            if not name:
+                continue
+            table_only = _table_only(name)
+            if table_only and table_only[0].isupper():
+                candidate_tables.append(table_only)
+
+        id_scope_clause = "AND id = ANY(:node_ids)" if node_ids is not None else ""
+        bind_params: Dict[str, Any] = {"tags": list(tags)}
+        if node_ids is not None:
+            bind_params["node_ids"] = [str(nid) for nid in node_ids]
+
+        for table_name in candidate_tables:
+            quoted_table = f'"{table_name}"'
+            # Can't use a data-modifying CTE (UPDATE … RETURNING then DELETE
+            # against the CTE): Postgres runs both statements under the
+            # same snapshot, so the outer DELETE doesn't observe the
+            # updated row versions and silently no-ops. Instead, capture
+            # the id set up front, run the UPDATE scoped to those ids,
+            # then DELETE only the ones that ended up empty. The captured
+            # set ensures the DELETE can't drop rows that were already
+            # empty before the call.
+            select_targets_sql = text(
+                f"""
+                SELECT id FROM {quoted_table}
+                WHERE payload::jsonb ? 'belongs_to_set'
+                  {id_scope_clause}
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements_text(
+                          payload::jsonb->'belongs_to_set'
+                      ) v
+                      WHERE v = ANY(:tags)
+                  )
+                """
+            )
+            update_sql = text(
+                f"""
+                UPDATE {quoted_table}
+                SET payload = jsonb_set(
+                    payload::jsonb,
+                    '{{belongs_to_set}}',
+                    (
+                        SELECT COALESCE(jsonb_agg(val), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(
+                            COALESCE(payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                        ) AS val
+                        WHERE val <> ALL(:tags)
+                    )
+                )::json
+                WHERE id = ANY(:target_ids)
+                """
+            )
+            delete_empties_sql = text(
+                f"""
+                DELETE FROM {quoted_table}
+                WHERE id = ANY(:target_ids)
+                  AND payload::jsonb->'belongs_to_set' = '[]'::jsonb
+                """
+            )
+            # Run each table in its own transaction — a failure on one table
+            # (e.g. a PascalCase name that isn't a vector collection and has
+            # no `payload::jsonb` column) must not roll back updates already
+            # committed for other tables.
+            try:
+                async with self.get_async_session() as session:
+                    target_rows = await session.execute(select_targets_sql, bind_params)
+                    target_ids = [row[0] for row in target_rows.all()]
+                    if not target_ids:
+                        await session.commit()
+                        continue
+
+                    scoped_params: Dict[str, Any] = {
+                        "tags": list(tags),
+                        "target_ids": target_ids,
+                    }
+                    await session.execute(update_sql, scoped_params)
+                    await session.execute(delete_empties_sql, {"target_ids": target_ids})
+                    await session.commit()
+            except exc.SQLAlchemyError as e:
+                logger.debug(
+                    "remove_belongs_to_set_tags skipped '%s': %s",
+                    table_name,
+                    e,
+                )
+
+        return None
+
     async def prune(self):
+        """Drop all vector collection tables and reset cached reflection metadata."""
         self._metadata.clear()
         await self.delete_database()
 

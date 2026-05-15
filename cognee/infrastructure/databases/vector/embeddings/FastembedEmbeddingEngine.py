@@ -1,6 +1,9 @@
+import asyncio
 import os
 import logging
+import math
 from typing import List, Optional
+import numpy as np
 
 try:
     from fastembed import TextEmbedding
@@ -82,7 +85,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type((litellm.exceptions.NotFoundError, EmbeddingException)),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -105,25 +108,67 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             - List[List[float]]: A list of embeddings, where each embedding is a list of floats
               representing the vector form of the input text.
         """
-        sanitized_text_input = sanitize_embedding_text_inputs(text)
+        original_texts = text if isinstance(text, list) else [text]
+        sanitized_text = sanitize_embedding_text_inputs(original_texts)
+
         try:
             if self.mock:
-                return [[0.0] * self.dimensions for _ in sanitized_text_input]
+                embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
             else:
                 async with embedding_rate_limiter_context_manager():
                     embeddings = self.embedding_model.embed(
-                        sanitized_text_input,
-                        batch_size=len(text),
+                        sanitized_text,
+                        batch_size=len(sanitized_text),
                         parallel=None,
                     )
+
                 embeddings = list(embeddings)
-                return handle_embedding_response(text, embeddings, self.dimensions)
 
         except Exception as error:
+            error_str = str(error).lower()
+            context_error_patterns = (
+                "context length",
+                "context window",
+                "input length",
+                "too long",
+                "maximum context",
+                "maximum tokens",
+                "max tokens",
+            )
+            if any(pattern in error_str for pattern in context_error_patterns):
+                if len(original_texts) > 1:
+                    mid = math.ceil(len(original_texts) / 2)
+                    left_vecs, right_vecs = await asyncio.gather(
+                        self.embed_text(original_texts[:mid]),
+                        self.embed_text(original_texts[mid:]),
+                    )
+                    embeddings = left_vecs + right_vecs
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
+                if len(original_texts) == 1:
+                    s = original_texts[0]
+                    third = len(s) // 3
+                    if third == 0:
+                        raise EmbeddingException(
+                            "Text is too short to split further but exceeds context window."
+                        ) from error
+                    left_part, right_part = s[: third * 2], s[third:]
+                    (left_vec,), (right_vec,) = await asyncio.gather(
+                        self.embed_text([left_part]),
+                        self.embed_text([right_part]),
+                    )
+                    pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+                    embeddings = [pooled.tolist()]
+                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
+                return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")
             raise EmbeddingException(
                 f"Failed to index data points using model {self.model}"
             ) from error
+
+        return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
     def get_vector_size(self) -> int:
         """

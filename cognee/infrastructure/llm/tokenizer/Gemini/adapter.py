@@ -1,4 +1,4 @@
-from typing import List, Any
+from typing import Any
 
 from ..tokenizer_interface import TokenizerInterface
 
@@ -19,7 +19,7 @@ class GeminiTokenizer(TokenizerInterface):
         self,
         llm_model: str,
         max_completion_tokens: int = 3072,
-    ):
+    ) -> None:
         self.llm_model = llm_model
         self.max_completion_tokens = max_completion_tokens
 
@@ -31,11 +31,11 @@ class GeminiTokenizer(TokenizerInterface):
 
         llm_config = get_llm_config()
 
-        from google import genai
+        from google import genai  # ty:ignore[unresolved-import]
 
         self.client = genai.Client(api_key=llm_config.llm_api_key)
 
-    def extract_tokens(self, text: str) -> List[Any]:
+    def extract_tokens(self, text: str) -> list[Any]:
         """
         Raise NotImplementedError when called, as this method should be implemented in a
         subclass.
@@ -47,7 +47,7 @@ class GeminiTokenizer(TokenizerInterface):
         """
         raise NotImplementedError
 
-    def decode_single_token(self, encoding: int):
+    def decode_single_token(self, token: int) -> str:
         """
         Raise NotImplementedError when called, as Gemini tokenizer does not support decoding of
         tokens.

@@ -1,23 +1,25 @@
-from uuid import UUID
-from typing import Optional, Union, List
 from datetime import datetime
-from pydantic import Field
-from fastapi import Depends, APIRouter
-from fastapi.responses import JSONResponse
-from fastapi.encoders import jsonable_encoder
+from typing import List, Optional, Union
+from uuid import UUID
 
-from cognee.modules.search.types import SearchType, SearchResult
-from cognee.api.DTO import InDTO, OutDTO
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
-from cognee.modules.users.models import User
-from cognee.modules.search.operations import get_history
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.utils import send_telemetry
-from cognee.shared.usage_logger import log_usage
+from fastapi import APIRouter, Depends
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from pydantic import Field
+
 from cognee import __version__ as cognee_version
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.usage_logger import log_usage
+from cognee.shared.utils import send_telemetry
 
 
 class RecallPayloadDTO(InDTO):
@@ -75,7 +77,7 @@ def get_recall_router() -> APIRouter:
                 content={"error": "An error occurred while fetching recall history."},
             )
 
-    @router.post("", response_model=Union[List[SearchResult], List])
+    @router.post("", response_model=list[RecallResponse])
     @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
     async def recall(payload: RecallPayloadDTO, user: User = Depends(get_authenticated_user)):
         """

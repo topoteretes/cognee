@@ -1,7 +1,8 @@
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
+from cognee.infrastructure.databases.cache import SessionQAEntry
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -12,19 +13,19 @@ from cognee.tasks.memify.feedback_weights_constants import (
 logger = get_logger("extract_feedback_qas")
 
 
-def _is_eligible(entry: Dict[str, Any]) -> bool:
-    feedback_score = entry.get("feedback_score")
+def _is_eligible(entry: SessionQAEntry) -> bool:
+    feedback_score = entry.feedback_score
     if not isinstance(feedback_score, int) or feedback_score < 1 or feedback_score > 5:
         return False
 
-    memify_metadata = entry.get("memify_metadata")
+    memify_metadata = entry.memify_metadata
     if (
         isinstance(memify_metadata, dict)
         and memify_metadata.get(MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY) is True
     ):
         return False
 
-    used_graph_element_ids = entry.get("used_graph_element_ids")
+    used_graph_element_ids = entry.used_graph_element_ids
     if not isinstance(used_graph_element_ids, dict):
         return False
 
@@ -76,18 +77,18 @@ async def extract_feedback_qas(data, session_ids: Optional[List[str]] = None):
             continue
 
         for entry in entries:
-            if not isinstance(entry, dict) or not _is_eligible(entry):
+            if not isinstance(entry, SessionQAEntry) or not _is_eligible(entry):
                 continue
 
-            qa_id = entry.get("qa_id")
+            qa_id = entry.qa_id
             if not isinstance(qa_id, str) or not qa_id:
                 continue
 
-            memify_metadata = entry.get("memify_metadata")
+            memify_metadata = entry.memify_metadata
             yield {
                 "session_id": session_id,
                 "qa_id": qa_id,
-                "feedback_score": entry.get("feedback_score"),
-                "used_graph_element_ids": entry.get("used_graph_element_ids"),
+                "feedback_score": entry.feedback_score,
+                "used_graph_element_ids": entry.used_graph_element_ids,
                 "memify_metadata": memify_metadata if isinstance(memify_metadata, dict) else {},
             }

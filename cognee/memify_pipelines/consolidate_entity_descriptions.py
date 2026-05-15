@@ -62,7 +62,7 @@ def format_edges(edges: List[Any]) -> Dict[str, str]:
 
     Handles multiple graph adapter edge tuple formats:
     - Neo4j / Neptune: (source_id, target_id, {"relationship_name": name})
-    - Kuzu:            (source_node_dict, relationship_name_str, target_node_dict)
+    - Ladybug:         (source_node_dict, relationship_name_str, target_node_dict)
     - EdgeData:        (source_id, target_id, relationship_name, properties)
     """
     result = {}
@@ -79,7 +79,7 @@ def format_edges(edges: List[Any]) -> Dict[str, str]:
             target_id = edge[1]
             rel_name = edge[2]
         elif isinstance(edge[1], str) and isinstance(edge[2], dict):
-            # Kuzu format: (source_dict, rel_name_str, target_dict)
+            # Ladybug format: (source_dict, rel_name_str, target_dict)
             target_id = edge[2].get("id", str(edge[2]))
             rel_name = edge[1]
         else:

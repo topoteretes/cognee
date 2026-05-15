@@ -20,8 +20,8 @@ logger = get_logger()
 
 async def main():
     # ENABLE PERMISSIONS FEATURE
-    # Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
-    # and graph provider is set to use Kuzu.
+    # Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled, vector provider is automatically set to use LanceDB.
+    # The default graph provider is Ladybug (can be overridden via GRAPH_DATABASE_PROVIDER env var).
     os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
 
     # Set the rest of your environment variables as needed. By default OpenAI is used as the LLM provider

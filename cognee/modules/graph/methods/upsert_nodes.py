@@ -7,6 +7,9 @@ from sqlalchemy.dialects.postgresql import insert
 from cognee.modules.graph.models import Node
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.databases.relational.with_async_session import with_async_session
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
+
+UPSERT_BATCH_SIZE = 1000
 
 
 @with_async_session
@@ -25,34 +28,37 @@ async def upsert_nodes(
     -----------
         - nodes (list): A list of nodes to be added to the graph.
     """
-    upsert_statement = (
-        insert(Node)
-        .values(
-            [
-                {
-                    "id": uuid5(
-                        NAMESPACE_OID,
-                        str(tenant_id)
-                        + str(user_id)
-                        + str(dataset_id)
-                        + str(data_id)
-                        + str(node.id),
-                    ),
-                    "slug": node.id,
-                    "user_id": user_id,
-                    "data_id": data_id,
-                    "dataset_id": dataset_id,
-                    "type": node.type,
-                    "indexed_fields": DataPoint.get_embeddable_property_names(node),
-                    "label": getattr(node, "label", getattr(node, "name", str(node.id))),
-                    "attributes": jsonable_encoder(node),
-                }
-                for node in nodes
-            ]
-        )
-        .on_conflict_do_nothing(index_elements=["id"])
-    )
+    if not nodes:
+        await session.commit()
+        return
 
-    await session.execute(upsert_statement)
+    node_rows = [
+        {
+            "id": uuid5(
+                NAMESPACE_OID,
+                str(tenant_id) + str(user_id) + str(dataset_id) + str(data_id) + str(node.id),
+            ),
+            "slug": node.id,
+            "user_id": user_id,
+            "data_id": data_id,
+            "dataset_id": dataset_id,
+            "type": sanitize_relational_payload(node.type),
+            "indexed_fields": sanitize_relational_payload(
+                DataPoint.get_embeddable_property_names(node)
+            ),
+            "label": sanitize_relational_payload(
+                getattr(node, "label", getattr(node, "name", str(node.id)))
+            ),
+            "attributes": sanitize_relational_payload(jsonable_encoder(node)),
+        }
+        for node in nodes
+    ]
+
+    for start_index in range(0, len(node_rows), UPSERT_BATCH_SIZE):
+        node_batch = node_rows[start_index : start_index + UPSERT_BATCH_SIZE]
+        upsert_statement = (
+            insert(Node).values(node_batch).on_conflict_do_nothing(index_elements=["id"])
+        )
+        await session.execute(upsert_statement)
 
     await session.commit()

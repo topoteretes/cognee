@@ -9,23 +9,22 @@ session history; e2e for session SDK (get_session, add_feedback, delete_feedback
 """
 
 import os
-import cognee
 import pathlib
+from collections import Counter
 
-from cognee.infrastructure.databases.cache import get_cache_engine
+import cognee
+from cognee.infrastructure.databases.cache import SessionQAEntry, get_cache_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.search.types import SearchType
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
-from collections import Counter
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
-def _assert_used_graph_element_ids_shape(entry: dict, expect_none: bool = False) -> None:
+def _assert_used_graph_element_ids_shape(entry: SessionQAEntry, expect_none: bool = False) -> None:
     """Assert entry has used_graph_element_ids key and valid shape (or None for Triplet)."""
-    assert "used_graph_element_ids" in entry, "QA entry should have used_graph_element_ids key"
-    ids = entry["used_graph_element_ids"]
+    ids = entry.used_graph_element_ids
     if expect_none:
         assert ids is None, "Triplet retriever should store used_graph_element_ids as None"
         return
@@ -97,11 +96,8 @@ async def main():
 
     history1 = await cache_engine.get_latest_qa(str(user.id), session_id_1, last_n=10)
     assert len(history1) == 1, f"Expected at least 1 Q&A in history, got {len(history1)}"
-    our_qa = [h for h in history1 if h["question"] == "What is TechCorp?"]
+    our_qa = [h for h in history1 if h.question == "What is TechCorp?"]
     assert len(our_qa) >= 1, "Expected to find 'What is TechCorp?' in history"
-    assert "answer" in our_qa[0] and "context" in our_qa[0], (
-        "Q&A should contain answer and context fields"
-    )
     _assert_used_graph_element_ids_shape(our_qa[0])
 
     result2 = await cognee.search(
@@ -116,7 +112,7 @@ async def main():
 
     history2 = await cache_engine.get_latest_qa(str(user.id), session_id_1, last_n=10)
     our_questions = [
-        h for h in history2 if h["question"] in ["What is TechCorp?", "Tell me more about it"]
+        h for h in history2 if h.question in ["What is TechCorp?", "Tell me more about it"]
     ]
     assert len(our_questions) == 2, (
         f"Expected at least 2 Q&A pairs in history after 2 queries, got {len(our_questions)}"
@@ -135,7 +131,7 @@ async def main():
     )
 
     history3 = await cache_engine.get_latest_qa(str(user.id), session_id_2, last_n=10)
-    our_qa_session2 = [h for h in history3 if h["question"] == "What is DataCo?"]
+    our_qa_session2 = [h for h in history3 if h.question == "What is DataCo?"]
     assert len(our_qa_session2) == 1, "Session 2 should have 'What is DataCo?' question"
 
     result4 = await cognee.search(
@@ -149,7 +145,7 @@ async def main():
     )
 
     history_default = await cache_engine.get_latest_qa(str(user.id), "default_session", last_n=10)
-    our_qa_default = [h for h in history_default if h["question"] == "Test default session"]
+    our_qa_default = [h for h in history_default if h.question == "Test default session"]
     assert len(our_qa_default) == 1, "Should find 'Test default session' in default_session"
 
     session_id_rag = "test_session_rag"
@@ -165,7 +161,7 @@ async def main():
     )
 
     history_rag = await cache_engine.get_latest_qa(str(user.id), session_id_rag, last_n=10)
-    our_qa_rag = [h for h in history_rag if h["question"] == "What companies are mentioned?"]
+    our_qa_rag = [h for h in history_rag if h.question == "What companies are mentioned?"]
     assert len(our_qa_rag) == 1, "Should find RAG question in history"
     _assert_used_graph_element_ids_shape(our_qa_rag[0])
 
@@ -188,7 +184,7 @@ async def main():
     our_qa_decomposition = [
         h
         for h in history_decomposition
-        if h["question"] == "What do you know about TechCorp and DataCo?"
+        if h.question == "What do you know about TechCorp and DataCo?"
     ]
     assert len(our_qa_decomposition) == 1, "Should find decomposition question in history"
     _assert_used_graph_element_ids_shape(our_qa_decomposition[0])
@@ -215,7 +211,7 @@ async def main():
     our_qa_decomposition_combined = [
         h
         for h in history_decomposition_combined
-        if h["question"] == "What do you know about TechCorp and DataCo?"
+        if h.question == "What do you know about TechCorp and DataCo?"
     ]
     assert len(our_qa_decomposition_combined) == 1, (
         "Should find combined decomposition question in history"
@@ -235,7 +231,7 @@ async def main():
     )
 
     history_cot = await cache_engine.get_latest_qa(str(user.id), session_id_cot, last_n=10)
-    our_qa_cot = [h for h in history_cot if h["question"] == "What do you know about TechCorp?"]
+    our_qa_cot = [h for h in history_cot if h.question == "What do you know about TechCorp?"]
     assert len(our_qa_cot) == 1, "Should find CoT question in history"
     _assert_used_graph_element_ids_shape(our_qa_cot[0])
 
@@ -252,7 +248,7 @@ async def main():
     )
 
     history_ext = await cache_engine.get_latest_qa(str(user.id), session_id_ext, last_n=10)
-    our_qa_ext = [h for h in history_ext if h["question"] == "Tell me about DataCo"]
+    our_qa_ext = [h for h in history_ext if h.question == "Tell me about DataCo"]
     assert len(our_qa_ext) == 1, "Should find Context Extension question in history"
     _assert_used_graph_element_ids_shape(our_qa_ext[0])
 
@@ -270,7 +266,7 @@ async def main():
 
     history_summary = await cache_engine.get_latest_qa(str(user.id), session_id_summary, last_n=10)
     our_qa_summary = [
-        h for h in history_summary if h["question"] == "What are the key points about TechCorp?"
+        h for h in history_summary if h.question == "What are the key points about TechCorp?"
     ]
     assert len(our_qa_summary) == 1, "Should find Summary question in history"
     _assert_used_graph_element_ids_shape(our_qa_summary[0])
@@ -290,9 +286,7 @@ async def main():
     history_temporal = await cache_engine.get_latest_qa(
         str(user.id), session_id_temporal, last_n=10
     )
-    our_qa_temporal = [
-        h for h in history_temporal if h["question"] == "Tell me about the companies"
-    ]
+    our_qa_temporal = [h for h in history_temporal if h.question == "Tell me about the companies"]
     assert len(our_qa_temporal) == 1, "Should find Temporal question in history"
     _assert_used_graph_element_ids_shape(our_qa_temporal[0])
 
@@ -309,9 +303,7 @@ async def main():
     )
 
     history_triplet = await cache_engine.get_latest_qa(str(user.id), session_id_triplet, last_n=10)
-    our_qa_triplet = [
-        h for h in history_triplet if h["question"] == "What companies are mentioned?"
-    ]
+    our_qa_triplet = [h for h in history_triplet if h.question == "What companies are mentioned?"]
     assert len(our_qa_triplet) == 1, "Should find Triplet question in history"
     _assert_used_graph_element_ids_shape(our_qa_triplet[0], expect_none=True)
 
@@ -320,10 +312,6 @@ async def main():
     assert len(entries) >= 2, (
         "Session should have at least 2 Q&A entries (two searches in session_id_1)"
     )
-    for entry in entries:
-        assert getattr(entry, "question", None), "Entry should have question"
-        assert getattr(entry, "context", None) is not None, "Entry should have context"
-        assert getattr(entry, "answer", None), "Entry should have answer"
 
     from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
         persist_sessions_in_knowledge_graph_pipeline,

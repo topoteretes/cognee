@@ -70,8 +70,7 @@ async def extract_people(data: LightweightData) -> List[Person]:
 
 
 async def main(text_data):
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
     await setup()
 
     tasks = [

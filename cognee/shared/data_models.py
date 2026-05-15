@@ -1,9 +1,10 @@
 """Data models for the cognitive architecture."""
 
 from enum import Enum, auto
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel, Field
+
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
@@ -37,8 +38,8 @@ if get_llm_config().llm_provider.lower() == "gemini":
 
         summary: str
         description: str
-        nodes: List[Node] = Field(..., default_factory=list)
-        edges: List[Edge] = Field(..., default_factory=list)
+        nodes: list[Node] = Field(..., default_factory=list)
+        edges: list[Edge] = Field(..., default_factory=list)
 else:
 
     class Node(BaseModel):
@@ -49,7 +50,7 @@ else:
         type: str
         description: str
 
-        def __init__(self, **data):
+        def __init__(self, **data: Any) -> None:
             if not data.get("name"):
                 data["name"] = data.get("id", "")
             super().__init__(**data)
@@ -64,8 +65,8 @@ else:
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""
 
-        nodes: List[Node] = Field(..., default_factory=list)
-        edges: List[Edge] = Field(..., default_factory=list)
+        nodes: list[Node] = Field(..., default_factory=list)
+        edges: list[Edge] = Field(..., default_factory=list)
 
 
 class GraphQLQuery(BaseModel):
@@ -97,8 +98,8 @@ class ChunkEngine(Enum):
 class MemorySummary(BaseModel):
     """Memory summary."""
 
-    nodes: List[Node] = Field(..., default_factory=list)
-    edges: List[Edge] = Field(..., default_factory=list)
+    nodes: list[Node] = Field(..., default_factory=list)
+    edges: list[Edge] = Field(..., default_factory=list)
 
 
 class TextSubclass(str, Enum):
@@ -211,51 +212,51 @@ class ContentType(BaseModel):
 
 class TextContent(ContentType):
     type: str = "TEXTUAL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
-    subclass: List[TextSubclass]
+    subclass: list[TextSubclass]
 
 
 class AudioContent(ContentType):
     type: str = "AUDIO_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
-    subclass: List[AudioSubclass]
+    subclass: list[AudioSubclass]
 
 
 class ImageContent(ContentType):
     type: str = "IMAGE_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
-    subclass: List[ImageSubclass]
+    subclass: list[ImageSubclass]
 
 
 class VideoContent(ContentType):
     type: str = "VIDEO_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
-    subclass: List[VideoSubclass]
+    subclass: list[VideoSubclass]
 
 
 class MultimediaContent(ContentType):
     type: str = "MULTIMEDIA_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
-    subclass: List[MultimediaSubclass]
+    subclass: list[MultimediaSubclass]
 
 
 class Model3DContent(ContentType):
     type: str = "3D_MODEL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
-    subclass: List[Model3DSubclass]
+    subclass: list[Model3DSubclass]
 
 
 class ProceduralContent(ContentType):
     type: str = "PROCEDURAL_DOCUMENTS_USED_FOR_GENERAL_PURPOSES"
-    subclass: List[ProceduralSubclass]
+    subclass: list[ProceduralSubclass]
 
 
 class DefaultContentPrediction(BaseModel):
     """Class for a single class label prediction."""
 
-    label: Union[
-        TextContent,
-        AudioContent,
-        ImageContent,
-        VideoContent,
-        MultimediaContent,
-        Model3DContent,
-        ProceduralContent,
-    ]
+    label: (
+        TextContent
+        | AudioContent
+        | ImageContent
+        | VideoContent
+        | MultimediaContent
+        | Model3DContent
+        | ProceduralContent
+    )
 
 
 class SummarizedContent(BaseModel):
@@ -268,40 +269,41 @@ class SummarizedContent(BaseModel):
 class SummarizedFunction(BaseModel):
     name: str
     description: str
-    inputs: Optional[List[str]] = None
-    outputs: Optional[List[str]] = None
-    decorators: Optional[List[str]] = None
+    inputs: list[str] | None = None
+    outputs: list[str] | None = None
+    decorators: list[str] | None = None
 
 
 class SummarizedClass(BaseModel):
     name: str
     description: str
-    methods: Optional[List[SummarizedFunction]] = None
-    decorators: Optional[List[str]] = None
+    methods: list[SummarizedFunction] | None = None
+    decorators: list[str] | None = None
 
 
 class SummarizedCode(BaseModel):
     high_level_summary: str
-    key_features: List[str]
-    imports: List[str] = []
-    constants: List[str] = []
-    classes: List[SummarizedClass] = []
-    functions: List[SummarizedFunction] = []
-    workflow_description: Optional[str] = None
+    key_features: list[str]
+    imports: list[str] = []
+    constants: list[str] = []
+    classes: list[SummarizedClass] = []
+    functions: list[SummarizedFunction] = []
+    workflow_description: str | None = None
 
 
 class GraphDBType(Enum):
     NETWORKX = auto()
     NEO4J = auto()
+    LADYBUG = auto()
     KUZU = auto()
 
 
 # Models for representing different entities
 class Relationship(BaseModel):
     type: str
-    source: Optional[str] = None
-    target: Optional[str] = None
-    properties: Optional[Dict[str, Any]] = None
+    source: str | None = None
+    target: str | None = None
+    properties: dict[str, Any] | None = None
 
 
 class DocumentType(BaseModel):
@@ -329,15 +331,15 @@ class UserLocation(BaseModel):
 
 
 class UserProperties(BaseModel):
-    custom_properties: Optional[Dict[str, Any]] = None
-    location: Optional[UserLocation] = None
+    custom_properties: dict[str, Any] | None = None
+    location: UserLocation | None = None
 
 
 class DefaultGraphModel(BaseModel):
     node_id: str
     user_properties: UserProperties = UserProperties()
-    documents: List[Document] = []
-    default_fields: Optional[Dict[str, Any]] = {}
+    documents: list[Document] = []
+    default_fields: dict[str, Any] | None = {}
     default_relationship: Relationship = Relationship(type="has_properties")
 
 
@@ -349,4 +351,4 @@ class ChunkSummary(BaseModel):
 class ChunkSummaries(BaseModel):
     """Relevant summary and chunk id"""
 
-    summaries: List[ChunkSummary]
+    summaries: list[ChunkSummary]

@@ -1,13 +1,13 @@
 [project]
 name = "cognee"
 
-version = "1.0.1.dev4"
+version = "1.1.0.dev1"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
     { name = "Boris Arzentar" },
 ]
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.10,<3.15"
 readme = "README.md"
 license = "Apache-2.0"
 classifiers = [
@@ -29,7 +29,7 @@ dependencies = [
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
     "tiktoken>=0.8.0,<1.0.0",
-    "litellm>=1.83.0",
+    "litellm>=1.83.7",
     "instructor>=1.9.1,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.13.3,<4.0.0",
@@ -47,7 +47,7 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
-    "kuzu (==0.11.3)",
+    "ladybug==0.16.0",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
@@ -75,14 +75,22 @@ scraping = [
     "beautifulsoup4>=4.13.1",
     "playwright>=1.9.0",
     "lxml>=4.9.3,<5 ; python_version < '3.13'",
-    "lxml>=5,<6 ; python_version >= '3.13'",
+    "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",
+    # cp314 wheels start at lxml 6.0.1; without this 3.14 falls back to a
+    # source build that requires libxml2/libxslt headers (CI doesn't have them).
+    "lxml>=6.0.1,<7 ; python_version >= '3.14'",
     "protego>=0.1",
     "APScheduler>=3.10.0,<=3.11.0"
 ]
 
 fastembed = [
-    "fastembed<=0.6.0",
-    "onnxruntime<=1.22.1",
+    "fastembed<=0.8.0",
+    # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
+    # at onnxruntime 1.24.1. Split by python_version so existing 3.10–3.13
+    # users keep the pinned version and 3.14 picks up the first cp314-capable
+    # release.
+    "onnxruntime<=1.23.2 ; python_version < '3.14'",
+    "onnxruntime>=1.24.1 ; python_version >= '3.14'",
 ]
 
 neo4j = ["neo4j>=5.28.0,<6"]
@@ -103,7 +111,7 @@ langchain = [
     "langchain_text_splitters>=0.3.2,<1.0.0",
     "langchain-core>=1.2.5"
 ]
-llama-index = ["llama-index-core>=0.13.0,<0.14"]
+llama-index = ["llama-index-core>=0.14.20,<0.15"]
 huggingface = ["transformers>=4.46.3,<5"]
 ollama = ["transformers>=4.46.3,<5"]
 mistral = ["mistral-common>=1.5.2,<2", "mistralai>=1.9.10,<2"]
@@ -115,15 +123,23 @@ groq = ["groq>=0.8.0,<1.0.0"]
 llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0"]
 chromadb = [
     "chromadb>=0.6,<0.7",
-    "pypika==0.48.9",
+    # pypika 0.48.9's setup.py uses ast.Str, which Python 3.14 removed (it
+    # was deprecated since 3.8). Build fails with "module 'ast' has no
+    # attribute 'Str'". Allow newer pypika on 3.14 — chromadb itself only
+    # requires pypika>=0.48.9, so this is in-range for it.
+    "pypika==0.48.9 ; python_version < '3.14'",
+    "pypika>=0.50.0 ; python_version >= '3.14'",
 ]
 docs = [
     "lxml>=4.9.3,<5 ; python_version < '3.13'",
-    "lxml>=5,<6 ; python_version >= '3.13'",
+    "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",
+    # cp314 wheels start at lxml 6.0.1.
+    "lxml>=6.0.1,<7 ; python_version >= '3.14'",
     "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
+    "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 codegraph = [
-    "fastembed<=0.6.0 ; python_version < '3.13'",
+    "fastembed<=0.8.0 ; python_version < '3.14'",
     "transformers>=4.46.3,<5",
     "tree-sitter>=0.24.0,<0.25",
     "tree-sitter-python>=0.23.6,<0.24",
@@ -134,6 +150,7 @@ evals = [
     "pandas>=2.2.2,<3.0.0",
     "matplotlib>=3.8.3,<4",
     "scikit-learn>=1.6.1,<2",
+    "locust>=2.0.0,<3",
 ]
 
 graphiti = ["graphiti-core>=0.28.0"]
@@ -210,13 +227,26 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["cognee", "distributed"]
+packages = ["cognee", "cognee_db_workers", "distributed", "kuzu"]
 
 [tool.uv]
+# Note: exclude newer packages that are less than 2 days old
+exclude-newer = "2 days"
 constraint-dependencies = [
     "protobuf>=5.29.6, !=6.30.*, !=6.31.*, !=6.32.*, !=6.33.1, !=6.33.2, !=6.33.3, !=6.33.4", # protobuf 6.33.5 and higher versions + version 5.29.6
     "pyasn1>=0.6.2",
     "wheel>=0.46.2",
+    "nltk>=3.9.3",
+    # spacy 3.8.14 dropped cp314 wheels (3.8.10-3.8.13 had them); pin so the
+    # Python 3.14 release path keeps a wheel available. Pulled transitively
+    # via unstructured.
+    "spacy<3.8.14 ; python_version >= '3.14'",
+    # scipy cp314 wheels start at 1.16.1; 1.16+ also dropped cp310, so the
+    # resolver collapses <3.11 and >=3.14 onto the latest cp310-compatible
+    # version (1.15.3) by default — which has no cp314 wheel. Force 3.14 to
+    # use 1.16.1+ so the wheel-only release sync succeeds. Pulled
+    # transitively via pandas / scikit-learn / fastembed.
+    "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
 
 [tool.ruff]
@@ -243,7 +273,21 @@ include = [
     "cognee/infrastructure/data",
     "cognee/infrastructure/engine",
     "cognee/infrastructure/entities",
+    "cognee/infrastructure/files",
+    "cognee/infrastructure/llm",
     "cognee/infrastructure/loaders",
+    "cognee/infrastructure/locks",
     "cognee/infrastructure/session",
-    "cognee/infrastructure/utils"
+    "cognee/infrastructure/utils",
+    "cognee/shared"
+]
+# Exclude generated files
+exclude = ["cognee/infrastructure/llm/structured_output_framework/baml/baml_client/"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=7.4.4",
+    "pytest-asyncio>=0.21.2",
+    "ruff>=0.13.1",
 ]

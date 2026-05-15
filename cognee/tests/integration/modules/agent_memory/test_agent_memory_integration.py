@@ -87,8 +87,8 @@ def _count_document_chunks(nodes) -> int:
 
 @pytest_asyncio.fixture
 async def agent_memory_integration_env(tmp_path, monkeypatch):
-    """Create a clean environment with kuzu graph storage and FS-backed session traces."""
-    pytest.importorskip("kuzu")
+    """Create a clean environment with ladybug graph storage and FS-backed session traces."""
+    pytest.importorskip("ladybug")
 
     root = Path(tmp_path)
     monkeypatch.setenv("CACHE_BACKEND", "fs")
@@ -96,7 +96,7 @@ async def agent_memory_integration_env(tmp_path, monkeypatch):
     _reset_cache_backend_caches()
     vector_db_config.set(None)
     graph_db_config.set(None)
-    cognee.config.set_graph_database_provider("kuzu")
+    cognee.config.set_graph_database_provider("ladybug")
     cognee.config.set_vector_db_config(
         {
             "vector_db_provider": "lancedb",

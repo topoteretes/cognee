@@ -107,3 +107,19 @@ def get_cache_engine(
         tapes_model=config.tapes_model,
         tapes_request_timeout=config.tapes_request_timeout,
     )
+
+
+async def close_cache_engine(
+    lock_key: Optional[str] = "default_lock",
+    log_key: Optional[str] = "usage_logs",
+) -> None:
+    """Close and clear the cached cache engine instance."""
+    if create_cache_engine.cache_info().currsize == 0:
+        return
+
+    try:
+        cache_engine = get_cache_engine(lock_key=lock_key, log_key=log_key)
+        if cache_engine is not None:
+            await cache_engine.close()
+    finally:
+        create_cache_engine.cache_clear()

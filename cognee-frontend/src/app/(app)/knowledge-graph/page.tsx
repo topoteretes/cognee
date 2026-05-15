@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
-import { useFilter } from "@/ui/Layout/FilterContext";
+import { useFilter } from "@/ui/layout/FilterContext";
 
 export default function KnowledgeGraphPage() {
   const { cogniInstance, serviceUrl, isInitializing } = useCogniInstance();

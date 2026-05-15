@@ -50,10 +50,6 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
                 name = _create_title_from_text(text)
                 content = text
             else:
-                logger.debug(
-                    "Node text missing, using fallback attributes",
-                    extra={"node_id": str(node.id)},
-                )
                 name = node.attributes.get("name", "Unnamed Node")
                 content = node.attributes.get("description", name)
 
@@ -86,13 +82,6 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
         target_name = nodes[edge.node2.id]["name"]
         edge_label = edge.attributes.get("edge_text")
         if not edge_label:
-            logger.debug(
-                "Edge text missing, falling back to relationship_type",
-                extra={
-                    "source_id": str(edge.node1.id),
-                    "target_id": str(edge.node2.id),
-                },
-            )
             edge_label = edge.attributes.get("relationship_type")
 
         connections.append(f"{source_name} --[{edge_label}]--> {target_name}")

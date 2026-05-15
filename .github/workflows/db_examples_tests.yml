@@ -82,11 +82,11 @@ jobs:
         run: |
           uv run python examples/database_examples/neo4j_example.py
 
-  run-db-example-kuzu:
-    name: "Kuzu DB Example Test"
+  run-db-example-ladybug:
+    name: "Ladybug DB Example Test"
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'ladybug') || contains(inputs.databases, 'kuzu') }}
 
     steps:
       - name: Check out
@@ -100,7 +100,7 @@ jobs:
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
 
-      - name: Run Kuzu Example
+      - name: Run Ladybug Example
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -112,9 +112,9 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          GRAPH_DATABASE_PROVIDER: "kuzu"
+          GRAPH_DATABASE_PROVIDER: "ladybug"
         run: |
-          uv run python examples/database_examples/kuzu_example.py
+          uv run python examples/database_examples/ladybug_example.py
 
   run-db-example-pgvector:
     name: "PostgreSQL PGVector DB Example Test"

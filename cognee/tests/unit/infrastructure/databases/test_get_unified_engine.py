@@ -16,8 +16,9 @@ class TestIsHybridProvider:
     #     v = {"vector_db_provider": "neptune_analytics"}
     #     assert _is_hybrid_provider(g, v) is True
 
-    def test_kuzu_lancedb_is_not_hybrid(self):
-        g = {"graph_database_provider": "kuzu"}
+    def test_ladybug_lancedb_is_not_hybrid(self, monkeypatch):
+        monkeypatch.delenv("USE_UNIFIED_PROVIDER", raising=False)
+        g = {"graph_database_provider": "ladybug"}
         v = {"vector_db_provider": "lancedb"}
         assert _is_hybrid_provider(g, v) is False
 
@@ -40,8 +41,10 @@ class TestIsHybridProvider:
 
 
 @pytest.mark.asyncio
-async def test_get_unified_engine_returns_separate_for_defaults():
-    """With default kuzu+lancedb config, get_unified_engine returns separate backends."""
+async def test_get_unified_engine_returns_separate_for_defaults(monkeypatch):
+    """With default ladybug+lancedb config, get_unified_engine returns separate backends."""
+    monkeypatch.delenv("USE_UNIFIED_PROVIDER", raising=False)
+
     from cognee.infrastructure.databases.unified import get_unified_engine
 
     engine = await get_unified_engine()

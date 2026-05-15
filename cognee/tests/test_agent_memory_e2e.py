@@ -27,11 +27,11 @@ async def _reset_engines_and_prune() -> None:
     except Exception:
         pass
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -151,11 +151,11 @@ async def test_agent_memory_e2e_persists_success_and_error_traces(agent_memory_e
 
     success_entry, error_entry = trace_entries
 
-    assert success_entry["origin_function"].endswith("successful_agent")
-    assert success_entry["status"] == "success"
-    assert success_entry["method_return_value"] == success_text
-    assert success_entry["error_message"] == ""
+    assert success_entry.origin_function.endswith("successful_agent")
+    assert success_entry.status == "success"
+    assert success_entry.method_return_value == success_text
+    assert success_entry.error_message == ""
 
-    assert error_entry["origin_function"].endswith("failing_agent")
-    assert error_entry["status"] == "error"
-    assert error_entry["error_message"] == error_text
+    assert error_entry.origin_function.endswith("failing_agent")
+    assert error_entry.status == "error"
+    assert error_entry.error_message == error_text

@@ -7,7 +7,7 @@ import pytest
 import cognee
 
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
+from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
 
 DEMO_KG_PATH = os.path.join(os.path.dirname(__file__), "test_kg.json")
@@ -41,8 +41,8 @@ def _normalize_neighbor(node: dict) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_kuzu_neo4j_get_neighbors_match(tmp_path):
-    pytest.importorskip("kuzu")
+async def test_ladybug_neo4j_get_neighbors_match(tmp_path):
+    pytest.importorskip("ladybug")
     pytest.importorskip("neo4j")
 
     neo4j_url = os.getenv("GRAPH_DATABASE_URL") or os.getenv("NEO4J_URL")
@@ -65,8 +65,8 @@ async def test_kuzu_neo4j_get_neighbors_match(tmp_path):
         (edge.source_node_id, edge.target_node_id, edge.relationship_name, {}) for edge in kg.edges
     ]
 
-    kuzu_db_path = str(tmp_path / "kuzu_neighbors_graph")
-    kuzu = KuzuAdapter(db_path=kuzu_db_path)
+    ladybug_db_path = str(tmp_path / "ladybug_neighbors_graph")
+    ladybug = LadybugAdapter(db_path=ladybug_db_path)
     neo4j = Neo4jAdapter(
         graph_database_url=neo4j_url,
         graph_database_username=neo4j_user,
@@ -75,25 +75,25 @@ async def test_kuzu_neo4j_get_neighbors_match(tmp_path):
     )
 
     try:
-        await kuzu.add_nodes(kg.nodes)
-        await kuzu.add_edges(edge_rows)
+        await ladybug.add_nodes(kg.nodes)
+        await ladybug.add_edges(edge_rows)
 
         await neo4j.initialize()
         await neo4j.delete_graph()
         await neo4j.add_nodes(kg.nodes)
         await neo4j.add_edges(edge_rows)
 
-        kuzu_neighbors = await kuzu.get_neighbors(center_node_id)
+        ladybug_neighbors = await ladybug.get_neighbors(center_node_id)
         neo4j_neighbors = await neo4j.get_neighbors(center_node_id)
 
-        kuzu_norm = {
+        ladybug_norm = {
             (
                 norm["id"],
                 norm["name"],
                 norm["type"],
                 norm["description"],
             )
-            for norm in (_normalize_neighbor(n) for n in kuzu_neighbors)
+            for norm in (_normalize_neighbor(n) for n in ladybug_neighbors)
         }
         neo4j_norm = {
             (
@@ -105,7 +105,7 @@ async def test_kuzu_neo4j_get_neighbors_match(tmp_path):
             for norm in (_normalize_neighbor(n) for n in neo4j_neighbors)
         }
 
-        assert kuzu_norm == neo4j_norm
+        assert ladybug_norm == neo4j_norm
     finally:
         await neo4j.delete_graph()
-        await kuzu.delete_graph()
+        await ladybug.delete_graph()

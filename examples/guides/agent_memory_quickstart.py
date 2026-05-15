@@ -26,10 +26,10 @@ NO_INFO = "NO INFO AVAILABLE"
 
 
 async def setup() -> None:
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    await cognee.add(["Our app is a web service. Users log in to access their account."])
-    await cognee.cognify()
+    await cognee.forget(everything=True)
+    await cognee.remember(
+        ["Our app is a web service. Users log in to access their account."], self_improvement=False
+    )
 
 
 async def ask_llm(question: str, system_prompt: str) -> str:

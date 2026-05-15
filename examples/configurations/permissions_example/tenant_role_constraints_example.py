@@ -102,8 +102,8 @@ async def main():
 
 
 # Please set ENABLE_BACKEND_ACCESS_CONTROL=True in .env file
-# Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
-# and graph provider is set to use Kuzu.
+# Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled, vector provider is automatically set to use LanceDB.
+# The default graph provider is Ladybug (can be overridden via GRAPH_DATABASE_PROVIDER env var).
 if __name__ == "__main__":
     import asyncio
 

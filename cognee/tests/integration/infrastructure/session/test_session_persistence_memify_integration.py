@@ -118,12 +118,12 @@ async def session_persistence_env(event_loop):
         tempfile.TemporaryDirectory(prefix="cognee_session_persistence_system_") as system_path,
         tempfile.TemporaryDirectory(prefix="cognee_session_persistence_data_") as data_path,
     ):
-        pytest.importorskip("kuzu")
+        pytest.importorskip("ladybug")
         _reset_cache_backend_caches()
 
         vector_db_config.set(None)
         graph_db_config.set(None)
-        cognee.config.set_graph_database_provider("kuzu")
+        cognee.config.set_graph_database_provider("ladybug")
         cognee.config.set_vector_db_config(
             {
                 "vector_db_provider": "lancedb",

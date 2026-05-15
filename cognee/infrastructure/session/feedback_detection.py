@@ -30,11 +30,7 @@ async def detect_feedback(user_message: str) -> FeedbackDetectionResult:
             system_prompt=system_prompt,
             response_model=FeedbackDetectionResult,
         )
-        return (
-            result
-            if isinstance(result, FeedbackDetectionResult)
-            else FeedbackDetectionResult(feedback_detected=False)
-        )
+        return result
     except Exception as e:
         logger.warning(
             "Feedback detection failed, proceeding with no feedback detected: %s", e, exc_info=False

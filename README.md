@@ -5,7 +5,7 @@
 
   <br />
 
-  Cognee - Build AI memory with a Knowledge Engine that learns
+  Cognee - The Brain behind your Agents
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s">Demo</a>
@@ -37,7 +37,7 @@
   </a>
 </p>
 
-Use our knowledge engine to build personalized and dynamic memory for AI Agents.
+Cognee gives AI agents a shared, improving memory of your data, decisions, and workflows so they can recall, connect, and act with context.
 
   <p align="center">
   🌐 Available Languages
@@ -64,7 +64,7 @@ Use our knowledge engine to build personalized and dynamic memory for AI Agents.
 
 ## About Cognee
 
-Cognee is an open-source knowledge engine that lets you ingest data in any format or structure and continuously learns to provide the right context for AI agents. It combines vector search, graph databases and cognitive science approaches to make your documents both searchable by meaning and connected by relationships as they change and evolve.
+Cognee is an open-source memory control plane for your Agents that lets you ingest data in any format or structure and continuously learns to provide the right context. It combines embeddings, graphs and cognitive science approaches to make your documents both searchable by meaning and connected by relationships as they change and evolve.
 
 
 
@@ -77,11 +77,10 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 ✴️ _Available as a plugin for your Claude Code — [claude-code-plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code)_
 
 
-Cognee memory plugin
-
 
 ### Why use Cognee:
 
+- Easily Build Company Brain - unify data from various sources in one place and enable Agents with your domain knowledge
 - Knowledge infrastructure — unified ingestion, graph/vector search, runs locally, ontology grounding, multimodal
 - Persistent and Learning Agents - learn from feedback, context management, cross-agent knowledge sharing
 - Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
@@ -104,7 +103,7 @@ Let’s try Cognee in just a few lines of code.
 
 ### Prerequisites
 
-- Python 3.10 to 3.13
+- Python 3.10 to 3.14
 
 ### Step 1: Install Cognee
 
@@ -203,26 +202,6 @@ export COGNEE_API_KEY="ck_..."
 ```
 
 The plugin hooks into Claude Code's lifecycle — `SessionStart` initializes memory, `PostToolUse` captures actions, `UserPromptSubmit` injects relevant context, `PreCompact` preserves memory across context resets, and `SessionEnd` bridges session data into the permanent graph.
-
-### Hermes Agent
-
-Enable Cognee as the memory provider in [Hermes Agent](https://github.com/NousResearch/hermes-agent) for session-aware knowledge graph memory with auto-routing recall.
-
-**Setup:**
-
-```yaml
-# ~/.hermes/config.yaml
-memory:
-  provider: cognee
-```
-
-```bash
-export LLM_API_KEY="your-openai-key"
-hermes  # start chatting — session memory and graph persistence are automatic
-```
-
-Or run `hermes memory setup` and select Cognee. For Cognee Cloud, set `COGNEE_SERVICE_URL` and `COGNEE_API_KEY` in `~/.hermes/.env`.
-
 
 ### Connect to Cognee Cloud
 
