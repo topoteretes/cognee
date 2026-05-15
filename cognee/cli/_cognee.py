@@ -149,6 +149,17 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         help="Delegate commands to a running Cognee API server (e.g. http://localhost:8000). "
         "Required for multi-agent / concurrent usage with file-based databases.",
     )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help="API key sent as X-Api-Key when --api-url is set. Falls back to $COGNEE_API_KEY.",
+    )
+    parser.add_argument(
+        "--api-token",
+        default=None,
+        help="Bearer token sent as Authorization: Bearer <token> when --api-url is set. "
+        "Falls back to $COGNEE_API_TOKEN. Ignored if --api-key is also provided.",
+    )
 
     subparsers = parser.add_subparsers(title="Available commands", dest="command")
 

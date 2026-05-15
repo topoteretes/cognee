@@ -32,6 +32,7 @@ class VectorConfig(BaseSettings):
     vector_db_username: str = ""
     vector_db_password: str = ""
     vector_db_host: str = ""
+    vector_db_subprocess_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -71,6 +72,7 @@ class VectorConfig(BaseSettings):
             "vector_db_username": self.vector_db_username,
             "vector_db_password": self.vector_db_password,
             "vector_db_host": self.vector_db_host,
+            "vector_db_subprocess_enabled": self.vector_db_subprocess_enabled,
         }
 
 

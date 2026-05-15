@@ -1,7 +1,11 @@
-"""Unit tests for NeptuneAnalyticsAdapter.add_nodes_with_vectors and add_edges_with_vectors.
+"""Unit tests for NeptuneAnalyticsAdapter hybrid-write methods and search().
 
-These tests verify the two new hybrid-write methods. They are skipped automatically
-when the Neptune optional dependencies (langchain_aws, botocore) are not installed.
+- add_nodes_with_vectors / add_edges_with_vectors
+- search() include_payload handling and node_name filtering
+
+These tests verify the hybrid-write methods and search behaviour. They are skipped
+automatically when the Neptune optional dependencies (langchain_aws, botocore) are
+not installed.
 """
 
 import pytest
@@ -164,3 +168,177 @@ async def test_add_edges_with_vectors_uses_edge_text_property_when_present():
     schemas = adapter.create_data_points.call_args[0][1]
     assert len(schemas) == 1
     assert schemas[0].text == "custom text"
+
+
+# ---------------------------------------------------------------------------
+# search: include_payload and node_name filtering
+# ---------------------------------------------------------------------------
+
+
+def _re_raise_exception(e, _query):
+    raise e
+
+
+class _FakeSearchAdapter:
+    """Minimal stand-in for NeptuneAnalyticsAdapter.search tests."""
+
+    search = NeptuneAnalyticsAdapter.search
+
+    def __init__(self, query_response=None):
+        self._client = MagicMock()
+        self._client.query = MagicMock(return_value=query_response or [])
+        self.embedding_engine = AsyncMock()
+        self.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+        self._COLLECTION_PREFIX = "collection"
+        self._TOPK_LOWER_BOUND = 0
+        self._TOPK_UPPER_BOUND = 100
+        self._na_exception_handler = MagicMock(side_effect=_re_raise_exception)
+        self._validate_embedding_engine = MagicMock()
+
+
+@pytest.mark.asyncio
+async def test_search_include_payload_false_omits_node_properties():
+    """When include_payload=False, query uses id(node) and payload is None."""
+    node_id = str(uuid4())
+    fake_response = [{"node_id": node_id, "score": 0.9}]
+    adapter = _FakeSearchAdapter(query_response=fake_response)
+
+    results = await adapter.search(
+        collection_name="test_col",
+        query_text="hello",
+        limit=5,
+        include_payload=False,
+    )
+
+    assert len(results) == 1
+    assert results[0].payload is None
+    assert results[0].score == 0.9
+
+    # Verify the query sent to Neptune does NOT fetch full node properties
+    query_sent = adapter._client.query.call_args[0][0]
+    assert "id(node) as node_id" in query_sent
+    assert "node as payload" not in query_sent
+
+
+@pytest.mark.asyncio
+async def test_search_include_payload_true_returns_node_properties():
+    """When include_payload=True, query uses node as payload and payload is populated."""
+    node_id = str(uuid4())
+    fake_response = [{"payload": {"~id": node_id, "~properties": {"name": "Alice"}}, "score": 0.8}]
+    adapter = _FakeSearchAdapter(query_response=fake_response)
+
+    results = await adapter.search(
+        collection_name="test_col",
+        query_text="hello",
+        limit=5,
+        include_payload=True,
+    )
+
+    assert len(results) == 1
+    assert results[0].payload == {"name": "Alice"}
+    assert results[0].score == 0.8
+
+    query_sent = adapter._client.query.call_args[0][0]
+    assert "node as payload" in query_sent
+    assert "id(node) as node_id" not in query_sent
+
+
+@pytest.mark.asyncio
+async def test_search_node_name_filter_or_adds_where_clause():
+    """node_name with OR operator adds an 'any(...) WHERE' filter to the query."""
+    adapter = _FakeSearchAdapter(query_response=[])
+
+    await adapter.search(
+        collection_name="test_col",
+        query_text="hello",
+        limit=5,
+        include_payload=False,
+        node_name=["Alice", "Bob"],
+        node_name_filter_operator="OR",
+    )
+
+    query_sent = adapter._client.query.call_args[0][0]
+    assert "any(name IN node.belongs_to_set" in query_sent
+    assert "'Alice'" in query_sent
+    assert "'Bob'" in query_sent
+
+
+@pytest.mark.asyncio
+async def test_search_node_name_filter_and_adds_all_clause():
+    """node_name with AND operator adds an 'all(...) WHERE' filter to the query."""
+    adapter = _FakeSearchAdapter(query_response=[])
+
+    await adapter.search(
+        collection_name="test_col",
+        query_text="hello",
+        limit=5,
+        include_payload=False,
+        node_name=["Alice", "Bob"],
+        node_name_filter_operator="AND",
+    )
+
+    query_sent = adapter._client.query.call_args[0][0]
+    assert "all(name IN node.belongs_to_set" in query_sent
+
+
+# ---------------------------------------------------------------------------
+# search: with_vector=True branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_with_vector_true_include_payload_false_contains_embedding():
+    """with_vector=True, include_payload=False: query has embedding in RETURN and vector in result."""
+    node_id = str(uuid4())
+    fake_embedding = [0.5, 0.6, 0.7]
+    fake_response = [{"node_id": node_id, "score": 0.7, "embedding": fake_embedding}]
+    adapter = _FakeSearchAdapter(query_response=fake_response)
+
+    results = await adapter.search(
+        collection_name="test_col",
+        query_text="hello",
+        limit=5,
+        include_payload=False,
+        with_vector=True,
+    )
+
+    assert len(results) == 1
+    assert results[0].payload is None
+
+    query_sent = adapter._client.query.call_args[0][0]
+    assert ", embedding" in query_sent.split("RETURN", 1)[1]
+    assert "neptune.algo.vectors.get" in query_sent
+    assert "id(node) as node_id" in query_sent
+    assert "node as payload" not in query_sent
+
+
+@pytest.mark.asyncio
+async def test_search_with_vector_true_include_payload_true_contains_embedding_and_payload():
+    """with_vector=True, include_payload=True: query returns full node and embedding."""
+    node_id = str(uuid4())
+    fake_embedding = [0.5, 0.6, 0.7]
+    fake_response = [
+        {
+            "payload": {"~id": node_id, "~properties": {"name": "Bob"}},
+            "score": 0.6,
+            "embedding": fake_embedding,
+        }
+    ]
+    adapter = _FakeSearchAdapter(query_response=fake_response)
+
+    results = await adapter.search(
+        collection_name="test_col",
+        query_text="hello",
+        limit=5,
+        include_payload=True,
+        with_vector=True,
+    )
+
+    assert len(results) == 1
+    assert results[0].payload == {"name": "Bob"}
+
+    query_sent = adapter._client.query.call_args[0][0]
+    assert "embedding" in query_sent
+    assert "neptune.algo.vectors.get" in query_sent
+    assert "node as payload" in query_sent
+    assert "id(node) as node_id" not in query_sent

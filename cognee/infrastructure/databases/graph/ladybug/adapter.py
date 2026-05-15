@@ -3,8 +3,8 @@
 import os
 import json
 import asyncio
+import threading
 import tempfile
-import shutil
 from uuid import UUID, uuid5, NAMESPACE_OID
 from ladybug import Connection
 from ladybug.database import Database
@@ -35,14 +35,13 @@ from cognee.modules.observability.tracing import (
 
 logger = get_logger()
 
+DEFAULT_KUZU_BUFFER_POOL_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+DEFAULT_KUZU_MAX_DB_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
+
 
 cache_config = get_cache_config()
 if cache_config.shared_ladybug_lock:
     from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
-
-
-def _version_tuple(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in version.split(".") if part.isdigit())
 
 
 class LadybugAdapter(GraphDBInterface):
@@ -55,64 +54,220 @@ class LadybugAdapter(GraphDBInterface):
     well as for graph metrics and data extraction.
     """
 
-    def __init__(self, db_path: str):
-        """Initialize Ladybug database connection and schema."""
+    @classmethod
+    def create_subprocess(
+        cls,
+        db_path: str,
+        kuzu_num_threads: int = 0,
+        kuzu_buffer_pool_size: int = DEFAULT_KUZU_BUFFER_POOL_SIZE,
+        kuzu_max_db_size: int = DEFAULT_KUZU_MAX_DB_SIZE,
+    ) -> "LadybugAdapter":
+        """Create a LadybugAdapter running in subprocess-proxy mode."""
+        db_parent = os.path.dirname(os.path.abspath(db_path))
+        if db_parent:
+            os.makedirs(db_parent, exist_ok=True)
+
+        from cognee.infrastructure.databases.graph.kuzu.subprocess.proxy import (
+            KuzuSubprocessSession,
+            RemoteKuzuConnection,
+            RemoteKuzuDatabase,
+            install_json_extension,
+        )
+
+        session = KuzuSubprocessSession.start()
+        try:
+            install_json_extension(session, kuzu_buffer_pool_size)
+
+            if cache_config.shared_ladybug_lock:
+                # Don't open persistent handles — the per-query Redis lock
+                # path will open/close them via _rebuild_subprocess_proxies
+                # and _drop_native_resources on each query.
+                return cls(
+                    db_path=db_path,
+                    kuzu_num_threads=kuzu_num_threads,
+                    kuzu_buffer_pool_size=kuzu_buffer_pool_size,
+                    kuzu_max_db_size=kuzu_max_db_size,
+                    subprocess_mode=True,
+                    session=session,
+                )
+
+            db = RemoteKuzuDatabase(
+                session,
+                db_path=db_path,
+                buffer_pool_size=kuzu_buffer_pool_size,
+                max_num_threads=kuzu_num_threads,
+                max_db_size=kuzu_max_db_size,
+            )
+            db.init_database()
+            conn = RemoteKuzuConnection(session, db)
+            conn.load_extension("JSON")
+
+            return cls(
+                db_path=db_path,
+                kuzu_num_threads=kuzu_num_threads,
+                kuzu_buffer_pool_size=kuzu_buffer_pool_size,
+                kuzu_max_db_size=kuzu_max_db_size,
+                subprocess_mode=True,
+                database=db,
+                connection=conn,
+                session=session,
+            )
+        except Exception:
+            session.shutdown(timeout=2.0)
+            raise
+
+    def __init__(
+        self,
+        db_path: str,
+        kuzu_num_threads: int = 0,
+        kuzu_buffer_pool_size: int = DEFAULT_KUZU_BUFFER_POOL_SIZE,
+        kuzu_max_db_size: int = DEFAULT_KUZU_MAX_DB_SIZE,
+        *,
+        subprocess_mode: bool = False,
+        database: Optional[Any] = None,
+        connection: Optional[Any] = None,
+        session: Optional[Any] = None,
+    ):
+        """Initialize Ladybug database connection and schema.
+
+        Parameters
+        ----------
+        db_path:
+            Path to the Kuzu database directory.
+        kuzu_num_threads:
+            Maximum number of threads Kuzu uses to execute queries. ``0`` keeps
+            Kuzu's internal default (one per CPU).
+        kuzu_buffer_pool_size:
+            Maximum size of the Kuzu buffer pool in bytes.
+        kuzu_max_db_size:
+            Maximum on-disk database size in bytes. Configurable via the
+            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); some users
+            need this above the default 4 GB for large graphs.
+        subprocess_mode:
+            When True, the adapter runs in subprocess-proxy mode: the
+            native ladybug.Database/Connection live in a dedicated worker
+            process. Requires ``session``. When ``shared_ladybug_lock`` is
+            disabled, ``database`` and ``connection`` must also be provided
+            (persistent handles). When ``shared_ladybug_lock`` is enabled,
+            handles are opened/closed per query via the Redis lock path,
+            so ``database`` and ``connection`` are left None.
+        database, connection:
+            Pre-built Database/Connection proxies for the subprocess worker.
+        session:
+            The subprocess session that owns the worker process. After a
+            transient drop (e.g. ``delete_graph``) the adapter rebuilds
+            proxies lazily against the surviving session; after ``close()``
+            the session is zeroed and the adapter is in a permanent error
+            state.
+        """
+        if subprocess_mode:
+            if session is None:
+                raise ValueError("subprocess_mode requires a session.")
+            if not cache_config.shared_ladybug_lock and (database is None or connection is None):
+                raise ValueError(
+                    "subprocess_mode without shared_ladybug_lock requires database and connection."
+                )
         self.open_connections = 0
-        self._is_closed = False
-        self.db_path = db_path  # Path for the database directory
-        self.db: Optional[Database] = None
-        self.connection: Optional[Connection] = None
+        self.db_path = db_path
+        self.kuzu_num_threads = kuzu_num_threads
+        self.kuzu_buffer_pool_size = kuzu_buffer_pool_size
+        self.kuzu_max_db_size = kuzu_max_db_size
+        self._session = session
+        self._subprocess_mode = subprocess_mode
+        self._permanently_closed = False
+        self.db: Optional[Database] = database
+        self.connection: Optional[Connection] = connection
+
+        # Always construct the executor — the shared-lock query path still
+        # runs ``blocking_query`` through ``loop.run_in_executor(self.executor,
+        # ...)`` and would hit AttributeError without it.
         self.executor = ThreadPoolExecutor()
+
         if cache_config.shared_ladybug_lock:
             self.redis_lock = get_cache_engine(
                 lock_key="ladybug-lock-" + str(uuid5(NAMESPACE_OID, db_path))
             )
         else:
-            self._initialize_connection()
+            if subprocess_mode:
+                self._ensure_schema()
+            else:
+                self._initialize_connection()
         self.LADYBUG_ASYNC_LOCK = asyncio.Lock()
-        self._connection_change_lock = asyncio.Lock()
+        self._connection_lock = asyncio.Lock()
+        # Set when ``open_connections == 0``; used by transient teardown
+        # paths (e.g. ``delete_graph``) to wait for in-flight queries to
+        # finish before dropping native resources. ``close()`` does NOT use
+        # this — see ``close()``'s docstring for the cross-loop reason.
+        self._all_queries_drained = asyncio.Event()
+        self._all_queries_drained.set()
+        # Brief sync lock for atomic counter+event mutations. Cannot reuse
+        # ``_connection_lock`` here: teardown holds that lock across the
+        # ``await`` on ``_all_queries_drained``, and the query's finally
+        # needs to decrement+set under SOME lock to make those mutations
+        # atomic relative to other queries' increment+clear. If the same
+        # lock were reused, the finally would deadlock waiting for
+        # teardown to release it. ``threading.Lock`` is held for
+        # microseconds (no awaits inside) so it can't deadlock the loop.
+        self._counter_lock = threading.Lock()
+        # Brief sync lock that makes ``_permanently_closed`` AND the
+        # ``self.executor`` reference move together. ``query()`` captures
+        # both under this lock; ``close()`` flips closed AND nulls
+        # ``self.executor`` under it before shutting the captured
+        # executor down. Without this, query could pass the closed check
+        # and then call ``run_in_executor`` after close shut the executor
+        # down, surfacing "cannot schedule new futures after shutdown".
+        # ``threading.Lock`` (not ``asyncio.Lock``) for cross-loop safety:
+        # ``close()`` may be invoked from a foreign loop via
+        # ``closing_lru_cache._close_value`` running ``asyncio.run``.
+        self._lifecycle_lock = threading.Lock()
+
+    def _ensure_schema(self) -> None:
+        """Create Node + EDGE tables on the current ``self.connection``.
+
+        Extracted from ``_initialize_connection`` so the subprocess path (where
+        the native db/connection are constructed by the factory) can still run
+        the same schema bootstrap.
+        """
+        # Explicit check rather than ``assert`` — assertions are stripped
+        # under ``python -O``, which would turn this into a confusing
+        # ``AttributeError`` on the next line instead of a clear message.
+        if self.connection is None:
+            raise RuntimeError("Ladybug connection is not initialized; cannot ensure schema.")
+        self.connection.execute("""
+            CREATE NODE TABLE IF NOT EXISTS Node(
+                id STRING PRIMARY KEY,
+                name STRING,
+                type STRING,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                properties STRING
+            )
+        """)
+        self.connection.execute("""
+            CREATE REL TABLE IF NOT EXISTS EDGE(
+                FROM Node TO Node,
+                relationship_name STRING,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                properties STRING
+            )
+        """)
+        logger.debug("Ladybug database schema ensured")
 
     def _initialize_connection(self) -> None:
         """Initialize the Ladybug database connection and schema."""
+        # Install the JSON extension via a throwaway DB so its presence is
+        # cached before we open the real database. Shared helper lives in
+        # cognee_db_workers so the subprocess worker can use the same code
+        # without importing cognee. Pass the instance's configured limits
+        # so callers that tune ``kuzu_buffer_pool_size`` / ``kuzu_max_db_size``
+        # via env or config aren't silently ignored during the install step.
+        from cognee_db_workers._kuzu_helpers import install_json_extension_local
 
-        def _install_json_extension():
-            """
-            Function handles installing of the json extension for the current Ladybug version.
-            This has to be done with an empty graph db before connecting to an existing database otherwise
-            missing json extension errors will be raised.
-            """
-            try:
-                fd, temp_graph_file = tempfile.mkstemp()
-                os.close(fd)
-                tmp_db = None
-                connection = None
-                try:
-                    tmp_db = Database(
-                        temp_graph_file,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
-                    )
-                    tmp_db.init_database()
-                    connection = Connection(tmp_db)
-                    connection.execute("INSTALL JSON;")
-                finally:
-                    if connection is not None:
-                        connection.close()
-                    if tmp_db is not None:
-                        tmp_db.close()
-                    for path in (
-                        temp_graph_file,
-                        temp_graph_file + ".wal",
-                        temp_graph_file + ".lock",
-                    ):
-                        if os.path.isdir(path):
-                            shutil.rmtree(path)
-                        elif os.path.exists(path):
-                            os.unlink(path)
-            except Exception as e:
-                logger.info(f"JSON extension already installed or not needed: {e}")
-
-        _install_json_extension()
+        install_json_extension_local(
+            buffer_pool_size=self.kuzu_buffer_pool_size,
+            max_db_size=self.kuzu_max_db_size,
+        )
 
         try:
             if "s3://" in self.db_path:
@@ -123,8 +278,9 @@ class LadybugAdapter(GraphDBInterface):
 
                 self.db = Database(
                     self.temp_graph_file,
-                    buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                    max_db_size=4096 * 1024 * 1024,
+                    buffer_pool_size=self.kuzu_buffer_pool_size,
+                    max_num_threads=self.kuzu_num_threads,
+                    max_db_size=self.kuzu_max_db_size,
                 )
             else:
                 # Ensure the parent directory exists before creating the database
@@ -144,33 +300,29 @@ class LadybugAdapter(GraphDBInterface):
                 try:
                     self.db = Database(
                         self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                        buffer_pool_size=self.kuzu_buffer_pool_size,
+                        max_num_threads=self.kuzu_num_threads,
+                        max_db_size=self.kuzu_max_db_size,
                     )
                 except RuntimeError:
-                    from .ladybug_migrate import read_ladybug_storage_version
                     import ladybug
+                    from .ladybug_migrate import needs_migration, ladybug_migration
 
-                    ladybug_db_version = read_ladybug_storage_version(self.db_path)
-                    if (
-                        _version_tuple(ladybug_db_version) < (0, 15, 0)
-                        and ladybug_db_version != ladybug.__version__
-                    ):
-                        # Try to migrate legacy Kuzu database to the current Ladybug version
-                        from .ladybug_migrate import ladybug_migration
-
+                    should_migrate, old_version = needs_migration(self.db_path, ladybug.__version__)
+                    if should_migrate:
                         ladybug_migration(
                             new_db=self.db_path + "_new",
                             old_db=self.db_path,
                             new_version=ladybug.__version__,
-                            old_version=ladybug_db_version,
+                            old_version=old_version,
                             overwrite=True,
                         )
 
                     self.db = Database(
                         self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                        buffer_pool_size=self.kuzu_buffer_pool_size,
+                        max_num_threads=self.kuzu_num_threads,
+                        max_db_size=self.kuzu_max_db_size,
                     )
 
             self.db.init_database()
@@ -240,9 +392,9 @@ class LadybugAdapter(GraphDBInterface):
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
-        Execute a Ladybug query asynchronously with automatic reconnection.
+        Execute a Ladybug query asynchronously.
 
-        This method runs a database query while managing potential reconnections. It handles
+        This method runs a database query while managing lazy connection initialization. It handles
         parameters in a dictionary and processes results to return structured data. The method
         raises any exceptions encountered during query execution.
 
@@ -258,24 +410,25 @@ class LadybugAdapter(GraphDBInterface):
 
             - List[Tuple]: A list of tuples representing the query results.
         """
+        # Note on ``close()`` synchronization: actual submission of the
+        # blocking work happens under ``_lifecycle_lock`` further down
+        # via ``_submit_to_executor_locked``. Capturing the executor
+        # reference *before* ``run_in_executor`` would not be enough —
+        # ``close()`` could call ``executor.shutdown()`` on the captured
+        # ref between capture and submit, surfacing "cannot schedule
+        # new futures after shutdown" anyway. Submitting under the lock
+        # closes that window: ``close()`` either runs first (and we
+        # raise from the helper) or runs after (and ``shutdown(wait=True)``
+        # waits for our queued future to complete).
         with new_span("cognee.db.graph.query") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "ladybug")
             otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
 
-            loop = asyncio.get_running_loop()
             params = params or {}
 
-            def blocking_query():
-                lock_acquired = False
+            def blocking_query(connection):
                 try:
-                    if cache_config.shared_ladybug_lock:
-                        self.redis_lock.acquire_lock()
-                        lock_acquired = True
-                    if not self.connection:
-                        logger.info("Reconnecting to Ladybug database...")
-                        self._initialize_connection()
-
-                    result = self.connection.execute(query, params)
+                    result = connection.execute(query, params)
                     rows = []
 
                     while result.has_next():
@@ -291,26 +444,91 @@ class LadybugAdapter(GraphDBInterface):
                 except Exception as e:
                     logger.error(f"Query execution failed: {str(e)}")
                     raise
-                finally:
-                    if cache_config.shared_ladybug_lock and lock_acquired:
-                        try:
-                            self.close()
-                        finally:
-                            self.redis_lock.release_lock()
 
             try:
                 if cache_config.shared_ladybug_lock:
-                    async with self._connection_change_lock:
-                        self.open_connections += 1
-                        logger.info(f"Open connections after open: {self.open_connections}")
+                    # Shared-lock path: the Redis lock MUST be acquired before
+                    # any native ``ladybug.Database`` is opened on this file.
+                    # Opening Ladybug takes the on-disk file lock, and if we open
+                    # first we race the previous Redis-lock holder that's
+                    # still releasing its own native handles.
+                    assert self.redis_lock is not None
+                    # ``acquire_lock()`` is sync and can block on Redis I/O
+                    # for up to ``blocking_timeout`` (default 300 s) waiting
+                    # for the previous holder. Offload so we don't freeze
+                    # the event loop while another process holds the lock.
+                    redis_lock_handle = await asyncio.to_thread(self.redis_lock.acquire_lock)
                     try:
-                        result = await loop.run_in_executor(self.executor, blocking_query)
+                        # Increment under ``_connection_lock`` so a transient
+                        # teardown waiting in ``_drain_in_flight_queries``
+                        # can't see ``open_connections == 0`` between the
+                        # lock release and our increment. The counter+event
+                        # mutation itself uses ``_counter_lock`` so it stays
+                        # atomic against other queries' decrement+set.
+                        async with self._connection_lock:
+                            connection = self.get_or_init_connection()
+                            with self._counter_lock:
+                                self.open_connections += 1
+                                self._all_queries_drained.clear()
+                        logger.debug(f"Open connections after open: {self.open_connections}")
+                        try:
+                            # Submit + check-closed atomically under
+                            # ``_lifecycle_lock``. See top-of-method note.
+                            future = self._submit_to_executor_locked(blocking_query, connection)
+                            result = await asyncio.wrap_future(future)
+                        finally:
+                            # Decrement under ``_counter_lock`` (not
+                            # ``_connection_lock`` — teardown holds the
+                            # latter across its ``await`` and we'd deadlock).
+                            with self._counter_lock:
+                                self.open_connections -= 1
+                                if self.open_connections == 0:
+                                    self._all_queries_drained.set()
+                            logger.debug(f"Open connections after close: {self.open_connections}")
+                            # Drop native handles BEFORE releasing the Redis
+                            # lock so the next holder can take the on-disk
+                            # file lock without fighting us. Drain first for
+                            # symmetry with ``delete_graph``: the redis lock
+                            # already serializes us in practice, but the
+                            # drain costs nothing here (we just decremented
+                            # to zero) and stays correct under any future
+                            # change to redis-lock reentrancy.
+                            async with self._connection_lock:
+                                await self._drain_in_flight_queries()
+                                if self._subprocess_mode:
+                                    await asyncio.to_thread(self._drop_native_resources)
+                                else:
+                                    self._drop_native_resources()
                     finally:
-                        async with self._connection_change_lock:
-                            self.open_connections -= 1
-                            logger.info(f"Open connections after close: {self.open_connections}")
+                        # ``release_lock()`` is also sync and does Redis
+                        # I/O — offload for symmetry with the acquire path.
+                        await asyncio.to_thread(self.redis_lock.release_lock, redis_lock_handle)
                 else:
-                    result = await loop.run_in_executor(self.executor, blocking_query)
+                    # Hold _connection_lock only for init + counter bookkeeping;
+                    # the actual query runs unlocked so multiple queries can
+                    # execute concurrently. Counter increment must be inside
+                    # ``_connection_lock`` so ``_drain_in_flight_queries``
+                    # can't miss us, AND inside ``_counter_lock`` so the
+                    # increment+clear is atomic against other queries'
+                    # decrement+set in their ``finally``.
+                    async with self._connection_lock:
+                        connection = self.get_or_init_connection()
+                        with self._counter_lock:
+                            self.open_connections += 1
+                            self._all_queries_drained.clear()
+                    try:
+                        # Submit + check-closed atomically under
+                        # ``_lifecycle_lock``. See top-of-method note.
+                        future = self._submit_to_executor_locked(blocking_query, connection)
+                        result = await asyncio.wrap_future(future)
+                    finally:
+                        # Decrement under ``_counter_lock`` (not
+                        # ``_connection_lock`` — teardown holds the latter
+                        # across its ``await`` and we'd deadlock).
+                        with self._counter_lock:
+                            self.open_connections -= 1
+                            if self.open_connections == 0:
+                                self._all_queries_drained.set()
 
                 otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
                 return result
@@ -319,21 +537,236 @@ class LadybugAdapter(GraphDBInterface):
                 otel_span.record_exception(e)
                 raise
 
-    def close(self):
-        if self.connection:
-            del self.connection
-            self.connection = None
-        if self.db:
-            del self.db
-            self.db = None
-        self._is_closed = True
-        logger.info("Ladybug database closed successfully")
+    def get_or_init_connection(self) -> Connection:
+        """Return the current connection, initializing it first if needed.
 
-    def reopen(self):
-        if self._is_closed:
-            self._is_closed = False
-            self._initialize_connection()
-            logger.info("Ladybug database re-opened successfully")
+        Subprocess mode rebuilds proxies through the surviving
+        ``self._session`` rather than falling through to a local
+        ``ladybug.Database`` init — opening the same DB path in the main
+        process would conflict with the subprocess on the Ladybug file
+        lock. If ``self._session`` itself is gone the adapter is a
+        permanent error state (only ``close()`` zeroes the session).
+
+        Callers must hold ``_connection_lock`` to prevent races with
+        explicit calls to ``close()``.
+        """
+        # Top-level closed check applies in BOTH modes. Read under
+        # ``_lifecycle_lock`` so a concurrent ``close()`` either hasn't
+        # started (we proceed) or has already flipped the flag (we
+        # raise). ``close()`` latches the flag at the very start of
+        # teardown, before touching any resources.
+        with self._lifecycle_lock:
+            if self._permanently_closed:
+                raise RuntimeError("LadybugAdapter is closed; a new adapter must be created.")
+        if not self.connection:
+            if self._subprocess_mode:
+                if self._session is None:
+                    raise RuntimeError(
+                        "LadybugAdapter subprocess session is gone; adapter "
+                        "cannot be re-initialized."
+                    )
+                self._rebuild_subprocess_proxies()
+            else:
+                self._initialize_connection()
+            # Re-check the closed latch after init: ``close()`` may have
+            # flipped it while we were inside ``_initialize_connection``
+            # (which opens a ladybug.Database and takes the on-disk file
+            # lock). Without this re-check we'd publish the freshly
+            # opened native handles onto an already-closed adapter,
+            # keeping the file lock alive for the rest of the process.
+            with self._lifecycle_lock:
+                closed = self._permanently_closed
+            if closed:
+                self._drop_native_resources()
+                raise RuntimeError("LadybugAdapter is closed; a new adapter must be created.")
+        # Explicit check rather than ``assert`` — assertions are stripped
+        # under ``python -O`` and would degrade to a confusing
+        # ``AttributeError`` in callers if init silently failed.
+        if self.connection is None:
+            raise RuntimeError("LadybugAdapter connection initialization failed.")
+        return self.connection
+
+    def _submit_to_executor_locked(self, fn, *args):
+        """Atomically check ``_permanently_closed`` AND submit ``fn`` to
+        ``self.executor``, all under ``_lifecycle_lock``.
+
+        Submitting under the lock (rather than capturing the executor
+        ref and submitting later) is what closes the close-vs-query
+        race: if ``close()`` is interleaving, it must take the same
+        lock to flip the flag and pull the executor reference. So the
+        only two outcomes here are (a) we observe the closed flag and
+        raise, or (b) we get a stable reference and ``executor.submit``
+        succeeds — at which point ``close()``'s
+        ``executor.shutdown(wait=True)`` will wait for our just-queued
+        future to complete, instead of refusing to schedule it.
+
+        Returns a ``concurrent.futures.Future``; await
+        ``asyncio.wrap_future(future)`` to consume the result on the
+        calling event loop.
+        """
+        with self._lifecycle_lock:
+            if self._permanently_closed or self.executor is None:
+                raise RuntimeError("LadybugAdapter is closed; a new adapter must be created.")
+            return self.executor.submit(fn, *args)
+
+    def _drop_native_resources(self) -> None:
+        """Synchronously drop the native Ladybug Database + Connection handles.
+
+        Does **not** latch ``_permanently_closed`` and does **not** touch the
+        subprocess session. Used by the shared_ladybug_lock per-query path (where
+        we want to release the on-disk file lock between queries) and by
+        ``delete_graph`` (which needs the file handles closed before removing
+        the db directory). The adapter remains reusable — a subsequent query
+        will lazily re-initialize via ``get_or_init_connection``.
+        """
+        if self.connection is not None:
+            try:
+                self.connection.close()
+            except Exception as e:
+                logger.warning(f"Error closing Ladybug connection: {e}")
+            self.connection = None
+        if self.db is not None:
+            try:
+                self.db.close()
+            except Exception as e:
+                logger.warning(f"Error closing Ladybug database: {e}")
+            self.db = None
+
+    def _rebuild_subprocess_proxies(self) -> None:
+        """Recreate ``self.db`` + ``self.connection`` against the existing
+        ``self._session`` after a transient drop (e.g. files removed by
+        ``delete_graph`` or native handles dropped by the shared-lock
+        per-query path).
+
+        Subprocess-mode counterpart to local mode's ``_initialize_connection``.
+        Called lazily from ``get_or_init_connection`` on the next query, not
+        eagerly — that way ``delete_graph`` does not silently recreate the
+        on-disk store it just removed. Sync method: the proxy constructors
+        issue blocking RPCs through the session, but the call site already
+        runs sync from inside ``get_or_init_connection`` (matching the
+        local-mode pattern).
+        """
+        # Imported here to avoid a top-level cycle with the proxy module.
+        from cognee.infrastructure.databases.graph.kuzu.subprocess.proxy import (
+            RemoteKuzuConnection,
+            RemoteKuzuDatabase,
+        )
+
+        self.db = RemoteKuzuDatabase(
+            self._session,
+            db_path=self.db_path,
+            buffer_pool_size=self.kuzu_buffer_pool_size,
+            max_num_threads=self.kuzu_num_threads,
+            max_db_size=self.kuzu_max_db_size,
+        )
+        self.db.init_database()
+        self.connection = RemoteKuzuConnection(self._session, self.db)
+        # Re-load the JSON extension on the fresh connection — the
+        # original setup path did this and queries that touch JSON would
+        # otherwise fail with "extension not loaded" after delete_graph.
+        try:
+            self.connection.load_extension("JSON")
+        except Exception as e:
+            logger.warning(f"Could not load JSON extension after reopen: {e}")
+        # Recreate the Node/EDGE schema — ``delete_graph`` removed the
+        # on-disk store, so the worker is now talking to a fresh empty
+        # DB with no tables. Without this, the very next graph query
+        # after ``delete_graph`` raises "table Node does not exist".
+        self._ensure_schema()
+
+    async def _drain_in_flight_queries(self) -> None:
+        """Wait until every query that's currently mid-``run_in_executor``
+        has finished. The caller MUST hold ``_connection_lock`` so new
+        queries can't start while we wait — otherwise the drain would
+        race a fresh increment.
+
+        Used by transient-teardown paths (currently ``delete_graph`` and
+        the shared-lock per-query cleanup) so ``_drop_native_resources``
+        doesn't tear out a connection an executor thread is still using.
+        ``close()`` does NOT use this — see its docstring for why
+        (cross-loop ``asyncio.Event.wait()`` would raise).
+
+        Reads the counter under ``_counter_lock`` so a stale ``set()``
+        from a finishing query can't race a fresh increment from a new
+        one and trick us into busy-spinning on an event that's set while
+        ``open_connections > 0``.
+        """
+        while True:
+            with self._counter_lock:
+                if self.open_connections == 0:
+                    return
+            await self._all_queries_drained.wait()
+
+    async def close(self):
+        """Permanently close the adapter, releasing native resources and (in
+        subprocess mode) shutting down the worker process.
+
+        Intentionally does **not** hold ``_connection_lock``: that lock is an
+        ``asyncio.Lock`` bound to the loop on which the adapter was created.
+        LRU eviction may invoke ``close()`` from a different loop (for
+        example via ``asyncio.run`` in ``closing_lru_cache._close_value``),
+        and awaiting a foreign-loop lock raises "got Future attached to a
+        different loop". After this call the adapter is not reusable — see
+        ``_drop_native_resources`` if you want a transient drop.
+
+        Shuts down our ``ThreadPoolExecutor`` with ``wait=True`` first — this
+        serves two purposes: (a) drains any in-flight ``blocking_query``
+        submissions, preventing a race where ``close()`` tears down
+        ``self.connection`` while an executor thread is still mid-
+        ``connection.execute``; (b) reaps the executor threads that would
+        otherwise leak on every LRU eviction.
+
+        Note: transient-teardown paths (``delete_graph``) use the asyncio
+        ``_drain_in_flight_queries`` helper instead, but that's not safe
+        from a foreign loop — ``executor.shutdown(wait=True)`` is the
+        cross-loop equivalent and the only correct choice here.
+
+        Idempotent — repeated calls observe ``_permanently_closed`` and
+        return early without re-shutting-down anything.
+        """
+        # Atomically: flip the closed flag, capture the executor
+        # reference, and null out ``self.executor``. A concurrent
+        # ``query()`` either sees the closed flag (raises clean) or
+        # captures a still-live executor (its run_in_executor will
+        # complete normally because we shut down with ``wait=True``
+        # below). Without nulling self.executor under the lock, a query
+        # that captured ``self.executor`` *after* the flag flipped
+        # could still submit to the about-to-be-shut-down executor.
+        # Idempotent — a second close() sees the flag and returns.
+        with self._lifecycle_lock:
+            if self._permanently_closed:
+                return
+            self._permanently_closed = True
+            executor = self.executor
+            self.executor = None
+
+        # Both ``executor.shutdown(wait=True)`` and
+        # ``SubprocessSession.shutdown()`` are sync-blocking calls that can
+        # take seconds (executor: thread join; session: join/terminate/kill
+        # chain plus a bounded ``_rpc_lock`` acquire). Offload them to a
+        # worker thread so awaiting ``close()`` doesn't freeze the calling
+        # event loop. ``asyncio.to_thread`` is safe across loops — required
+        # because ``close()`` may be invoked from a foreign loop via
+        # ``closing_lru_cache._close_value`` running ``asyncio.run``.
+        if executor is not None:
+            await asyncio.to_thread(executor.shutdown, True)
+        # In subprocess mode, ``_drop_native_resources`` calls
+        # ``self.connection.close()`` and ``self.db.close()`` which are
+        # proxy RPCs through ``session.call(...)`` and can block on
+        # the worker for hundreds of ms. Offload to a thread so we
+        # don't freeze the event loop. Local mode stays sync — closing
+        # an in-process Ladybug Database/Connection is fast.
+        if self._subprocess_mode:
+            await asyncio.to_thread(self._drop_native_resources)
+        else:
+            self._drop_native_resources()
+        if self._session is not None:
+            try:
+                await asyncio.to_thread(self._session.shutdown)
+            except Exception as e:
+                logger.warning(f"Error shutting down Ladybug subprocess: {e}")
+            self._session = None
+        logger.info("Ladybug database closed successfully")
 
     @asynccontextmanager
     async def get_session(self):
@@ -2063,13 +2496,35 @@ class LadybugAdapter(GraphDBInterface):
         This method deletes all nodes and relationships from the graph database.
         It raises exceptions for failures occurring during deletion processes.
         """
+        # In ``shared_ladybug_lock`` mode the Redis lock is the cross-process
+        # mutex that ``query()`` uses to keep two processes from opening
+        # the same Ladybug DB on disk concurrently. ``delete_graph`` removes
+        # those files, so it MUST hold the same lock — otherwise a peer
+        # process could be mid-query (holding the on-disk file lock) when
+        # we delete its files, or could open the DB right between our
+        # drop and our reopen.
+        held_redis_lock = None
+        if cache_config.shared_ladybug_lock and self.redis_lock is not None:
+            held_redis_lock = await asyncio.to_thread(self.redis_lock.acquire_lock)
         try:
-            if self.connection:
-                self.connection.close()
-                self.connection = None
-            if self.db:
-                self.db.close()
-                self.db = None
+            # Transient drop: release the file handles so we can delete the
+            # db files, but do NOT latch ``_permanently_closed`` — callers
+            # expect to keep using this adapter after ``delete_graph`` and
+            # have the store lazily reinitialize. Drain in-flight queries
+            # under ``_connection_lock`` so we don't tear out a Connection
+            # an executor thread is still using (the query path releases
+            # ``_connection_lock`` before ``run_in_executor`` so multiple
+            # queries can run concurrently — the lock alone wouldn't block
+            # us against them).
+            async with self._connection_lock:
+                await self._drain_in_flight_queries()
+                # Subprocess mode: ``_drop_native_resources`` issues two
+                # RPCs (OP_CONN_CLOSE + OP_DB_CLOSE) which block on the
+                # worker. Offload so we don't freeze the event loop.
+                if self._subprocess_mode:
+                    await asyncio.to_thread(self._drop_native_resources)
+                else:
+                    self._drop_native_resources()
 
             db_dir = os.path.dirname(self.db_path)
             db_name = os.path.basename(self.db_path)
@@ -2083,9 +2538,23 @@ class LadybugAdapter(GraphDBInterface):
 
             logger.info(f"Deleted Ladybug database files at {self.db_path}")
 
+            # No eager reopen here: we just removed the on-disk store, and
+            # callers asking us to delete it should not get a freshly
+            # recreated empty database as a side effect. If the same
+            # adapter is reused for a query later, ``get_or_init_connection``
+            # rebuilds proxies + schema lazily — same shape local mode has
+            # always had. If the caller is the dataset-deletion handler,
+            # the cache evicts this entry and ``close()`` shuts the
+            # subprocess down cleanly.
+
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
             raise
+        finally:
+            if held_redis_lock is not None:
+                # Offloaded for symmetry with the acquire path; release
+                # does Redis I/O too.
+                await asyncio.to_thread(self.redis_lock.release_lock, held_redis_lock)
 
     async def get_document_subgraph(self, data_id: str):
         """

@@ -113,13 +113,34 @@ def test_format_recall_results_handles_normalized_rows():
     assert "[graph] graph answer" in rendered
 
 
+# Tools that the MCP server is expected to expose. Kept as named groups so the
+# contract documents intent rather than just enumerating names. The hardening
+# rule is that the LLM-direct memory API stays minimal (V2: remember/recall/
+# forget); the workspace UI adds entry tools (one per common user phrasing) and
+# a small set of internals called by the React workspace via app.callServerTool.
+MEMORY_API_TOOLS = {"remember", "recall", "forget"}
+WORKSPACE_UI_ENTRY_TOOLS = {
+    "visualize_graph_ui",
+    "upload_file_ui",
+    "open_cognee_workspace",
+}
+WORKSPACE_INTERNAL_TOOLS = {
+    "cognify_file",
+    "list_datasets_json",
+    "list_dataset_data_json",
+    "create_dataset_json",
+    "get_client_info_json",
+}
+EXPECTED_TOOLS = MEMORY_API_TOOLS | WORKSPACE_UI_ENTRY_TOOLS | WORKSPACE_INTERNAL_TOOLS
+
+
 @pytest.mark.asyncio
 async def test_mcp_exposes_only_memory_tools():
     import src.server as server
 
     tools = await server.mcp.list_tools()
 
-    assert {tool.name for tool in tools} == {"remember", "recall", "forget"}
+    assert {tool.name for tool in tools} == EXPECTED_TOOLS
 
 
 @pytest.mark.asyncio

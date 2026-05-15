@@ -209,12 +209,26 @@ def get_activity_router() -> APIRouter:
             is_default = email == "default_user@example.com"
 
             # Parse agent type from email
-            # The +{parent_user_id} suffix ensures agent name uniqueness across users
+            # Internal email format: "sanitized-name+{parent_user_id}@cognee.agent"
+            # The +{parent_user_id} suffix ensures uniqueness across users but
+            # must be stripped for display purposes.
+            # Legacy agents used "-" throughout, so we fall back to rsplit("-", 1)
+            # when no "+" is present and the suffix looks like a hex UUID fragment.
             if is_agent:
                 local_part = email.split("@")[0]
-                parts = local_part.rsplit("-", 1)
-                agent_type = parts[0].replace("-", " ").replace("_", " ") if parts else local_part
-                agent_short_id = parts[1] if len(parts) > 1 else ""
+                if "+" in local_part:
+                    # Current format: name+user_id
+                    display_name, agent_short_id = local_part.rsplit("+", 1)
+                elif "-" in local_part:
+                    # Legacy format: name-part-of-uuid — strip UUID suffix
+                    prefix, suffix = local_part.rsplit("-", 1)
+                    if len(suffix) >= 8 and all(c in "0123456789abcdef" for c in suffix):
+                        display_name, agent_short_id = prefix, suffix
+                    else:
+                        display_name, agent_short_id = local_part, ""
+                else:
+                    display_name, agent_short_id = local_part, ""
+                agent_type = display_name.replace("-", " ").replace("_", " ")
             else:
                 agent_type = "Human User" if is_default else email.split("@")[0]
                 agent_short_id = ""

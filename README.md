@@ -64,7 +64,7 @@ Cognee gives AI agents a shared, improving memory of your data, decisions, and w
 
 ## About Cognee
 
-Cognee is an open-source brain for your Agents that lets you ingest data in any format or structure and continuously learns to provide the right context for AI agents. It combines vector search, graph databases and cognitive science approaches to make your documents both searchable by meaning and connected by relationships as they change and evolve.
+Cognee is an open-source memory control plane for your Agents that lets you ingest data in any format or structure and continuously learns to provide the right context. It combines embeddings, graphs and cognitive science approaches to make your documents both searchable by meaning and connected by relationships as they change and evolve.
 
 
 
@@ -202,26 +202,6 @@ export COGNEE_API_KEY="ck_..."
 ```
 
 The plugin hooks into Claude Code's lifecycle — `SessionStart` initializes memory, `PostToolUse` captures actions, `UserPromptSubmit` injects relevant context, `PreCompact` preserves memory across context resets, and `SessionEnd` bridges session data into the permanent graph.
-
-### Hermes Agent
-
-Enable Cognee as the memory provider in [Hermes Agent](https://github.com/NousResearch/hermes-agent) for session-aware knowledge graph memory with auto-routing recall.
-
-**Setup:**
-
-```yaml
-# ~/.hermes/config.yaml
-memory:
-  provider: cognee
-```
-
-```bash
-export LLM_API_KEY="your-openai-key"
-hermes  # start chatting — session memory and graph persistence are automatic
-```
-
-Or run `hermes memory setup` and select Cognee. For Cognee Cloud, set `COGNEE_SERVICE_URL` and `COGNEE_API_KEY` in `~/.hermes/.env`.
-
 
 ### Connect to Cognee Cloud
 

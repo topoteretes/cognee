@@ -2,7 +2,11 @@ import os
 from uuid import UUID
 from typing import Optional
 
-from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.graph.get_graph_engine import (
+    create_graph_engine,
+    evict_graph_engine,
+)
 from cognee.base_config import get_base_config
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
@@ -62,7 +66,12 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         graph_file_path = os.path.join(
             databases_directory_path, dataset_database.graph_database_name
         )
-        graph_engine = create_graph_engine(
+        graph_config = get_graph_config()
+        # Build the kwargs once so the evict call uses the exact same key
+        # the cognify-time ``create_graph_engine`` call produced. Missing
+        # any context-sourced field here (e.g. subprocess flag) puts the
+        # entry on a different key and the eviction silently misses.
+        engine_kwargs = dict(
             graph_database_provider=dataset_database.graph_database_provider,
             graph_database_url=dataset_database.graph_database_url,
             graph_database_name=dataset_database.graph_database_name,
@@ -72,5 +81,16 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             graph_database_password="",
             graph_dataset_database_handler="",
             graph_database_port="",
+            graph_database_subprocess_enabled=graph_config.graph_database_subprocess_enabled,
+            kuzu_num_threads=graph_config.kuzu_num_threads,
+            kuzu_buffer_pool_size=graph_config.kuzu_buffer_pool_size,
+            kuzu_max_db_size=graph_config.kuzu_max_db_size,
         )
+        graph_engine = create_graph_engine(**engine_kwargs)
         await graph_engine.delete_graph()
+        # Drop the cache entry so the leased adapter's ``close()`` runs:
+        # in subprocess mode that shuts down the worker process. Leaving
+        # the entry behind would let an LRU hit return an adapter
+        # pointing at a now-deleted on-disk store, and would keep the
+        # worker process alive until LRU eviction.
+        evict_graph_engine(**engine_kwargs)

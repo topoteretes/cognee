@@ -122,7 +122,8 @@ def generate_document(num_paragraphs: int = 3) -> tuple[str, str]:
     """Returns (text, primary_topic) for a randomly generated document. Along with random UUID to ensure uniqueness across test runs."""
     topic = random.choice(TOPICS)
     paragraphs = [
-        generate_paragraph(topic, num_sentences=random.randint(3, 7)) for _ in range(num_paragraphs)
+        generate_paragraph(topic, num_sentences=random.randint(300, 377))
+        for _ in range(num_paragraphs)
     ]
     paragraphs.append(str(uuid.uuid4()))  # Ensure uniqueness of document text across test runs
     return "\n\n".join(paragraphs), topic
@@ -196,7 +197,7 @@ class AddCognifySearchFlow(SequentialTaskSet):
             headers=self._headers(),
             name="/api/v1/add",
             catch_response=True,
-            timeout=60,
+            timeout=600,
         ) as resp:
             if resp.status_code == 200:
                 resp.success()
@@ -217,7 +218,7 @@ class AddCognifySearchFlow(SequentialTaskSet):
             headers=self._json_headers(),
             name="/api/v1/cognify",
             catch_response=True,
-            timeout=300,
+            timeout=6000,
         ) as resp:
             if resp.status_code == 200:
                 resp.success()
@@ -240,7 +241,7 @@ class AddCognifySearchFlow(SequentialTaskSet):
             headers=self._json_headers(),
             name="/api/v1/search",
             catch_response=True,
-            timeout=120,
+            timeout=200,
         ) as resp:
             if resp.status_code == 200:
                 resp.success()

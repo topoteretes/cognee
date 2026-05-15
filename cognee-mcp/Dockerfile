@@ -1,3 +1,14 @@
+# Build the MCP App workspace bundle (React/Vite, served inline by the MCP
+# server). Vite writes to ../src/app_bundles/ relative to apps-src, so we
+# mirror the repo layout: /build/cognee-mcp/{apps-src,src}.
+FROM node:22-alpine AS app-bundle
+WORKDIR /build/cognee-mcp/apps-src
+COPY ./cognee-mcp/apps-src/package.json ./cognee-mcp/apps-src/package-lock.json ./
+RUN npm ci
+COPY ./cognee-mcp/apps-src ./
+RUN npm run build
+# Output lands at /build/cognee-mcp/src/app_bundles/visualize-graph.html
+
 # Use a Python image with uv pre-installed
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
 
@@ -33,6 +44,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows layer caching
 COPY ./cognee-mcp /app
+# Drop in the workspace bundle built by the node stage. Order matters: the
+# COPY above brings in `cognee-mcp/src/app_bundles/` (empty in CI/clean clones
+# because the bundle is gitignored, or stale on a developer's machine), and
+# this COPY then *shadows* it with the freshly-built bundle. uv sync below
+# packages this into the wheel installed into the venv; visualize_graph_ui
+# reads the bundle from its own neighbor directory inside site-packages.
+COPY --from=app-bundle /build/cognee-mcp/src/app_bundles /app/src/app_bundles
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 

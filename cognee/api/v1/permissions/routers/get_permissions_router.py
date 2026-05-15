@@ -86,6 +86,49 @@ def get_permissions_router() -> APIRouter:
             status_code=200, content={"message": "Permission assigned to principal"}
         )
 
+    @permissions_router.delete("/datasets/{principal_id}")
+    async def revoke_datasets_permission_from_principal(
+        permission_name: str,
+        dataset_ids: List[UUID],
+        principal_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Revoke permission on datasets from a principal (user or role).
+
+        ## Path Parameters
+        - **principal_id** (UUID): The UUID of the principal to revoke permission from
+
+        ## Request Parameters
+        - **permission_name** (str): The name of the permission to revoke (e.g., "read", "write", "delete")
+        - **dataset_ids** (List[UUID]): List of dataset UUIDs to revoke permission on
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/datasets/{str(principal_id)}",
+                "dataset_ids": str(dataset_ids),
+                "principal_id": str(principal_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.permissions.methods import (
+            authorized_revoke_permission_on_datasets,
+        )
+
+        await authorized_revoke_permission_on_datasets(
+            principal_id,
+            [dataset_id for dataset_id in dataset_ids],
+            permission_name,
+            user.id,
+        )
+
+        return JSONResponse(
+            status_code=200, content={"message": "Permission revoked from principal"}
+        )
+
     @permissions_router.post("/roles")
     async def create_role(role_name: str, user: User = Depends(get_authenticated_user)):
         """
@@ -129,6 +172,34 @@ def get_permissions_router() -> APIRouter:
             },
         )
 
+    @permissions_router.delete("/roles/{role_id}")
+    async def delete_role_endpoint(role_id: UUID, user: User = Depends(get_authenticated_user)):
+        """
+        Delete a role and all its associations.
+
+        Removes all user-role memberships and ACL entries for this role,
+        then deletes the role. The authenticated user must be able to manage
+        users in the tenant.
+
+        ## Path Parameters
+        - **role_id** (UUID): The UUID of the role to delete
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/roles/{str(role_id)}",
+                "role_id": str(role_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.roles.methods import delete_role as delete_role_method
+
+        await delete_role_method(role_id=role_id, owner_id=user.id)
+
+        return JSONResponse(status_code=200, content={"message": "Role deleted"})
+
     @permissions_router.post("/users/{user_id}/roles")
     async def add_user_to_role(
         user_id: UUID, role_id: UUID, user: User = Depends(get_authenticated_user)
@@ -171,6 +242,40 @@ def get_permissions_router() -> APIRouter:
         await add_user_to_role_method(user_id=user_id, role_id=role_id, owner_id=user.id)
 
         return JSONResponse(status_code=200, content={"message": "User added to role"})
+
+    @permissions_router.delete("/users/{user_id}/roles")
+    async def remove_user_from_role_endpoint(
+        user_id: UUID, role_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
+        """
+        Remove a user from a role.
+
+        The authenticated user must be able to manage users in the tenant.
+
+        ## Path Parameters
+        - **user_id** (UUID): The UUID of the user to remove from the role
+
+        ## Request Parameters
+        - **role_id** (UUID): The UUID of the role to remove the user from
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/users/{str(user_id)}/roles",
+                "user_id": str(user_id),
+                "role_id": str(role_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.roles.methods import (
+            remove_user_from_role as remove_user_from_role_method,
+        )
+
+        await remove_user_from_role_method(user_id=user_id, role_id=role_id, owner_id=user.id)
+
+        return JSONResponse(status_code=200, content={"message": "User removed from role"})
 
     @permissions_router.post("/users/{user_id}/tenants")
     async def add_user_to_tenant(
