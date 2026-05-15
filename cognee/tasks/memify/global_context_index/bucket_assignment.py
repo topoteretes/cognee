@@ -71,9 +71,7 @@ def build_child_to_bucket_index(
     buckets_by_id: dict[str, SummaryNode],
 ) -> dict[str, str]:
     return {
-        child_id: bucket.id
-        for bucket in buckets_by_id.values()
-        for child_id in bucket.child_ids
+        child_id: bucket.id for bucket in buckets_by_id.values() for child_id in bucket.child_ids
     }
 
 
@@ -136,9 +134,7 @@ def choose_existing_bucket_for_item(
     if not child_id_to_bucket_id:
         return None
 
-    distances_by_bucket = group_distances_by_bucket(
-        nearest_results, child_id_to_bucket_id
-    )
+    distances_by_bucket = group_distances_by_bucket(nearest_results, child_id_to_bucket_id)
     return choose_best_bucket(
         distances_by_bucket,
         buckets_by_id,

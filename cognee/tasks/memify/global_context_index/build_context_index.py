@@ -40,9 +40,7 @@ async def build_context_index_level(
     list[BucketAssignment],
     list[GlobalContextSummary],
 ]:
-    source_collection = (
-        TEXT_SUMMARY_COLLECTION if level == 0 else GLOBAL_CONTEXT_SUMMARY_COLLECTION
-    )
+    source_collection = TEXT_SUMMARY_COLLECTION if level == 0 else GLOBAL_CONTEXT_SUMMARY_COLLECTION
 
     if existing or level == 0:
         buckets_to_persist, assignments = await assign_items_to_buckets(
@@ -121,9 +119,7 @@ async def build_context_index(
 
         existing_ids = {bucket.id for bucket in existing}
         new_at_level = [
-            bucket
-            for bucket in buckets_to_persist.values()
-            if bucket.id not in existing_ids
+            bucket for bucket in buckets_to_persist.values() if bucket.id not in existing_ids
         ]
         buckets_at_level = list(existing) + new_at_level
 
@@ -147,9 +143,7 @@ async def build_context_index(
         for bucket in top_level_buckets:
             if bucket.global_context_bucket_id == root_id_str:
                 continue
-            all_assignments.append(
-                BucketAssignment(summary_id=bucket.id, bucket_id=root_id_str)
-            )
+            all_assignments.append(BucketAssignment(summary_id=bucket.id, bucket_id=root_id_str))
             bucket.global_context_bucket_id = root_id_str
 
     return all_datapoints, all_assignments

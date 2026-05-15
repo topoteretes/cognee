@@ -428,9 +428,7 @@ async def test_update_global_context_index_places_new_summary_into_existing_buck
             add_edges=AsyncMock(),
         ),
         vector=SimpleNamespace(
-            search=AsyncMock(
-                return_value=[SimpleNamespace(id=existing_child.id, score=0.1)]
-            ),
+            search=AsyncMock(return_value=[SimpleNamespace(id=existing_child.id, score=0.1)]),
             delete_data_points=AsyncMock(),
         ),
     )
@@ -579,9 +577,7 @@ async def test_update_global_context_index_skips_marked_text_summaries(monkeypat
             add_edges=AsyncMock(),
         ),
         vector=SimpleNamespace(
-            search=AsyncMock(
-                return_value=[SimpleNamespace(id=assigned_child.id, score=0.1)]
-            ),
+            search=AsyncMock(return_value=[SimpleNamespace(id=assigned_child.id, score=0.1)]),
             delete_data_points=AsyncMock(),
         ),
     )
