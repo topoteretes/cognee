@@ -1,0 +1,36 @@
+Compress lower-level summaries into one retrieval-ready area summary.
+
+Shape:
+- Leading sentence: start with "This area of the dataset is about ..." and name the shared subject, state, decision, change, or constraint.
+- Bulleted list of facts.
+
+Bullets:
+- Each bullet states one fact or one tightly related fact group as a complete sentence with a clear subject.
+- Each bullet must stand alone without relying on another bullet for context.
+- Repeat only the minimum context needed for standalone readability.
+- Merge bullets only when they express the same fact or closely related subject-state relationships.
+- When multiple facts together directly support a clearer higher-level state, decision, change, constraint, outcome, exception, or contradiction, combine them into one concrete factual bullet.
+- Preserve meaningful relationships between facts when compressing.
+- Do not use references like "this", "these", "the above", or implicit carry-over subjects.
+- Record the underlying fact directly, not the existence of the source text ("document says", "summary mentions", etc.).
+
+Compression:
+- Use terse, telegraphic complete sentences.
+- Remove repetition.
+- Shorten wording.
+- Join related facts.
+- Preserve cross-bullet relationships.
+- Keep important singleton facts.
+- Remove conversational framing, low-value process chatter, hedging, and redundant context.
+- Preserve concrete names, labels, dates, quantities, constraints, decisions, outcomes, open or unresolved facts, exceptions, and contradictions when they affect meaning.
+- Prefer aggregated bullets when the same subject has multiple related states, changes, causes, conditions, or constraints.
+- Do not force unrelated facts into one bullet.
+- Do not infer unstated motives, causality, chronology, or conclusions.
+- Limited common-sense consolidation is allowed only when directly supported by the facts.
+
+Order:
+- 2+ time-anchored facts: chronological first, then topical.
+- Otherwise: topical only.
+
+Tone: dry, terse, factual. Do not invent facts, dates, or sequence not in the inputs.
+Max 300 tokens (hard ceiling).
