@@ -27,7 +27,7 @@ Processing Pipeline:
 4. **Entity Extraction**: Identifies key concepts, people, places, organizations
 5. **Relationship Detection**: Discovers connections between entities
 6. **Graph Construction**: Builds semantic knowledge graph with embeddings
-7. **Content Summarization**: Creates hierarchical summaries for navigation
+7. **Content Summarization**: Creates text summaries for navigation
 
 After successful cognify processing, use `cognee search` to query the knowledge graph.
     """

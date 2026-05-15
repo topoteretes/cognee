@@ -92,9 +92,9 @@ async def search(
             Returns: Ranked list of relevant text chunks with metadata.
 
         **SUMMARIES**:
-            Pre-generated hierarchical summaries of content.
+            Pre-generated summaries of content.
             Best for: Quick overviews, document abstracts, topic summaries.
-            Returns: Multi-level summaries from detailed to high-level.
+            Returns: Generated content summaries.
 
         **CODE**:
             Code-specific search with syntax and semantic understanding.
@@ -164,7 +164,7 @@ async def search(
                 [List of relevant text passages with source metadata]
 
             **SUMMARIES**:
-                [List of hierarchical summaries from general to specific]
+                [List of generated content summaries]
 
             **CODE**:
                 [List of structured code information with context]

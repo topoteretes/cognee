@@ -85,7 +85,7 @@ async def cognify(
         3. **Entity Extraction**: Identifies key concepts, people, places, organizations
         4. **Relationship Detection**: Discovers connections between entities
         5. **Graph Construction**: Builds semantic knowledge graph with embeddings
-        6. **Content Summarization**: Creates hierarchical summaries for navigation
+        6. **Content Summarization**: Creates text summaries for navigation
 
     Graph Model Customization:
         The `graph_model` parameter allows custom knowledge structures:
@@ -323,7 +323,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             chunker=chunker,
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
-        # COGNIFY: LLM-summarize each chunk for hierarchical retrieval
+        # COGNIFY: LLM-summarize each chunk for retrieval
         Task(
             extract_graph_and_summarize,
             graph_model=graph_model,
