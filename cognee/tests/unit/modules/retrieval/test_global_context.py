@@ -76,8 +76,7 @@ async def test_search_top_global_context_summaries_caps_at_top_k():
     vector_engine = SimpleNamespace(
         search=AsyncMock(
             return_value=[
-                SimpleNamespace(payload={"text": f"area {i}", "is_root": False})
-                for i in range(5)
+                SimpleNamespace(payload={"text": f"area {i}", "is_root": False}) for i in range(5)
             ]
         )
     )

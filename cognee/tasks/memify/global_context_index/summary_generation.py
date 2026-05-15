@@ -11,9 +11,7 @@ from .bucket_assignment import create_root_summary_id
 from .models import GlobalContextSummaryContent, SummaryNode
 
 
-async def summarize_with_prompt(
-    children: list[SummaryNode], prompt_file: str
-) -> str:
+async def summarize_with_prompt(children: list[SummaryNode], prompt_file: str) -> str:
     child_summaries = "\n\n".join(
         f"Input {index + 1}:\n{child.text}" for index, child in enumerate(children)
     )
@@ -40,9 +38,7 @@ async def build_bucket_summary_datapoint(
     dataset_id: str,
 ) -> GlobalContextSummary:
     children = [
-        children_by_id[child_id]
-        for child_id in bucket.child_ids
-        if child_id in children_by_id
+        children_by_id[child_id] for child_id in bucket.child_ids if child_id in children_by_id
     ]
     bucket.text = await generate_bucket_summary(children)
 
@@ -61,10 +57,7 @@ async def generate_bucket_summary_datapoints(
     dataset_id: str,
 ) -> list[GlobalContextSummary]:
     return await asyncio.gather(
-        *[
-            build_bucket_summary_datapoint(bucket, children_by_id, dataset_id)
-            for bucket in buckets
-        ]
+        *[build_bucket_summary_datapoint(bucket, children_by_id, dataset_id) for bucket in buckets]
     )
 
 

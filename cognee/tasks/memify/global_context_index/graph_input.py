@@ -76,8 +76,7 @@ def extract_context_index_input_from_graph(
             buckets.append(bucket_node)
 
     nodes_by_id = {
-        node.id: node
-        for node in text_summaries + buckets + ([root] if root is not None else [])
+        node.id: node for node in text_summaries + buckets + ([root] if root is not None else [])
     }
     for edge in memory_fragment.edges:
         if relationship_name(edge) != SUMMARIZED_IN:
