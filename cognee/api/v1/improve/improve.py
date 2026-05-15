@@ -39,6 +39,7 @@ async def improve(
     run_in_background: bool = False,
     node_name: Optional[List[str]] = None,
     session_ids: Optional[List[str]] = None,
+    build_global_context_index: bool = False,
     **kwargs: Unpack[ImproveKwargs],
 ):
     """Enrich an existing knowledge graph with additional context and rules.
@@ -58,11 +59,15 @@ async def improve(
     3. **Default enrichment** -- triplet embeddings are extracted and
        indexed (same as calling ``improve()`` without sessions).
 
-    4. **Sync graph to session cache** -- incrementally copies new graph
+    4. **Global context index** -- when ``build_global_context_index=True``,
+       builds retrieval-ready bucket and root summaries over the graph's
+       text summaries.
+
+    5. **Sync graph to session cache** -- incrementally copies new graph
        relationships back into the session cache as human-readable
        summaries for fast retrieval during session completions.
 
-    Without ``session_ids``, only stage 3 runs.
+    Without ``session_ids``, only stage 3 runs by default.
 
     Args:
         dataset: Dataset name or UUID to process.
@@ -70,6 +75,10 @@ async def improve(
         node_name: Filter graph to specific named entities.
         session_ids: Session IDs whose feedback and Q&A content
             should be bridged into the permanent graph.
+        build_global_context_index: Opt-in flag for building the global
+            context index after default enrichment. Skipped in background
+            mode because ordered background pipeline chaining is not
+            supported yet.
         **kwargs: Additional options -- see ``ImproveKwargs``.
 
     Returns:
@@ -96,6 +105,7 @@ async def improve(
             "session_count": len(session_ids) if session_ids else 0,
             "session_ids": ",".join(session_ids) if session_ids else "",
             "run_in_background": run_in_background,
+            "build_global_context_index": build_global_context_index,
             "cognee_version": cognee_version,
         },
     )
@@ -188,7 +198,21 @@ async def improve(
         )
         stages_run.append("memify_enrichment")
 
-        # Stage 4: sync enriched graph back to session cache (incremental)
+        if build_global_context_index:
+            if run_in_background:
+                logger.warning(
+                    "improve: global context index skipped in background mode "
+                    "because ordered background pipeline chaining is not supported"
+                )
+            else:
+                global_context_index_updated = await _build_global_context_index(
+                    dataset=dataset,
+                    user=user,
+                )
+                if global_context_index_updated:
+                    stages_run.append("global_context_index")
+
+        # Stage 5: sync enriched graph back to session cache (incremental)
         # Skip when running in background — stage 3 hasn't completed yet
         if session_ids and not run_in_background:
             await _sync_graph_to_sessions(
@@ -206,6 +230,25 @@ async def improve(
             await release_improve_lock(acquired_lock_for)
 
         return result
+
+
+async def _build_global_context_index(
+    dataset: Union[str, UUID],
+    user,
+) -> bool:
+    from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
+
+    try:
+        await global_context_index_pipeline(
+            user=user,
+            dataset=dataset,
+            run_in_background=False,
+        )
+        logger.info("improve: global context index updated")
+        return True
+    except Exception as e:
+        logger.warning("improve: global context index update failed (non-fatal): %s", e)
+        return False
 
 
 async def _resolve_dataset_name(dataset: Union[str, UUID], user) -> str:
