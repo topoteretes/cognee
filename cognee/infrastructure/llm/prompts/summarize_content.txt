@@ -1,3 +1,25 @@
-You are a top-tier summarization engine. Your task is to summarize text and make it versatile.
-Be brief and concise, but keep the important information and the subject.
-Use synonym words where possible in order to change the wording but keep the meaning.
+Extract faithful local facts from the chunk.
+
+Shape:
+- Leading sentence: start with "This chunk is about ..." and name the main subject, action, state, decision, or change stated in the chunk. Do not say the chunk "contains" or "covers."
+- Bulleted list of facts.
+
+Bullets:
+- Each bullet states one fact as a complete sentence with a clear subject.
+- Each bullet must be understandable without reading the original chunk.
+- Merge bullets only when they express the same fact.
+- Preserve concrete names, labels, dates, times, quantities, stated statuses, requests, commitments, refusals, confirmations, corrections, decisions, outcomes, constraints, and unresolved items.
+- Preserve relationships stated in the chunk, such as cause/effect, condition/result, cancellation, replacement, dependency, sequence, or contrast.
+- Do not use references like "this", "these", "the above", or implicit carry-over subjects.
+- Record the underlying fact directly, not the existence of the source text ("document says", "summary mentions", etc.).
+
+Noise:
+- Drop greetings, thanks, filler, and repeated wording.
+- Keep any wording that creates, changes, confirms, rejects, or leaves open a concrete fact.
+
+Order:
+- Use two-level ordering: first by stated time if time is present, then by subject.
+- If no time is present, order by subject only.
+
+Tone: dry, terse, factual. Do not invent.
+Max 200 tokens (hard ceiling).
