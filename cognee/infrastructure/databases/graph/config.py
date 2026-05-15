@@ -48,6 +48,7 @@ class GraphConfig(BaseSettings):
     graph_database_name: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
+    graph_database_host: str = ""
     graph_database_allow_anonymous: bool = False
     graph_database_port: int = 123
     graph_database_key: str = ""
@@ -75,6 +76,8 @@ class GraphConfig(BaseSettings):
         self.graph_dataset_database_handler = graph_dataset_database_handler
         if provider == "kuzu" and graph_dataset_database_handler == "ladybug":
             self.graph_dataset_database_handler = "kuzu"
+        if provider == "postgres" and graph_dataset_database_handler in ("ladybug", "postgres"):
+            self.graph_dataset_database_handler = "postgres_graph"
         base_config = get_base_config()
 
         databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
@@ -119,6 +122,7 @@ class GraphConfig(BaseSettings):
             "graph_database_url": self.graph_database_url,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
+            "graph_database_host": self.graph_database_host,
             "graph_database_allow_anonymous": self.graph_database_allow_anonymous,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
@@ -152,6 +156,7 @@ class GraphConfig(BaseSettings):
             "graph_database_name": self.graph_database_name,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
+            "graph_database_host": self.graph_database_host,
             "graph_database_allow_anonymous": self.graph_database_allow_anonymous,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,

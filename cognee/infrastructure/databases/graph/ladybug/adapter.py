@@ -304,20 +304,35 @@ class LadybugAdapter(GraphDBInterface):
                         max_num_threads=self.kuzu_num_threads,
                         max_db_size=self.kuzu_max_db_size,
                     )
-                except RuntimeError:
-                    import ladybug
-                    from .ladybug_migrate import needs_migration, ladybug_migration
-
-                    should_migrate, old_version = needs_migration(self.db_path, ladybug.__version__)
-                    if should_migrate:
-                        ladybug_migration(
-                            new_db=self.db_path + "_new",
-                            old_db=self.db_path,
-                            new_version=ladybug.__version__,
-                            old_version=old_version,
-                            overwrite=True,
+                except RuntimeError as e:
+                    if "wal" in str(e).lower():
+                        wal_path = self.db_path + ".wal"
+                        logger.warning(
+                            "Corrupted WAL detected at %s — removing to recover. "
+                            "Uncommitted transactions from the previous session will be lost.",
+                            wal_path,
                         )
+                        try:
+                            os.remove(wal_path)
+                        except FileNotFoundError:
+                            pass
+                    else:
+                        import ladybug
+                        from .ladybug_migrate import needs_migration, ladybug_migration
 
+                        should_migrate, old_version = needs_migration(
+                            self.db_path, ladybug.__version__
+                        )
+                        if should_migrate:
+                            ladybug_migration(
+                                new_db=self.db_path + "_new",
+                                old_db=self.db_path,
+                                new_version=ladybug.__version__,
+                                old_version=old_version,
+                                overwrite=True,
+                            )
+
+                    # After WAL or migration mitigation try initialization again
                     self.db = Database(
                         self.db_path,
                         buffer_pool_size=self.kuzu_buffer_pool_size,
@@ -976,11 +991,16 @@ class LadybugAdapter(GraphDBInterface):
                     n.updated_at = timestamp(node.updated_at)
                 """
                 await self.query(merge_query, {"nodes": node_params})
+                await self.checkpoint()
                 logger.debug(f"Processed {len(node_params)} nodes in batch")
 
         except Exception as e:
             logger.error(f"Failed to add nodes in batch: {e}")
             raise
+
+    async def checkpoint(self) -> None:
+        """Flush the WAL to disk so all preceding writes are durable."""
+        await self.query("CHECKPOINT;")
 
     async def delete_node(self, node_id: str) -> None:
         """
@@ -1259,6 +1279,7 @@ class LadybugAdapter(GraphDBInterface):
             """
 
             await self.query(query, {"edges": edge_params})
+            await self.checkpoint()
 
         except Exception as e:
             logger.error(f"Failed to add edges in batch: {e}")

@@ -77,6 +77,7 @@ def create_graph_engine(
     graph_database_name="",
     graph_database_username="",
     graph_database_password="",
+    graph_database_host="",
     graph_database_allow_anonymous=False,
     graph_database_port="",
     graph_database_key="",
@@ -97,6 +98,7 @@ def create_graph_engine(
     graph_database_name = normalized_optional_params["graph_database_name"]
     graph_database_username = normalized_optional_params["graph_database_username"]
     graph_database_password = normalized_optional_params["graph_database_password"]
+    graph_database_host = normalized_optional_params["graph_database_host"]
     graph_database_allow_anonymous = normalized_optional_params["graph_database_allow_anonymous"]
     graph_database_port = normalized_optional_params["graph_database_port"]
     graph_database_key = normalized_optional_params["graph_database_key"]
@@ -128,6 +130,7 @@ def create_graph_engine(
         graph_database_name,
         graph_database_username,
         graph_database_password,
+        graph_database_host,
         graph_database_allow_anonymous,
         graph_database_port,
         graph_database_key,
@@ -158,6 +161,7 @@ def evict_graph_engine(**kwargs) -> bool:
         normalized["graph_database_name"],
         normalized["graph_database_username"],
         normalized["graph_database_password"],
+        normalized["graph_database_host"],
         normalized["graph_database_allow_anonymous"],
         normalized["graph_database_port"],
         normalized["graph_database_key"],
@@ -177,6 +181,7 @@ def _create_graph_engine(
     graph_database_name="",
     graph_database_username="",
     graph_database_password="",
+    graph_database_host="",
     graph_database_allow_anonymous=False,
     graph_database_port="",
     graph_database_key="",
@@ -241,12 +246,46 @@ def _create_graph_engine(
         )
 
     elif graph_database_provider == "postgres":
-        if not graph_database_url:
-            raise EnvironmentError("Missing required Postgres GRAPH_DATABASE_URL.")
+        from cognee.context_global_variables import backend_access_control_enabled
+
+        if backend_access_control_enabled():
+            connection_string: str = (
+                f"postgresql+asyncpg://{graph_database_username}:{graph_database_password}"
+                f"@{graph_database_host}:{graph_database_port}/{graph_database_name}"
+            )
+        else:
+            if (
+                graph_database_port
+                and graph_database_username
+                and graph_database_password
+                and graph_database_host
+                and graph_database_name
+            ):
+                connection_string: str = (
+                    f"postgresql+asyncpg://{graph_database_username}:{graph_database_password}"
+                    f"@{graph_database_host}:{graph_database_port}/{graph_database_name}"
+                )
+            else:
+                from cognee.infrastructure.databases.relational import get_relational_config
+
+                relational_config = get_relational_config()
+                db_username = relational_config.db_username
+                db_password = relational_config.db_password
+                db_host = relational_config.db_host
+                db_port = relational_config.db_port
+                db_name = relational_config.db_name
+
+                if not (db_host and db_port and db_name and db_username and db_password):
+                    raise EnvironmentError("Missing required Postgres graph credentials!")
+
+                connection_string: str = (
+                    f"postgresql+asyncpg://{db_username}:{db_password}"
+                    f"@{db_host}:{db_port}/{db_name}"
+                )
 
         from .postgres.adapter import PostgresAdapter
 
-        return PostgresAdapter(connection_string=graph_database_url)
+        return PostgresAdapter(connection_string=connection_string)
 
     elif graph_database_provider in ("ladybug", "kuzu"):
         if not graph_file_path:

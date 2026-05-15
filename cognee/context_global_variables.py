@@ -93,7 +93,7 @@ def backend_access_control_enabled():
 
 
 VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "pgvector", "falkor"]
-GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["ladybug", "kuzu", "falkor"]
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["ladybug", "kuzu", "falkor", "postgres"]
 
 
 def is_multi_user_support_possible():
@@ -179,8 +179,13 @@ class DatabaseContextManager:
             "graph_database_password": dataset_database.graph_database_connection_info.get(
                 "graph_database_password", ""
             ),
+            "graph_database_host": dataset_database.graph_database_connection_info.get(
+                "graph_database_host", ""
+            ),
             "graph_dataset_database_handler": "",
-            "graph_database_port": "",
+            "graph_database_port": dataset_database.graph_database_connection_info.get(
+                "graph_database_port", ""
+            ),
             # Inherit subprocess mode and Kuzu tuning from the global config so that
             # per-dataset DB wrappers are spawned with matching settings.
             "graph_database_subprocess_enabled": get_graph_config().graph_database_subprocess_enabled,
