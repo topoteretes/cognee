@@ -670,7 +670,15 @@ async def _remember_inner(
     client = get_remote_client()
     if client is not None:
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
-        return await client.remember(data, dataset_name, session_id=session_id, **kwargs)
+        return await client.remember(
+            data,
+            dataset_name,
+            session_id=session_id,
+            chunk_size=chunk_size,
+            custom_prompt=custom_prompt,
+            run_in_background=run_in_background,
+            **kwargs,
+        )
 
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify

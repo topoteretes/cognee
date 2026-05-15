@@ -296,13 +296,15 @@ async def get_session_row(
     *,
     session_id: str,
     user_id: UUIDType,
+    user_ids: Optional[list[UUIDType]] = None,
     permitted_dataset_ids: Optional[list[UUIDType]] = None,
     prefer_other_owner: bool = False,
 ) -> Optional[SessionRecord]:
     """Fetch a session row visible to the caller.
 
-    Returns the row if the caller owns the session OR if the session's
-    dataset is in ``permitted_dataset_ids``. Returns None otherwise.
+    Returns the row if the caller (or their child agents, via
+    ``user_ids``) owns the session OR if the session's dataset is in
+    ``permitted_dataset_ids``. Returns None otherwise.
 
     The same ``session_id`` can exist under multiple owners (it's only
     unique per user in the composite PK). When the query matches
@@ -312,7 +314,10 @@ async def get_session_row(
     """
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
-        visibility_terms = [SessionRecord.user_id == user_id]
+        if user_ids is not None and len(user_ids) > 0:
+            visibility_terms = [SessionRecord.user_id.in_(user_ids)]
+        else:
+            visibility_terms = [SessionRecord.user_id == user_id]
         if permitted_dataset_ids:
             visibility_terms.append(SessionRecord.dataset_id.in_(permitted_dataset_ids))
         result = await session.execute(
@@ -365,6 +370,7 @@ class SessionListPage:
 async def list_session_rows(
     *,
     user_id: Optional[UUIDType] = None,
+    user_ids: Optional[list[UUIDType]] = None,
     permitted_dataset_ids: Optional[list[UUIDType]] = None,
     since: Optional[datetime] = None,
     status_filter: Optional[str] = None,
@@ -375,10 +381,10 @@ async def list_session_rows(
 ) -> SessionListPage:
     """List sessions with pagination metadata.
 
-    Visibility: returns sessions the caller owns OR sessions whose
-    ``dataset_id`` is in ``permitted_dataset_ids`` (read permission
-    granted at the dataset level). This mirrors the activity feed,
-    which scopes by dataset permissions rather than strict ownership.
+    Visibility: returns sessions the caller owns (or their child
+    agents own, via ``user_ids``) OR sessions whose ``dataset_id``
+    is in ``permitted_dataset_ids`` (read permission granted at the
+    dataset level).
 
     status_filter accepts the effective status (including
     ``abandoned``) — the SQL predicate handles the abandoned-by-time
@@ -390,7 +396,9 @@ async def list_session_rows(
 
         # Ownership / permission predicate.
         visibility_terms = []
-        if user_id is not None:
+        if user_ids is not None and len(user_ids) > 0:
+            visibility_terms.append(SessionRecord.user_id.in_(user_ids))
+        elif user_id is not None:
             visibility_terms.append(SessionRecord.user_id == user_id)
         if permitted_dataset_ids:
             visibility_terms.append(SessionRecord.dataset_id.in_(permitted_dataset_ids))

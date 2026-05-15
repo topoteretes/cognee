@@ -15,15 +15,13 @@ from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.modules.data.methods import create_dataset, get_datasets_by_name
+from cognee.modules.data.methods import get_datasets_by_name
+from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.permissions.methods import (
-    get_all_user_permission_datasets,
-    give_permission_on_dataset,
-)
+from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.shared.utils import send_telemetry
@@ -168,18 +166,9 @@ def get_datasets_router() -> APIRouter:
             if datasets:
                 return datasets[0]
 
-            db_engine = get_relational_engine()
-            async with db_engine.get_async_session() as session:
-                dataset = await create_dataset(
-                    dataset_name=dataset_data.name, user=user, session=session
-                )
+            dataset = await create_authorized_dataset(dataset_data.name, user)
 
-                await give_permission_on_dataset(user, dataset.id, "read")
-                await give_permission_on_dataset(user, dataset.id, "write")
-                await give_permission_on_dataset(user, dataset.id, "share")
-                await give_permission_on_dataset(user, dataset.id, "delete")
-
-                return dataset
+            return dataset
         except Exception as error:
             logger.error(f"Error creating dataset: {str(error)}")
             raise HTTPException(

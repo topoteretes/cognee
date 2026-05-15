@@ -186,3 +186,29 @@ jobs:
           EMBEDDING_DIMENSIONS: "1024"
           EMBEDDING_MAX_TOKENS: "8191"
         run: uv run python ./examples/demos/simple_cognee_example.py
+
+  test-claude-anthropic:
+    name: Run Anthropic Claude LLM Test
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Claude Anthropic LLM Simple Example
+        env:
+          LLM_PROVIDER: "anthropic"
+          # Note: If model becomes outdated update docs with new model as well
+          LLM_MODEL: "anthropic/claude-sonnet-4-5-20250929"
+          LLM_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_MAX_TOKENS: "16384"
+          EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_MODEL: "openai/text-embedding-3-large"
+          EMBEDDING_DIMENSIONS: "3072"
+          EMBEDDING_MAX_TOKENS: "8191"
+        run: uv run python ./examples/demos/simple_cognee_example.py

@@ -201,7 +201,13 @@ async def cognify(
 
     client = get_remote_client()
     if client is not None:
-        return await client.cognify(datasets)
+        return await client.cognify(
+            datasets,
+            chunk_size=chunk_size,
+            chunks_per_batch=chunks_per_batch,
+            custom_prompt=custom_prompt,
+            run_in_background=run_in_background,
+        )
 
     with new_span("cognee.api.cognify") as span:
         span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")

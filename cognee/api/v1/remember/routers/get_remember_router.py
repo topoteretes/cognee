@@ -35,6 +35,7 @@ def get_remember_router() -> APIRouter:
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         run_in_background: Optional[bool] = Form(default=False),
         custom_prompt: Optional[str] = Form(default=""),
+        chunk_size: Optional[int] = Form(default=None),
         chunks_per_batch: Optional[int] = Form(default=10),
         user: User = Depends(get_authenticated_user),
     ):
@@ -51,6 +52,8 @@ def get_remember_router() -> APIRouter:
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
+        - **chunk_size** (Optional[int]): Maximum tokens per chunk. Defaults to automatic
+          model-based sizing.
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
 
         Either datasetName or datasetId must be provided.
@@ -87,6 +90,7 @@ def get_remember_router() -> APIRouter:
                 node_set=node_set if node_set != [""] else None,
                 run_in_background=run_in_background or False,
                 custom_prompt=custom_prompt or None,
+                chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
             )
 

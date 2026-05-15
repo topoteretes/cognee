@@ -65,6 +65,7 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_allow_anonymous: bool = False,
         driver: Optional[Any] = None,
     ):
+        """Initialize the Neo4j driver from the given connection params and optional auth."""
         # Only use auth if both username and password are provided
         auth = None
 
@@ -114,6 +115,7 @@ class Neo4jAdapter(GraphDBInterface):
             yield session
 
     async def is_empty(self) -> bool:
+        """Return True if the graph contains no nodes."""
         query = """
         RETURN EXISTS {
         MATCH (n)
@@ -200,10 +202,18 @@ class Neo4jAdapter(GraphDBInterface):
         """
         serialized_properties = self.serialize_properties(node.model_dump())
 
+        # Capture the existing belongs_to_set before `+=` overwrites it, then
+        # write back the union so a DataPoint cognified into multiple datasets
+        # retains every dataset tag on its node property (edges are already
+        # additive; this keeps the property consistent with them).
         query = dedent(
             f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
-                ON CREATE SET node += $properties, node.updated_at = timestamp()
-                ON MATCH SET node += $properties, node.updated_at = timestamp()
+                WITH node, apoc.coll.toSet(
+                    coalesce(node.belongs_to_set, [])
+                    + coalesce($properties.belongs_to_set, [])
+                ) AS merged_belongs_to_set
+                SET node += $properties, node.updated_at = timestamp()
+                SET node.belongs_to_set = merged_belongs_to_set
                 WITH node, $node_label AS label
                 CALL apoc.create.addLabels(node, [label]) YIELD node AS labeledNode
                 RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId"""
@@ -233,27 +243,109 @@ class Neo4jAdapter(GraphDBInterface):
 
             - None: None
         """
+        # Capture the existing belongs_to_set before `+=` overwrites it, then
+        # write back the union so the property on a shared DataPoint reflects
+        # every dataset that cognified it (consistent with the additive
+        # belongs_to_set edges). See add_node for the single-node variant.
         query = f"""
         UNWIND $nodes AS node
         MERGE (n: `{BASE_LABEL}`{{id: node.node_id}})
-        ON CREATE SET n += node.properties, n.updated_at = timestamp()
-        ON MATCH SET n += node.properties, n.updated_at = timestamp()
+        WITH n, node, apoc.coll.toSet(
+            coalesce(n.belongs_to_set, [])
+            + coalesce(node.properties.belongs_to_set, [])
+        ) AS merged_belongs_to_set
+        SET n += node.properties, n.updated_at = timestamp()
+        SET n.belongs_to_set = merged_belongs_to_set
         WITH n, node.label AS label
         CALL apoc.create.addLabels(n, [label]) YIELD node AS labeledNode
         RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
         """
 
-        nodes = [
-            {
-                "node_id": str(node.id),
-                "label": type(node).__name__,
-                "properties": self.serialize_properties(dict(node)),
-            }
-            for node in nodes
-        ]
+        # Dedup by node_id within the batch — UNWIND on a list with
+        # duplicates yields the same `n` twice, and each pass recomputes
+        # merged_belongs_to_set from the pre-SET state. The second SET then
+        # overwrites the first, losing any tag only seen on the first
+        # duplicate. Collapsing duplicates here (union of tags kept) avoids
+        # the race and matches the batch-dedup already done in PGVector.
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for node in nodes:
+            key = str(node.id)
+            props = self.serialize_properties(dict(node))
+            existing_entry = deduped.get(key)
+            if existing_entry:
+                existing_tags = existing_entry["properties"].get("belongs_to_set") or []
+                incoming_tags = props.get("belongs_to_set") or []
+                if existing_tags or incoming_tags:
+                    merged = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                    props["belongs_to_set"] = merged
+                existing_entry["properties"] = props
+                existing_entry["label"] = type(node).__name__
+            else:
+                deduped[key] = {
+                    "node_id": key,
+                    "label": type(node).__name__,
+                    "properties": props,
+                }
 
-        results = await self.query(query, dict(nodes=nodes))
+        results = await self.query(query, dict(nodes=list(deduped.values())))
         return results
+
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Strip the given tag names from every node's `belongs_to_set`
+        property array AND delete the matching `belongs_to_set` edges
+        to surviving NodeSet nodes whose `name` is one of the tags.
+
+        Used to reconcile surviving shared nodes after a dataset or its
+        NodeSet is deleted. When the NodeSet node itself is hard-deleted
+        upstream, no edges survive — this call is a no-op on the edge
+        side. When the NodeSet survives (scoped detag for shared slugs),
+        the edge from the detagged node to that NodeSet is stale and
+        must be dropped so the graph and the property stay in sync.
+
+        When `node_ids` is provided, the update is restricted to nodes
+        whose `id` is in the list — used when a shared node must lose
+        one dataset's tag while the dataset itself (and its other
+        members) remains.
+        """
+        if not tags:
+            return None
+
+        if node_ids is not None and not node_ids:
+            return None
+
+        id_filter = "AND n.id IN $node_ids" if node_ids is not None else ""
+        node_scope_clause = "WHERE n.id IN $node_ids" if node_ids is not None else ""
+        edge_scope_keyword = "AND" if node_ids is not None else "WHERE"
+        # Single Cypher statement → single transaction. Two independent
+        # phases bridged by `WITH count(*)`: first strip the property on
+        # matching nodes, then match `belongs_to_set` edges to NodeSets
+        # whose name is being removed and delete them. The bridge keeps
+        # the phases sequenced (so phase 2 sees the post-SET graph) but
+        # decouples their match sets — an edge to a stale NodeSet is
+        # pruned even if the source node didn't carry the tag in its
+        # property array. If phase 2 fails, the whole transaction rolls
+        # back and the property is untouched — retry is safe.
+        query = f"""
+        MATCH (n: `{BASE_LABEL}`)
+        WHERE any(tag IN $tags WHERE tag IN coalesce(n.belongs_to_set, []))
+        {id_filter}
+        SET n.belongs_to_set = [x IN n.belongs_to_set WHERE NOT x IN $tags]
+        WITH count(*) AS _bridge
+        MATCH (n: `{BASE_LABEL}`)-[r:belongs_to_set]->(ns:NodeSet)
+        {node_scope_clause}
+        {edge_scope_keyword} ns.name IN $tags
+        DELETE r
+        """
+        params: Dict[str, Any] = {"tags": list(tags)}
+        if node_ids is not None:
+            params["node_ids"] = [str(nid) for nid in node_ids]
+        await self.query(query, params)
+        return None
 
     async def extract_node(self, node_id: str):
         """
@@ -828,6 +920,7 @@ class Neo4jAdapter(GraphDBInterface):
         return {str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None}
 
     async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        """Return each node's `feedback_weight` property, defaulting to 0.5 when unset."""
         if not node_ids:
             return {}
         valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
@@ -848,6 +941,7 @@ class Neo4jAdapter(GraphDBInterface):
     async def set_node_feedback_weights(
         self, node_feedback_weights: Dict[str, float]
     ) -> Dict[str, bool]:
+        """Persist `feedback_weight` per node; returns a map of node_id → updated bool."""
         if not node_feedback_weights:
             return {}
         node_ids = list(node_feedback_weights.keys())
@@ -858,6 +952,7 @@ class Neo4jAdapter(GraphDBInterface):
         return {nid: (nid in updated_ids) for nid in node_ids}
 
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        """Return each edge's `feedback_weight` property, defaulting to 0.5 when unset."""
         if not edge_object_ids:
             return {}
         valid_edge_ids = [eid for eid in edge_object_ids if isinstance(eid, str) and eid]
@@ -882,6 +977,7 @@ class Neo4jAdapter(GraphDBInterface):
     async def set_edge_feedback_weights(
         self, edge_feedback_weights: Dict[str, float]
     ) -> Dict[str, bool]:
+        """Persist `feedback_weight` per edge; returns a map of edge_object_id → updated bool."""
         if not edge_feedback_weights:
             return {}
         edge_ids = list(edge_feedback_weights.keys())

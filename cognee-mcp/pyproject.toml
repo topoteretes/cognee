@@ -26,6 +26,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+# The MCP App workspace bundle is gitignored (built artifact). `artifacts`
+# tells Hatch to include it in wheels when present, without erroring on
+# editable installs where the bundle hasn't been built yet (e.g. e2e CI).
+# The release pipeline runs `npm run build` before `uv build`, so PyPI
+# wheels always carry the bundle.
+artifacts = ["src/app_bundles/**/*"]
 
 [dependency-groups]
 dev = [
@@ -34,17 +40,29 @@ dev = [
     "pytest-asyncio>=0.21.1,<2",
 ]
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-
 postgres-binary = [
     "psycopg2-binary>=2.9.10,<3.0.0",
     "pgvector>=0.3.5,<0.4",
     "asyncpg>=0.30.0,<1.0.0",
 ]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.uv]
+# onnxruntime is pulled in transitively via cognee[docs] -> unstructured.
+# 1.24.x dropped cp310 wheels (the MCP CI step uses Python 3.10), and
+# cp314 wheels start at 1.24.1. cognee's own pyproject applies the same
+# split inside its [fastembed] extra, but cognee-mcp doesn't pull that
+# extra, so we must mirror the constraint here to keep `uv lock --upgrade`
+# from picking a 1.24.x for python<3.14.
+constraint-dependencies = [
+    "onnxruntime<=1.23.2 ; python_version < '3.14'",
+    "onnxruntime>=1.24.1 ; python_version >= '3.14'",
+]
 
 [project.scripts]
 cognee = "src:main"

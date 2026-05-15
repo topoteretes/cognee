@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, List, Annotated
 
+import litellm
 from fastapi import APIRouter, Depends, File, UploadFile as UF, Form
 from fastapi.responses import JSONResponse
 from pydantic import Field
@@ -8,6 +9,7 @@ from pydantic import ConfigDict, ValidationError
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.loaders import get_loader_engine
@@ -24,15 +26,127 @@ import tempfile
 
 logger = get_logger("api.llm")
 
+# Maximum characters of sample text sent to the LLM for schema inference.
+# Keeps the prompt well within typical context windows while providing
+# enough material for the model to identify entity types and relationships.
+_INFER_SCHEMA_MAX_CHARS = 12_000
+
 # NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
 #       Once issue is resolved on Swagger side it can be removed.
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 _ALLOWED_LLM_PARAMS = {"temperature", "max_tokens", "top_p", "seed"}
+_TOKEN_BUDGET_SAFETY_MARGIN = 512
 
 
 def _safe_params(params: dict) -> dict:
     return {k: v for k, v in params.items() if k in _ALLOWED_LLM_PARAMS}
+
+
+def _sample_text(text: str, max_chars: int = _INFER_SCHEMA_MAX_CHARS) -> str:
+    """Return a representative sample of *text* that fits within *max_chars*.
+
+    Strategy depends on how much larger the text is than the budget:
+    - ≤ max_chars: return as-is.
+    - ≤ 2× max_chars: take beginning and end (two sections).
+    - > 2× max_chars: take beginning, middle, and end (three sections).
+
+    This avoids near-duplicate content when the text is only slightly
+    over the limit.
+    """
+    if len(text) <= max_chars:
+        return text
+
+    separator = "\n\n[...]\n\n"
+    sep_budget = len(separator)
+
+    if len(text) <= max_chars * 2:
+        # Two sections: beginning + end — no overlap possible.
+        half = (max_chars - sep_budget) // 2
+        return text[:half].rstrip() + separator + text[-half:].lstrip()
+
+    # Three sections: beginning, middle, end.
+    chunk = (max_chars - sep_budget * 2) // 3
+    mid_start = (len(text) - chunk) // 2
+
+    return (
+        text[:chunk].rstrip()
+        + separator
+        + text[mid_start : mid_start + chunk].strip()
+        + separator
+        + text[-chunk:].lstrip()
+    )
+
+
+def _count_tokens(text: str, model: str) -> int | None:
+    try:
+        return litellm.token_counter(model=model, text=text)
+    except Exception:
+        return None
+
+
+def _model_aware_sample_text(
+    text: str,
+    model: str,
+    system_prompt: str,
+    user_prompt_prefix: str,
+    requested_max_tokens: int,
+) -> str:
+    """
+    Return sampled text sized for model context budget.
+
+    Falls back to the static character sampler when model metadata or token counting
+    is unavailable.
+    """
+    try:
+        llm_config = get_llm_config()
+        model_info = litellm.get_model_info(
+            model,
+            custom_llm_provider=llm_config.llm_provider or None,
+            api_base=llm_config.llm_endpoint or None,
+        )
+
+        max_input_tokens = model_info.get("max_input_tokens") or model_info.get("max_tokens")
+        max_output_tokens = model_info.get("max_output_tokens") or model_info.get("max_tokens")
+        if not max_input_tokens:
+            return _sample_text(text)
+
+        output_budget = min(requested_max_tokens, max_output_tokens or requested_max_tokens)
+        prompt_overhead = (_count_tokens(system_prompt, model) or 0) + (
+            _count_tokens(user_prompt_prefix, model) or 0
+        )
+
+        available_input_tokens = max_input_tokens - output_budget - prompt_overhead
+        available_input_tokens -= _TOKEN_BUDGET_SAFETY_MARGIN
+
+        if available_input_tokens <= 0:
+            logger.warning(
+                "Infer schema prompt budget exhausted for model %s. Falling back to %s chars.",
+                model,
+                _INFER_SCHEMA_MAX_CHARS,
+            )
+            return _sample_text(text)
+
+        full_text_tokens = _count_tokens(text, model)
+        if full_text_tokens is None:
+            return _sample_text(text)
+        if full_text_tokens <= available_input_tokens:
+            return text
+
+        chars_per_token = len(text) / max(full_text_tokens, 1)
+        sample_max_chars = max(500, int(available_input_tokens * chars_per_token * 0.95))
+        sample = _sample_text(text, max_chars=sample_max_chars)
+
+        for _ in range(4):
+            sample_tokens = _count_tokens(sample, model)
+            if sample_tokens is None or sample_tokens <= available_input_tokens:
+                break
+            sample_max_chars = max(500, int(sample_max_chars * 0.8))
+            sample = _sample_text(text, max_chars=sample_max_chars)
+
+        return sample
+    except Exception:
+        return _sample_text(text)
 
 
 @asynccontextmanager
@@ -134,7 +248,7 @@ def get_llm_router() -> APIRouter:
             return JSONResponse(status_code=400, content={"error": str(error)})
         except Exception as error:
             logger.error("LLM custom prompt generation request failed")
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(status_code=500, content={"error": str(error)})
 
     @router.post("/infer-schema", response_model=InferSchemaResponseDTO)
     @log_usage(function_name="POST /v1/llm/infer-schema", log_type="api_endpoint")
@@ -189,16 +303,29 @@ def get_llm_router() -> APIRouter:
             if text:
                 file_contents.append(text)
 
-            file_contents_text = "\n\n".join(file_contents)
-
-            user_prompt = render_prompt(
-                "infer_schema_user.txt",
-                {"SAMPLE_TEXT": file_contents_text},
-            )
-
             system_prompt = render_prompt(
                 "infer_schema_system.txt",
                 {},
+            )
+            user_prompt_prefix = render_prompt(
+                "infer_schema_user.txt",
+                {"SAMPLE_TEXT": ""},
+            )
+
+            file_contents_text = "\n\n".join(file_contents)
+            requested_max_tokens = int(
+                parameters_dict.get("max_tokens", get_llm_config().llm_max_completion_tokens)
+            )
+            sample = _model_aware_sample_text(
+                text=file_contents_text,
+                model=get_llm_config().llm_model,
+                system_prompt=system_prompt,
+                user_prompt_prefix=user_prompt_prefix,
+                requested_max_tokens=requested_max_tokens,
+            )
+            user_prompt = render_prompt(
+                "infer_schema_user.txt",
+                {"SAMPLE_TEXT": sample},
             )
 
             llm_output = await LLMGateway.acreate_structured_output(
@@ -228,6 +355,6 @@ def get_llm_router() -> APIRouter:
             )
         except Exception as error:
             logger.error("LLM schema inference failed: %s", error)
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(status_code=500, content={"error": str(error)})
 
     return router

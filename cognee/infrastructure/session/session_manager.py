@@ -501,7 +501,7 @@ class SessionManager:
                 await self.add_feedback(
                     user_id=str(user_id),
                     session_id=resolved_session_id,
-                    qa_id=last_qa_id,  # ty:ignore[invalid-argument-type]
+                    qa_id=last_qa_id,
                     feedback_text=feedback_text,
                     feedback_score=score,
                 )

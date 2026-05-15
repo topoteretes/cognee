@@ -30,6 +30,28 @@ class TestConfigSetMethod:
         """Test setting vector DB provider through generic set method."""
         config.set("vector_db_provider", "chromadb")
 
+    def test_set_graph_database_subprocess_enabled(self):
+        """Test enabling graph subprocess adapters through generic set method."""
+        from cognee.infrastructure.databases.graph.config import get_graph_config
+
+        original = get_graph_config().graph_database_subprocess_enabled
+        try:
+            config.set("graph_database_subprocess_enabled", True)
+            assert get_graph_config().graph_database_subprocess_enabled is True
+        finally:
+            get_graph_config().graph_database_subprocess_enabled = original
+
+    def test_set_vector_db_subprocess_enabled(self):
+        """Test enabling vector subprocess adapters through generic set method."""
+        from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+        original = get_vectordb_config().vector_db_subprocess_enabled
+        try:
+            config.set("vector_db_subprocess_enabled", True)
+            assert get_vectordb_config().vector_db_subprocess_enabled is True
+        finally:
+            get_vectordb_config().vector_db_subprocess_enabled = original
+
     def test_set_chunk_size(self):
         """Test setting chunk size through generic set method."""
         config.set("chunk_size", 2048)
@@ -68,3 +90,44 @@ class TestConfigSetMethod:
 
         for key, value in test_cases:
             config.set(key, value)
+
+    def test_set_graph_db_config_coerces_string_values(self):
+        """Bulk ``set_graph_db_config`` must coerce string payloads to the
+        field's declared type — e.g. ``{"graph_database_subprocess_enabled":
+        "true"}`` should land as ``bool True``, not the literal string.
+        Without coercion, downstream ``if subprocess_enabled:`` evaluates
+        a non-empty string as truthy regardless of its content.
+
+        Snapshots and restores the mutated singleton fields so the test
+        doesn't leak state into other tests in the same session.
+        """
+        from cognee.infrastructure.databases.graph.config import get_graph_config
+
+        cfg = get_graph_config()
+        original = {
+            "graph_database_subprocess_enabled": cfg.graph_database_subprocess_enabled,
+            "kuzu_num_threads": cfg.kuzu_num_threads,
+        }
+        try:
+            config.set_graph_db_config(
+                {
+                    "graph_database_subprocess_enabled": "true",
+                    "kuzu_num_threads": "4",
+                }
+            )
+            cfg = get_graph_config()
+            assert cfg.graph_database_subprocess_enabled is True
+            assert cfg.kuzu_num_threads == 4
+
+            # Native types pass through unchanged.
+            config.set_graph_db_config(
+                {
+                    "graph_database_subprocess_enabled": False,
+                    "kuzu_num_threads": 8,
+                }
+            )
+            cfg = get_graph_config()
+            assert cfg.graph_database_subprocess_enabled is False
+            assert cfg.kuzu_num_threads == 8
+        finally:
+            config.set_graph_db_config(original)

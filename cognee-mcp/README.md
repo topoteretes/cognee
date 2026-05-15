@@ -74,7 +74,12 @@ Please refer to our documentation [here](https://docs.cognee.ai/how-to-guides/de
     ```
     LLM_API_KEY="YOUR_OPENAI_API_KEY"
     ```
-7. Run cognee mcp server with stdio (default)
+7. (Optional — running from source only) Build the MCP App workspace UI bundle. Requires Node.js. Docker users skip this; the image build runs it automatically.
+    ```
+    cd apps-src && npm install && npm run build && cd ..
+    ```
+    This produces `src/app_bundles/visualize-graph.html`, which is gitignored. If you skip this step, `visualize_graph_ui` and the workspace tools will raise a clear error pointing back to this command.
+8. Run cognee mcp server with stdio (default)
     ```
     python src/server.py
     ```
@@ -476,6 +481,50 @@ The MCP server exposes three tools:
 - **remember**: Store data in memory. With `session_id`: fast session cache. Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name, or delete all owned memory with `everything=True`
+
+**Workspace UI Tools** (MCP Apps — Cursor, Claude Desktop, etc.):
+
+- **visualize_graph_ui**: Open the workspace and render the current knowledge graph
+- **upload_file_ui**: Open the workspace for file upload
+- **open_cognee_workspace**: Generic "open the cognee UI" entry point
+- **cognify_file**: Ingest an uploaded file (used by the workspace; accepts base64 content)
+- **list_datasets_json / list_dataset_data_json / create_dataset_json / get_client_info_json**: Structured-JSON helpers powering the workspace dropdown
+
+The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
+
+The bundle that powers the workspace lives at `cognee-mcp/src/app_bundles/visualize-graph.html`. It is built from `cognee-mcp/apps-src/` via `npm run build` and is gitignored. The Docker image builds it as part of the image; PyPI wheels carry it (the maintainer runs `npm run build` before `uv build`); from-source users build it manually (see [Quick Start](#-quick-start) step 7). If the bundle is missing at runtime, the workspace tools raise a `FileNotFoundError` pointing back to the build command.
+
+### Agent Scoping (per-client default datasets)
+
+By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cursor_vscode_memory`, Claude Code → `claude_code_memory`) so different agents don't share memory unintentionally. The dataset is created on demand the first time a client calls a workspace tool.
+
+LLM-direct calls to `cognify`, `remember`, `improve`, `cognify_status`, and `cognify_file` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
+
+To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
+
+```bash
+COGNEE_MCP_AGENT_SCOPED=false
+```
+
+When disabled, the workspace UI header shows `(agent scoping off)` and no per-client datasets are autocreated.
+
+### Per-dataset isolation (`ENABLE_BACKEND_ACCESS_CONTROL`)
+
+Agent scoping decides which dataset *name* a tool defaults to. Whether two datasets are actually isolated at the storage layer is governed by cognee's `ENABLE_BACKEND_ACCESS_CONTROL` flag:
+
+- **`false` (default)** — all datasets share one Kuzu graph DB and one LanceDB. The dataset filter is honored for top-level data points, but `GRAPH_COMPLETION` traversal can pull connected nodes from any dataset, and `visualize_graph_ui` reflects the full shared graph. Fastest path; fine for single-user local dev.
+- **`true`** — each `(user, dataset)` pair gets its own per-dataset Kuzu + LanceDB under `.cognee_system/databases/<dataset_uuid>/`. `visualize_graph_ui` and search become strictly per-dataset because the workspace passes `dataset_name` and the server routes the visualization through cognee's `visualize_multi_user_graph` to set the right DB context.
+
+**Switching modes wipes nothing automatically — but data does not migrate.** Data ingested in one mode lives at a different on-disk path than the other and won't be visible after the flip. Clean-slate when changing the flag:
+
+```bash
+# Stop server, then:
+DATA_ROOT="/absolute/path/to/data-root"
+rm -rf "$DATA_ROOT/.cognee_system" "$DATA_ROOT/.data_storage"
+# Edit .env to flip ENABLE_BACKEND_ACCESS_CONTROL, restart, re-cognify.
+```
+
+(Set `DATA_ROOT` to whatever you used for `DATA_ROOT_DIRECTORY` / `SYSTEM_ROOT_DIRECTORY`, or your cognee install dir if you didn't set those.)
 
 **Examples:**
 ```bash

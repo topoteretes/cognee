@@ -296,6 +296,7 @@ jobs:
 
             Start by reading the branch notes, then inspect the actual code diff for this branch. Use the branch parents above to identify what really changed. Prefer the merge-base-aware diff `git diff ${{ matrix.first_parent }}...${{ matrix.second_parent }}` and read the touched source files before editing docs.
             Focus on the precomputed source files and likely documentation targets first. Only search outside those targets if they are clearly not sufficient.
+            Document the net-new public-facing delta introduced by this branch, not the full current behavior of the subsystem.
 
             Before making any docs edits:
 
@@ -309,6 +310,8 @@ jobs:
                - or only internal implementation details
             3. Only edit docs for items that fall into the documented/public categories above.
             4. If a proposed docs edit cannot be traced back to a concrete source diff in this branch, do not make that edit.
+            5. Check whether the described behavior already existed before this branch. If it did, do not describe it as newly introduced by this merge.
+            6. If the branch fixes migrations, registration, wiring, or visibility for an already-existing feature, document the upgrade or migration impact only. Do not expand into broad subsystem documentation unless it is strictly required to understand the branch.
 
             ## Instructions
 
@@ -316,16 +319,23 @@ jobs:
             2. Inspect the source diff for `${{ matrix.first_parent }}...${{ matrix.second_parent }}` and identify which changes are documentation-worthy.
             3. Review the touched source files themselves, not just the merge summary.
             4. Only document user-facing behavior, public API changes, examples, or developer-facing semantics that actually changed in this branch.
-            5. Do not make unrelated cleanup edits, style edits, or generic improvements to nearby docs sections unless they are strictly required to explain the branch changes.
-            6. Prefer the smallest possible set of docs edits that fully covers the code changes.
-            7. Review the relevant existing documentation pages in `./docs-repo`.
-            8. Search the Cognee source code in the current workspace to verify technical details before editing docs.
-            9. Edit at most 3 documentation files unless the source diff clearly requires more.
-            10. Prefer updating existing pages over creating new ones.
-            11. Do not edit `docs.json` unless you are creating a new docs page that is strictly required by the code diff.
-            12. Do not edit any workflow files, automation files, integration docs, provider docs, or unrelated concept pages unless the changed source files in this branch directly require it.
-            13. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
-            14. Do NOT create git commits.
+            5. For each proposed docs edit, identify the exact branch delta it documents and which changed source file(s) prove it.
+            6. Check that the target page is the correct page type for the detail level:
+               - concept pages: high-level behavior and mental model
+               - guides: task-oriented usage
+               - API/reference pages: exact signatures, parameters, schemas, env vars, and defaults
+               - migration/changelog pages: upgrade impact and operational notes
+            7. If the content is too detailed for the chosen page, either move it to a more appropriate existing page or reduce it to a short note with a link.
+            8. Do not make unrelated cleanup edits, style edits, or generic improvements to nearby docs sections unless they are strictly required to explain the branch changes.
+            9. Prefer the smallest possible set of docs edits that fully covers the code changes.
+            10. Review the relevant existing documentation pages in `./docs-repo`.
+            11. Search the Cognee source code in the current workspace to verify technical details before editing docs.
+            12. Edit at most 3 documentation files unless the source diff clearly requires more.
+            13. Prefer updating existing pages over creating new ones.
+            14. Do not edit `docs.json` unless you are creating a new docs page that is strictly required by the code diff.
+            15. Do not edit any workflow files, automation files, integration docs, provider docs, or unrelated concept pages unless the changed source files in this branch directly require it.
+            16. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
+            17. Do NOT create git commits.
 
             ## What to prioritize
 
@@ -350,10 +360,18 @@ jobs:
             The resulting docs PR should be easy to justify from the code diff.
 
             - Keep the PR narrowly scoped to this merge.
+            - Do not present pre-existing behavior as if this branch introduced it.
+            - Do not broaden a narrow fix branch into full feature-area documentation.
+            - Do not turn a small migration or registration fix into a large conceptual backfill unless the branch itself changes the public concept.
             - Avoid adding documentation for features, integrations, or guides that were not touched by this branch.
             - Do not add new conceptual pages unless the source diff introduces a new public concept that cannot fit into an existing page.
             - If the branch only warrants one or two doc edits, make only one or two doc edits.
             - Every edited file must be explainable by pointing to one or more changed source files in this merge.
+            - Every edited paragraph should be defensible from a concrete branch delta, not just from the current state of the codebase.
+            - Prefer precise scope wording. For example:
+              - "for graph node and edge relational upserts" instead of "for all relational writes"
+              - "helps avoid race conditions and contention" instead of "prevents race conditions"
+              - "equivalent configurations now reuse the same adapter instance" instead of "the factory caches adapters"
             - If you cannot justify an edit from the code diff, skip it.
             - It is better to produce a very small PR than a broad PR with speculative documentation updates.
 
@@ -366,6 +384,7 @@ jobs:
         env:
           BRANCH_NAME: ${{ matrix.branch_name }}
           SHORT_SHA: ${{ matrix.short_sha }}
+          NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
           ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
           DEFAULT_PR_TITLE: ${{ steps.assessment.outputs.pr_title }}
         run: |
@@ -375,10 +394,11 @@ jobs:
           import subprocess
           from pathlib import Path
 
+          notes = json.loads(Path(os.environ["NOTES_JSON"]).read_text())
           assessment = json.loads(Path(os.environ["ASSESSMENT_JSON"]).read_text())
+          summary = notes.get("summary", "").strip()
+          highlights = notes.get("highlights", [])
           reason = assessment.get("reason", "")
-          candidate_areas = assessment.get("candidate_areas", [])
-          recommended = assessment.get("recommended_next_steps", [])
 
           changed_files = [
               line.rstrip()
@@ -392,21 +412,29 @@ jobs:
 
           pr_title = os.environ["DEFAULT_PR_TITLE"]
           pr_body_lines = [
+              "## Summary",
+              "",
               f"Automated documentation draft for merged branch `{os.environ['BRANCH_NAME']}` (`{os.environ['SHORT_SHA']}`).",
               "",
-              "This PR includes Claude-generated updates grounded in the current documentation pages and verified against the source repository.",
+              summary
+              or "This PR updates existing docs to reflect the branch's user-facing documentation impact based on the source diff and current docs structure.",
               "",
-              f"Reason: {reason}",
+              "## Why This PR Exists",
+              "",
+              reason
+              or "The merged branch appears to change behavior, configuration, API usage, or developer-facing semantics that are represented in the docs.",
+              "",
+              "## Source",
+              "",
+              f"- Branch: `{os.environ['BRANCH_NAME']}`",
+              f"- Merge short SHA: `{os.environ['SHORT_SHA']}`",
           ]
-          if candidate_areas:
-              pr_body_lines.extend(["", "Candidate areas:"])
-              pr_body_lines.extend([f"- {item}" for item in candidate_areas])
+          if highlights:
+              pr_body_lines.extend(["", "## Branch Highlights", ""])
+              pr_body_lines.extend([f"- {item}" for item in highlights])
           if normalized_files:
-              pr_body_lines.extend(["", "Documentation files updated:"])
+              pr_body_lines.extend(["", "## Documentation Files Updated", ""])
               pr_body_lines.extend([f"- `{item}`" for item in normalized_files])
-          if recommended:
-              pr_body_lines.extend(["", "Recommended next steps:"])
-              pr_body_lines.extend([f"- {item}" for item in recommended])
 
           output_path = Path(os.environ["GITHUB_OUTPUT"])
           with output_path.open("a", encoding="utf-8") as fh:

@@ -1,10 +1,14 @@
 import asyncio
+
 import cognee
-from cognee.shared.logging_utils import setup_logging, INFO
 from cognee.api.v1.search import SearchType
+from cognee.shared.logging_utils import INFO, setup_logging
+from common import configure_cognee_for_subprocess
 
 
 async def main():
+    configure_cognee_for_subprocess(cognee)
+
     await cognee.cognify(datasets=["second_cognify_dataset"])
 
     query_text = (
@@ -22,7 +26,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = setup_logging(log_level=INFO)
+    setup_logging(log_level=INFO)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
