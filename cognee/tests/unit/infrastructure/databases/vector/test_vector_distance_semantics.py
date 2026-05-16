@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -234,3 +234,75 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
 
     assert [r.score for r in results] == [1.19, 0.51]
     assert any(r.score > 1.0 for r in results)
+
+
+@pytest.mark.asyncio
+async def test_cross_collection_scores_are_globally_comparable() -> None:
+    """Regression test for GH-2030: per-collection normalization must NOT be applied.
+
+    When brute_force_triplet_search queries multiple collections the raw cosine
+    distances returned by each adapter are mapped directly onto graph nodes.  If
+    scores were min-max-normalised *per collection* a node with distance 0.1 from
+    Entity_name and a node with distance 0.5 from TextSummary_text would both end
+    up with score 0.0 (the local minimum), making them appear equally relevant.
+    Instead the raw values must be preserved so that cross-collection ranking is
+    correct.
+
+    This test verifies the invariant via CogneeGraph.map_vector_distances_to_graph_nodes()
+    without touching any real database.
+    """
+    from typing import Any, Dict
+
+    from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
+
+    # Two nodes, one matched in each collection with different raw distances.
+    node_a_id = str(uuid4())
+    node_b_id = str(uuid4())
+
+    class _ScoredResult:
+        def __init__(self, id_: str, score: float) -> None:
+            self.id: str = id_
+            self.score: float = score
+            self.payload: Dict[str, Any] = {}
+
+    # node_a appears in Entity_name with a very good (low) distance
+    # node_b appears in TextSummary_text with a worse distance
+    node_distances = {
+        "Entity_name": [_ScoredResult(node_a_id, 0.1)],
+        "TextSummary_text": [_ScoredResult(node_b_id, 0.5)],
+    }
+
+    # Build a minimal graph with both nodes connected by a single edge
+    graph = CogneeGraph()
+    node_a = Node(node_id=node_a_id, attributes={"name": "A", "type": "Entity"})
+    node_b = Node(node_id=node_b_id, attributes={"name": "B", "type": "Entity"})
+    edge = Edge(
+        node1=node_a,
+        node2=node_b,
+        attributes={"relationship_name": "related_to"},
+    )
+    graph.nodes[node_a_id] = node_a
+    graph.nodes[node_b_id] = node_b
+    graph.edges.append(edge)
+    graph.triplet_distance_penalty = 6.5
+
+    await graph.map_vector_distances_to_graph_nodes(node_distances=node_distances)
+
+    distance_a = node_a.attributes["vector_distance"][0]
+    distance_b = node_b.attributes["vector_distance"][0]
+
+    # Raw distances must be preserved — no per-collection min-max normalization.
+    assert distance_a == pytest.approx(0.1), (
+        f"Expected raw distance 0.1 for node_a, got {distance_a}. "
+        "Per-collection normalization would collapse this to 0.0."
+    )
+    assert distance_b == pytest.approx(0.5), (
+        f"Expected raw distance 0.5 for node_b, got {distance_b}. "
+        "Per-collection normalization would collapse this to 0.0."
+    )
+    # The closer node must rank better (lower score = more relevant).
+    assert distance_a < distance_b, (
+        "Cross-collection ranking is broken: node_a (distance 0.1) should rank "
+        "better than node_b (distance 0.5) regardless of which collection each came from."
+    )
