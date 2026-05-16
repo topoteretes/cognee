@@ -2,6 +2,7 @@ from uuid import UUID
 from typing import Union, Optional, List, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.models import Skill
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
@@ -45,6 +46,11 @@ async def search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
+    skills: Optional[List[Union[str, Skill]]] = None,
+    tools: Optional[List[str]] = None,
+    max_iter: Optional[int] = None,
+    skills_auto_retrieve: Optional[bool] = None,
+    skills_top_k: Optional[int] = None,
 ) -> List[SearchResult]:
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
@@ -248,6 +254,22 @@ async def search(
             datasets = [dataset.id for dataset in datasets]
             if not datasets:
                 raise DatasetNotFoundError(message="No datasets found.")
+
+        # Skills, tools, and the agentic loop knobs activate the AgenticRetriever
+        # inside the search type factory. They live in retriever_specific_config
+        # so the rest of the pipeline does not need to know about them.
+        agentic_overrides = {
+            "skills": skills,
+            "tools": tools,
+            "max_iter": max_iter,
+            "skills_auto_retrieve": skills_auto_retrieve,
+            "skills_top_k": skills_top_k,
+        }
+        if any(v is not None for v in agentic_overrides.values()):
+            retriever_specific_config = dict(retriever_specific_config or {})
+            for key, value in agentic_overrides.items():
+                if value is not None:
+                    retriever_specific_config[key] = value
 
         filtered_search_results = await search_function(
             query_text=query_text,
