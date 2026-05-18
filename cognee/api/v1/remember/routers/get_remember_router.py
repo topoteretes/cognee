@@ -37,7 +37,7 @@ def get_remember_router() -> APIRouter:
         custom_prompt: Optional[str] = Form(default=""),
         chunk_size: Optional[int] = Form(default=4096),
         chunks_per_batch: Optional[int] = Form(default=36),
-        content_type: Optional[str] = Form(default=None),
+        content_type: Optional[str] = Form(default=""),
         user: User = Depends(get_authenticated_user),
     ):
         """
