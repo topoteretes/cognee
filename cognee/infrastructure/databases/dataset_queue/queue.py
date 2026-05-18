@@ -8,8 +8,10 @@ Ref-counting model (per (task, dataset)):
 
 Repeated :meth:`DatasetQueue.ensure_slot` calls for the same ``(task, dataset)``
 bump a per-entry depth counter rather than re-acquiring the semaphore. The
-corresponding :meth:`DatasetQueue.release_slot_for` decrements that counter;
-the underlying semaphore slot is freed only when the counter hits zero. This
+corresponding :meth:`DatasetQueue.release_slot_for` (async) decrements that
+counter; the underlying semaphore slot is freed only when the counter hits
+zero.  An optional *on_last_release* callback is awaited when the last holder
+across all tasks exits, allowing safe subprocess teardown.  This
 makes nested ``async with set_database_global_context_variables(D, u)`` scopes
 safe — an inner exit never steals an outer holder's slot.
 
@@ -36,7 +38,7 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Dict, Set
+from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
@@ -192,40 +194,69 @@ class DatasetQueue:
         self._task_slots[task_id][ds_key] = SlotEntry(release, depth=1)
 
     # -------------------------------------------------------- release_slot_for
-    def release_slot_for(self, dataset_id: Any = None) -> None:
-        """Decrement this task's depth counter for ``dataset_id``. Actually
-        release the semaphore only when the counter hits zero.
+    async def release_slot_for(
+        self,
+        dataset_id: Any = None,
+        on_last_release: Optional[Callable[[], Awaitable[None]]] = None,
+    ) -> None:
+        """Decrement this task's depth counter for ``dataset_id`` and release
+        the semaphore slot when the counter reaches zero.
 
-        Normally slots are scoped by ``async with`` and released on block
-        exit. ``await``-style callers that never decrement rely on the
-        task-end cleanup backstop.
+        When *on_last_release* is supplied and this is the very last holder
+        across all tasks for ``dataset_id``, the callback is awaited while
+        the semaphore slot is still held so that no new operation can observe
+        a half-torn-down resource.  The slot is freed afterwards regardless
+        of whether the callback succeeds or raises.
 
-        No-op when:
-          * the queue is disabled,
-          * there is no running task,
-          * the current task doesn't hold a slot for ``dataset_id``.
+        No-op when the queue is disabled, there is no running task, or the
+        current task does not hold a slot for ``dataset_id``.
 
-        Idempotent past depth=0: further calls are no-ops because the entry
-        was popped once depth reached zero.
+        When the queue is disabled there is no tracking, so the callback
+        always fires (preserving the existing always-cleanup behaviour).
         """
         if not self._enabled:
+            if on_last_release is not None:
+                await on_last_release()
             return
+
         task = asyncio.current_task()
+        if task is None:
+            if on_last_release is not None:
+                await on_last_release()
+            return
 
         task_id = id(task)
         ds_key = f"ds:{dataset_id}" if dataset_id is not None else "ds:<none>"
 
         entry = self._task_slots.get(task_id, {}).get(ds_key)
+        if entry is None:
+            return
 
         entry.depth -= 1
         if entry.depth > 0:
-            # Outer holder still has a claim — keep the slot.
             return
 
-        # Depth reached zero — pop the entry and actually release.
-        self._task_slots[task_id].pop(ds_key, None)
-        logger.debug("Task %d releasing dataset queue slot for dataset_id=%s", task_id, dataset_id)
-        entry.release()
+        # About to fully release.  Run cleanup only when no other task
+        # holds the same dataset.  The cross-task scan and the cache
+        # eviction (inside the callback) are both synchronous, so no
+        # other task can interleave between the check and the eviction.
+        # The subsequent ``await engine.close()`` happens after eviction,
+        # so new callers already get a fresh engine by that point.
+        try:
+            if on_last_release is not None:
+                other_holds = any(
+                    ds_key in slots for tid, slots in self._task_slots.items() if tid != task_id
+                )
+                if not other_holds:
+                    await on_last_release()
+        finally:
+            self._task_slots.get(task_id, {}).pop(ds_key, None)
+            logger.debug(
+                "Task %d releasing dataset queue slot for dataset_id=%s",
+                task_id,
+                dataset_id,
+            )
+            entry.release()
 
     # ---------------------------------------------------------------- acquire
     @asynccontextmanager

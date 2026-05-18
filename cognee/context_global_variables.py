@@ -232,46 +232,41 @@ class DatabaseContextManager:
         if not backend_access_control_enabled():
             return None
 
-        # In subprocess mode each adapter's child process holds an
-        # exclusive flock() on the DB file. Evict and await close() so
-        # the subprocess fully releases the lock before the next caller
-        # tries to open the same database file.
-        #
-        # Check the cache *before* calling create — if the entry was
-        # already removed (e.g. by delete_dataset), calling create
-        # would manufacture a new adapter that re-creates the deleted
-        # database on disk.
-        g_cfg = get_graph_context_config()
-        if g_cfg.get("graph_database_subprocess_enabled"):
-            from cognee.infrastructure.databases.graph.get_graph_engine import (
-                create_graph_engine,
-                evict_graph_engine,
-                is_graph_engine_cached,
-            )
-
-            if is_graph_engine_cached(**g_cfg):
-                engine = create_graph_engine(**g_cfg)
-                evict_graph_engine(**g_cfg)
-                if hasattr(engine, "close"):
-                    await engine.close()
-
-        v_cfg = get_vectordb_context_config()
-        if v_cfg.get("vector_db_subprocess_enabled"):
-            from cognee.infrastructure.databases.vector.create_vector_engine import (
-                create_vector_engine,
-                evict_vector_engine,
-                is_vector_engine_cached,
-            )
-
-            if is_vector_engine_cached(**v_cfg):
-                engine = create_vector_engine(**v_cfg)
-                evict_vector_engine(**v_cfg)
-                if hasattr(engine, "close"):
-                    await engine.close()
-
         from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
-        dataset_queue().release_slot_for(self._dataset)
+        async def _teardown_subprocess_engines() -> None:
+            """Evict and close subprocess engines so DB file locks are released."""
+            g_cfg = get_graph_context_config()
+            if g_cfg.get("graph_database_subprocess_enabled"):
+                from cognee.infrastructure.databases.graph.get_graph_engine import (
+                    create_graph_engine,
+                    evict_graph_engine,
+                    is_graph_engine_cached,
+                )
+
+                if is_graph_engine_cached(**g_cfg):
+                    engine = create_graph_engine(**g_cfg)
+                    evict_graph_engine(**g_cfg)
+                    if hasattr(engine, "close"):
+                        await engine.close()
+
+            v_cfg = get_vectordb_context_config()
+            if v_cfg.get("vector_db_subprocess_enabled"):
+                from cognee.infrastructure.databases.vector.create_vector_engine import (
+                    create_vector_engine,
+                    evict_vector_engine,
+                    is_vector_engine_cached,
+                )
+
+                if is_vector_engine_cached(**v_cfg):
+                    engine = create_vector_engine(**v_cfg)
+                    evict_vector_engine(**v_cfg)
+                    if hasattr(engine, "close"):
+                        await engine.close()
+
+        await dataset_queue().release_slot_for(
+            self._dataset, on_last_release=_teardown_subprocess_engines
+        )
 
 
 def set_database_global_context_variables(
