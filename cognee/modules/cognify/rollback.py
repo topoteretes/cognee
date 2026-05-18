@@ -150,6 +150,27 @@ async def cognify_rollback_handler(
         unique_nodes = _deduplicate_by_id(unique_nodes)
         unique_edges = _deduplicate_by_id(unique_edges)
 
+    # Important ordering for robust retries:
+    # 1) Delete graph/vector artifacts first
+    # 2) Delete relational ownership rows and reset pipeline_status second
+    # If graph/vector deletion fails, relational rows remain as rollback metadata.
+
+    if unique_nodes:
+        is_legacy_node = await has_nodes_in_legacy_ledger(unique_nodes)
+    else:
+        is_legacy_node = []
+
+    if unique_edges:
+        is_legacy_edge = await has_edges_in_legacy_ledger(unique_edges)
+    else:
+        is_legacy_edge = []
+
+    if unique_nodes or unique_edges:
+        await delete_from_graph_and_vector(
+            unique_nodes, unique_edges, is_legacy_node, is_legacy_edge
+        )
+
+    async with db_engine.get_async_session() as session:
         if target_nodes:
             await session.execute(
                 delete(Node).where(
@@ -188,21 +209,6 @@ async def cognify_rollback_handler(
                     orm_attributes.flag_modified(data_record, "pipeline_status")
 
         await session.commit()
-
-    if unique_nodes:
-        is_legacy_node = await has_nodes_in_legacy_ledger(unique_nodes)
-    else:
-        is_legacy_node = []
-
-    if unique_edges:
-        is_legacy_edge = await has_edges_in_legacy_ledger(unique_edges)
-    else:
-        is_legacy_edge = []
-
-    if unique_nodes or unique_edges:
-        await delete_from_graph_and_vector(
-            unique_nodes, unique_edges, is_legacy_node, is_legacy_edge
-        )
 
     logger.info(
         "Cognify rollback completed for run %s (dataset=%s, user=%s, rows=%d nodes/%d edges).",
