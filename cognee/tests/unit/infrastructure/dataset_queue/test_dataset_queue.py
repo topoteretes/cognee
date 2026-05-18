@@ -422,7 +422,6 @@ class TestReleaseSlotFor:
     def _mock_teardown(queue):
         """Replace _teardown_subprocess_engines with a counter."""
         call_count = 0
-        original = queue._teardown_subprocess_engines
 
         async def fake_teardown():
             nonlocal call_count
