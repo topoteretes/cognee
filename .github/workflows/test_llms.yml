@@ -85,7 +85,7 @@ jobs:
         env:
           LLM_PROVIDER: "custom"
           LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          LLM_MODEL: "openrouter/x-ai/grok-code-fast-1"
+          LLM_MODEL: "openrouter/x-ai/grok-4.3"
           LLM_ENDPOINT: "https://openrouter.ai/api/v1"
           EMBEDDING_PROVIDER: "openai"
           EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}

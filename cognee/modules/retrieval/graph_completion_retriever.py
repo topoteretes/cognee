@@ -8,6 +8,11 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.global_context import (
+    format_global_context_prelude,
+    load_root_text,
+    search_top_global_context_summaries,
+)
 from cognee.modules.retrieval.utils.used_graph_elements import (
     is_edge_list,
     extract_from_edges,
@@ -50,6 +55,8 @@ class GraphCompletionRetriever(BaseRetriever):
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
+        include_global_context_index: bool = False,
+        global_context_index_top_k: int = 3,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
@@ -68,6 +75,8 @@ class GraphCompletionRetriever(BaseRetriever):
         self.response_model = response_model
         self.neighborhood_depth = neighborhood_depth
         self.neighborhood_seed_top_k = neighborhood_seed_top_k
+        self.include_global_context_index = include_global_context_index
+        self.global_context_index_top_k = global_context_index_top_k
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -233,11 +242,34 @@ class GraphCompletionRetriever(BaseRetriever):
                 *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
             )
 
-        if not triplets:
+        graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
+
+        if not self.include_global_context_index:
+            if not triplets:
+                logger.warning("Empty context was provided to the completion")
+                return ""
+            return graph_context
+
+        prelude = await self._build_global_context_prelude(query)
+        if not prelude and not graph_context:
             logger.warning("Empty context was provided to the completion")
             return ""
+        if not prelude:
+            return graph_context
+        if not graph_context:
+            return prelude
+        return f"{prelude}\n\n{graph_context}"
 
-        return await self.resolve_edges_to_text(triplets)
+    async def _build_global_context_prelude(self, query: Optional[str]) -> str:
+        if not query:
+            return ""
+        if getattr(self, "_unified_engine", None) is None:
+            self._unified_engine = await get_unified_engine()
+        root_text = await load_root_text()
+        top_summaries = await search_top_global_context_summaries(
+            query, self.global_context_index_top_k, self._unified_engine.vector
+        )
+        return format_global_context_prelude(root_text, top_summaries)
 
     def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""

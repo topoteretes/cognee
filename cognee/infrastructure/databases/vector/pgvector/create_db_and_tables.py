@@ -45,7 +45,14 @@ async def create_pg_database(vector_config):
         connection = await maintenance_engine.connect()
         try:
             connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-            await connection.execute(text(f'CREATE DATABASE "{vector_config["vector_db_name"]}";'))
+            result = await connection.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :db"),
+                {"db": vector_config["vector_db_name"]},
+            )
+            if not result.scalar():
+                await connection.execute(
+                    text(f'CREATE DATABASE "{vector_config["vector_db_name"]}";')
+                )
         finally:
             await connection.close()
     finally:
@@ -91,7 +98,7 @@ async def delete_pg_database(dataset_database: DatasetDatabase):
                 {"db": dataset_database.vector_database_name},
             )
             await connection.execute(
-                text(f'DROP DATABASE "{dataset_database.vector_database_name}";')
+                text(f'DROP DATABASE IF EXISTS "{dataset_database.vector_database_name}";')
             )
         finally:
             await connection.close()

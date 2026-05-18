@@ -73,7 +73,7 @@ class AnthropicAdapter(GenericAPIAdapter):
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def acreate_structured_output(

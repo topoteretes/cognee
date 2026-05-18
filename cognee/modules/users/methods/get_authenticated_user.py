@@ -9,10 +9,69 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("get_authenticated_user")
 
-# Check environment variable to determine authentication requirement
-REQUIRE_AUTHENTICATION = (
-    os.getenv("REQUIRE_AUTHENTICATION", "true").lower() == "true"
-    or os.environ.get("ENABLE_BACKEND_ACCESS_CONTROL", "true").lower() == "true"
+
+def _resolve_auth_posture() -> tuple[bool, bool, str]:
+    """Resolve authentication + access-control posture from env vars.
+
+    Returns ``(require_authentication, enable_backend_access_control, reason)``.
+
+    Semantics:
+      * ``ENABLE_BACKEND_ACCESS_CONTROL`` is the canonical posture switch
+        (multi-tenant on/off, default on).
+      * ``REQUIRE_AUTHENTICATION`` controls whether endpoints demand a user.
+        If unset, it inherits from ``ENABLE_BACKEND_ACCESS_CONTROL`` — turning
+        off backend access control disables the auth requirement, matching
+        single-user / internal-deployment expectations.
+      * Invariant: multi-tenant mode requires authentication. Setting
+        ``REQUIRE_AUTHENTICATION=false`` together with
+        ``ENABLE_BACKEND_ACCESS_CONTROL=true`` is a misconfiguration; we log
+        a warning and force auth on to keep per-user data isolated.
+    """
+
+    def _read_bool(name: str) -> tuple[Optional[bool], bool]:
+        raw = os.environ.get(name)
+        if raw is None or raw == "":
+            return None, False
+        return raw.lower() == "true", True
+
+    access_value, access_explicit = _read_bool("ENABLE_BACKEND_ACCESS_CONTROL")
+    require_value, require_explicit = _read_bool("REQUIRE_AUTHENTICATION")
+
+    enable_access_control = True if access_value is None else access_value
+
+    if require_explicit:
+        assert require_value is not None  # require_explicit implies a parsed value
+        require_authentication = require_value
+        if enable_access_control and not require_authentication:
+            logger.warning(
+                "REQUIRE_AUTHENTICATION=false is incompatible with "
+                "ENABLE_BACKEND_ACCESS_CONTROL=true: multi-tenant mode requires "
+                "authentication. Forcing REQUIRE_AUTHENTICATION=true. "
+                "To disable auth for a single-user deployment, also set "
+                "ENABLE_BACKEND_ACCESS_CONTROL=false."
+            )
+            require_authentication = True
+            reason = "forced on by multi-tenant mode (REQUIRE_AUTHENTICATION=false was ignored)"
+        else:
+            reason = "explicit REQUIRE_AUTHENTICATION"
+    else:
+        require_authentication = enable_access_control
+        reason = (
+            "inherited from ENABLE_BACKEND_ACCESS_CONTROL"
+            if access_explicit
+            else "default (no env vars set)"
+        )
+
+    return require_authentication, enable_access_control, reason
+
+
+REQUIRE_AUTHENTICATION, ENABLE_BACKEND_ACCESS_CONTROL, _AUTH_REASON = _resolve_auth_posture()
+
+logger.info(
+    "auth posture: authentication=%s, multi_tenant=%s (%s)",
+    "required" if REQUIRE_AUTHENTICATION else "disabled",
+    "enabled" if ENABLE_BACKEND_ACCESS_CONTROL else "disabled",
+    _AUTH_REASON,
 )
 
 fastapi_users = get_fastapi_users()

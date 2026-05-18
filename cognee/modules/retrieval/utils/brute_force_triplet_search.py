@@ -52,6 +52,7 @@ async def get_memory_fragment(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     relevant_ids_to_filter: Optional[List[str]] = None,
+    memory_fragment_filter: Optional[List[dict]] = None,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     graph_engine=None,
@@ -103,6 +104,7 @@ async def get_memory_fragment(
                 node_name=node_name,
                 node_name_filter_operator=node_name_filter_operator,
                 relevant_ids_to_filter=relevant_ids_to_filter,
+                memory_fragment_filter=memory_fragment_filter or [],
                 triplet_distance_penalty=triplet_distance_penalty,
                 feedback_influence=feedback_influence,
             )

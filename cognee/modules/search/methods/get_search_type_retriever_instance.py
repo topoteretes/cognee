@@ -29,6 +29,8 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 )
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
+from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.context_global_variables import session_user
 
 
 async def get_search_type_retriever_instance(
@@ -110,6 +112,12 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
+                "include_global_context_index": retriever_specific_config.get(
+                    "include_global_context_index", False
+                ),
+                "global_context_index_top_k": retriever_specific_config.get(
+                    "global_context_index_top_k", 3
+                ),
             },
         ),
         SearchType.GRAPH_COMPLETION_DECOMPOSITION: (
@@ -254,6 +262,53 @@ async def get_search_type_retriever_instance(
             {"rules_nodeset_name": node_name},
         ),
     }
+
+    # Build AgenticRetriever only when explicitly requested. Other graph-completion
+    # variants keep their existing retrievers even when retriever-specific config
+    # contains skill/tool-looking keys.
+    has_skills = bool(retriever_specific_config.get("skills"))
+    has_tools = retriever_specific_config.get("tools") is not None
+    if query_type is not SearchType.AGENTIC_COMPLETION and (has_skills or has_tools):
+        raise UnsupportedSearchTypeError(
+            "skills/tools are supported only with SearchType.AGENTIC_COMPLETION"
+        )
+
+    if query_type is SearchType.AGENTIC_COMPLETION:
+        dataset = kwargs.get("dataset")
+        dataset_id = dataset.id if dataset is not None else None
+        user = kwargs.get("user")
+        try:
+            user = user or session_user.get()
+        except LookupError:
+            pass
+
+        return AgenticRetriever(
+            skills=retriever_specific_config.get("skills"),
+            tools=retriever_specific_config.get("tools"),
+            user=user,
+            dataset=dataset,
+            dataset_id=dataset_id,
+            max_iter=retriever_specific_config.get("max_iter", 6),
+            agentic_system_prompt_path=retriever_specific_config.get(
+                "agentic_system_prompt_path", "agentic_system.txt"
+            ),
+            agentic_user_prompt_path=retriever_specific_config.get(
+                "agentic_user_prompt_path", "agentic_user.txt"
+            ),
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
+            session_id=session_id,
+            response_model=retriever_specific_config.get("response_model", str),
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
+        )
 
     # If the query type is FEELING_LUCKY, select the search type intelligently
     if query_type is SearchType.FEELING_LUCKY:
