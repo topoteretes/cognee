@@ -246,12 +246,8 @@ class DatasetQueue:
 
         No-op when the queue is disabled, there is no running task, or the
         current task does not hold a slot for ``dataset_id``.
-
-        When the queue is disabled there is no tracking, so the teardown
-        always fires (preserving the existing always-cleanup behaviour).
         """
         if not self._enabled:
-            await self._teardown_subprocess_engines()
             return
 
         task = asyncio.current_task()

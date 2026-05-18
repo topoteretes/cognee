@@ -547,14 +547,14 @@ class TestReleaseSlotFor:
         await task
 
     @pytest.mark.asyncio
-    async def test_disabled_queue_always_runs_teardown(self):
+    async def test_disabled_queue_skips_teardown(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=False, max_concurrent=5)
         counter = self._mock_teardown(queue)
 
         await queue.release_slot_for("any-dataset")
-        assert counter.value == 1
+        assert counter.value == 0
 
     @pytest.mark.asyncio
     async def test_teardown_exception_still_releases_slot(self):
