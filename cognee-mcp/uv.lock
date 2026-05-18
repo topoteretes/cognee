@@ -14,6 +14,10 @@ resolution-markers = [
     "python_full_version < '3.11' and platform_machine == 's390x'",
 ]
 
+[options]
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer-span = "P2D"
+
 [manifest]
 constraints = [
     { name = "onnxruntime", marker = "python_full_version < '3.14'", specifier = "<=1.23.2" },
@@ -864,7 +868,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "1.0.4"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -911,9 +915,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/32/da/72cdfffedee25c6cb1b110f8092b1dbeee462f87347a199677d1dff2a992/cognee-1.0.4.tar.gz", hash = "sha256:441c720ba2207914d9ece8ecb471f2d6c9e0cc671d824f5992615ed712fb0049", size = 18569567, upload-time = "2026-05-03T04:21:27.187Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/ec/ab50531c89628c2d4f5abd63a35f320b13a2d8d940722ab2987a756d1ce9/cognee-1.1.0.tar.gz", hash = "sha256:41505ae5afcfc43e5f017992b9d9b1c7b5dd77ec057e9c95b722afd781a07ab4", size = 18833971, upload-time = "2026-05-16T18:55:54.324Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/f1/6b0d12f90aee4d56ef1a1c14e4f89fdcfce8be94968676f50d2d89178ea9/cognee-1.0.4-py3-none-any.whl", hash = "sha256:cad9958fa033ab7e5dfbb9842375d846c41c20bacd7e3ca294f9ab01f979ee43", size = 2125187, upload-time = "2026-05-03T04:21:23.939Z" },
+    { url = "https://files.pythonhosted.org/packages/54/c1/f29421b5dc16f6eb92c4e4461a04a48ed14808e7944e9b32d81f24586529/cognee-1.1.0-py3-none-any.whl", hash = "sha256:559e0e610304d5d4bdf6fcb6d17d0e3036f464b7da3b1db1d4ffefb3588a6384", size = 2338066, upload-time = "2026-05-16T18:55:57.898Z" },
 ]
 
 [package.optional-dependencies]
@@ -959,7 +963,7 @@ postgres-binary = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cognee", extras = ["postgres-binary", "docs", "neo4j"], specifier = ">=1.0.0,<2.0.0" },
+    { name = "cognee", extras = ["postgres-binary", "docs", "neo4j"], specifier = ">=1.1.0,<2.0.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
     { name = "mcp", specifier = ">=1.12.0,<2.0.0" },
     { name = "uv", specifier = ">=0.6.3,<1.0.0" },
