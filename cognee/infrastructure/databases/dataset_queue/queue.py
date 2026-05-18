@@ -10,8 +10,8 @@ Repeated :meth:`DatasetQueue.ensure_slot` calls for the same ``(task, dataset)``
 bump a per-entry depth counter rather than re-acquiring the semaphore. The
 corresponding :meth:`DatasetQueue.release_slot_for` (async) decrements that
 counter; the underlying semaphore slot is freed only when the counter hits
-zero.  An optional *on_last_release* callback is awaited when the last holder
-across all tasks exits, allowing safe subprocess teardown.  This
+zero.  When the last holder across all tasks exits, subprocess engines are
+torn down via :meth:`DatasetQueue._teardown_subprocess_engines`.  This
 makes nested ``async with set_database_global_context_variables(D, u)`` scopes
 safe — an inner exit never steals an outer holder's slot.
 
@@ -38,7 +38,7 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from typing import Any, Awaitable, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, Set
 
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
@@ -193,36 +193,70 @@ class DatasetQueue:
         # After registration, the task entry exists in ``_task_slots``.
         self._task_slots[task_id][ds_key] = SlotEntry(release, depth=1)
 
+    # ----------------------------------------- subprocess engine teardown
+    async def _teardown_subprocess_engines(self) -> None:
+        """Evict and close subprocess-mode engines so DB file locks are released.
+
+        Reads the current task's ContextVar-based graph/vector config to
+        identify which cached engines to tear down.  Lazy imports avoid
+        circular dependencies at module load time.
+        """
+        from cognee.infrastructure.databases.graph.config import get_graph_context_config
+        from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
+
+        g_cfg = get_graph_context_config()
+        if g_cfg.get("graph_database_subprocess_enabled"):
+            from cognee.infrastructure.databases.graph.get_graph_engine import (
+                create_graph_engine,
+                evict_graph_engine,
+                is_graph_engine_cached,
+            )
+
+            if is_graph_engine_cached(**g_cfg):
+                engine = create_graph_engine(**g_cfg)
+                evict_graph_engine(**g_cfg)
+                if hasattr(engine, "close"):
+                    await engine.close()
+
+        v_cfg = get_vectordb_context_config()
+        if v_cfg.get("vector_db_subprocess_enabled"):
+            from cognee.infrastructure.databases.vector.create_vector_engine import (
+                create_vector_engine,
+                evict_vector_engine,
+                is_vector_engine_cached,
+            )
+
+            if is_vector_engine_cached(**v_cfg):
+                engine = create_vector_engine(**v_cfg)
+                evict_vector_engine(**v_cfg)
+                if hasattr(engine, "close"):
+                    await engine.close()
+
     # -------------------------------------------------------- release_slot_for
-    async def release_slot_for(
-        self,
-        dataset_id: Any = None,
-        on_last_release: Optional[Callable[[], Awaitable[None]]] = None,
-    ) -> None:
+    async def release_slot_for(self, dataset_id: Any = None) -> None:
         """Decrement this task's depth counter for ``dataset_id`` and release
         the semaphore slot when the counter reaches zero.
 
-        When *on_last_release* is supplied and this is the very last holder
-        across all tasks for ``dataset_id``, the callback is awaited while
-        the semaphore slot is still held so that no new operation can observe
-        a half-torn-down resource.  The slot is freed afterwards regardless
-        of whether the callback succeeds or raises.
+        When this is the very last holder across all tasks for
+        ``dataset_id``, subprocess engines are torn down via
+        :meth:`_teardown_subprocess_engines` while the semaphore slot is
+        still held so that no new operation can observe a half-torn-down
+        resource.  The slot is freed afterwards regardless of whether the
+        teardown succeeds or raises.
 
         No-op when the queue is disabled, there is no running task, or the
         current task does not hold a slot for ``dataset_id``.
 
-        When the queue is disabled there is no tracking, so the callback
+        When the queue is disabled there is no tracking, so the teardown
         always fires (preserving the existing always-cleanup behaviour).
         """
         if not self._enabled:
-            if on_last_release is not None:
-                await on_last_release()
+            await self._teardown_subprocess_engines()
             return
 
         task = asyncio.current_task()
         if task is None:
-            if on_last_release is not None:
-                await on_last_release()
+            await self._teardown_subprocess_engines()
             return
 
         task_id = id(task)
@@ -236,19 +270,18 @@ class DatasetQueue:
         if entry.depth > 0:
             return
 
-        # About to fully release.  Run cleanup only when no other task
-        # holds the same dataset.  The cross-task scan and the cache
-        # eviction (inside the callback) are both synchronous, so no
-        # other task can interleave between the check and the eviction.
-        # The subsequent ``await engine.close()`` happens after eviction,
-        # so new callers already get a fresh engine by that point.
+        # About to fully release.  Tear down subprocess engines only when
+        # no other task holds the same dataset.  The cross-task scan and
+        # the cache eviction are both synchronous, so no other task can
+        # interleave between the check and the eviction.  The subsequent
+        # ``await engine.close()`` happens after eviction, so new callers
+        # already get a fresh engine by that point.
         try:
-            if on_last_release is not None:
-                other_holds = any(
-                    ds_key in slots for tid, slots in self._task_slots.items() if tid != task_id
-                )
-                if not other_holds:
-                    await on_last_release()
+            other_holds = any(
+                ds_key in slots for tid, slots in self._task_slots.items() if tid != task_id
+            )
+            if not other_holds:
+                await self._teardown_subprocess_engines()
         finally:
             self._task_slots.get(task_id, {}).pop(ds_key, None)
             logger.debug(

@@ -404,7 +404,9 @@ class TestDatasetQueueEdgeCases:
 
 
 class TestReleaseSlotFor:
-    """Tests for the async release_slot_for with optional on_last_release callback."""
+    """Tests for release_slot_for — verifies that _teardown_subprocess_engines
+    fires at the right time (last holder) and that the semaphore is always
+    released regardless of teardown outcome."""
 
     @pytest.fixture(autouse=True)
     def reset_queue_singleton(self):
@@ -416,54 +418,59 @@ class TestReleaseSlotFor:
             pass
         yield
 
-    @pytest.mark.asyncio
-    async def test_cleanup_fires_for_single_holder(self):
-        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
-
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
-        ds = "dataset-A"
-        cleaned = False
-
-        async def cleanup():
-            nonlocal cleaned
-            cleaned = True
-
-        await queue.ensure_slot(ds)
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert cleaned is True
-
-    @pytest.mark.asyncio
-    async def test_cleanup_skipped_for_nested_depth(self):
-        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
-
-        queue = DatasetQueue(enabled=True, max_concurrent=5)
-        ds = "dataset-B"
+    @staticmethod
+    def _mock_teardown(queue):
+        """Replace _teardown_subprocess_engines with a counter."""
         call_count = 0
+        original = queue._teardown_subprocess_engines
 
-        async def cleanup():
+        async def fake_teardown():
             nonlocal call_count
             call_count += 1
 
-        await queue.ensure_slot(ds)
-        await queue.ensure_slot(ds)  # depth = 2
+        queue._teardown_subprocess_engines = fake_teardown
 
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert call_count == 0  # inner exit — skipped
+        class Counter:
+            @property
+            def value(self):
+                return call_count
 
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert call_count == 1  # outer exit — fires
+        return Counter()
 
     @pytest.mark.asyncio
-    async def test_cleanup_skipped_when_cross_task_holder_exists(self):
+    async def test_teardown_fires_for_single_holder(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        ds = "dataset-C"
-        cleaned = False
+        counter = self._mock_teardown(queue)
 
-        async def cleanup():
-            nonlocal cleaned
-            cleaned = True
+        await queue.ensure_slot("ds-A")
+        await queue.release_slot_for("ds-A")
+        assert counter.value == 1
+
+    @pytest.mark.asyncio
+    async def test_teardown_skipped_for_nested_depth(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+
+        await queue.ensure_slot("ds-B")
+        await queue.ensure_slot("ds-B")  # depth = 2
+
+        await queue.release_slot_for("ds-B")
+        assert counter.value == 0  # inner exit — skipped
+
+        await queue.release_slot_for("ds-B")
+        assert counter.value == 1  # outer exit — fires
+
+    @pytest.mark.asyncio
+    async def test_teardown_skipped_when_cross_task_holder_exists(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+        ds = "ds-C"
 
         other_ready = asyncio.Event()
         check_done = asyncio.Event()
@@ -478,23 +485,20 @@ class TestReleaseSlotFor:
         await other_ready.wait()
 
         await queue.ensure_slot(ds)
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert cleaned is False  # other task still holds the dataset
+        await queue.release_slot_for(ds)
+        assert counter.value == 0  # other task still holds the dataset
 
         check_done.set()
         await task
+        assert counter.value == 1  # other task was last
 
     @pytest.mark.asyncio
-    async def test_cleanup_fires_after_last_cross_task_holder_releases(self):
+    async def test_teardown_fires_after_last_cross_task_holder_releases(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        ds = "dataset-D"
-        call_count = 0
-
-        async def cleanup():
-            nonlocal call_count
-            call_count += 1
+        counter = self._mock_teardown(queue)
+        ds = "ds-D"
 
         other_ready = asyncio.Event()
         main_released = asyncio.Event()
@@ -503,29 +507,25 @@ class TestReleaseSlotFor:
             await queue.ensure_slot(ds)
             other_ready.set()
             await main_released.wait()
-            await queue.release_slot_for(ds, on_last_release=cleanup)
+            await queue.release_slot_for(ds)
 
         task = asyncio.create_task(other_task())
         await other_ready.wait()
 
         await queue.ensure_slot(ds)
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert call_count == 0  # not last
+        await queue.release_slot_for(ds)
+        assert counter.value == 0  # not last
 
         main_released.set()
         await task
-        assert call_count == 1  # other task was last, cleanup fired
+        assert counter.value == 1  # other task was last, teardown fired
 
     @pytest.mark.asyncio
-    async def test_different_dataset_does_not_block_cleanup(self):
+    async def test_different_dataset_does_not_block_teardown(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        cleaned = False
-
-        async def cleanup():
-            nonlocal cleaned
-            cleaned = True
+        counter = self._mock_teardown(queue)
 
         other_ready = asyncio.Event()
         check_done = asyncio.Event()
@@ -540,58 +540,44 @@ class TestReleaseSlotFor:
         await other_ready.wait()
 
         await queue.ensure_slot("dataset-OURS")
-        await queue.release_slot_for("dataset-OURS", on_last_release=cleanup)
-        assert cleaned is True  # different dataset — we're still last for ours
+        await queue.release_slot_for("dataset-OURS")
+        assert counter.value == 1  # different dataset — we're last for ours
 
         check_done.set()
         await task
 
     @pytest.mark.asyncio
-    async def test_disabled_queue_always_runs_cleanup(self):
+    async def test_disabled_queue_always_runs_teardown(self):
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=False, max_concurrent=5)
-        cleaned = False
+        counter = self._mock_teardown(queue)
 
-        async def cleanup():
-            nonlocal cleaned
-            cleaned = True
-
-        await queue.release_slot_for("any-dataset", on_last_release=cleanup)
-        assert cleaned is True
+        await queue.release_slot_for("any-dataset")
+        assert counter.value == 1
 
     @pytest.mark.asyncio
-    async def test_cleanup_exception_still_releases_slot(self):
-        """Slot must be freed even if the cleanup callback raises."""
+    async def test_teardown_exception_still_releases_slot(self):
+        """Slot must be freed even if _teardown_subprocess_engines raises."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=1)
-        ds = "dataset-E"
+        ds = "ds-E"
 
-        async def failing_cleanup():
+        async def failing_teardown():
             raise ValueError("engine teardown failed")
+
+        queue._teardown_subprocess_engines = failing_teardown
 
         await queue.ensure_slot(ds)
 
         with pytest.raises(ValueError, match="engine teardown failed"):
-            await queue.release_slot_for(ds, on_last_release=failing_cleanup)
+            await queue.release_slot_for(ds)
+
+        # Replace the failing mock so the verification calls below don't blow up.
+        self._mock_teardown(queue)
 
         # Semaphore must have been released — acquiring again should not block.
-        await queue.ensure_slot(ds)
-        await queue.release_slot_for(ds)
-
-    @pytest.mark.asyncio
-    async def test_no_callback_behaves_as_plain_release(self):
-        """Without on_last_release the method is a plain depth-aware release."""
-        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
-
-        queue = DatasetQueue(enabled=True, max_concurrent=1)
-        ds = "dataset-F"
-
-        await queue.ensure_slot(ds)
-        await queue.release_slot_for(ds)
-
-        # Slot freed — re-acquire should succeed immediately.
         await queue.ensure_slot(ds)
         await queue.release_slot_for(ds)
 
@@ -601,15 +587,10 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        cleaned = False
+        counter = self._mock_teardown(queue)
 
-        async def cleanup():
-            nonlocal cleaned
-            cleaned = True
-
-        # No ensure_slot — should silently no-op.
-        await queue.release_slot_for("never-acquired", on_last_release=cleanup)
-        assert cleaned is False
+        await queue.release_slot_for("never-acquired")
+        assert counter.value == 0  # no entry — teardown not called
         assert queue._semaphore._value == 5  # nothing consumed
 
     @pytest.mark.asyncio
@@ -618,17 +599,20 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=2)
-        ds = "dataset-G"
+        counter = self._mock_teardown(queue)
+        ds = "ds-G"
 
         await queue.ensure_slot(ds)
-        assert queue._semaphore._value == 1  # one slot consumed
+        assert queue._semaphore._value == 1
 
         await queue.release_slot_for(ds)
-        assert queue._semaphore._value == 2  # back to full
+        assert queue._semaphore._value == 2
+        assert counter.value == 1
 
         # Second release — entry already popped, should be a no-op.
         await queue.release_slot_for(ds)
-        assert queue._semaphore._value == 2  # still full, not over-released
+        assert queue._semaphore._value == 2  # not over-released
+        assert counter.value == 1  # not called again
 
     @pytest.mark.asyncio
     async def test_semaphore_accounting_after_mixed_operations(self):
@@ -636,13 +620,14 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=3)
+        self._mock_teardown(queue)
 
         await queue.ensure_slot("ds1")
         await queue.ensure_slot("ds2")
         assert queue._semaphore._value == 1  # 2 consumed
 
         await queue.ensure_slot("ds1")  # re-entrant, no new acquire
-        assert queue._semaphore._value == 1  # still 2 consumed
+        assert queue._semaphore._value == 1
 
         await queue.release_slot_for("ds1")  # depth 2 → 1
         assert queue._semaphore._value == 1  # not freed yet
@@ -654,17 +639,13 @@ class TestReleaseSlotFor:
         assert queue._semaphore._value == 3  # all back
 
     @pytest.mark.asyncio
-    async def test_three_tasks_cleanup_fires_only_on_last(self):
-        """With three tasks on the same dataset, cleanup fires once on the last exit."""
+    async def test_three_tasks_teardown_fires_only_on_last(self):
+        """With three tasks on the same dataset, teardown fires once on the last exit."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
         ds = "shared-ds"
-        cleanup_count = 0
-
-        async def cleanup():
-            nonlocal cleanup_count
-            cleanup_count += 1
 
         gate_1 = asyncio.Event()
         gate_2 = asyncio.Event()
@@ -675,51 +656,42 @@ class TestReleaseSlotFor:
             await queue.ensure_slot(ds)
             ready_1.set()
             await gate_1.wait()
-            await queue.release_slot_for(ds, on_last_release=cleanup)
+            await queue.release_slot_for(ds)
 
         async def task_b():
             await queue.ensure_slot(ds)
             ready_2.set()
             await gate_2.wait()
-            await queue.release_slot_for(ds, on_last_release=cleanup)
+            await queue.release_slot_for(ds)
 
         t1 = asyncio.create_task(task_a())
         t2 = asyncio.create_task(task_b())
         await ready_1.wait()
         await ready_2.wait()
 
-        # Main task also holds the dataset.
         await queue.ensure_slot(ds)
 
-        # Release from main — two others still hold it.
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert cleanup_count == 0
+        await queue.release_slot_for(ds)
+        assert counter.value == 0
 
-        # Release task_a — task_b still holds it.
         gate_1.set()
         await t1
-        assert cleanup_count == 0
+        assert counter.value == 0
 
-        # Release task_b — now last holder.
         gate_2.set()
         await t2
-        assert cleanup_count == 1
+        assert counter.value == 1
 
     @pytest.mark.asyncio
-    async def test_cleanup_fires_exactly_once_under_stress(self):
-        """Many tasks on the same dataset; cleanup fires exactly once total."""
+    async def test_teardown_fires_exactly_once_under_stress(self):
+        """Many tasks on the same dataset; teardown fires exactly once total."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         n_tasks = 20
         queue = DatasetQueue(enabled=True, max_concurrent=n_tasks + 1)
+        counter = self._mock_teardown(queue)
         ds = "stress-ds"
-        cleanup_count = 0
 
-        async def cleanup():
-            nonlocal cleanup_count
-            cleanup_count += 1
-
-        # Manual barrier for Python 3.10 compat (asyncio.Barrier is 3.11+).
         arrived = 0
         all_arrived = asyncio.Event()
 
@@ -731,24 +703,20 @@ class TestReleaseSlotFor:
                 all_arrived.set()
             else:
                 await all_arrived.wait()
-            await queue.release_slot_for(ds, on_last_release=cleanup)
+            await queue.release_slot_for(ds)
 
         await asyncio.gather(*[asyncio.create_task(worker()) for _ in range(n_tasks)])
-        assert cleanup_count == 1
+        assert counter.value == 1
 
     @pytest.mark.asyncio
-    async def test_backstop_frees_slot_then_remaining_task_fires_cleanup(self):
-        """Task-end backstop releases a crashed task's slot without cleanup.
-        The surviving task should then be the last holder and fire cleanup."""
+    async def test_backstop_frees_slot_then_remaining_task_fires_teardown(self):
+        """Task-end backstop releases a crashed task's slot without teardown.
+        The surviving task should then be the last holder and fire teardown."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
         ds = "backstop-ds"
-        cleaned = False
-
-        async def cleanup():
-            nonlocal cleaned
-            cleaned = True
 
         crashed_ready = asyncio.Event()
 
@@ -760,20 +728,17 @@ class TestReleaseSlotFor:
         task = asyncio.create_task(crashing_task())
         await crashed_ready.wait()
 
-        # Let the task finish and its backstop fire.
         try:
             await task
         except RuntimeError:
             pass
 
-        # Done-callbacks are scheduled via call_soon; yield to the event
-        # loop so the backstop actually removes the crashed task's entry.
+        # Done-callbacks are scheduled via call_soon; yield so the backstop fires.
         await asyncio.sleep(0)
 
-        # Now the main task acquires and is the only holder.
         await queue.ensure_slot(ds)
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert cleaned is True
+        await queue.release_slot_for(ds)
+        assert counter.value == 1
 
     @pytest.mark.asyncio
     async def test_nested_depth_plus_cross_task(self):
@@ -782,12 +747,8 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
         ds = "combo-ds"
-        cleanup_count = 0
-
-        async def cleanup():
-            nonlocal cleanup_count
-            cleanup_count += 1
 
         other_ready = asyncio.Event()
         main_done = asyncio.Event()
@@ -796,24 +757,23 @@ class TestReleaseSlotFor:
             await queue.ensure_slot(ds)
             other_ready.set()
             await main_done.wait()
-            await queue.release_slot_for(ds, on_last_release=cleanup)
+            await queue.release_slot_for(ds)
 
         task = asyncio.create_task(other_task())
         await other_ready.wait()
 
-        # Main task: depth = 2.
         await queue.ensure_slot(ds)
-        await queue.ensure_slot(ds)
+        await queue.ensure_slot(ds)  # depth = 2
 
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert cleanup_count == 0  # depth 2 → 1, inner exit
+        await queue.release_slot_for(ds)
+        assert counter.value == 0  # depth 2 → 1
 
-        await queue.release_slot_for(ds, on_last_release=cleanup)
-        assert cleanup_count == 0  # depth 0, but other task holds it
+        await queue.release_slot_for(ds)
+        assert counter.value == 0  # depth 0, but other task holds it
 
         main_done.set()
         await task
-        assert cleanup_count == 1  # other task was last
+        assert counter.value == 1  # other task was last
 
     @pytest.mark.asyncio
     async def test_two_datasets_release_one_keeps_other(self):
@@ -821,29 +781,19 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
-        cleaned_a = False
-        cleaned_b = False
-
-        async def cleanup_a():
-            nonlocal cleaned_a
-            cleaned_a = True
-
-        async def cleanup_b():
-            nonlocal cleaned_b
-            cleaned_b = True
+        counter = self._mock_teardown(queue)
 
         await queue.ensure_slot("ds-A")
         await queue.ensure_slot("ds-B")
-        assert queue._semaphore._value == 3  # 2 consumed
+        assert queue._semaphore._value == 3
 
-        await queue.release_slot_for("ds-A", on_last_release=cleanup_a)
-        assert cleaned_a is True
-        assert queue._semaphore._value == 4  # 1 consumed (ds-B)
+        await queue.release_slot_for("ds-A")
+        assert counter.value == 1
+        assert queue._semaphore._value == 4
 
-        # ds-B still held, should succeed.
-        await queue.release_slot_for("ds-B", on_last_release=cleanup_b)
-        assert cleaned_b is True
-        assert queue._semaphore._value == 5  # all back
+        await queue.release_slot_for("ds-B")
+        assert counter.value == 2
+        assert queue._semaphore._value == 5
 
     @pytest.mark.asyncio
     async def test_none_dataset_id(self):
@@ -851,42 +801,38 @@ class TestReleaseSlotFor:
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=2)
-        cleaned = False
-
-        async def cleanup():
-            nonlocal cleaned
-            cleaned = True
+        counter = self._mock_teardown(queue)
 
         await queue.ensure_slot(None)
         assert queue._semaphore._value == 1
 
-        await queue.release_slot_for(None, on_last_release=cleanup)
-        assert cleaned is True
+        await queue.release_slot_for(None)
+        assert counter.value == 1
         assert queue._semaphore._value == 2
 
     @pytest.mark.asyncio
-    async def test_cleanup_exception_does_not_affect_other_datasets(self):
-        """If cleanup raises for one dataset, another dataset's slot is unaffected."""
+    async def test_teardown_exception_does_not_affect_other_datasets(self):
+        """If teardown raises for one dataset, another dataset's slot is unaffected."""
         from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
 
         queue = DatasetQueue(enabled=True, max_concurrent=5)
+        call_count = 0
 
-        async def failing_cleanup():
-            raise RuntimeError("kaboom")
+        async def teardown_fails_once():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("kaboom")
+
+        queue._teardown_subprocess_engines = teardown_fails_once
 
         await queue.ensure_slot("ds-ok")
         await queue.ensure_slot("ds-fail")
 
         with pytest.raises(RuntimeError, match="kaboom"):
-            await queue.release_slot_for("ds-fail", on_last_release=failing_cleanup)
+            await queue.release_slot_for("ds-fail")
 
         # ds-ok is still held and can be released normally.
-        cleaned = False
-
-        async def ok_cleanup():
-            nonlocal cleaned
-            cleaned = True
-
-        await queue.release_slot_for("ds-ok", on_last_release=ok_cleanup)
-        assert cleaned is True
+        await queue.release_slot_for("ds-ok")
+        assert call_count == 2
         assert queue._semaphore._value == 5
