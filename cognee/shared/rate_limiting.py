@@ -7,7 +7,7 @@ from cognee.infrastructure.llm.config import get_llm_config
 llm_config = get_llm_config()
 
 llm_rate_limiter = AsyncLimiter(
-    llm_config.llm_rate_limit_requests, llm_config.embedding_rate_limit_interval
+    llm_config.llm_rate_limit_requests, llm_config.llm_rate_limit_interval
 )
 embedding_rate_limiter = AsyncLimiter(
     llm_config.embedding_rate_limit_requests, llm_config.embedding_rate_limit_interval
