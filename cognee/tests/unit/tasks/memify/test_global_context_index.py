@@ -436,7 +436,7 @@ async def test_update_global_context_index_rejects_invalid_config_before_io(
 
 
 @pytest.mark.asyncio
-async def test_update_global_context_index_rejects_graph_incremental_before_io(monkeypatch):
+async def test_update_global_context_index_rejects_graph_without_dataset_before_io(monkeypatch):
     load_summary_input_mock = AsyncMock()
     get_unified_engine_mock = AsyncMock()
     monkeypatch.setattr(
@@ -450,7 +450,7 @@ async def test_update_global_context_index_rejects_graph_incremental_before_io(m
         get_unified_engine_mock,
     )
 
-    with pytest.raises(ValueError, match="requires rebuild=True"):
+    with pytest.raises(ValueError, match="requires a dataset context"):
         await update_global_context_index(
             bucketing_strategy="graph",
             rebuild=False,
@@ -1025,6 +1025,69 @@ def test_graph_strategy_dispatch_is_scoped_to_level_zero():
     assert isinstance(bucketing_strategy_for_level("graph", 0), GraphBucketingStrategy)
     assert isinstance(bucketing_strategy_for_level("graph", 1), VectorBucketingStrategy)
     assert isinstance(bucketing_strategy_for_level("vector", 0), VectorBucketingStrategy)
+
+
+@pytest.mark.asyncio
+async def test_update_global_context_index_graph_incremental_extends_graph_bucket(monkeypatch):
+    bucket_id = str(uuid4())
+    assigned_child = _summary_node("alice roadmap", bucket_id=bucket_id)
+    new_child = _summary_node("alice launch")
+    graph_bucket = SummaryNode(
+        id=bucket_id,
+        text="alice bucket",
+        type="GlobalContextSummary",
+        level=0,
+        child_ids={assigned_child.id},
+        graph_bucket_entity_ids={"alice"},
+    )
+    dataset_id = uuid4()
+    unified_engine = _unified_engine()
+    _stub_global_context_index_io(monkeypatch, unified_engine)
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "get_dataset_text_summary_ids",
+        AsyncMock(return_value=[assigned_child.id, new_child.id]),
+    )
+    provider_mock = AsyncMock(
+        return_value=_graph_input(
+            {
+                assigned_child.id: {"alice"},
+                new_child.id: {"alice"},
+            },
+            {"alice": 1.0},
+        )
+    )
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "load_global_context_graph_input",
+        provider_mock,
+    )
+
+    result = await update_global_context_index(
+        GlobalContextIndexInput(
+            text_summaries=[assigned_child, new_child],
+            buckets=[graph_bucket],
+        ),
+        bucketing_strategy="graph",
+        rebuild=False,
+        max_bucket_size=3,
+        ctx=PipelineContext(dataset=SimpleNamespace(id=dataset_id)),
+    )
+
+    provider_summary_ids = provider_mock.await_args.args[1]
+    assert set(provider_summary_ids) == {assigned_child.id, new_child.id}
+    assert graph_bucket.child_ids == {assigned_child.id, new_child.id}
+    assert new_child.global_context_bucket_id == bucket_id
+    unified_engine.graph.delete_nodes.assert_not_awaited()
+    unified_engine.vector.search.assert_not_awaited()
+
+    level_zero = [datapoint for datapoint in result if datapoint.level == 0]
+    assert len(level_zero) == 1
+    assert str(level_zero[0].id) == bucket_id
+    assert level_zero[0].graph_bucket_entity_ids == ["alice"]
+
+    edge_pairs = [(edge[0], edge[1]) for edge in unified_engine.graph.add_edges.await_args.args[0]]
+    assert (new_child.id, bucket_id) in edge_pairs
 
 
 @pytest.mark.asyncio

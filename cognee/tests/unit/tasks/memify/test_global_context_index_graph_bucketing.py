@@ -2,8 +2,10 @@ import pytest
 
 from cognee.tasks.memify.global_context_index.bucket_assignment import create_bucket_id
 from cognee.tasks.memify.global_context_index.graph_bucketing import (
+    place_graph_summaries_incrementally,
     rebuild_graph_buckets_for_level,
     validate_graph_buckets_can_be_extended,
+    validate_vector_buckets_can_be_extended,
 )
 from cognee.tasks.memify.global_context_index.models import SummaryNode
 
@@ -37,6 +39,42 @@ def _bucket_child_sets(buckets: dict[str, SummaryNode]) -> list[set[str]]:
 
 def _bucket_entity_sets(buckets: dict[str, SummaryNode]) -> list[set[str] | None]:
     return [bucket.graph_bucket_entity_ids for bucket in buckets.values()]
+
+
+def _bucket(
+    bucket_id: str,
+    child_ids: set[str],
+    graph_bucket_entity_ids: set[str] | None,
+) -> SummaryNode:
+    return SummaryNode(
+        id=bucket_id,
+        text=f"{bucket_id} text",
+        type="GlobalContextSummary",
+        level=0,
+        child_ids=child_ids,
+        graph_bucket_entity_ids=graph_bucket_entity_ids,
+    )
+
+
+def _incremental(
+    new_summary_ids: list[str],
+    existing_buckets: list[SummaryNode],
+    entities_by_summary_id: dict[str, set[str]],
+    idf_weights: dict[str, float],
+    *,
+    max_bucket_size: int = 2,
+    min_overlap: float = 0.1,
+):
+    return place_graph_summaries_incrementally(
+        [_summary(summary_id) for summary_id in new_summary_ids],
+        existing_buckets,
+        entities_by_summary_id,
+        idf_weights,
+        dataset_id="dataset-1",
+        level=0,
+        max_bucket_size=max_bucket_size,
+        min_overlap=min_overlap,
+    )
 
 
 def test_graph_rebuild_groups_by_weighted_overlap_and_populates_entity_state():
@@ -225,3 +263,171 @@ def test_validate_graph_buckets_can_be_extended_accepts_empty_graph_state():
             ),
         ]
     )
+
+
+def test_validate_vector_buckets_can_be_extended_rejects_graph_built_buckets():
+    with pytest.raises(ValueError, match="cannot extend graph-built"):
+        validate_vector_buckets_can_be_extended(
+            [_bucket("graph-bucket", {"s1"}, {"alice"})]
+        )
+
+
+def test_graph_incremental_places_summary_into_matching_existing_bucket():
+    existing_bucket = _bucket("bucket-alice", {"s1"}, {"alice"})
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [existing_bucket],
+        {"s1": {"alice"}, "s2": {"alice"}},
+        {"alice": 1.0},
+        max_bucket_size=3,
+    )
+
+    assert buckets == {"bucket-alice": existing_bucket}
+    assert existing_bucket.child_ids == {"s1", "s2"}
+    assert existing_bucket.graph_bucket_entity_ids == {"alice"}
+    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+        ("s2", "bucket-alice")
+    ]
+
+
+def test_graph_incremental_creates_new_bucket_when_overlap_is_below_threshold():
+    existing_bucket = _bucket("bucket-rare", {"s1"}, {"rare", "common"})
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [existing_bucket],
+        {"s1": {"rare", "common"}, "s2": {"common"}},
+        {"rare": 0.95, "common": 0.05},
+        min_overlap=0.1,
+    )
+
+    new_bucket_id = str(create_bucket_id("dataset-1", 0, ["s2"]))
+    assert set(buckets) == {new_bucket_id}
+    assert buckets[new_bucket_id].child_ids == {"s2"}
+    assert buckets[new_bucket_id].graph_bucket_entity_ids == {"common"}
+    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+        ("s2", new_bucket_id)
+    ]
+    assert existing_bucket.child_ids == {"s1"}
+
+
+def test_graph_incremental_reuses_misc_bucket_for_no_effective_entity_summary():
+    misc_bucket = _bucket("misc-bucket", {"s1"}, set())
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [misc_bucket],
+        {"s1": set(), "s2": {"standup"}},
+        {"standup": 0.0},
+        max_bucket_size=2,
+        min_overlap=0,
+    )
+
+    assert buckets == {"misc-bucket": misc_bucket}
+    assert misc_bucket.child_ids == {"s1", "s2"}
+    assert misc_bucket.graph_bucket_entity_ids == set()
+    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+        ("s2", "misc-bucket")
+    ]
+
+
+def test_graph_incremental_updates_index_after_creating_bucket():
+    buckets, assignments = _incremental(
+        ["s1", "s2"],
+        [],
+        {"s1": {"alice"}, "s2": {"alice"}},
+        {"alice": 1.0},
+        max_bucket_size=2,
+    )
+
+    bucket_id = str(create_bucket_id("dataset-1", 0, ["s1"]))
+    assert set(buckets) == {bucket_id}
+    assert buckets[bucket_id].child_ids == {"s1", "s2"}
+    assert buckets[bucket_id].graph_bucket_entity_ids == {"alice"}
+    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+        ("s1", bucket_id),
+        ("s2", bucket_id),
+    ]
+
+
+def test_graph_incremental_tie_breaks_by_bucket_size_then_id():
+    larger_bucket = _bucket("bucket-a", {"s1", "s2"}, {"shared"})
+    smaller_bucket = _bucket("bucket-b", {"s3"}, {"shared"})
+
+    _, assignments = _incremental(
+        ["new"],
+        [larger_bucket, smaller_bucket],
+        {
+            "s1": {"shared"},
+            "s2": {"shared"},
+            "s3": {"shared"},
+            "new": {"shared"},
+        },
+        {"shared": 1.0},
+        max_bucket_size=3,
+    )
+
+    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+        ("new", "bucket-b")
+    ]
+
+
+def test_graph_incremental_tie_breaks_equal_size_by_bucket_id():
+    bucket_b = _bucket("bucket-b", {"s1"}, {"shared"})
+    bucket_a = _bucket("bucket-a", {"s2"}, {"shared"})
+
+    _, assignments = _incremental(
+        ["new"],
+        [bucket_b, bucket_a],
+        {
+            "s1": {"shared"},
+            "s2": {"shared"},
+            "new": {"shared"},
+        },
+        {"shared": 1.0},
+        max_bucket_size=2,
+    )
+
+    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+        ("new", "bucket-a")
+    ]
+
+
+def test_graph_incremental_normalizes_misc_bucket_before_placement():
+    bucket = _bucket("bucket-promoted", {"s1"}, set())
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [bucket],
+        {"s1": {"alice"}, "s2": {"alice"}},
+        {"alice": 1.0},
+        max_bucket_size=2,
+    )
+
+    assert buckets == {"bucket-promoted": bucket}
+    assert bucket.child_ids == {"s1", "s2"}
+    assert bucket.graph_bucket_entity_ids == {"alice"}
+    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+        ("s2", "bucket-promoted")
+    ]
+
+
+def test_graph_incremental_demotes_zero_weight_bucket_before_misc_reuse():
+    bucket = _bucket("bucket-demoted", {"s1"}, {"standup"})
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [bucket],
+        {"s1": {"standup"}, "s2": set()},
+        {"standup": 0.0},
+        max_bucket_size=2,
+        min_overlap=0,
+    )
+
+    assert buckets == {"bucket-demoted": bucket}
+    assert bucket.child_ids == {"s1", "s2"}
+    assert bucket.graph_bucket_entity_ids == set()
+    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+        ("s2", "bucket-demoted")
+    ]

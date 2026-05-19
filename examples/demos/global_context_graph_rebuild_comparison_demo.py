@@ -18,6 +18,11 @@ DEMO_TURNS = [
     "Farah will review Project Beacon rollout notes after onboarding.",
 ]
 
+INCREMENTAL_TURNS = [
+    "Alice added a Project Atlas follow-up focused on provider validation.",
+    "Eli added a Project Beacon follow-up focused on retriever rollout metrics.",
+]
+
 
 def main() -> None:
     os.environ.setdefault("COGNEE_CLI_MODE", "true")
@@ -28,21 +33,32 @@ def main() -> None:
 
 
 async def _run() -> bool:
-    print("Global context vector vs graph rebuild demo")
+    print("Global context vector rebuild, graph rebuild, and graph incremental demo")
 
     dataset_id = await _ingest_dataset(DATASET)
     if not dataset_id:
         return False
 
     try:
-        await _rebuild_index(dataset_id, strategy="vector")
-        if not await _print_buckets("Vector rebuild buckets", dataset_id):
+        await _build_index(dataset_id, strategy="vector", rebuild=True)
+        if await _print_buckets("Vector rebuild buckets", dataset_id) is None:
             return False
 
         print("\nGraph rebuild will replace the vector index for the same dataset.")
-        await _rebuild_index(dataset_id, strategy="graph")
-        if not await _print_buckets("Graph rebuild buckets", dataset_id):
+        await _build_index(dataset_id, strategy="graph", rebuild=True)
+        graph_bucket_ids = await _print_buckets("Graph rebuild buckets", dataset_id)
+        if graph_bucket_ids is None:
             return False
+
+        await _ingest_more_data(dataset_id)
+        await _build_index(dataset_id, strategy="graph", rebuild=False)
+        incremental_bucket_ids = await _print_buckets("Graph incremental buckets", dataset_id)
+        if incremental_bucket_ids is None:
+            return False
+
+        print("\nGraph incremental bucket changes")
+        print(f"  reused bucket ids: {sorted(graph_bucket_ids & incremental_bucket_ids)}")
+        print(f"  new bucket ids: {sorted(incremental_bucket_ids - graph_bucket_ids)}")
     except Exception as error:
         print(
             "Setup: demo failed. Ensure LLM configuration is available and the "
@@ -77,23 +93,36 @@ async def _ingest_dataset(dataset_name: str) -> str:
     return str(dataset_id)
 
 
-async def _rebuild_index(dataset_id: str, strategy: str) -> None:
+async def _ingest_more_data(dataset_id: str) -> None:
+    import cognee
+
+    print("\nIngesting additional data for graph incremental update")
+    await cognee.remember(
+        INCREMENTAL_TURNS,
+        dataset_name=DATASET,
+        dataset_id=UUID(dataset_id),
+        self_improvement=False,
+    )
+
+
+async def _build_index(dataset_id: str, strategy: str, rebuild: bool) -> None:
     from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
     from cognee.modules.users.methods import get_default_user
 
-    print(f"\nRunning {strategy} rebuild on dataset id: {dataset_id}")
+    mode = "rebuild" if rebuild else "incremental update"
+    print(f"\nRunning {strategy} {mode} on dataset id: {dataset_id}")
     user = await get_default_user()
     result = await global_context_index_pipeline(
         user=user,
         dataset=UUID(dataset_id),
-        rebuild=True,
+        rebuild=rebuild,
         bucketing_strategy=strategy,
         max_bucket_size=2,
     )
-    print(f"{strategy} rebuild result: {result}")
+    print(f"{strategy} {mode} result: {result}")
 
 
-async def _print_buckets(title: str, dataset_id: str) -> bool:
+async def _print_buckets(title: str, dataset_id: str) -> set[str] | None:
     from cognee.modules.graph.methods.get_global_context_graph_inputs import (
         get_dataset_text_summary_ids,
     )
@@ -125,7 +154,7 @@ async def _print_buckets(title: str, dataset_id: str) -> bool:
     )
     if not level_zero_buckets:
         print("  no level-0 buckets; rebuild did not produce a usable index")
-        return False
+        return None
 
     for bucket in level_zero_buckets:
         child_ids = sorted(bucket.child_ids)
@@ -136,7 +165,7 @@ async def _print_buckets(title: str, dataset_id: str) -> bool:
         print(f"    child previews: {_child_previews(child_ids, summaries_by_id)}")
         print(f"    top entities: {top_entities}")
 
-    return True
+    return {bucket.id for bucket in level_zero_buckets}
 
 
 def _top_bucket_entities(child_ids, graph_bucket_entity_ids, graph_input):

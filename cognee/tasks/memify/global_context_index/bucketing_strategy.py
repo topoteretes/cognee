@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from .bucket_assignment import assign_items_to_buckets, create_buckets_for_level
-from .graph_bucketing import rebuild_graph_buckets_for_level
+from .graph_bucketing import place_graph_summaries_incrementally, rebuild_graph_buckets_for_level
 from .models import BucketAssignment, SummaryNode
 
 BucketingStrategyName = Literal["vector", "graph"]
@@ -86,7 +86,16 @@ class GraphBucketingStrategy:
         if level != 0:
             raise ValueError("Graph bucketing is only supported for level 0.")
         if existing_buckets:
-            raise ValueError("Graph bucketing requires rebuild=True until incremental mode lands.")
+            return place_graph_summaries_incrementally(
+                items,
+                existing_buckets,
+                strategy_context.entities_by_summary_id,
+                strategy_context.idf_weights,
+                dataset_id=dataset_id,
+                level=level,
+                max_bucket_size=max_bucket_size,
+                min_overlap=strategy_context.min_overlap,
+            )
 
         return rebuild_graph_buckets_for_level(
             items_for_cluster,

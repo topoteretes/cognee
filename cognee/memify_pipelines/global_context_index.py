@@ -18,6 +18,16 @@ def get_global_context_index_memify_tasks(
     bucketing_strategy: BucketingStrategyName = "vector",
     min_overlap: float = 0.1,
 ):
+    """
+    Build the task pair for the explicit global context index pipeline.
+
+    ``bucketing_strategy="vector"`` is the default and uses
+    ``placement_distance_threshold`` for level-0 and upper-level placement.
+    ``bucketing_strategy="graph"`` is experimental, uses ``min_overlap`` for
+    level-0 graph placement, and falls back to vector bucketing for levels
+    above 0. Switching between vector-built and graph-built indexes requires
+    ``rebuild=True``.
+    """
     return (
         [Task(extract_global_context_index_input)],
         [
@@ -43,6 +53,13 @@ async def global_context_index_pipeline(
     bucketing_strategy: BucketingStrategyName = "vector",
     min_overlap: float = 0.1,
 ):
+    """
+    Build or update the global context index for a dataset.
+
+    Vector bucketing is the default. Graph bucketing is experimental and only
+    applies to level-0 buckets; upper levels remain vector-based. Use
+    ``rebuild=True`` when switching between vector and graph strategies.
+    """
     extraction_tasks, enrichment_tasks = get_global_context_index_memify_tasks(
         max_bucket_size=max_bucket_size,
         placement_distance_threshold=placement_distance_threshold,

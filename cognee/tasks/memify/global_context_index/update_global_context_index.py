@@ -13,7 +13,10 @@ from cognee.tasks.summarization.models import GlobalContextSummary
 
 from .build_context_index import build_context_index, group_buckets_by_level
 from .bucketing_strategy import BucketingStrategyName
-from .graph_bucketing import validate_vector_buckets_can_be_extended
+from .graph_bucketing import (
+    validate_graph_buckets_can_be_extended,
+    validate_vector_buckets_can_be_extended,
+)
 from .graph_input import dataset_id_from_context, load_context_index_input
 from .graph_providers import GlobalContextGraphInput, load_global_context_graph_input
 from .models import GlobalContextIndexInput, SummaryNode
@@ -117,6 +120,13 @@ async def update_global_context_index(
     Build or incrementally extend the global context index above a dataset's
     TextSummaries: level-0 buckets, any upper levels needed, and the dataset
     root.
+
+    ``bucketing_strategy="vector"`` is the stable default and uses
+    ``placement_distance_threshold``. ``bucketing_strategy="graph"`` is
+    experimental, uses ``min_overlap``, and only applies to level 0. Existing
+    vector-built buckets cannot be extended by graph incremental mode, and
+    existing graph-built buckets cannot be extended by vector incremental mode;
+    use ``rebuild=True`` to switch strategies.
     """
     validate_global_context_index_config(
         max_bucket_size,
@@ -124,9 +134,6 @@ async def update_global_context_index(
         bucketing_strategy,
         min_overlap,
     )
-    if bucketing_strategy == "graph" and not rebuild:
-        raise ValueError('bucketing_strategy="graph" requires rebuild=True until Phase 6.')
-
     dataset_id = dataset_id_from_context(ctx)
     if bucketing_strategy == "graph" and not dataset_id:
         raise ValueError('bucketing_strategy="graph" requires a dataset context.')
@@ -143,6 +150,12 @@ async def update_global_context_index(
     if bucketing_strategy == "graph":
         text_summaries = await filter_graph_dataset_text_summaries(dataset_id, text_summaries)
 
+    if not rebuild:
+        if bucketing_strategy == "graph":
+            validate_graph_buckets_can_be_extended(context_input.buckets)
+        else:
+            validate_vector_buckets_can_be_extended(context_input.buckets)
+
     if not text_summaries:
         return []
 
@@ -154,9 +167,6 @@ async def update_global_context_index(
     if not new_summaries:
         logger.info("No new TextSummary nodes to place in global context index.")
         return []
-
-    if bucketing_strategy == "vector" and not rebuild:
-        validate_vector_buckets_can_be_extended(context_input.buckets)
 
     entities_by_summary_id = context_input.entities_by_summary_id
     idf_weights: dict[str, float] = {}

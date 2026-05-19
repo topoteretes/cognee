@@ -70,6 +70,81 @@ def rebuild_graph_buckets_for_level(
     return buckets_to_persist, assignments
 
 
+def place_graph_summaries_incrementally(
+    new_summaries: list[SummaryNode],
+    existing_buckets: list[SummaryNode],
+    entities_by_summary_id: Mapping[str, set[str]],
+    idf_weights: Mapping[str, float],
+    dataset_id: str,
+    level: int,
+    max_bucket_size: int,
+    min_overlap: float,
+) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
+    if level != 0:
+        raise ValueError("Graph incremental placement is only supported for level 0.")
+    if max_bucket_size < 1:
+        raise ValueError("max_bucket_size must be at least 1.")
+
+    validate_graph_buckets_can_be_extended(existing_buckets)
+
+    buckets_by_id = {bucket.id: bucket for bucket in existing_buckets}
+    buckets_to_persist = _normalize_existing_graph_buckets(
+        existing_buckets,
+        entities_by_summary_id,
+        idf_weights,
+    )
+    entity_to_bucket_ids = _build_entity_to_bucket_ids(existing_buckets)
+    misc_bucket_ids = _build_misc_bucket_ids(existing_buckets)
+    assignments: list[BucketAssignment] = []
+
+    for summary in sorted(new_summaries, key=lambda item: item.id):
+        summary_entity_ids = entities_by_summary_id.get(summary.id, set())
+        if not _has_positive_entity_weight(summary_entity_ids, idf_weights):
+            _place_misc_summary(
+                summary,
+                buckets_by_id,
+                misc_bucket_ids,
+                entities_by_summary_id,
+                dataset_id,
+                level,
+                max_bucket_size,
+                buckets_to_persist,
+                assignments,
+            )
+            continue
+
+        bucket = _choose_existing_graph_bucket(
+            summary_entity_ids,
+            entity_to_bucket_ids,
+            buckets_by_id,
+            idf_weights,
+            max_bucket_size,
+            min_overlap,
+        )
+        if bucket is None:
+            bucket = _create_new_graph_bucket(
+                summary,
+                entities_by_summary_id,
+                dataset_id,
+                level,
+                buckets_by_id,
+                buckets_to_persist,
+                assignments,
+            )
+        else:
+            _assign_summary_to_graph_bucket(
+                summary,
+                bucket,
+                summary_entity_ids,
+                buckets_to_persist,
+                assignments,
+            )
+
+        _index_bucket_entities(bucket, entity_to_bucket_ids)
+
+    return buckets_to_persist, assignments
+
+
 def validate_graph_buckets_can_be_extended(existing_buckets: list[SummaryNode]) -> None:
     for bucket in existing_buckets:
         if bucket.level == 0 and bucket.graph_bucket_entity_ids is None:
@@ -107,6 +182,62 @@ def _partition_summaries(
     return entity_summaries, misc_summaries
 
 
+def _normalize_existing_graph_buckets(
+    existing_buckets: list[SummaryNode],
+    entities_by_summary_id: Mapping[str, set[str]],
+    idf_weights: Mapping[str, float],
+) -> dict[str, SummaryNode]:
+    buckets_to_persist: dict[str, SummaryNode] = {}
+
+    for bucket in existing_buckets:
+        child_entity_ids = _union_entities(sorted(bucket.child_ids), entities_by_summary_id)
+        normalized_entity_ids = (
+            child_entity_ids if _has_positive_entity_weight(child_entity_ids, idf_weights) else set()
+        )
+        if bucket.graph_bucket_entity_ids != normalized_entity_ids:
+            bucket.graph_bucket_entity_ids = normalized_entity_ids
+            buckets_to_persist[bucket.id] = bucket
+
+    return buckets_to_persist
+
+
+def _has_positive_entity_weight(
+    entity_ids: set[str],
+    idf_weights: Mapping[str, float],
+) -> bool:
+    return bool(entity_ids) and entities_weight(entity_ids, idf_weights) > 0
+
+
+def _build_entity_to_bucket_ids(
+    buckets: list[SummaryNode],
+) -> dict[str, set[str]]:
+    entity_to_bucket_ids: dict[str, set[str]] = {}
+    for bucket in buckets:
+        _index_bucket_entities(bucket, entity_to_bucket_ids)
+    return entity_to_bucket_ids
+
+
+def _index_bucket_entities(
+    bucket: SummaryNode,
+    entity_to_bucket_ids: dict[str, set[str]],
+) -> None:
+    if bucket.graph_bucket_entity_ids is None:
+        return
+
+    for entity_id in bucket.graph_bucket_entity_ids:
+        entity_to_bucket_ids.setdefault(entity_id, set()).add(bucket.id)
+
+
+def _build_misc_bucket_ids(
+    buckets: list[SummaryNode],
+) -> list[str]:
+    return sorted(
+        bucket.id
+        for bucket in buckets
+        if bucket.graph_bucket_entity_ids is not None and not bucket.graph_bucket_entity_ids
+    )
+
+
 def _build_entity_to_summary_ids(
     summaries: list[SummaryNode],
     entities_by_summary_id: Mapping[str, set[str]],
@@ -116,6 +247,133 @@ def _build_entity_to_summary_ids(
         for entity_id in entities_by_summary_id.get(summary.id, set()):
             entity_to_summary_ids.setdefault(entity_id, set()).add(summary.id)
     return entity_to_summary_ids
+
+
+def _choose_existing_graph_bucket(
+    summary_entity_ids: set[str],
+    entity_to_bucket_ids: Mapping[str, set[str]],
+    buckets_by_id: Mapping[str, SummaryNode],
+    idf_weights: Mapping[str, float],
+    max_bucket_size: int,
+    min_overlap: float,
+) -> SummaryNode | None:
+    candidate_bucket_ids: set[str] = set()
+    for entity_id in summary_entity_ids:
+        candidate_bucket_ids.update(entity_to_bucket_ids.get(entity_id, set()))
+
+    scored_candidates: list[tuple[float, int, str, SummaryNode]] = []
+    for bucket_id in sorted(candidate_bucket_ids):
+        bucket = buckets_by_id[bucket_id]
+        if len(bucket.child_ids) >= max_bucket_size:
+            continue
+
+        score = weighted_jaccard(
+            summary_entity_ids,
+            bucket.graph_bucket_entity_ids or set(),
+            idf_weights,
+        )
+        if score < min_overlap:
+            continue
+        scored_candidates.append((-score, len(bucket.child_ids), bucket.id, bucket))
+
+    if not scored_candidates:
+        return None
+
+    return sorted(scored_candidates, key=lambda item: (item[0], item[1], item[2]))[0][3]
+
+
+def _place_misc_summary(
+    summary: SummaryNode,
+    buckets_by_id: dict[str, SummaryNode],
+    misc_bucket_ids: list[str],
+    entities_by_summary_id: Mapping[str, set[str]],
+    dataset_id: str,
+    level: int,
+    max_bucket_size: int,
+    buckets_to_persist: dict[str, SummaryNode],
+    assignments: list[BucketAssignment],
+) -> None:
+    bucket = _first_available_misc_bucket(misc_bucket_ids, buckets_by_id, max_bucket_size)
+    if bucket is None:
+        bucket = _create_new_graph_bucket(
+            summary,
+            entities_by_summary_id,
+            dataset_id,
+            level,
+            buckets_by_id,
+            buckets_to_persist,
+            assignments,
+            force_misc=True,
+        )
+        misc_bucket_ids.append(bucket.id)
+        misc_bucket_ids.sort()
+        return
+
+    _assign_summary_to_graph_bucket(
+        summary,
+        bucket,
+        set(),
+        buckets_to_persist,
+        assignments,
+        force_misc=True,
+    )
+
+
+def _first_available_misc_bucket(
+    misc_bucket_ids: list[str],
+    buckets_by_id: Mapping[str, SummaryNode],
+    max_bucket_size: int,
+) -> SummaryNode | None:
+    for bucket_id in misc_bucket_ids:
+        bucket = buckets_by_id[bucket_id]
+        if len(bucket.child_ids) < max_bucket_size:
+            return bucket
+    return None
+
+
+def _create_new_graph_bucket(
+    summary: SummaryNode,
+    entities_by_summary_id: Mapping[str, set[str]],
+    dataset_id: str,
+    level: int,
+    buckets_by_id: dict[str, SummaryNode],
+    buckets_to_persist: dict[str, SummaryNode],
+    assignments: list[BucketAssignment],
+    *,
+    force_misc: bool = False,
+) -> SummaryNode:
+    _add_bucket(
+        [summary.id],
+        entities_by_summary_id,
+        dataset_id,
+        level,
+        buckets_to_persist,
+        assignments,
+        force_misc=force_misc,
+    )
+    bucket_id = str(create_bucket_id(dataset_id, level, [summary.id]))
+    bucket = buckets_to_persist[bucket_id]
+    buckets_by_id[bucket.id] = bucket
+    return bucket
+
+
+def _assign_summary_to_graph_bucket(
+    summary: SummaryNode,
+    bucket: SummaryNode,
+    summary_entity_ids: set[str],
+    buckets_to_persist: dict[str, SummaryNode],
+    assignments: list[BucketAssignment],
+    *,
+    force_misc: bool = False,
+) -> None:
+    bucket.child_ids.add(summary.id)
+    if force_misc:
+        bucket.graph_bucket_entity_ids = set()
+    elif bucket.graph_bucket_entity_ids is not None:
+        bucket.graph_bucket_entity_ids.update(summary_entity_ids)
+
+    buckets_to_persist[bucket.id] = bucket
+    assignments.append(BucketAssignment(summary_id=summary.id, bucket_id=bucket.id))
 
 
 def _sort_entity_seeds(
