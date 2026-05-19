@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-BENCH_SCRIPT = (Path(__file__).parent / "statistics-percentile" / "bench_cognee.py").resolve()
+BENCH_SCRIPT = (Path(__file__).parent / "statistics_percentile" / "bench_cognee.py").resolve()
 COGNEE_DIR = Path(__file__).resolve().parents[3]
 METRICS = ["add_time_s", "cognify_time_s", "total_ingest_time_s", "search_time", "prune_time_s"]
 PERCENTILES = [50, 75, 90, 95, 99]
