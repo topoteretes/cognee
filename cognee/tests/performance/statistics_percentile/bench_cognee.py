@@ -23,8 +23,6 @@ import sys
 import time
 from pathlib import Path
 
-
-
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
 DEFAULT_MEMORIES_FILE = Path(__file__).with_name("memories.json")
