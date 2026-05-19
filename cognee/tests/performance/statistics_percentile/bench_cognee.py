@@ -33,6 +33,8 @@ DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMS = 1536
 DATASET_NAME = "bench_memories"
 
+os.environ.setdefault("COGNEE_SKIP_CONNECTION_TEST", "true")
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
