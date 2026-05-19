@@ -80,6 +80,15 @@ def validate_graph_buckets_can_be_extended(existing_buckets: list[SummaryNode]) 
             )
 
 
+def validate_vector_buckets_can_be_extended(existing_buckets: list[SummaryNode]) -> None:
+    for bucket in existing_buckets:
+        if bucket.level == 0 and bucket.graph_bucket_entity_ids is not None:
+            raise ValueError(
+                "Vector incremental placement cannot extend graph-built level-0 buckets. "
+                "Use rebuild=True to rebuild the index with vector bucketing."
+            )
+
+
 def _partition_summaries(
     summaries: list[SummaryNode],
     entities_by_summary_id: Mapping[str, set[str]],

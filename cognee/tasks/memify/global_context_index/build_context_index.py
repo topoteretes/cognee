@@ -5,7 +5,13 @@ from typing import Any
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.summarization.models import GlobalContextSummary
 
-from .bucket_assignment import assign_items_to_buckets, create_buckets_for_level
+from .bucketing_strategy import (
+    BucketingStrategy,
+    BucketingStrategyContext,
+    BucketingStrategyName,
+    GraphBucketingStrategy,
+    VectorBucketingStrategy,
+)
 from .constants import GLOBAL_CONTEXT_SUMMARY_COLLECTION, TEXT_SUMMARY_COLLECTION
 from .models import BucketAssignment, SummaryNode
 from .persistence import persist_context_summaries
@@ -24,6 +30,25 @@ def group_buckets_by_level(buckets: list[SummaryNode]) -> dict[int, list[Summary
     return by_level
 
 
+def apply_bucket_assignments(
+    assignments: list[BucketAssignment],
+    children_by_id: dict[str, SummaryNode],
+) -> None:
+    for assignment in assignments:
+        child = children_by_id.get(assignment.summary_id)
+        if child is not None:
+            child.global_context_bucket_id = assignment.bucket_id
+
+
+def bucketing_strategy_for_level(
+    bucketing_strategy: BucketingStrategyName,
+    level: int,
+) -> BucketingStrategy:
+    if bucketing_strategy == "graph" and level == 0:
+        return GraphBucketingStrategy()
+    return VectorBucketingStrategy()
+
+
 async def build_context_index_level(
     items: list[SummaryNode],
     items_for_cluster: list[SummaryNode],
@@ -34,6 +59,10 @@ async def build_context_index_level(
     vector_engine: Any,
     max_bucket_size: int,
     placement_distance_threshold: float,
+    bucketing_strategy: BucketingStrategyName,
+    min_overlap: float,
+    entities_by_summary_id: dict[str, set[str]],
+    idf_weights: dict[str, float],
     ctx: PipelineContext | None,
 ) -> tuple[
     dict[str, SummaryNode],
@@ -41,27 +70,27 @@ async def build_context_index_level(
     list[GlobalContextSummary],
 ]:
     source_collection = TEXT_SUMMARY_COLLECTION if level == 0 else GLOBAL_CONTEXT_SUMMARY_COLLECTION
+    strategy_context = BucketingStrategyContext(
+        vector_engine=vector_engine,
+        source_collection=source_collection,
+        placement_distance_threshold=placement_distance_threshold,
+        min_overlap=min_overlap,
+        entities_by_summary_id=entities_by_summary_id,
+        idf_weights=idf_weights,
+    )
 
-    if existing or level == 0:
-        buckets_to_persist, assignments = await assign_items_to_buckets(
-            items,
-            existing,
-            level,
-            dataset_id,
-            vector_engine,
-            source_collection,
-            max_bucket_size,
-            placement_distance_threshold,
-        )
-    else:
-        buckets_to_persist, assignments = await create_buckets_for_level(
-            items_for_cluster,
-            level,
-            dataset_id,
-            vector_engine,
-            source_collection,
-            max_bucket_size,
-        )
+    strategy = bucketing_strategy_for_level(bucketing_strategy, level)
+    buckets_to_persist, assignments = await strategy.assign(
+        items=items,
+        items_for_cluster=items_for_cluster,
+        existing_buckets=existing,
+        children_by_id=children_by_id,
+        level=level,
+        dataset_id=dataset_id,
+        max_bucket_size=max_bucket_size,
+        strategy_context=strategy_context,
+    )
+    apply_bucket_assignments(assignments, children_by_id)
 
     bucket_datapoints = await generate_bucket_summary_datapoints(
         list(buckets_to_persist.values()), children_by_id, dataset_id
@@ -79,7 +108,11 @@ async def build_context_index(
     vector_engine: Any,
     max_bucket_size: int,
     placement_distance_threshold: float,
-    ctx: PipelineContext | None,
+    bucketing_strategy: BucketingStrategyName = "vector",
+    min_overlap: float = 0.1,
+    entities_by_summary_id: dict[str, set[str]] | None = None,
+    idf_weights: dict[str, float] | None = None,
+    ctx: PipelineContext | None = None,
 ) -> tuple[list[GlobalContextSummary], list[BucketAssignment]]:
     """
     Bottom-up global context index build starting from new TextSummaries.
@@ -92,6 +125,8 @@ async def build_context_index(
     """
     all_assignments: list[BucketAssignment] = []
     all_datapoints: list[GlobalContextSummary] = []
+    entities_by_summary_id = entities_by_summary_id or {}
+    idf_weights = idf_weights or {}
 
     items_changed: list[SummaryNode] = list(new_text_summaries)
     items_all: list[SummaryNode] = list(text_summaries_all)
@@ -112,6 +147,10 @@ async def build_context_index(
             vector_engine,
             max_bucket_size,
             placement_distance_threshold,
+            bucketing_strategy,
+            min_overlap,
+            entities_by_summary_id,
+            idf_weights,
             ctx,
         )
         all_assignments.extend(assignments)

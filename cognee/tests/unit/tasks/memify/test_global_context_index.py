@@ -7,11 +7,23 @@ import pytest
 
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
+from cognee.modules.graph.methods.get_global_context_graph_inputs import (
+    DatasetEntityCounts,
+    SummaryEntityLoadResult,
+)
 from cognee.modules.pipelines.models import PipelineContext
+from cognee.tasks.memify.global_context_index.bucketing_strategy import (
+    GraphBucketingStrategy,
+    VectorBucketingStrategy,
+)
+from cognee.tasks.memify.global_context_index.build_context_index import (
+    bucketing_strategy_for_level,
+)
 from cognee.tasks.memify.global_context_index.constants import SUMMARIZED_IN
 from cognee.tasks.memify.global_context_index.graph_input import (
     extract_context_index_input_from_graph,
 )
+from cognee.tasks.memify.global_context_index.graph_providers import GlobalContextGraphInput
 from cognee.tasks.memify.global_context_index.models import GlobalContextIndexInput, SummaryNode
 from cognee.tasks.memify.global_context_index.update_global_context_index import (
     update_global_context_index,
@@ -79,6 +91,29 @@ def _add_summarized_in_edge(graph: CogneeGraph, child: Node, parent: Node) -> No
 def _assert_add_data_points_used_context(add_data_points_mock: AsyncMock, ctx) -> None:
     assert add_data_points_mock.await_args_list
     assert all(call.kwargs.get("ctx") is ctx for call in add_data_points_mock.await_args_list)
+
+
+def _graph_input(
+    entities_by_summary_id: dict[str, set[str]],
+    idf_weights: dict[str, float],
+    *,
+    missing_made_from_summary_ids: set[str] | None = None,
+) -> GlobalContextGraphInput:
+    return GlobalContextGraphInput(
+        entities_by_summary_id=entities_by_summary_id,
+        idf_weights=idf_weights,
+        summary_entities=SummaryEntityLoadResult(
+            entities_by_summary_id=entities_by_summary_id,
+            summarized_chunk_count=len(entities_by_summary_id),
+            summary_ids_with_made_from=set(entities_by_summary_id),
+            missing_made_from_summary_ids=missing_made_from_summary_ids or set(),
+            entity_link_count=sum(len(entity_ids) for entity_ids in entities_by_summary_id.values()),
+        ),
+        entity_counts=DatasetEntityCounts(
+            chunk_count=len(entities_by_summary_id),
+            entity_chunk_counts={},
+        ),
+    )
 
 
 def test_extract_context_index_input_from_graph_uses_summary_edges_for_assignment():
@@ -364,6 +399,13 @@ async def test_build_bucket_summary_datapoint_leaves_non_level_zero_graph_state_
         {"placement_distance_threshold": "0.5"},
         {"placement_distance_threshold": float("inf")},
         {"placement_distance_threshold": float("nan")},
+        {"bucketing_strategy": "unknown"},
+        {"min_overlap": -0.1},
+        {"min_overlap": 1.1},
+        {"min_overlap": True},
+        {"min_overlap": "0.1"},
+        {"min_overlap": float("inf")},
+        {"min_overlap": float("nan")},
     ],
 )
 async def test_update_global_context_index_rejects_invalid_config_before_io(
@@ -387,6 +429,31 @@ async def test_update_global_context_index_rejects_invalid_config_before_io(
         await update_global_context_index(
             GlobalContextIndexInput(text_summaries=[], buckets=[]),
             **invalid_config,
+        )
+
+    load_summary_input_mock.assert_not_awaited()
+    get_unified_engine_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_global_context_index_rejects_graph_incremental_before_io(monkeypatch):
+    load_summary_input_mock = AsyncMock()
+    get_unified_engine_mock = AsyncMock()
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "load_context_index_input",
+        load_summary_input_mock,
+    )
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "get_unified_engine",
+        get_unified_engine_mock,
+    )
+
+    with pytest.raises(ValueError, match="requires rebuild=True"):
+        await update_global_context_index(
+            bucketing_strategy="graph",
+            rebuild=False,
         )
 
     load_summary_input_mock.assert_not_awaited()
@@ -745,6 +812,40 @@ async def test_update_global_context_index_skips_marked_text_summaries(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_update_global_context_index_rejects_vector_incremental_on_graph_buckets(
+    monkeypatch,
+):
+    bucket_id = str(uuid4())
+    assigned_child = _summary_node("already assigned", bucket_id=bucket_id)
+    unassigned_child = _summary_node("new unassigned")
+    graph_bucket = SummaryNode(
+        id=bucket_id,
+        text="graph bucket",
+        type="GlobalContextSummary",
+        level=0,
+        dataset_id=str(uuid4()),
+        child_ids={assigned_child.id},
+        graph_bucket_entity_ids={"entity-a"},
+    )
+    unified_engine = _unified_engine()
+    _stub_global_context_index_io(monkeypatch, unified_engine)
+
+    with pytest.raises(ValueError, match="cannot extend graph-built"):
+        await update_global_context_index(
+            GlobalContextIndexInput(
+                text_summaries=[assigned_child, unassigned_child],
+                buckets=[graph_bucket],
+            ),
+            bucketing_strategy="vector",
+            rebuild=False,
+            ctx=PipelineContext(dataset=SimpleNamespace(id=graph_bucket.dataset_id)),
+        )
+
+    unified_engine.vector.search.assert_not_awaited()
+    unified_engine.graph.add_edges.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_update_global_context_index_rebuild_empty_input_deletes_old_index(
     monkeypatch,
 ):
@@ -806,4 +907,155 @@ async def test_update_global_context_index_rebuild_empty_input_deletes_old_index
     unified_engine.vector.search.assert_not_awaited()
     add_data_points_mock.assert_not_awaited()
     unified_engine.graph.add_nodes.assert_not_awaited()
+    unified_engine.graph.add_edges.assert_not_awaited()
+
+
+def _unified_engine(vector_search=None):
+    return SimpleNamespace(
+        graph=SimpleNamespace(
+            delete_nodes=AsyncMock(),
+            add_nodes=AsyncMock(),
+            add_edges=AsyncMock(),
+        ),
+        vector=SimpleNamespace(
+            search=AsyncMock(side_effect=vector_search)
+            if vector_search is not None
+            else AsyncMock(return_value=[]),
+            delete_data_points=AsyncMock(),
+        ),
+    )
+
+
+def _stub_global_context_index_io(monkeypatch, unified_engine):
+    add_data_points_mock = AsyncMock()
+
+    async def summarize_bucket(children):
+        return " / ".join(child.text for child in children)
+
+    async def summarize_root(children):
+        return "root: " + " / ".join(child.text for child in children)
+
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "get_unified_engine",
+        AsyncMock(return_value=unified_engine),
+    )
+    monkeypatch.setattr(
+        "cognee.tasks.memify.global_context_index.summary_generation.generate_bucket_summary",
+        summarize_bucket,
+    )
+    monkeypatch.setattr(
+        "cognee.tasks.memify.global_context_index.summary_generation.generate_global_context_summary",
+        summarize_root,
+    )
+    monkeypatch.setattr(
+        "cognee.tasks.memify.global_context_index.persistence.add_data_points",
+        add_data_points_mock,
+    )
+    return add_data_points_mock
+
+
+@pytest.mark.asyncio
+async def test_update_global_context_index_graph_rebuild_uses_provider_entities(monkeypatch):
+    summaries = [
+        _summary_node("alice roadmap"),
+        _summary_node("alice launch"),
+        _summary_node("bob migration"),
+    ]
+    foreign_summary = _summary_node("foreign dataset summary")
+    dataset_id = uuid4()
+    unified_engine = _unified_engine()
+    add_data_points_mock = _stub_global_context_index_io(monkeypatch, unified_engine)
+    dataset_summary_ids_mock = AsyncMock(return_value=[summary.id for summary in summaries])
+    provider_mock = AsyncMock(
+        return_value=_graph_input(
+            {
+                summaries[0].id: {"alice"},
+                summaries[1].id: {"alice"},
+                summaries[2].id: {"bob"},
+            },
+            {"alice": 1.0, "bob": 1.0},
+        )
+    )
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "get_dataset_text_summary_ids",
+        dataset_summary_ids_mock,
+    )
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "load_global_context_graph_input",
+        provider_mock,
+    )
+    ctx = PipelineContext(dataset=SimpleNamespace(id=dataset_id))
+
+    result = await update_global_context_index(
+        GlobalContextIndexInput(
+            text_summaries=[*summaries, foreign_summary],
+            buckets=[],
+            entities_by_summary_id={
+                summary.id: {"ignored"} for summary in [*summaries, foreign_summary]
+            },
+        ),
+        rebuild=True,
+        bucketing_strategy="graph",
+        max_bucket_size=10,
+        ctx=ctx,
+    )
+
+    dataset_summary_ids_mock.assert_awaited_once_with(str(dataset_id))
+    provider_mock.assert_awaited_once_with(
+        str(dataset_id),
+        sorted(summary.id for summary in summaries),
+    )
+    unified_engine.vector.search.assert_not_awaited()
+    assert summaries[0].global_context_bucket_id == summaries[1].global_context_bucket_id
+    assert summaries[2].global_context_bucket_id != summaries[0].global_context_bucket_id
+    assert foreign_summary.global_context_bucket_id is None
+
+    level_zero = [datapoint for datapoint in result if datapoint.level == 0]
+    assert sorted(datapoint.graph_bucket_entity_ids for datapoint in level_zero) == [
+        ["alice"],
+        ["bob"],
+    ]
+    _assert_add_data_points_used_context(add_data_points_mock, ctx)
+
+
+def test_graph_strategy_dispatch_is_scoped_to_level_zero():
+    assert isinstance(bucketing_strategy_for_level("graph", 0), GraphBucketingStrategy)
+    assert isinstance(bucketing_strategy_for_level("graph", 1), VectorBucketingStrategy)
+    assert isinstance(bucketing_strategy_for_level("vector", 0), VectorBucketingStrategy)
+
+
+@pytest.mark.asyncio
+async def test_update_global_context_index_graph_rebuild_rejects_missing_made_from(monkeypatch):
+    summary = _summary_node("summary")
+    dataset_id = uuid4()
+    unified_engine = _unified_engine()
+    _stub_global_context_index_io(monkeypatch, unified_engine)
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "get_dataset_text_summary_ids",
+        AsyncMock(return_value=[summary.id]),
+    )
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "load_global_context_graph_input",
+        AsyncMock(
+            return_value=_graph_input(
+                {summary.id: set()},
+                {},
+                missing_made_from_summary_ids={summary.id},
+            )
+        ),
+    )
+
+    with pytest.raises(ValueError, match="made_from"):
+        await update_global_context_index(
+            GlobalContextIndexInput(text_summaries=[summary], buckets=[]),
+            rebuild=True,
+            bucketing_strategy="graph",
+            ctx=PipelineContext(dataset=SimpleNamespace(id=dataset_id)),
+        )
+
     unified_engine.graph.add_edges.assert_not_awaited()

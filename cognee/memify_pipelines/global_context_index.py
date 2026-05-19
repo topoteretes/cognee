@@ -8,12 +8,15 @@ from cognee.tasks.memify.global_context_index import (
     extract_global_context_index_input,
     update_global_context_index,
 )
+from cognee.tasks.memify.global_context_index.bucketing_strategy import BucketingStrategyName
 
 
 def get_global_context_index_memify_tasks(
     max_bucket_size: int = 20,
     placement_distance_threshold: float = 0.5,
     rebuild: bool = False,
+    bucketing_strategy: BucketingStrategyName = "vector",
+    min_overlap: float = 0.1,
 ):
     return (
         [Task(extract_global_context_index_input)],
@@ -23,6 +26,8 @@ def get_global_context_index_memify_tasks(
                 rebuild=rebuild,
                 max_bucket_size=max_bucket_size,
                 placement_distance_threshold=placement_distance_threshold,
+                bucketing_strategy=bucketing_strategy,
+                min_overlap=min_overlap,
             )
         ],
     )
@@ -35,11 +40,15 @@ async def global_context_index_pipeline(
     max_bucket_size: int = 20,
     placement_distance_threshold: float = 0.5,
     rebuild: bool = False,
+    bucketing_strategy: BucketingStrategyName = "vector",
+    min_overlap: float = 0.1,
 ):
     extraction_tasks, enrichment_tasks = get_global_context_index_memify_tasks(
         max_bucket_size=max_bucket_size,
         placement_distance_threshold=placement_distance_threshold,
         rebuild=rebuild,
+        bucketing_strategy=bucketing_strategy,
+        min_overlap=min_overlap,
     )
 
     return await memify(
