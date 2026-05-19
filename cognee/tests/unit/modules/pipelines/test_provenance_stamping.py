@@ -1,4 +1,4 @@
-"""Unit tests for the _stamp_provenance function from run_tasks_base.
+"""Unit tests for the _stamp_provenance function from run_tasks_single.
 
 Tests the provenance stamping logic that tags DataPoints with their
 originating pipeline and task names. Uses inline reimplementation to
@@ -37,7 +37,7 @@ class ChunkDP(DataPoint):
 
 
 def _stamp_provenance(data, pipeline_name, task_name, visited=None):
-    """Copy of the function from run_tasks_base.py for isolated testing."""
+    """Copy of the function from run_tasks_single.py for isolated testing."""
     if visited is None:
         visited = set()
 

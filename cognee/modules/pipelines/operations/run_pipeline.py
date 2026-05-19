@@ -17,7 +17,7 @@ This is the high-level API for the deferred-call pattern::
     ], data=raw_input)
 
 Internally, it converts BoundTasks into Task objects and delegates to
-the existing run_tasks_base machinery — preserving observability,
+the existing run_tasks_single machinery — preserving observability,
 telemetry, provenance stamping, and error handling.
 """
 
@@ -29,7 +29,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.tasks.task import BoundTask, Task
-from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+from cognee.modules.pipelines.operations.run_tasks_single import run_tasks_single
 
 logger = get_logger("run_pipeline")
 
@@ -91,10 +91,10 @@ async def run_pipeline(
         extras=context if isinstance(context, dict) else {},
     )
 
-    # Delegate to existing run_tasks_base — gets us observability,
+    # Delegate to existing run_tasks_single — gets us observability,
     # telemetry, provenance stamping, error handling for free.
     results = []
-    async for result in run_tasks_base(tasks, data, user, ctx):
+    async for result in run_tasks_single(tasks, data, user, ctx):
         results.append(result)
 
     return results

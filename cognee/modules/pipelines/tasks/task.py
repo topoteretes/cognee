@@ -185,7 +185,15 @@ class Task:
     _execute_method: Callable = None
 
     def __init__(
-        self, executable, *args, task_config=None, batch_size=None, enriches=False, **kwargs
+        self,
+        executable,
+        *args,
+        task_config=None,
+        batch_size=None,
+        enriches=False,
+        workers=None,
+        timeout=None,
+        **kwargs,
     ):
         self.executable = executable
         self.default_params = {"args": args, "kwargs": kwargs}
@@ -222,6 +230,10 @@ class Task:
 
         if batch_size is not None:
             self.task_config["batch_size"] = batch_size
+        if workers is not None:
+            self.task_config["workers"] = workers
+        if timeout is not None:
+            self.task_config["timeout"] = timeout
 
     def with_config(self, **overrides) -> "Task":
         """Return a new Task with overridden config.

@@ -11,12 +11,12 @@ import pytest
 
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+from cognee.modules.pipelines.operations.run_tasks_single import run_tasks_single
 
 
 @dataclass
 class _FakeUser:
-    """Minimal user stub — run_tasks_base needs user.id for telemetry."""
+    """Minimal user stub — run_tasks_single needs user.id for telemetry."""
 
     id: str = str(uuid4())
     tenant_id: str = None
@@ -59,7 +59,7 @@ async def test_extras_flow_through_single_task():
 
     tasks = [Task(enrich_with_custom_config)]
     results = []
-    async for result in run_tasks_base(tasks, [1, 2, 3], user=_USER, ctx=ctx):
+    async for result in run_tasks_single(tasks, [1, 2, 3], user=_USER, ctx=ctx):
         results.append(result)
 
     assert len(results) > 0
@@ -83,7 +83,7 @@ async def test_extras_flow_through_chained_tasks():
         Task(filter_by_threshold),
     ]
     results = []
-    async for result in run_tasks_base(tasks, [1, 2, 3], user=_USER, ctx=ctx):
+    async for result in run_tasks_single(tasks, [1, 2, 3], user=_USER, ctx=ctx):
         results.append(result)
 
     # After enrichment: values are 5, 10, 15
@@ -116,7 +116,7 @@ async def test_task_without_ctx_ignores_extras():
 
     tasks = [Task(plain_task)]
     results = []
-    async for result in run_tasks_base(tasks, [1, 2, 3], user=_USER, ctx=ctx):
+    async for result in run_tasks_single(tasks, [1, 2, 3], user=_USER, ctx=ctx):
         results.append(result)
 
     flat = results[0] if isinstance(results[0], list) else results

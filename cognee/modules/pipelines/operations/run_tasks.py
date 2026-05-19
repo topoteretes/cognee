@@ -2,32 +2,43 @@ import os
 
 import asyncio
 from functools import wraps
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import select
+
+import cognee.modules.ingestion as ingestion
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
-from cognee.context_global_variables import set_database_global_context_variables
-from cognee.modules.users.models import User
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines.utils import generate_pipeline_id
-from cognee.modules.pipelines.exceptions import PipelineRunFailedError
-from cognee.tasks.ingestion import resolve_data_directories
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.modules.data.models import Data
+from cognee.modules.pipelines.exceptions import PipelineItemFailure, PipelineRunFailedError
 from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
     PipelineRunErrored,
     PipelineRunStarted,
+    PipelineRunYield,
 )
 from cognee.modules.pipelines.operations import (
-    log_pipeline_run_start,
     log_pipeline_run_complete,
     log_pipeline_run_error,
+    log_pipeline_run_start,
 )
-from .run_tasks_data_item import run_tasks_data_item
+from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
+from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
+from cognee.tasks.ingestion import resolve_data_directories, save_data_item_to_storage
+
 from ..tasks.task import Task
+from .worker_pipeline import _ErroredItem, run_worker_pipeline
 
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
@@ -52,6 +63,91 @@ def override_run_tasks(new_gen):
     return decorator
 
 
+async def _resolve_data_id(data_item: Any, user: User) -> Any:
+    """Compute the stable ``data_id`` used to look up per-item processing
+    status. Lifted out of run_tasks_data_item_incremental so we can run it
+    in parallel before feeding the worker pipeline."""
+    if isinstance(data_item, Data):
+        return data_item.id
+
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+
+    if isinstance(data_item, DataItemType) and data_item.data_id is not None:
+        return data_item.data_id
+
+    file_path = await save_data_item_to_storage(data_item)
+    async with open_data_file(file_path) as file:
+        classified_data = ingestion.classify(file)
+        return await ingestion.identify(classified_data, user)
+
+
+async def _is_already_completed(data_id, pipeline_name: str, dataset_id) -> bool:
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+    if not data_point:
+        return False
+    return (
+        data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset_id))
+        == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+    )
+
+
+async def _mark_completed(data_id, pipeline_name: str, dataset_id) -> None:
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+        if not data_point:
+            return
+        status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
+        status_for_pipeline[str(dataset_id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+        await session.merge(data_point)
+        await session.commit()
+
+
+async def _preflight(
+    data: List[Any],
+    user: User,
+    dataset,
+    pipeline_name: str,
+    incremental_loading: bool,
+) -> Tuple[List[Tuple[Any, Any]], List[Any]]:
+    """Resolve data_ids and (for incremental mode) filter out items that have
+    already been processed.
+
+    Returns ``(items_to_process, already_completed_ids)`` where each item in
+    ``items_to_process`` is ``(data_item, data_id_or_None)``.
+    """
+    if not incremental_loading:
+        return [(item, None) for item in data], []
+
+    data_ids = await asyncio.gather(*[_resolve_data_id(item, user) for item in data])
+    completion_flags = await asyncio.gather(
+        *[_is_already_completed(did, pipeline_name, dataset.id) for did in data_ids]
+    )
+
+    to_process: List[Tuple[Any, Any]] = []
+    already_done: List[Any] = []
+    for item, did, done in zip(data, data_ids, completion_flags):
+        if done:
+            already_done.append(did)
+        else:
+            to_process.append((item, did))
+    return to_process, already_done
+
+
+def _pipeline_telemetry_props(pipeline_name: str, user: User) -> dict:
+    return {
+        "pipeline_name": str(pipeline_name),
+        "cognee_version": cognee_version,
+        "tenant_id": str(user.tenant_id) if user and user.tenant_id else "Single User Tenant",
+    }
+
+
 @override_run_tasks(run_tasks_distributed)
 async def run_tasks(
     tasks: List[Task],
@@ -63,6 +159,10 @@ async def run_tasks(
     data_per_batch: int = 20,
     extras: Optional[dict] = None,
 ):
+    """Run a pipeline once for an entire dataset: a single shared worker
+    pipeline absorbs all data items, with per-task ``num_workers`` (default
+    ``data_per_batch`` when the task allows reordering) providing input
+    parallelism."""
     if not user:
         user = await get_default_user()
 
@@ -82,8 +182,14 @@ async def run_tasks(
         payload=data,
     )
 
-    # Note: Setting of global context has to be done after yielding PipelineRunStarted due to running in
-    #       background mode requiring the pipeline run started yield.
+    send_telemetry(
+        "Pipeline Run Started",
+        user.id,
+        additional_properties=_pipeline_telemetry_props(pipeline_id, user),
+    )
+
+    # Note: Setting of global context has to be done after yielding PipelineRunStarted
+    # due to running in background mode requiring the pipeline run started yield.
     async with set_database_global_context_variables(dataset.id, dataset.owner_id):
         try:
             if not isinstance(data, list):
@@ -92,64 +198,141 @@ async def run_tasks(
             if incremental_loading:
                 data = await resolve_data_directories(data)
 
-            # Semaphore-based concurrency: all items are scheduled at once,
-            # but at most data_per_batch run concurrently at any time.
-            semaphore = asyncio.Semaphore(data_per_batch)
-
-            async def _run_item(data_item):
-                async with semaphore:
-                    return await run_tasks_data_item(
-                        data_item,
-                        dataset,
-                        tasks,
-                        pipeline_name,
-                        pipeline_id,
-                        pipeline_run_id,
-                        PipelineContext(
-                            user=user,
-                            data_item=data_item,
-                            dataset=dataset,
-                            pipeline_name=pipeline_name,
-                            extras=extras if isinstance(extras, dict) else {},
-                        ),
-                        user,
-                        incremental_loading,
-                    )
-
-            gathered = await asyncio.gather(
-                *[asyncio.create_task(_run_item(item)) for item in data],
-                return_exceptions=True,
+            to_process, already_done_ids = await _preflight(
+                data=data,
+                user=user,
+                dataset=dataset,
+                pipeline_name=pipeline_name,
+                incremental_loading=incremental_loading,
             )
 
-            # Separate successes from unhandled exceptions
-            results = []
-            for i, result in enumerate(gathered):
-                if isinstance(result, BaseException):
-                    logger.error(f"Item {i} failed: {result}", exc_info=result)
+            results: list = []
+            for did in already_done_ids:
+                results.append(
+                    {
+                        "run_info": PipelineRunAlreadyCompleted(
+                            pipeline_run_id=pipeline_run_id,
+                            dataset_id=dataset.id,
+                            dataset_name=dataset.name,
+                        ),
+                        "data_id": did,
+                    }
+                )
+
+            # Track per-origin processing state keyed by id(item): we need identity-based
+            # lookup (Data items may be value-equal duplicates, so __hash__/__eq__ won't do)
+            # and id() is the cheap hashable proxy. Correctness depends on to_process holding
+            # strong refs to every (item, did) tuple for the whole run, which prevents GC and
+            # id reuse. Do NOT drop items from to_process early, or weakref them elsewhere,
+            # without rekeying this map -- a recycled id() would alias the wrong entry.
+            origin_state: dict = {
+                id(item): {"data_id": did, "error": None, "successes": 0}
+                for item, did in to_process
+            }
+
+            ctx = PipelineContext(
+                user=user,
+                data_item=None,  # set per-call inside workers via dataclasses.replace
+                dataset=dataset,
+                pipeline_name=pipeline_name,
+                extras=extras if isinstance(extras, dict) else {},
+            )
+
+            # First task expects a list of Data items (cognee convention),
+            # so wrap each item as [item] entering the pipeline. The
+            # ``origin`` (second tuple element) stays the unwrapped item so
+            # ctx.data_item points to the original Data downstream.
+            pipeline_inputs = [([item], item) for item, _ in to_process]
+
+            try:
+                async for envelope in run_worker_pipeline(
+                    tasks=tasks,
+                    data_iterable=pipeline_inputs,
+                    user=user,
+                    ctx=ctx,
+                    data_per_batch=data_per_batch,
+                    pipeline_name=pipeline_id,
+                ):
+                    state = origin_state.get(id(envelope.origin))
+                    if state is None:
+                        # Defensive: origin not in our state map (shouldn't happen).
+                        continue
+                    if isinstance(envelope.value, _ErroredItem):
+                        if state["error"] is None:
+                            state["error"] = envelope.value.exception
+                            logger.error(
+                                f"Item failed in pipeline: {envelope.value.exception}",
+                                exc_info=envelope.value.exception,
+                            )
+                        continue
+                    state["successes"] += 1
+                    yield PipelineRunYield(
+                        pipeline_run_id=pipeline_run_id,
+                        dataset_id=dataset.id,
+                        dataset_name=dataset.name,
+                        payload=envelope.value,
+                    )
+            except Exception as worker_pipeline_error:
+                # An exception that escaped the worker pipeline itself (not a
+                # per-item error envelope). Surface it the same way the old
+                # gather did: log + raise PipelineRunFailedError.
+                logger.error(
+                    f"Worker pipeline failed: {worker_pipeline_error}",
+                    exc_info=worker_pipeline_error,
+                )
+                raise PipelineRunFailedError(
+                    message="Pipeline run failed. Data item could not be processed."
+                ) from worker_pipeline_error
+
+            # Per-item post-flight: mark completed in DB for incremental mode,
+            # and build the per-item results dict.
+            for item, did in to_process:
+                state = origin_state[id(item)]
+                if state["error"] is not None:
                     results.append(
                         {
                             "run_info": PipelineRunErrored(
                                 pipeline_run_id=pipeline_run_id,
-                                payload=repr(result),
+                                payload=repr(state["error"]),
                                 dataset_id=dataset.id,
                                 dataset_name=dataset.name,
                             ),
+                            "data_id": did,
                         }
                     )
-                elif result:
-                    results.append(result)
+                else:
+                    if incremental_loading and did is not None:
+                        await _mark_completed(did, pipeline_name, dataset.id)
+                    results.append(
+                        {
+                            "run_info": PipelineRunCompleted(
+                                pipeline_run_id=pipeline_run_id,
+                                dataset_id=dataset.id,
+                                dataset_name=dataset.name,
+                            ),
+                            "data_id": did,
+                        }
+                    )
 
-            # If any data item could not be processed propagate error
-            errored_results = [
-                result for result in results if isinstance(result["run_info"], PipelineRunErrored)
+            item_failures = [
+                PipelineItemFailure(data_id=state["data_id"], exception=state["error"])
+                for state in origin_state.values()
+                if state["error"] is not None
             ]
-            if errored_results:
+            if item_failures:
                 raise PipelineRunFailedError(
-                    message="Pipeline run failed. Data item could not be processed."
+                    message=f"Pipeline run failed: {len(item_failures)} item(s) could not be processed.",
+                    item_failures=item_failures,
                 )
 
             await log_pipeline_run_complete(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
+            )
+
+            send_telemetry(
+                "Pipeline Run Completed",
+                user.id,
+                additional_properties=_pipeline_telemetry_props(pipeline_id, user),
             )
 
             yield PipelineRunCompleted(
@@ -172,16 +355,22 @@ async def run_tasks(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
             )
 
+            send_telemetry(
+                "Pipeline Run Errored",
+                user.id,
+                additional_properties=_pipeline_telemetry_props(pipeline_id, user),
+            )
+
             yield PipelineRunErrored(
                 pipeline_run_id=pipeline_run_id,
                 payload=repr(error),
                 dataset_id=dataset.id,
                 dataset_name=dataset.name,
-                data_ingestion_info=locals().get(
-                    "results"
-                ),  # Returns results if they exist or returns None
+                data_ingestion_info=locals().get("results"),
             )
 
-            # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
+            # Mirror previous behavior: surface non-PipelineRunFailedError errors,
+            # but absorb PipelineRunFailedError so the caller still sees the
+            # yielded Errored info (without an exception bubbling further).
             if not isinstance(error, PipelineRunFailedError):
                 raise error

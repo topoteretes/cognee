@@ -97,6 +97,7 @@ def generate_document(num_paragraphs: int = 3) -> tuple:
 
 
 NUM_FILES = 200
+NUM_CYCLES = 3
 DATASET_NAME = f"batch_test_{uuid.uuid4().hex[:8]}"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 VENV_PYTHON = str(PROJECT_ROOT / ".venv" / "bin" / "python")
@@ -120,7 +121,7 @@ def log(msg: str) -> None:
     print(f"[{ts}] {msg}", flush=True)
 
 
-def add_files_batch(base_url: str, api_key: str, count: int) -> float:
+def add_files_batch(base_url: str, api_key: str, count: int, dataset_name: str) -> float:
     log(f"  Generating {count} documents...")
     files = []
     for i in range(1, count + 1):
@@ -133,7 +134,7 @@ def add_files_batch(base_url: str, api_key: str, count: int) -> float:
     start = time.time()
     resp = requests.post(
         f"{base_url}/api/v1/add",
-        data={"datasetName": DATASET_NAME},
+        data={"datasetName": dataset_name},
         files=files,
         headers={"X-Api-Key": api_key},
         timeout=1800,
@@ -145,9 +146,9 @@ def add_files_batch(base_url: str, api_key: str, count: int) -> float:
     return elapsed
 
 
-def cognify(base_url: str, api_key: str) -> float:
+def cognify(base_url: str, api_key: str, dataset_name: str) -> float:
     headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
-    payload = {"datasets": [DATASET_NAME], "data_per_batch": NUM_FILES, "runInBackground": False}
+    payload = {"datasets": [dataset_name], "data_per_batch": NUM_FILES, "runInBackground": False}
 
     start = time.time()
     resp = requests.post(
@@ -199,24 +200,21 @@ def main() -> None:
         wait_for_server(f"{base_url}/health")
         log("Server is ready")
 
-        log(f"=== Adding {NUM_FILES} files to dataset '{DATASET_NAME}' (single request) ===")
-        total_add_time = add_files_batch(base_url, api_key, NUM_FILES)
-        log("=== Add phase complete ===")
-        log(f"  Total:   {total_add_time:.1f}s")
-        log(f"  Average: {total_add_time / NUM_FILES:.3f}s per file")
+        cycle_results = []
+        for cycle in range(1, NUM_CYCLES + 1):
+            ds = f"{DATASET_NAME}_cycle{cycle}"
+            log(f"=== Cycle {cycle}: adding {NUM_FILES} files to dataset '{ds}' ===")
+            total_add_time = add_files_batch(base_url, api_key, NUM_FILES, ds)
+            log(f"  Add total: {total_add_time:.1f}s ({total_add_time / NUM_FILES:.3f}s avg)")
 
-        log(f"=== Running cognify on dataset '{DATASET_NAME}' ===")
-        cognify_time = cognify(base_url, api_key)
-        log("=== Cognify complete ===")
-        log(f"  Time: {cognify_time:.1f}s")
+            log(f"=== Cycle {cycle}: running cognify on dataset '{ds}' ===")
+            cognify_time = cognify(base_url, api_key, ds)
+            log(f"=== Cycle {cycle}: cognify complete in {cognify_time:.1f}s ===")
+            cycle_results.append((cycle, total_add_time, cognify_time))
 
-        log("=== Summary ===")
-        log(f"  Files added:     {NUM_FILES}")
-        log(
-            f"  Add total time:  {total_add_time:.1f}s ({total_add_time / NUM_FILES:.3f}s avg per file)"
-        )
-        log(f"  Cognify time:    {cognify_time:.1f}s")
-        log(f"  Total time:      {total_add_time + cognify_time:.1f}s")
+        log("=== Summary across cycles ===")
+        for cycle, add_t, cog_t in cycle_results:
+            log(f"  Cycle {cycle}: add={add_t:.1f}s, cognify={cog_t:.1f}s")
 
     finally:
         log("Shutting down server")

@@ -8,7 +8,7 @@ from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 from cognee.modules.pipelines.models import PipelineContext
 
-from .run_tasks_base import run_tasks_base
+from .run_tasks_single import run_tasks_single
 from ..tasks.task import Task
 
 
@@ -35,7 +35,7 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        async for result in run_tasks_base(tasks, data, user, ctx):
+        async for result in run_tasks_single(tasks, data, user, ctx):
             yield result
 
         logger.info("Pipeline run completed: `%s`", pipeline_name)
