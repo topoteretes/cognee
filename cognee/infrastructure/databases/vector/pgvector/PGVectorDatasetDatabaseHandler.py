@@ -1,14 +1,18 @@
 from uuid import UUID
 from typing import Optional
-from sqlalchemy import MetaData
 
-from cognee.infrastructure.databases.vector.pgvector.create_db_and_tables import delete_pg_database
+from sqlalchemy import text
+
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
-from cognee.infrastructure.databases.vector import get_vectordb_config, get_vector_engine
+from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 from cognee.infrastructure.databases.vector.create_vector_engine import (
     create_vector_engine,
+)
+from cognee.infrastructure.databases.postgres import (
+    create_pg_database_if_not_exists,
+    drop_pg_database_if_exists,
 )
 
 
@@ -28,7 +32,29 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         vector_db_name = f"{dataset_id}"
 
-        new_vector_config = {
+        await create_pg_database_if_not_exists(
+            vector_db_name,
+            host=vector_config.vector_db_host,
+            port=vector_config.vector_db_port,
+            username=vector_config.vector_db_username,
+            password=vector_config.vector_db_password,
+        )
+
+        new_vector_engine = create_vector_engine(
+            vector_db_provider=vector_config.vector_db_provider,
+            vector_db_url=vector_config.vector_db_url,
+            vector_db_name=vector_db_name,
+            vector_db_port=vector_config.vector_db_port,
+            vector_db_key="",
+            vector_db_username=vector_config.vector_db_username,
+            vector_db_password=vector_config.vector_db_password,
+            vector_db_host=vector_config.vector_db_host,
+            vector_dataset_database_handler="pgvector",
+        )
+        async with new_vector_engine.engine.begin() as connection:
+            await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+
+        return {
             "vector_database_provider": vector_config.vector_db_provider,
             "vector_database_url": vector_config.vector_db_url,
             "vector_database_name": vector_db_name,
@@ -38,24 +64,6 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             },
             "vector_dataset_database_handler": "pgvector",
         }
-
-        from .create_db_and_tables import create_pg_database
-
-        await create_pg_database(
-            {
-                "vector_db_provider": new_vector_config["vector_database_provider"],
-                "vector_db_url": new_vector_config["vector_database_url"],
-                "vector_db_name": new_vector_config["vector_database_name"],
-                "vector_db_port": new_vector_config["vector_database_connection_info"]["port"],
-                "vector_db_key": "",
-                "vector_db_username": vector_config.vector_db_username,
-                "vector_db_password": vector_config.vector_db_password,
-                "vector_db_host": new_vector_config["vector_database_connection_info"]["host"],
-                "vector_dataset_database_handler": "pgvector",
-            }
-        )
-
-        return new_vector_config
 
     @classmethod
     async def resolve_dataset_connection_info(
@@ -75,8 +83,14 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
         dataset_database = await cls.resolve_dataset_connection_info(dataset_database)
 
-        # Drop entire database
-        await delete_pg_database(dataset_database)
+        info = dataset_database.vector_database_connection_info
+        await drop_pg_database_if_exists(
+            dataset_database.vector_database_name,
+            host=info["host"],
+            port=info["port"],
+            username=info["username"],
+            password=info["password"],
+        )
 
         vector_engine = create_vector_engine(
             vector_db_provider=dataset_database.vector_database_provider,
