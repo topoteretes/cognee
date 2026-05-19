@@ -302,8 +302,9 @@ def main():
     for i in range(1, args.runs + 1):
         import time
 
-        # Sleep to give time for LLM/embedding API to handle more requests and reduce RPM
-        time.sleep(10)
+        if i is not 1:
+            # Sleep to give time for LLM/embedding API to handle more requests and reduce RPM limit on their side
+            time.sleep(60)
 
         data = run_single(i, args.runs, extra_args)
         runs.append(data)
