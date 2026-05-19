@@ -1,6 +1,29 @@
+from functools import lru_cache
+
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Any, Dict, Optional, Literal
 import os
+
+
+class WebScraperConfig(BaseSettings):
+    tavily_api_key: Optional[str] = None
+    web_scraper_timeout: float = 15.0
+    web_scraper_max_delay: Optional[float] = None
+
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
+    def to_dict(self) -> dict:
+        return {
+            "tavily_api_key": self.tavily_api_key,
+            "web_scraper_timeout": self.web_scraper_timeout,
+            "web_scraper_max_delay": self.web_scraper_max_delay,
+        }
+
+
+@lru_cache
+def get_web_scraper_config():
+    return WebScraperConfig()
 
 
 class TavilyConfig(BaseModel):

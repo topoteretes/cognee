@@ -11,7 +11,18 @@ from cognee.infrastructure.llm.config import (
 )
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
+from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.infrastructure.databases.dataset_queue.config import get_dataset_queue_config
+from cognee.infrastructure.files.storage.config import get_storage_config
+from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.users.authentication.config import get_auth_config
+from cognee.modules.observability.config import get_telemetry_config
+from cognee.shared.logging_config import get_logging_config
+from cognee.tasks.ingestion.config import get_ingestion_config
 from cognee.tasks.translation.config import get_translation_config
+from cognee.tasks.web_scraper.config import get_web_scraper_config
+from cognee.api.v1.cloud.config import get_cloud_config
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 
 
@@ -365,6 +376,11 @@ class config:
         """
         config._update_config(get_llm_config(), config_dict)
 
+    @staticmethod
+    def get_llm_config():
+        """Return the active LLM config object."""
+        return get_llm_config()
+
     # Embedding configuration methods
 
     @staticmethod
@@ -473,6 +489,11 @@ class config:
         if "embedding_dimensions" in normalized_config:
             config.set_embedding_dimensions(normalized_config.pop("embedding_dimensions"))
         config._update_config(get_embedding_config(), normalized_config)
+
+    @staticmethod
+    def get_embedding_config():
+        """Return the active embedding config object."""
+        return get_embedding_config()
 
     @staticmethod
     def set_chunk_strategy(chunk_strategy: object):
@@ -617,6 +638,41 @@ class config:
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_url = db_url
 
+    @staticmethod
+    def get_base_config():
+        """Return the active base config object."""
+        return get_base_config()
+
+    @staticmethod
+    def get_cognify_config():
+        """Return the active cognify config object."""
+        return get_cognify_config()
+
+    @staticmethod
+    def get_chunk_config():
+        """Return the active chunking config object."""
+        return get_chunk_config()
+
+    @staticmethod
+    def get_graph_config():
+        """Return the active graph database config object."""
+        return get_graph_config()
+
+    @staticmethod
+    def get_vector_db_config():
+        """Return the active vector database config object."""
+        return get_vectordb_config()
+
+    @staticmethod
+    def get_relational_config():
+        """Return the active relational database config object."""
+        return get_relational_config()
+
+    @staticmethod
+    def get_migration_config():
+        """Return the active migration database config object."""
+        return get_migration_config()
+
     # Translation configuration methods
 
     @staticmethod
@@ -653,6 +709,128 @@ class config:
             A dictionary of translation config attributes to update.
         """
         config._update_config(get_translation_config(), config_dict)
+
+    @staticmethod
+    def get_translation_config():
+        """Return the active translation config object."""
+        return get_translation_config()
+
+    # Operational configuration methods
+
+    @staticmethod
+    def set_cache_config(config_dict: dict):
+        """Update the cache config with values from a dictionary."""
+        config._update_config(get_cache_config(), config_dict)
+
+    @staticmethod
+    def get_cache_config():
+        """Return the active cache config object."""
+        return get_cache_config()
+
+    @staticmethod
+    def get_caching():
+        """Return whether Cognee caching is enabled."""
+        return get_cache_config().caching
+
+    @staticmethod
+    def set_auth_config(config_dict: dict):
+        """Update the auth and access-control config with values from a dictionary."""
+        config._update_config(get_auth_config(), config_dict)
+
+    @staticmethod
+    def get_auth_config():
+        """Return the active auth and access-control config object."""
+        return get_auth_config()
+
+    @staticmethod
+    def set_logging_config(config_dict: dict):
+        """Update the logging config with values from a dictionary."""
+        config._update_config(get_logging_config(), config_dict)
+
+    @staticmethod
+    def get_logging_config():
+        """Return the active logging config object."""
+        return get_logging_config()
+
+    @staticmethod
+    def set_telemetry_config(config_dict: dict):
+        """Update the telemetry and tracing config with values from a dictionary."""
+        config._update_config(get_telemetry_config(), config_dict)
+
+    @staticmethod
+    def get_telemetry_config():
+        """Return the active telemetry and tracing config object."""
+        return get_telemetry_config()
+
+    @staticmethod
+    def set_storage_config(config_dict: dict):
+        """Update the storage config with values from a dictionary."""
+        config._update_config(get_storage_config(), config_dict)
+
+    @staticmethod
+    def get_storage_config():
+        """Return the active storage config object."""
+        return get_storage_config()
+
+    @staticmethod
+    def set_s3_config(config_dict: dict):
+        """Update the S3 config with values from a dictionary."""
+        config._update_config(get_s3_config(), config_dict)
+
+    @staticmethod
+    def get_s3_config():
+        """Return the active S3 config object."""
+        return get_s3_config()
+
+    @staticmethod
+    def set_web_scraper_config(config_dict: dict):
+        """Update the web scraper config with values from a dictionary."""
+        config._update_config(get_web_scraper_config(), config_dict)
+
+    @staticmethod
+    def get_web_scraper_config():
+        """Return the active web scraper config object."""
+        return get_web_scraper_config()
+
+    @staticmethod
+    def set_ingestion_config(config_dict: dict):
+        """Update the ingestion config with values from a dictionary."""
+        config._update_config(get_ingestion_config(), config_dict)
+
+    @staticmethod
+    def get_ingestion_config():
+        """Return the active ingestion config object."""
+        return get_ingestion_config()
+
+    @staticmethod
+    def set_ontology_config(config_dict: dict):
+        """Update the ontology config with values from a dictionary."""
+        config._update_config(get_ontology_env_config(), config_dict)
+
+    @staticmethod
+    def get_ontology_config():
+        """Return the active ontology config object."""
+        return get_ontology_env_config()
+
+    @staticmethod
+    def set_cloud_config(config_dict: dict):
+        """Update the cloud/API/UI config with values from a dictionary."""
+        config._update_config(get_cloud_config(), config_dict)
+
+    @staticmethod
+    def get_cloud_config():
+        """Return the active cloud/API/UI config object."""
+        return get_cloud_config()
+
+    @staticmethod
+    def set_dataset_queue_config(config_dict: dict):
+        """Update the dataset queue config with values from a dictionary."""
+        config._update_config(get_dataset_queue_config(), config_dict)
+
+    @staticmethod
+    def get_dataset_queue_config():
+        """Return the active dataset queue config object."""
+        return get_dataset_queue_config()
 
     @staticmethod
     def set(key: str, value):
