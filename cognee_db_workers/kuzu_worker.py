@@ -34,22 +34,31 @@ def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
 
     try:
         db = ladybug.Database(**req.kwargs)
-    except RuntimeError:
-        from .ladybug_migrate import needs_migration, ladybug_migration
-
+    except RuntimeError as e:
         db_path = req.kwargs.get("database_path", "")
-        should_migrate, old_version = needs_migration(db_path, ladybug.__version__)
-        if should_migrate:
-            ladybug_migration(
-                new_db=db_path + "_new",
-                old_db=db_path,
-                new_version=ladybug.__version__,
-                old_version=old_version,
-                overwrite=True,
-            )
-            db = ladybug.Database(**req.kwargs)
+
+        if "wal" in str(e).lower():
+            # In case of corrupted WAL file preventing database opening, remove the WAL file and try again
+            wal_path = db_path + ".wal"
+            try:
+                import os
+
+                os.remove(wal_path)
+            except FileNotFoundError:
+                pass
         else:
-            raise
+            from .ladybug_migrate import needs_migration, ladybug_migration
+
+            should_migrate, old_version = needs_migration(db_path, ladybug.__version__)
+            if should_migrate:
+                ladybug_migration(
+                    new_db=db_path + "_new",
+                    old_db=db_path,
+                    new_version=ladybug.__version__,
+                    old_version=old_version,
+                    overwrite=True,
+                )
+        db = ladybug.Database(**req.kwargs)
 
     return HandleResult(value=None, handle_id=registry.register(db))
 

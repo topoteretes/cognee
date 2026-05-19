@@ -174,6 +174,7 @@ async def authorized_search(
         search_datasets=search_datasets,
         query_type=query_type,
         query_text=query_text,
+        user=user,
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,
         top_k=top_k,
@@ -197,6 +198,7 @@ async def search_in_datasets_context(
     search_datasets: list[Dataset],
     query_type: SearchType,
     query_text: str,
+    user: User,
     system_prompt_path: str = "answer_simple_question.txt",
     system_prompt: Optional[str] = None,
     top_k: int = 10,
@@ -266,6 +268,7 @@ async def search_in_datasets_context(
                 return await get_retriever_output(
                     query_type=query_type,
                     query_text=query_text,
+                    user=user,
                     dataset=dataset,
                     system_prompt_path=system_prompt_path,
                     system_prompt=system_prompt,
@@ -311,11 +314,13 @@ async def search_in_datasets_context(
     else:
         # Run search without setting database context in case access control is disabled
         # Needed for low level pipelines that need to run search without dataset context.
+        dataset = search_datasets[0] if len(search_datasets) == 1 else None
         tasks.append(
             get_retriever_output(
                 query_type=query_type,
                 query_text=query_text,
-                dataset=None,
+                user=user,
+                dataset=dataset,
                 system_prompt_path=system_prompt_path,
                 system_prompt=system_prompt,
                 top_k=top_k,

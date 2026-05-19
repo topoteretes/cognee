@@ -37,6 +37,19 @@ class VectorConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     @pydantic.model_validator(mode="after")
+    def fill_derived(self):
+        # Note: When the vector provider is pgvector, automatically use the pgvector
+        # dataset handler instead of the default lancedb one. This mirrors the same
+        # pattern used in GraphConfig for postgres → postgres_graph.
+        provider = self.vector_db_provider.lower()
+        self.vector_db_provider = provider
+        vector_dataset_database_handler = self.vector_dataset_database_handler.lower()
+        self.vector_dataset_database_handler = vector_dataset_database_handler
+        if provider == "pgvector" and vector_dataset_database_handler in ("lancedb", "pgvector"):
+            self.vector_dataset_database_handler = "pgvector"
+        return self
+
+    @pydantic.model_validator(mode="after")
     def validate_paths(self):
         base_config = get_base_config()
 

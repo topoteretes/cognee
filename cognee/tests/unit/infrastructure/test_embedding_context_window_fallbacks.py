@@ -1,5 +1,6 @@
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pytest
 
 from cognee.infrastructure.databases.exceptions import EmbeddingException
@@ -85,13 +86,13 @@ async def test_fastembed_splits_batch_on_context_window_error():
                 raise RuntimeError("context length exceeded")
             # "too long" (8 chars) splits into third=8//3=2 → left="too " (s[:4]), right="o long" (s[2:])
             if inputs == ["too "]:
-                return iter([[1.0, 1.0]])
+                return iter([np.array([1.0, 1.0])])
             if inputs == ["o long"]:
-                return iter([[2.0, 2.0]])
+                return iter([np.array([2.0, 2.0])])
             if inputs == ["ok 1"]:
-                return iter([[3.0, 3.0]])
+                return iter([np.array([3.0, 3.0])])
             if inputs == ["ok 2"]:
-                return iter([[4.0, 4.0]])
+                return iter([np.array([4.0, 4.0])])
             raise AssertionError(f"Unexpected inputs: {inputs}")
 
         embedding_model.embed.side_effect = fake_embed

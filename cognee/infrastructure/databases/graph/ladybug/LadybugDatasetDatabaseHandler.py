@@ -88,9 +88,5 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         )
         graph_engine = create_graph_engine(**engine_kwargs)
         await graph_engine.delete_graph()
-        # Drop the cache entry so the leased adapter's ``close()`` runs:
-        # in subprocess mode that shuts down the worker process. Leaving
-        # the entry behind would let an LRU hit return an adapter
-        # pointing at a now-deleted on-disk store, and would keep the
-        # worker process alive until LRU eviction.
         evict_graph_engine(**engine_kwargs)
+        await graph_engine.close()

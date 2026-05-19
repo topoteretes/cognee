@@ -10,6 +10,9 @@ from cognee.infrastructure.databases.graph.ladybug.LadybugDatasetDatabaseHandler
 from cognee.infrastructure.databases.vector.pgvector.PGVectorDatasetDatabaseHandler import (
     PGVectorDatasetDatabaseHandler,
 )
+from cognee.infrastructure.databases.graph.postgres.PostgresGraphDatasetDatabaseHandler import (
+    PostgresGraphDatasetDatabaseHandler,
+)
 
 supported_dataset_database_handlers = {
     "neo4j_aura_dev": {
@@ -20,6 +23,10 @@ supported_dataset_database_handlers = {
     "pgvector": {
         "handler_instance": PGVectorDatasetDatabaseHandler,
         "handler_provider": "pgvector",
+    },
+    "postgres_graph": {
+        "handler_instance": PostgresGraphDatasetDatabaseHandler,
+        "handler_provider": "postgres",
     },
     "ladybug": {
         "handler_instance": LadybugDatasetDatabaseHandler,

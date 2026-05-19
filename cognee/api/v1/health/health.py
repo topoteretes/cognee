@@ -120,11 +120,10 @@ class HealthChecker:
             config = get_graph_config()
             engine = await get_graph_engine()
 
-            # Test basic operation with actual graph query
-            if hasattr(engine, "query"):
-                # For other graph engines
+            if hasattr(engine, "is_empty"):
+                await engine.is_empty()
+            elif hasattr(engine, "query"):
                 await engine.query("MATCH () RETURN count(*) LIMIT 1", {})
-            # If engine exists but no test method, consider it healthy
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(

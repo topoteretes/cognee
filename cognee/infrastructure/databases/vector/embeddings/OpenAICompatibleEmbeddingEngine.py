@@ -109,13 +109,13 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             base = base[: -len("/embeddings")]
         if not base.endswith("/v1"):
             base = base + "/v1"
-        self._client = AsyncOpenAI(api_key=self.api_key, base_url=base)
+        self._client = AsyncOpenAI(api_key=self.api_key, base_url=base, timeout=120)
 
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((ValueError, EmbeddingException)),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        retry=retry_if_not_exception_type(ValueError),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def embed_text(self, text: List[str]) -> List[List[float]]:
@@ -150,7 +150,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                         input=sanitized_text,
                         encoding_format="float",
                     ),
-                    timeout=30.0,
+                    timeout=300.0,
                 )
             embeddings = [item.embedding for item in response.data]
 

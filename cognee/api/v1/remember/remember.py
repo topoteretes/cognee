@@ -1,7 +1,7 @@
 import asyncio
 import time
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any
+from typing import Union, BinaryIO, List, Optional, Any, Literal
 
 try:
     from typing import Unpack
@@ -17,6 +17,7 @@ from cognee.memory import (
     QAEntry,
     TraceEntry,
     FeedbackEntry,
+    SkillRunEntry,
 )
 from cognee.memory.entries import MEMORY_ENTRY_TYPES
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
@@ -34,6 +35,20 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
+_migrations_done = False
+
+
+async def _ensure_migrations_run():
+    """Run vector migrations once on the first local SDK call."""
+    global _migrations_done
+    if _migrations_done:
+        return
+    _migrations_done = True
+
+    from cognee.run_migrations import run_vector_migrations
+
+    await run_vector_migrations()
+
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
@@ -48,6 +63,8 @@ class RememberKwargs(TypedDict, total=False):
     user: object
     vector_db_config: dict
     graph_db_config: dict
+    content_type: Literal["skills"]
+    skill_improvement: dict[str, Any]
 
 
 # Kwarg routing: which RememberKwargs go to add(), cognify(), or both.
@@ -151,6 +168,7 @@ async def _remember_entry(
     dataset_name: str,
     session_id: Optional[str],
     user,
+    skill_improvement: Optional[dict[str, Any]] = None,
 ) -> "RememberResult":
     """Top-level dispatcher for typed MemoryEntry payloads.
 
@@ -165,6 +183,7 @@ async def _remember_entry(
             entry,
             dataset_name=dataset_name,
             session_id=session_id,
+            skill_improvement=skill_improvement,
         )
         # Reconstruct a RememberResult from the server's response
         result = RememberResult(
@@ -184,6 +203,7 @@ async def _remember_entry(
         dataset_name=dataset_name,
         session_id=session_id,
         user=user,
+        skill_improvement=skill_improvement,
     )
 
 
@@ -193,14 +213,61 @@ async def _dispatch_session_entry(
     dataset_name: str,
     session_id: Optional[str],
     user,
+    skill_improvement: Optional[dict[str, Any]] = None,
 ) -> "RememberResult":
     """Route a typed memory entry to the right SessionManager method.
 
-    All typed entries require a session_id — session cache is the
-    storage target. Returns a RememberResult with entry_id/entry_type
-    fields populated so callers can chain (e.g., attach feedback to a
-    QA they just stored).
+    Session-backed entries require a session_id. SkillRunEntry is
+    graph-backed and may be recorded without a session_id. Returns a
+    RememberResult with entry_id/entry_type fields populated so callers
+    can chain writes.
     """
+    if isinstance(entry, SkillRunEntry):
+        from cognee.modules.tools.skill_runs import remember_skill_run_entry
+
+        run, dataset = await remember_skill_run_entry(
+            entry,
+            dataset_name=dataset_name,
+            session_id=session_id,
+            user=user,
+        )
+
+        result = RememberResult(
+            status="completed",
+            dataset_name=dataset.name,
+            dataset_id=str(dataset.id),
+            session_ids=[session_id] if session_id else None,
+        )
+        result.elapsed_seconds = time.monotonic() - result._started_at
+        result.entry_type = entry.type
+        result.entry_id = run.run_id
+        result.items_processed = 1
+        result.items = [
+            {
+                "kind": "skill_run",
+                "run_id": run.run_id,
+                "selected_skill_id": run.selected_skill_id,
+                "selected_skill_name": run.selected_skill_name,
+                "success_score": run.success_score,
+            }
+        ]
+        if skill_improvement is not None:
+            from cognee.modules.memify.skill_improvement import improve_skill_from_config
+
+            config = dict(skill_improvement)
+            config.setdefault("skill_name", run.selected_skill_name or entry.selected_skill_id)
+            proposal = await improve_skill_from_config(config, dataset=dataset, user=user)
+            if proposal is not None:
+                result.items.append(
+                    {
+                        "kind": "skill_improvement_proposal",
+                        "proposal_id": proposal.proposal_id,
+                        "skill_name": proposal.skill_name,
+                        "status": proposal.status,
+                    }
+                )
+        return result
+
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.modules.engine.operations.setup import setup
 
@@ -373,9 +440,9 @@ class RememberResult:
         self.items_processed: int = 0
         self.items: List[dict] = []
         # Populated when the call dispatched a typed MemoryEntry.
-        # entry_type is one of "qa", "trace", "feedback"; entry_id is
-        # the qa_id / trace_id returned by SessionManager (or the
-        # qa_id a feedback was attached to).
+        # entry_type is one of "qa", "trace", "feedback", or
+        # "skill_run"; entry_id is the qa_id / trace_id / run_id
+        # returned by the storage backend.
         self.entry_type: Optional[str] = None
         self.entry_id: Optional[str] = None
         self._task: Optional[asyncio.Task] = None
@@ -573,6 +640,12 @@ async def remember(
             Only used when ``self_improvement=True``. When provided,
             ``improve()`` will also copy recent graph relationships
             into these sessions for fast retrieval.
+        content_type: Set to ``"skills"`` to explicitly ingest SKILL.md
+            files as dataset-scoped Skill nodes. ``remember()`` does not
+            auto-detect skill paths.
+        skill_improvement: Internal skill-improvement control dict used with
+            ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
+            requires an existing ``proposal_id``.
         **kwargs: Additional options -- see ``RememberKwargs``.
 
     Returns:
@@ -598,15 +671,15 @@ async def remember(
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
 
-    # Typed MemoryEntry dispatch: trace steps, rich QA, feedback.
-    # These short-circuit the add+cognify path entirely and write
-    # directly into the session cache via SessionManager.
+    # Typed MemoryEntry dispatch: trace steps, rich QA, feedback, and
+    # explicit skill-run scores. These short-circuit the add+cognify path.
     if isinstance(data, MEMORY_ENTRY_TYPES):
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
             session_id=session_id,
             user=kwargs.get("user"),
+            skill_improvement=kwargs.get("skill_improvement"),
         )
 
     data_size = _estimate_data_size(data)
@@ -679,6 +752,82 @@ async def _remember_inner(
             run_in_background=run_in_background,
             **kwargs,
         )
+
+    # Run vector migrations lazily on the first local SDK call.
+    # This ensures stale LanceDB schemas are migrated before any
+    # writes, even when the API server was never started.
+    await _ensure_migrations_run()
+
+    content_type = kwargs.pop("content_type", None)
+    skill_improvement = kwargs.pop("skill_improvement", None)
+
+    def _requested_node_set(default: str) -> str:
+        requested_node_set = kwargs.get("node_set") or [default]
+        if isinstance(requested_node_set, str):
+            return requested_node_set
+        if requested_node_set:
+            return requested_node_set[0]
+        return default
+
+    if content_type not in (None, "skills"):
+        raise ValueError("Unsupported remember content_type. Supported values: 'skills'.")
+    if skill_improvement is not None and content_type != "skills":
+        raise ValueError(
+            "skill_improvement is supported only for SkillRunEntry or content_type='skills'."
+        )
+
+    if content_type == "skills":
+        from cognee.context_global_variables import set_database_global_context_variables
+        from cognee.modules.engine.operations.setup import setup
+        from cognee.modules.tools import add_skills
+
+        await setup()
+
+        user = kwargs.get("user")
+        dataset_id = kwargs.get("dataset_id")
+        dataset_ref = dataset_id or dataset_name
+        user, authorized_datasets = await resolve_authorized_user_datasets(dataset_ref, user)
+        dataset = authorized_datasets[0]
+
+        skills_node_set = _requested_node_set("skills")
+        owner_id = getattr(dataset, "owner_id", None) or getattr(user, "id", None)
+        if owner_id is None:
+            raise ValueError("Skill ingestion requires a dataset owner or user.")
+
+        async with set_database_global_context_variables(dataset.id, owner_id):
+            skills = await add_skills(
+                data,
+                node_set=skills_node_set,
+                user=user,
+                dataset=dataset,
+            )
+        result = RememberResult(
+            status="completed",
+            dataset_name=dataset.name,
+            dataset_id=str(dataset.id),
+            session_ids=None,
+        )
+        result.elapsed_seconds = time.monotonic() - result._started_at
+        result.items_processed = len(skills)
+        result.items = [
+            {"name": s.name, "kind": "skill", "declared_tools": s.declared_tools} for s in skills
+        ]
+        if skill_improvement is not None:
+            from cognee.modules.memify.skill_improvement import improve_skill_from_config
+
+            proposal = await improve_skill_from_config(
+                skill_improvement, dataset=dataset, user=user
+            )
+            if proposal is not None:
+                result.items.append(
+                    {
+                        "kind": "skill_improvement_proposal",
+                        "proposal_id": proposal.proposal_id,
+                        "skill_name": proposal.skill_name,
+                        "status": proposal.status,
+                    }
+                )
+        return result
 
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify

@@ -314,6 +314,11 @@ class ClosingLRUCache:
         self._detach_entry(entry)
         return True
 
+    def contains(self, key) -> bool:
+        """Check whether *key* is currently in the cache without creating."""
+        with self._lock:
+            return key in self._cache
+
     def cache_info(self):
         """Return current size and max size."""
         with self._lock:
@@ -356,8 +361,13 @@ def closing_lru_cache(maxsize: Optional[int] = 128, lease: bool = True):
             """
             return cache.evict(_key(args, kwargs))
 
+        def cache_contains(*args, **kwargs) -> bool:
+            """Return True if the key is cached, without creating."""
+            return cache.contains(_key(args, kwargs))
+
         wrapper.cache_clear = cache.cache_clear
         wrapper.cache_evict = cache_evict
+        wrapper.cache_contains = cache_contains
         wrapper.cache_info = cache.cache_info
         wrapper.__wrapped__ = fn
         return wrapper

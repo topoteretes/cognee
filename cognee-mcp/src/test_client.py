@@ -10,7 +10,19 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-EXPECTED_TOOLS = {"remember", "recall", "forget"}
+EXPECTED_TOOLS = {
+    "remember",
+    "recall",
+    "forget",
+    "visualize_graph_ui",
+    "upload_file_ui",
+    "open_cognee_workspace",
+    "cognify_file",
+    "list_datasets_json",
+    "list_dataset_data_json",
+    "get_client_info_json",
+    "create_dataset_json",
+}
 
 
 class CogneeTestClient:
