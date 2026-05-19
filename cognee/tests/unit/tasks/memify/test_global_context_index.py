@@ -21,6 +21,9 @@ from cognee.tasks.summarization.models import GlobalContextSummary
 update_global_context_index_module = import_module(
     "cognee.tasks.memify.global_context_index.update_global_context_index"
 )
+summary_generation_module = import_module(
+    "cognee.tasks.memify.global_context_index.summary_generation"
+)
 
 
 def _summary_node(text: str = "summary", bucket_id: str | None = None) -> SummaryNode:
@@ -46,6 +49,8 @@ def _global_context_summary_graph_node(
     level: int | None = 0,
     is_root: bool = False,
     bucket_id: str | None = None,
+    graph_bucket_entity_ids: list[str] | None = None,
+    include_graph_bucket_entity_ids: bool = False,
 ) -> Node:
     attributes = {
         "type": "GlobalContextSummary",
@@ -56,6 +61,8 @@ def _global_context_summary_graph_node(
     }
     if bucket_id is not None:
         attributes["global_context_bucket_id"] = bucket_id
+    if include_graph_bucket_entity_ids:
+        attributes["graph_bucket_entity_ids"] = graph_bucket_entity_ids
     return Node(node_id or str(uuid4()), attributes)
 
 
@@ -233,6 +240,115 @@ def test_extract_context_index_input_from_graph_filters_buckets_by_dataset_id():
 
     assert [bucket.id for bucket in summary_input.buckets] == [matching_bucket.id]
     assert summary_input_from_name.buckets == []
+
+
+def test_extract_context_index_input_from_graph_rehydrates_graph_bucket_entity_state():
+    dataset_id = str(uuid4())
+    missing_state = _global_context_summary_graph_node(dataset_id, node_id="missing-state")
+    null_state = _global_context_summary_graph_node(
+        dataset_id,
+        node_id="null-state",
+        graph_bucket_entity_ids=None,
+        include_graph_bucket_entity_ids=True,
+    )
+    empty_state = _global_context_summary_graph_node(
+        dataset_id,
+        node_id="empty-state",
+        graph_bucket_entity_ids=[],
+        include_graph_bucket_entity_ids=True,
+    )
+    populated_state = _global_context_summary_graph_node(
+        dataset_id,
+        node_id="populated-state",
+        graph_bucket_entity_ids=["entity-b", "entity-a"],
+        include_graph_bucket_entity_ids=True,
+    )
+    upper_level = _global_context_summary_graph_node(
+        dataset_id,
+        node_id="upper-level",
+        level=1,
+        graph_bucket_entity_ids=["ignored"],
+        include_graph_bucket_entity_ids=True,
+    )
+    graph = CogneeGraph()
+    for node in [missing_state, null_state, empty_state, populated_state, upper_level]:
+        graph.add_node(node)
+
+    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+
+    buckets_by_id = {bucket.id: bucket for bucket in summary_input.buckets}
+    assert buckets_by_id["missing-state"].graph_bucket_entity_ids is None
+    assert buckets_by_id["null-state"].graph_bucket_entity_ids is None
+    assert buckets_by_id["empty-state"].graph_bucket_entity_ids == set()
+    assert buckets_by_id["populated-state"].graph_bucket_entity_ids == {"entity-a", "entity-b"}
+    assert buckets_by_id["upper-level"].graph_bucket_entity_ids is None
+
+
+@pytest.mark.asyncio
+async def test_build_bucket_summary_datapoint_persists_sorted_level_zero_graph_entity_state(
+    monkeypatch,
+):
+    child_ids_seen = []
+
+    async def summarize_bucket(children):
+        child_ids_seen.extend(child.id for child in children)
+        return "bucket summary"
+
+    monkeypatch.setattr(
+        summary_generation_module,
+        "generate_bucket_summary",
+        summarize_bucket,
+    )
+    bucket = SummaryNode(
+        id=str(uuid4()),
+        text="",
+        type="GlobalContextSummary",
+        level=0,
+        child_ids={"summary-b", "summary-a"},
+        graph_bucket_entity_ids={"entity-b", "entity-a"},
+    )
+    children_by_id = {
+        "summary-a": SummaryNode(id="summary-a", text="A", type="TextSummary"),
+        "summary-b": SummaryNode(id="summary-b", text="B", type="TextSummary"),
+    }
+
+    datapoint = await summary_generation_module.build_bucket_summary_datapoint(
+        bucket,
+        children_by_id,
+        dataset_id=str(uuid4()),
+    )
+
+    assert child_ids_seen == ["summary-a", "summary-b"]
+    assert datapoint.graph_bucket_entity_ids == ["entity-a", "entity-b"]
+
+
+@pytest.mark.asyncio
+async def test_build_bucket_summary_datapoint_leaves_non_level_zero_graph_state_unset(
+    monkeypatch,
+):
+    async def summarize_bucket(children):
+        return "bucket summary"
+
+    monkeypatch.setattr(
+        summary_generation_module,
+        "generate_bucket_summary",
+        summarize_bucket,
+    )
+    bucket = SummaryNode(
+        id=str(uuid4()),
+        text="",
+        type="GlobalContextSummary",
+        level=1,
+        graph_bucket_entity_ids={"entity-a"},
+    )
+
+    datapoint = await summary_generation_module.build_bucket_summary_datapoint(
+        bucket,
+        children_by_id={},
+        dataset_id=str(uuid4()),
+    )
+
+    assert datapoint.graph_bucket_entity_ids is None
 
 
 @pytest.mark.asyncio

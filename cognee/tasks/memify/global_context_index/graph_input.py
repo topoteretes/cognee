@@ -33,6 +33,21 @@ def is_root_global_context_summary(attributes: dict[str, Any]) -> bool:
     return bool(is_root)
 
 
+def graph_bucket_entity_ids_from_attributes(
+    attributes: dict[str, Any],
+    level: int | None,
+) -> set[str] | None:
+    if level != 0:
+        return None
+
+    raw_entity_ids = attributes.get("graph_bucket_entity_ids")
+    if raw_entity_ids is None:
+        return None
+    if isinstance(raw_entity_ids, (list, set, tuple)):
+        return {str(entity_id) for entity_id in raw_entity_ids}
+    return None
+
+
 def extract_context_index_input_from_graph(
     memory_fragment: CogneeGraph,
     dataset_id: str,
@@ -62,13 +77,15 @@ def extract_context_index_input_from_graph(
         if node_dataset_id is not None and str(node_dataset_id) != dataset_id:
             continue
 
+        level = global_context_summary_level(attributes)
         bucket_node = SummaryNode(
             id=str(node.id),
             text=str(attributes.get("text") or ""),
             type="GlobalContextSummary",
-            level=global_context_summary_level(attributes),
+            level=level,
             is_root=is_root_global_context_summary(attributes),
             dataset_id=str(node_dataset_id) if node_dataset_id is not None else dataset_id,
+            graph_bucket_entity_ids=graph_bucket_entity_ids_from_attributes(attributes, level),
         )
         if bucket_node.is_root:
             root = bucket_node
@@ -145,6 +162,7 @@ async def load_context_index_input_from_graph(
             "dataset_id",
             "level",
             "is_root",
+            "graph_bucket_entity_ids",
             "importance_weight",
             "global_context_bucket_id",
         ],

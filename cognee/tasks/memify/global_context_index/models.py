@@ -19,6 +19,7 @@ class SummaryNode:
     dataset_id: str | None = None
     global_context_bucket_id: str | None = None
     child_ids: set[str] = field(default_factory=set)
+    graph_bucket_entity_ids: set[str] | None = None
 
 
 @dataclass
@@ -26,6 +27,7 @@ class GlobalContextIndexInput:
     text_summaries: list[SummaryNode]
     buckets: list[SummaryNode]
     root: SummaryNode | None = None
+    entities_by_summary_id: dict[str, set[str]] = field(default_factory=dict)
 
 
 @dataclass

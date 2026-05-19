@@ -15,7 +15,7 @@ def rebuild_graph_buckets_for_level(
     level: int,
     max_bucket_size: int,
     min_overlap: float,
-) -> tuple[dict[str, SummaryNode], dict[str, set[str]], list[BucketAssignment]]:
+) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
     """
     Build graph-based buckets from in-memory summary/entity inputs.
 
@@ -31,7 +31,6 @@ def rebuild_graph_buckets_for_level(
     entity_to_summary_ids = _build_entity_to_summary_ids(entity_summaries, entities_by_summary_id)
 
     buckets_to_persist: dict[str, SummaryNode] = {}
-    graph_bucket_entity_ids_by_bucket_id: dict[str, set[str]] = {}
     assignments: list[BucketAssignment] = []
 
     unassigned_ids = {summary.id for summary in entity_summaries}
@@ -54,7 +53,6 @@ def rebuild_graph_buckets_for_level(
             dataset_id,
             level,
             buckets_to_persist,
-            graph_bucket_entity_ids_by_bucket_id,
             assignments,
         )
 
@@ -65,12 +63,21 @@ def rebuild_graph_buckets_for_level(
             dataset_id,
             level,
             buckets_to_persist,
-            graph_bucket_entity_ids_by_bucket_id,
             assignments,
             force_misc=True,
         )
 
-    return buckets_to_persist, graph_bucket_entity_ids_by_bucket_id, assignments
+    return buckets_to_persist, assignments
+
+
+def validate_graph_buckets_can_be_extended(existing_buckets: list[SummaryNode]) -> None:
+    for bucket in existing_buckets:
+        if bucket.level == 0 and bucket.graph_bucket_entity_ids is None:
+            raise ValueError(
+                "Graph incremental placement requires existing level-0 buckets to have "
+                "graph_bucket_entity_ids. Use rebuild=True to rebuild the index with "
+                "graph bucketing."
+            )
 
 
 def _partition_summaries(
@@ -184,7 +191,6 @@ def _add_bucket(
     dataset_id: str,
     level: int,
     buckets_to_persist: dict[str, SummaryNode],
-    graph_bucket_entity_ids_by_bucket_id: dict[str, set[str]],
     assignments: list[BucketAssignment],
     *,
     force_misc: bool = False,
@@ -198,12 +204,12 @@ def _add_bucket(
         is_root=False,
         dataset_id=dataset_id,
         child_ids=set(child_ids),
+        graph_bucket_entity_ids=(
+            set() if force_misc else _union_entities(child_ids, entities_by_summary_id)
+        ),
     )
 
     buckets_to_persist[bucket.id] = bucket
-    graph_bucket_entity_ids_by_bucket_id[bucket.id] = (
-        set() if force_misc else _union_entities(child_ids, entities_by_summary_id)
-    )
     assignments.extend(
         BucketAssignment(summary_id=child_id, bucket_id=bucket.id) for child_id in child_ids
     )

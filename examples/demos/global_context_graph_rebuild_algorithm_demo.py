@@ -36,7 +36,7 @@ def main() -> None:
         "standup": 0.0,
     }
 
-    buckets, graph_entities, assignments = rebuild_graph_buckets_for_level(
+    buckets, assignments = rebuild_graph_buckets_for_level(
         summaries,
         entities_by_summary_id,
         idf_weights,
@@ -49,7 +49,7 @@ def main() -> None:
     print("Global context graph rebuild algorithm demo")
     for bucket in buckets.values():
         child_ids = sorted(bucket.child_ids)
-        entity_ids = sorted(graph_entities[bucket.id])
+        entity_ids = sorted(bucket.graph_bucket_entity_ids or set())
         print(f"bucket: {bucket.id}")
         print(f"  children: {child_ids}")
         print(f"  graph_bucket_entity_ids: {entity_ids}")

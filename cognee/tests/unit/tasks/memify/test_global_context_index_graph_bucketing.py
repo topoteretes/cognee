@@ -1,6 +1,9 @@
+import pytest
+
 from cognee.tasks.memify.global_context_index.bucket_assignment import create_bucket_id
 from cognee.tasks.memify.global_context_index.graph_bucketing import (
     rebuild_graph_buckets_for_level,
+    validate_graph_buckets_can_be_extended,
 )
 from cognee.tasks.memify.global_context_index.models import SummaryNode
 
@@ -32,8 +35,12 @@ def _bucket_child_sets(buckets: dict[str, SummaryNode]) -> list[set[str]]:
     return [bucket.child_ids for bucket in buckets.values()]
 
 
+def _bucket_entity_sets(buckets: dict[str, SummaryNode]) -> list[set[str] | None]:
+    return [bucket.graph_bucket_entity_ids for bucket in buckets.values()]
+
+
 def test_graph_rebuild_groups_by_weighted_overlap_and_populates_entity_state():
-    buckets, graph_entities, assignments = _rebuild(
+    buckets, assignments = _rebuild(
         ["s1", "s2", "s3", "s4"],
         {
             "s1": {"alice", "project-x"},
@@ -45,14 +52,14 @@ def test_graph_rebuild_groups_by_weighted_overlap_and_populates_entity_state():
     )
 
     assert _bucket_child_sets(buckets) == [{"s1", "s2"}, {"s3", "s4"}]
-    assert list(graph_entities.values()) == [{"alice", "project-x"}, {"bob"}]
+    assert _bucket_entity_sets(buckets) == [{"alice", "project-x"}, {"bob"}]
     assert {(assignment.summary_id, assignment.bucket_id) for assignment in assignments} == {
         (child_id, bucket.id) for bucket in buckets.values() for child_id in bucket.child_ids
     }
 
 
 def test_graph_rebuild_uses_weighted_seed_order():
-    buckets, _, _ = _rebuild(
+    buckets, _ = _rebuild(
         ["plain", "rich", "other"],
         {
             "plain": {"alice"},
@@ -67,7 +74,7 @@ def test_graph_rebuild_uses_weighted_seed_order():
 
 
 def test_graph_rebuild_respects_weighted_jaccard_cutoff():
-    buckets, _, _ = _rebuild(
+    buckets, _ = _rebuild(
         ["s1", "s2"],
         {
             "s1": {"rare", "common"},
@@ -81,7 +88,7 @@ def test_graph_rebuild_respects_weighted_jaccard_cutoff():
 
 
 def test_graph_rebuild_tie_breaks_candidates_by_summary_id():
-    buckets, _, _ = _rebuild(
+    buckets, _ = _rebuild(
         ["seed", "candidate-b", "candidate-c"],
         {
             "seed": {"shared", "seed-a", "seed-b"},
@@ -96,7 +103,7 @@ def test_graph_rebuild_tie_breaks_candidates_by_summary_id():
 
 
 def test_graph_rebuild_places_no_entity_and_zero_weight_summaries_in_misc_buckets():
-    buckets, graph_entities, assignments = _rebuild(
+    buckets, assignments = _rebuild(
         ["missing", "no-entities", "zero-weight"],
         {
             "no-entities": set(),
@@ -108,12 +115,12 @@ def test_graph_rebuild_places_no_entity_and_zero_weight_summaries_in_misc_bucket
     )
 
     assert _bucket_child_sets(buckets) == [{"missing", "no-entities"}, {"zero-weight"}]
-    assert list(graph_entities.values()) == [set(), set()]
+    assert _bucket_entity_sets(buckets) == [set(), set()]
     assert len(assignments) == 3
 
 
 def test_graph_rebuild_min_overlap_zero_keeps_zero_weight_only_summaries_misc():
-    buckets, graph_entities, _ = _rebuild(
+    buckets, _ = _rebuild(
         ["entity", "zero-weight"],
         {
             "entity": {"alice"},
@@ -124,11 +131,11 @@ def test_graph_rebuild_min_overlap_zero_keeps_zero_weight_only_summaries_misc():
     )
 
     assert _bucket_child_sets(buckets) == [{"entity"}, {"zero-weight"}]
-    assert list(graph_entities.values()) == [{"alice"}, set()]
+    assert _bucket_entity_sets(buckets) == [{"alice"}, set()]
 
 
 def test_graph_rebuild_min_overlap_zero_admits_positive_candidates_with_zero_score():
-    buckets, _, _ = _rebuild(
+    buckets, _ = _rebuild(
         ["s1", "s2"],
         {
             "s1": {"standup", "alice"},
@@ -142,7 +149,7 @@ def test_graph_rebuild_min_overlap_zero_admits_positive_candidates_with_zero_sco
 
 
 def test_graph_rebuild_bucket_ids_are_deterministic():
-    first_buckets, first_graph_entities, first_assignments = _rebuild(
+    first_buckets, first_assignments = _rebuild(
         ["s1", "s2", "s3"],
         {
             "s1": {"alice"},
@@ -151,7 +158,7 @@ def test_graph_rebuild_bucket_ids_are_deterministic():
         },
         {"alice": 1.0, "bob": 1.0},
     )
-    second_buckets, second_graph_entities, second_assignments = _rebuild(
+    second_buckets, second_assignments = _rebuild(
         ["s1", "s2", "s3"],
         {
             "s1": {"alice"},
@@ -162,7 +169,6 @@ def test_graph_rebuild_bucket_ids_are_deterministic():
     )
 
     assert first_buckets == second_buckets
-    assert first_graph_entities == second_graph_entities
     assert first_assignments == second_assignments
     assert set(first_buckets) == {
         str(create_bucket_id("dataset-1", 0, list(bucket.child_ids)))
@@ -185,3 +191,37 @@ def test_graph_rebuild_does_not_mutate_input_summaries():
 
     assert [summary.global_context_bucket_id for summary in summaries] == [None, None]
     assert [summary.child_ids for summary in summaries] == [set(), set()]
+
+
+def test_validate_graph_buckets_can_be_extended_rejects_missing_level_zero_state():
+    bucket = SummaryNode(
+        id="bucket-1",
+        text="bucket",
+        type="GlobalContextSummary",
+        level=0,
+        graph_bucket_entity_ids=None,
+    )
+
+    with pytest.raises(ValueError, match="Use rebuild=True"):
+        validate_graph_buckets_can_be_extended([bucket])
+
+
+def test_validate_graph_buckets_can_be_extended_accepts_empty_graph_state():
+    validate_graph_buckets_can_be_extended(
+        [
+            SummaryNode(
+                id="misc-bucket",
+                text="misc",
+                type="GlobalContextSummary",
+                level=0,
+                graph_bucket_entity_ids=set(),
+            ),
+            SummaryNode(
+                id="upper-bucket",
+                text="upper",
+                type="GlobalContextSummary",
+                level=1,
+                graph_bucket_entity_ids=None,
+            ),
+        ]
+    )

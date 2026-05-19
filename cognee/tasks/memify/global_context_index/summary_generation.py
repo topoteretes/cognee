@@ -38,7 +38,9 @@ async def build_bucket_summary_datapoint(
     dataset_id: str,
 ) -> GlobalContextSummary:
     children = [
-        children_by_id[child_id] for child_id in bucket.child_ids if child_id in children_by_id
+        children_by_id[child_id]
+        for child_id in sorted(bucket.child_ids)
+        if child_id in children_by_id
     ]
     bucket.text = await generate_bucket_summary(children)
 
@@ -48,6 +50,11 @@ async def build_bucket_summary_datapoint(
         dataset_id=dataset_id,
         level=bucket.level if bucket.level is not None else 0,
         is_root=False,
+        graph_bucket_entity_ids=(
+            sorted(bucket.graph_bucket_entity_ids)
+            if bucket.level == 0 and bucket.graph_bucket_entity_ids is not None
+            else None
+        ),
     )
 
 
