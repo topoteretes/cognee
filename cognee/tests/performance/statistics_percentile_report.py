@@ -25,7 +25,7 @@ from pathlib import Path
 BENCH_SCRIPT = (Path(__file__).parent / "statistics_percentile" / "bench_cognee.py").resolve()
 RESULTS_DIR = Path(__file__).parent / "results"
 COGNEE_DIR = Path(__file__).resolve().parents[3]
-METRICS = ["add_time_s", "cognify_time_s", "total_ingest_time_s", "search_time", "prune_time_s"]
+METRICS = ["add_time_s", "cognify_time_s", "total_ingest_time_s", "search_time", "prune_time_s", "db_setup_time_s"]
 PERCENTILES = [50, 75, 90, 95, 99]
 LABELS = {
     "add_time_s": "cognee.add()",
@@ -33,6 +33,7 @@ LABELS = {
     "total_ingest_time_s": "Total ingest",
     "search_time": "Search",
     "prune_time_s": "Prune",
+    "db_setup_time_s": "DB setup",
     "wall_time_s": "Wall clock (e2e)",
 }
 
@@ -210,7 +211,7 @@ def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], pa
 
 <h2 class="section-title">Individual Runs</h2>
 <table>
-  <thead><tr><th>Run</th><th>add()</th><th>cognify()</th><th>Total Ingest</th><th>Search</th><th>Prune</th><th>Wall Clock</th></tr></thead>
+  <thead><tr><th>Run</th><th>add()</th><th>cognify()</th><th>Total Ingest</th><th>Search</th><th>Prune</th><th>DB Setup</th><th>Wall Clock</th></tr></thead>
   <tbody>{run_rows}</tbody>
 </table>
 

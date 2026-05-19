@@ -95,6 +95,11 @@ async def run_benchmark(
     t_prune = time.time() - t_prune_start
     print(f"  Prune completed in {t_prune:.2f}s")
 
+    from cognee.modules.engine.operations.setup import setup
+    t_db_setup_start = time.time()
+    await setup()
+    t_db_setup = time.time() - t_db_setup_start
+
     n = len(memories)
     add_errors: list[str] = []
 
@@ -129,6 +134,7 @@ async def run_benchmark(
         "cognify_time_s": round(t_cognify, 3),
         "total_ingest_time_s": round(t_total, 3),
         "prune_time_s": round(t_prune, 3),
+        "db_setup_time_s": round(t_db_setup, 3),
         "search_time": t_search,
         "config": {
             "llm_model": llm_model,
@@ -147,6 +153,7 @@ async def run_benchmark(
     print(f"  cognify() time    : {t_cognify:.2f}s")
     print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
     print(f"  Search total      : {t_search:.2f}s")
+    print(f"  DB setup time     : {t_db_setup:.2f}s")
     print(f"  Prune time        : {t_prune:.2f}s  (not included in ingest total)")
     print(f"  LLM model         : {llm_model}")
     print(f"  Embedding model   : {embedding_model} ({embedding_dims}d)")
