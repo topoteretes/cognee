@@ -4,7 +4,7 @@ import cognee
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+from cognee.modules.pipelines.operations.run_tasks_single import run_tasks_single
 from cognee.infrastructure.databases.relational import create_db_and_tables
 
 
@@ -29,7 +29,7 @@ async def run_and_check_tasks():
     # pipeline_name = "testing" has length 7
     ctx = PipelineContext(pipeline_name="testing")
 
-    pipeline = run_tasks_base(
+    pipeline = run_tasks_single(
         [
             Task(task_1),
             Task(task_2),
