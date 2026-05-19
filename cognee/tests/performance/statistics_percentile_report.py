@@ -23,6 +23,7 @@ from pathlib import Path
 
 
 BENCH_SCRIPT = (Path(__file__).parent / "statistics_percentile" / "bench_cognee.py").resolve()
+RESULTS_DIR = Path(__file__).parent / "results"
 COGNEE_DIR = Path(__file__).resolve().parents[3]
 METRICS = ["add_time_s", "cognify_time_s", "total_ingest_time_s", "search_time", "prune_time_s"]
 PERCENTILES = [50, 75, 90, 95, 99]
@@ -268,7 +269,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run bench_cognee.py N times and produce a percentile report.")
     parser.add_argument("--runs", "-n", type=int, default=5, help="Number of sequential runs (default: 5)")
     parser.add_argument("--output", "-o", type=Path, default=None, help="Save full report as JSON")
-    parser.add_argument("--html", type=Path, default=Path("report.html"), help="Save HTML report (default: report.html)")
+    parser.add_argument("--html", type=Path, default=RESULTS_DIR / "report.html", help="Save HTML report (default: results/report.html)")
     parser.add_argument("--memories", type=Path, default=None, help="Forward to bench_cognee.py")
     parser.add_argument("--llm-model", default=None, help="Forward to bench_cognee.py")
     parser.add_argument("--llm-provider", default=None, help="Forward to bench_cognee.py")
