@@ -921,6 +921,16 @@ async def _run_worker(
     pool: Optional[_AdaptivePool] = None,
     per_call_timeout: Optional[float] = None,
 ):
+    """Single worker loop for one stage.
+
+    Pulls envelopes from ``in_queue``, gates execution behind the adaptive
+    pool's permit semaphore when ``pool`` is supplied, and either forwards
+    ``_ErroredItem`` envelopes downstream unchanged or invokes ``task.execute``
+    (under ``per_call_timeout`` when set) and pushes the results to
+    ``out_queue``. Exits cleanly when it receives ``_SENTINEL``. Per-item
+    exceptions are wrapped into ``_ErroredItem`` envelopes so they flow through
+    without aborting the rest of the stage.
+    """
     while True:
         envelope = await in_queue.get()
         if envelope is _SENTINEL:
