@@ -4,6 +4,7 @@ from cognee.infrastructure.files.storage import get_file_storage, get_storage_co
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.processing.rtl_processor import maybe_normalize_rtl
 
 try:
     from unstructured.partition.auto import partition  # ty:ignore[unresolved-import]
@@ -111,6 +112,8 @@ class UnstructuredLoader(LoaderInterface):
 
             # Combine all text content
             full_content = "\n\n".join(text_parts)
+
+            full_content = maybe_normalize_rtl(full_content)
 
             if not kwargs.get("persist", True):
                 return full_content

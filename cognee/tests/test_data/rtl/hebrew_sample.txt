@@ -1,0 +1,1 @@
+﻿היום בבוקר 2/10 מהDBים של postgress נפלו בproduction

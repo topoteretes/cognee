@@ -6,6 +6,7 @@ from cognee.infrastructure.files.storage import get_file_storage, get_storage_co
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.processing.rtl_processor import maybe_normalize_rtl
 
 logger = get_logger(__name__)
 
@@ -68,6 +69,8 @@ class DoclingLoader(LoaderInterface):
             converter = _get_docling_converter()
             conv_result = converter.convert(file_path)
             text = conv_result.document.export_to_text()
+
+            text = maybe_normalize_rtl(text)
 
             if not kwargs.get("persist", True):
                 return text

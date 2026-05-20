@@ -12,9 +12,11 @@ description: >
   "extract entities and relations", "sync data into a graph", "update graph memory",
   "store memories for an agent", "help my agent learn over time", "visualize a knowledge
   graph built from documents", "let the agent learn", "adaptive agents", "personalized agents",
-  "session based personalization", "find important ontologies", "find custom pydantic models",
-  "isolate agentic behaviour", "add permission control to retrieval", "reduce context bloating".
----
+  session based personalization, find important ontologies, find custom pydantic models,
+  isolate agentic behaviour, add permission control to retrieval, reduce context bloating,
+  RTL support, Hebrew text extraction, Arabic text extraction, mixed RTL LTR text.
+  ---
+
 
 # Cognee
 
