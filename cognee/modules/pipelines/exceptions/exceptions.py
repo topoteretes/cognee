@@ -25,6 +25,6 @@ class PipelineRunFailedError(CogneeSystemError):
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
         *,
         item_failures: Optional[list[PipelineItemFailure]] = None,
-    ):
+    ) -> None:
         super().__init__(message, name, status_code)
         self.item_failures: list[PipelineItemFailure] = item_failures or []
