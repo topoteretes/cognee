@@ -123,9 +123,10 @@ def get_remember_router() -> APIRouter:
 
             return jsonable_encoder(result.to_dict())
         except ValueError as error:
+            logger.error("Remember endpoint validation error: %s", error, exc_info=True)
             return JSONResponse(
                 status_code=409,
-                content={"error": str(error)},
+                content={"error": "Invalid request data for remember operation."},
             )
         except Exception as error:
             logger.error("Remember endpoint error: %s", error, exc_info=True)
