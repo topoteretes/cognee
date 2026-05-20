@@ -10,6 +10,9 @@ from sqlalchemy import text, values, select, exists, func, String
 from sqlalchemy import column as sa_column
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from asyncpg import DeadlockDetectedError
+from sqlalchemy.exc import DBAPIError
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -99,6 +102,11 @@ class PostgresAdapter(GraphDBInterface):
         else:
             await self.add_nodes([node])
 
+    @retry(
+        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+    )
     async def add_nodes(self, nodes: Union[List[Tuple[str, Dict]], List[DataPoint]]) -> None:
         """Add multiple nodes via batch upsert.
 
@@ -229,6 +237,11 @@ class PostgresAdapter(GraphDBInterface):
             [(str(source_id), str(target_id), relationship_name, properties or {})]
         )
 
+    @retry(
+        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+    )
     async def add_edges(
         self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
     ) -> None:
