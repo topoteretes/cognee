@@ -278,6 +278,8 @@ def main():
     parser.add_argument("--embedding-provider", default=None, help="Forward to bench_cognee.py")
     parser.add_argument("--embedding-dims", type=int, default=None, help="Forward to bench_cognee.py")
     parser.add_argument("--num-memories", type=int, default=None, help="Limit number of memories to load")
+    parser.add_argument("--mock-llm", action="store_true", default=False, help="Use mock LLM/embedding (no API calls)")
+    parser.add_argument("--mock-memories", type=Path, default=None, help="Forward to bench_cognee.py")
     args = parser.parse_args()
 
     extra_args = []
@@ -295,15 +297,19 @@ def main():
         extra_args += ["--embedding-dims", str(args.embedding_dims)]
     if args.num_memories:
         extra_args += ["--num-memories", str(args.num_memories)]
+    if args.mock_llm:
+        extra_args += ["--mock-llm"]
+    if args.mock_memories:
+        extra_args += ["--mock-memories", str(args.mock_memories)]
 
-    print(f"Starting {args.runs} sequential run(s) of bench_cognee.py...")
+    mode = " [MOCK LLM]" if args.mock_llm else ""
+    print(f"Starting {args.runs} sequential run(s) of bench_cognee.py...{mode}")
 
     runs = []
     for i in range(1, args.runs + 1):
         import time
 
-        if i is not 1:
-            # Sleep to give time for LLM/embedding API to handle more requests and reduce RPM limit on their side
+        if i != 1 and not args.mock_llm:
             time.sleep(60)
 
         data = run_single(i, args.runs, extra_args)

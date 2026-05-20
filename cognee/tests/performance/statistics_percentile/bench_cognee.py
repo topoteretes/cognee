@@ -28,6 +28,7 @@ from dotenv import dotenv_values
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
 DEFAULT_MEMORIES_FILE = Path(__file__).with_name("memories.json")
+DEFAULT_MOCK_MEMORIES_FILE = Path(__file__).with_name("mock_memories.json")
 DEFAULT_LLM_PROVIDER = "openai"
 DEFAULT_LLM_MODEL = "gpt-4.1-mini"
 DEFAULT_EMBEDDING_PROVIDER = "openai"
@@ -42,6 +43,7 @@ os.environ.setdefault("COGNEE_SKIP_CONNECTION_TEST", "true")
 
 def _resolve_config(args: argparse.Namespace) -> dict:
     """Resolve config values: CLI arg → .env file → script defaults."""
+    mock_llm = getattr(args, "mock_llm", False)
     env = dotenv_values(ENV_FILE) if ENV_FILE.exists() else {}
 
     def pick(cli_val, env_key: str, default):
@@ -53,17 +55,109 @@ def _resolve_config(args: argparse.Namespace) -> dict:
         return default
 
     api_key = pick(None, "LLM_API_KEY", "") or pick(None, "OPENAI_API_KEY", "")
-    if not api_key:
+    if not api_key and not mock_llm:
         sys.exit("Error: LLM_API_KEY is not set (CLI, .env, or environment)")
 
     return {
-        "api_key": api_key,
+        "api_key": api_key or "mock-key",
         "llm_provider": pick(args.llm_provider, "LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
         "llm_model": pick(args.llm_model, "LLM_MODEL", DEFAULT_LLM_MODEL),
         "embedding_provider": pick(args.embedding_provider, "EMBEDDING_PROVIDER", DEFAULT_EMBEDDING_PROVIDER),
         "embedding_model": pick(args.embedding_model, "EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
         "embedding_dims": pick(args.embedding_dims, "EMBEDDING_DIMENSIONS", DEFAULT_EMBEDDING_DIMS),
+        "mock_llm": mock_llm,
     }
+
+
+# ── Mock LLM / Embedding ────────────────────────────────────────────────────
+
+def _load_mock_data(path: Path) -> dict:
+    with open(path) as f:
+        raw = json.load(f)
+    by_title: dict[str, dict] = {}
+    for entry in raw["memories"]:
+        by_title[entry["title"]] = entry
+    return by_title
+
+
+def _install_mocks(mock_data: dict[str, dict], embedding_dims: int) -> None:
+    """Monkey-patch LLMGateway and the embedding engine with mock implementations."""
+    import hashlib
+    import importlib
+    import struct
+
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+    from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
+
+    emb_mod = importlib.import_module(
+        "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine"
+    )
+    vec_mod = importlib.import_module(
+        "cognee.infrastructure.databases.vector.create_vector_engine"
+    )
+
+    def _match_memory(text_input: str) -> dict | None:
+        for title, entry in mock_data.items():
+            if title in text_input:
+                return entry
+        return None
+
+    @staticmethod
+    async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
+        entry = _match_memory(text_input)
+
+        if response_model is KnowledgeGraph or (
+            isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph)
+        ):
+            if entry:
+                return KnowledgeGraph(**entry["knowledge_graph"])
+            return KnowledgeGraph(nodes=[], edges=[])
+
+        if response_model is SummarizedContent or (
+            isinstance(response_model, type) and issubclass(response_model, SummarizedContent)
+        ):
+            if entry:
+                return SummarizedContent(**entry["summary"])
+            return SummarizedContent(summary="Mock summary.", description="")
+
+        return response_model()
+
+    LLMGateway.acreate_structured_output = _mock_acreate
+
+    class _MockEmbeddingEngine:
+        def __init__(self, dims: int):
+            self._dims = dims
+            self.max_completion_tokens = 8192
+            self.dimensions = dims
+            self.tokenizer = None
+
+        async def embed_text(self, text: list[str]) -> list[list[float]]:
+            results = []
+            for t in text:
+                h = hashlib.sha256(t.encode()).digest()
+                vec = []
+                for i in range(self._dims):
+                    offset = (i * 4) % len(h)
+                    chunk = h[offset:offset + 4].ljust(4, b"\x00")
+                    val = struct.unpack("<f", chunk)[0]
+                    vec.append(max(-1.0, min(1.0, val / 1e38)))
+                results.append(vec)
+            return results
+
+        def get_vector_size(self) -> int:
+            return self._dims
+
+        def get_batch_size(self) -> int:
+            return 64
+
+    mock_engine = _MockEmbeddingEngine(embedding_dims)
+
+    emb_mod.create_embedding_engine.cache_clear()
+    emb_mod.get_embedding_engine = lambda: mock_engine
+    emb_mod.create_embedding_engine = lambda *a, **kw: mock_engine
+
+    vec_mod._create_vector_engine.cache_clear()
+    vec_mod.get_embedding_engine = lambda: mock_engine
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -109,6 +203,11 @@ async def run_benchmark(
     cognee.config.set_embedding_model(embedding_model)
     cognee.config.set_embedding_dimensions(embedding_dims)
     cognee.config.set_embedding_api_key(config["api_key"])
+
+    if config.get("mock_llm"):
+        mock_data = _load_mock_data(config["mock_memories_file"])
+        _install_mocks(mock_data, embedding_dims)
+        print("Mock LLM/embedding mode enabled")
 
     # ── Prune (clean slate) ──────────────────────────────────────────────
     print("Pruning previous data...")
@@ -164,6 +263,7 @@ async def run_benchmark(
             "embedding_model": embedding_model,
             "embedding_dimensions": embedding_dims,
             "dataset_name": DATASET_NAME,
+            "mock_llm": config.get("mock_llm", False),
         },
     }
 
@@ -180,6 +280,8 @@ async def run_benchmark(
     print(f"  Prune time        : {t_prune:.2f}s  (not included in ingest total)")
     print(f"  LLM model         : {llm_model}")
     print(f"  Embedding model   : {embedding_model} ({embedding_dims}d)")
+    if config.get("mock_llm"):
+        print(f"  Mock mode         : ON")
     if add_errors:
         print(f"\n  Add Errors:")
         for err in add_errors:
@@ -224,18 +326,29 @@ def main():
         help="Limit the number of memories to load (default: all)",
     )
     parser.add_argument(
+        "--mock-llm", action="store_true", default=False,
+        help="Use mock LLM/embedding responses from mock_memories.json instead of real API calls",
+    )
+    parser.add_argument(
+        "--mock-memories", type=Path, default=DEFAULT_MOCK_MEMORIES_FILE,
+        help=f"Mock responses JSON file (default: {DEFAULT_MOCK_MEMORIES_FILE.name})",
+    )
+    parser.add_argument(
         "--output", "-o", type=Path, default=None,
         help="Write JSON results to this file",
     )
     args = parser.parse_args()
 
     config = _resolve_config(args)
+    if config["mock_llm"]:
+        config["mock_memories_file"] = args.mock_memories
 
     memories = load_memories(args.memories)
     if args.num_memories is not None:
         memories = memories[:args.num_memories]
     print(f"Loaded {len(memories)} memories from {args.memories}")
-    print(f"Config: llm={config['llm_model']}, embeddings={config['embedding_model']} ({config['embedding_dims']}d)\n")
+    mock_label = " [MOCK]" if config["mock_llm"] else ""
+    print(f"Config: llm={config['llm_model']}, embeddings={config['embedding_model']} ({config['embedding_dims']}d){mock_label}\n")
 
     results = asyncio.run(run_benchmark(memories, config=config))
 
