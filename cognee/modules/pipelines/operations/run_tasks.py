@@ -163,6 +163,15 @@ def _pipeline_telemetry_props(pipeline_name: str, user: User) -> dict:
     }
 
 
+def _safe_send_telemetry(event_name: str, user_id, additional_properties: dict) -> None:
+    """Emit a telemetry event without letting a telemetry outage abort the
+    pipeline. Failures are logged and swallowed."""
+    try:
+        send_telemetry(event_name, user_id, additional_properties=additional_properties)
+    except Exception:
+        logger.warning("Telemetry emission failed for %s", event_name, exc_info=True)
+
+
 @override_run_tasks(run_tasks_distributed)
 async def run_tasks(
     tasks: List[Task],
@@ -200,7 +209,7 @@ async def run_tasks(
         payload=data,
     )
 
-    send_telemetry(
+    _safe_send_telemetry(
         "Pipeline Run Started",
         user.id,
         additional_properties=_pipeline_telemetry_props(pipeline_name, user),
@@ -357,7 +366,7 @@ async def run_tasks(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
             )
 
-            send_telemetry(
+            _safe_send_telemetry(
                 "Pipeline Run Completed",
                 user.id,
                 additional_properties=_pipeline_telemetry_props(pipeline_name, user),
@@ -383,7 +392,7 @@ async def run_tasks(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
             )
 
-            send_telemetry(
+            _safe_send_telemetry(
                 "Pipeline Run Errored",
                 user.id,
                 additional_properties=_pipeline_telemetry_props(pipeline_name, user),

@@ -254,18 +254,22 @@ class Task:
             base = Task(extract_graph, batch_size=20, graph_model=KnowledgeGraph)
             tasks = [base.with_config(batch_size=10)]
         """
-        batch_size = overrides.pop("batch_size", self.task_config["batch_size"])
+        # Start from a copy of the original task_config so unknown extras
+        # (e.g. queue_maxsize set via task_config={...}) survive the clone.
+        merged_config = dict(self.task_config)
+        if "batch_size" in overrides:
+            merged_config["batch_size"] = overrides.pop("batch_size")
+        if "workers" in overrides:
+            merged_config["workers"] = overrides.pop("workers")
+        if "timeout" in overrides:
+            merged_config["timeout"] = overrides.pop("timeout")
         enriches = overrides.pop("enriches", self.enriches)
-        workers = overrides.pop("workers", self.task_config.get("workers"))
-        timeout = overrides.pop("timeout", self.task_config.get("timeout"))
         merged_kwargs = {**self.default_params["kwargs"], **overrides}
         return Task(
             self.executable,
             *self.default_params["args"],
-            batch_size=batch_size,
+            task_config=merged_config,
             enriches=enriches,
-            workers=workers,
-            timeout=timeout,
             **merged_kwargs,
         )
 
