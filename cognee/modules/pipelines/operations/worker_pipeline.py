@@ -1117,8 +1117,14 @@ async def run_worker_pipeline(
     Queue-depth telemetry is emitted as ``Task Queue Metrics`` events at end of run.
     """
     if not tasks:
+        seq = 0
         async for item in _as_async_iterable(data_iterable):
-            yield _ItemEnvelope(value=item, origin=item, seq=0)
+            if isinstance(item, tuple) and len(item) == 2:
+                value, origin = item
+            else:
+                value, origin = item, item
+            yield _ItemEnvelope(value=value, origin=origin, seq=seq)
+            seq += 1
         return
 
     stage_configs = _resolve_stage_configs(tasks, data_per_batch=data_per_batch)
