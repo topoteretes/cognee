@@ -27,4 +27,4 @@ class PipelineRunFailedError(CogneeSystemError):
         item_failures: Optional[list[PipelineItemFailure]] = None,
     ) -> None:
         super().__init__(message, name, status_code)
-        self.item_failures: list[PipelineItemFailure] = item_failures or []
+        self.item_failures: list[PipelineItemFailure] = list(item_failures) if item_failures else []

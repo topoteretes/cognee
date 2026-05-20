@@ -89,8 +89,9 @@ async def _is_already_completed(data_id, pipeline_name: str, dataset_id) -> bool
         ).scalar_one_or_none()
     if not data_point:
         return False
+    status = data_point.pipeline_status or {}
     return (
-        data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset_id))
+        status.get(pipeline_name, {}).get(str(dataset_id))
         == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
     )
 
@@ -98,13 +99,17 @@ async def _is_already_completed(data_id, pipeline_name: str, dataset_id) -> bool
 async def _mark_completed(data_id, pipeline_name: str, dataset_id) -> None:
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
+        # SELECT ... FOR UPDATE so concurrent pipeline runs marking the same
+        # Data row don't lose each other's status entries under last-write-wins.
         data_point = (
-            await session.execute(select(Data).filter(Data.id == data_id))
+            await session.execute(select(Data).filter(Data.id == data_id).with_for_update())
         ).scalar_one_or_none()
         if not data_point:
             return
-        status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
+        status = data_point.pipeline_status or {}
+        status_for_pipeline = status.setdefault(pipeline_name, {})
         status_for_pipeline[str(dataset_id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+        data_point.pipeline_status = status
         await session.merge(data_point)
         await session.commit()
 
