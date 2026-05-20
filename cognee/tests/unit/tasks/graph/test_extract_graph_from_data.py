@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
-from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
+from cognee.tasks.graph.extract_graph_from_data import (
+    extract_graph_from_data,
+    integrate_chunk_graphs,
+)
 
 egd_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
 
@@ -103,6 +106,61 @@ async def test_cache_entity_embeddings_hook_called(mock_retrieve):
     hook.assert_called_once()
     entity_nodes_arg = hook.call_args.args[0]
     assert len(entity_nodes_arg) > 0
+
+
+class _KGSubclass(KnowledgeGraph):
+    pass
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "retrieve_existing_edges", new_callable=AsyncMock)
+async def test_integrate_chunk_graphs_accepts_knowledge_graph_subclass(mock_retrieve):
+    mock_retrieve.return_value = {}
+    chunk = _make_chunk()
+    graph = _KGSubclass(
+        nodes=[
+            Node(id="n1", name="Alice", type="Person", description="desc"),
+            Node(id="n2", name="Bob", type="Person", description="desc"),
+        ],
+        edges=[KGEdge(source_node_id="n1", target_node_id="n2", relationship_name="knows")],
+    )
+
+    await integrate_chunk_graphs([chunk], [graph], _KGSubclass, _mock_resolver(), {})
+
+    # Subclass should take the integration path, not the contains-passthrough path.
+    assert chunk.contains is not None and len(chunk.contains) > 0
+    _, entity = chunk.contains[0]
+    assert entity.name in ("alice", "bob")
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "integrate_chunk_graphs", new_callable=AsyncMock)
+async def test_extract_graph_from_data_filters_edges_for_subclass(mock_integrate):
+    chunk = _make_chunk()
+    graph = _KGSubclass(
+        nodes=[Node(id="n1", name="Alice", type="Person", description="desc")],
+        edges=[
+            KGEdge(source_node_id="n1", target_node_id="n1", relationship_name="self"),
+            KGEdge(source_node_id="n1", target_node_id="missing", relationship_name="dangling"),
+        ],
+    )
+    mock_integrate.side_effect = lambda *a, **kw: a[0]
+
+    async def fake_calc(chunks, graph_model, custom_prompt, **kwargs):
+        return [graph]
+
+    config = {"ontology_config": {"ontology_resolver": _mock_resolver()}}
+
+    await extract_graph_from_data(
+        [chunk],
+        _KGSubclass,
+        config=config,
+        calculate_chunk_graphs=fake_calc,
+    )
+
+    # Edge with missing target should be filtered out for the subclass.
+    assert len(graph.edges) == 1
+    assert graph.edges[0].target_node_id == "n1"
 
 
 @pytest.mark.asyncio
