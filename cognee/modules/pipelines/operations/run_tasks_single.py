@@ -5,6 +5,13 @@ worker-per-task executor in :mod:`worker_pipeline`. Multi-item callers
 (the dataset-level :mod:`run_tasks`) should use ``run_worker_pipeline``
 directly to feed the whole stream of data items into one shared set of
 workers + queues.
+
+Order guarantee: every stage is pinned to ``FixedWorkers(1)`` here so
+that streamed yields from an upstream async-generator task arrive at
+downstream stages in their yield order. Single-input pipelines gain no
+throughput from per-stage parallelism (there is only one initial input),
+and historical callers of ``run_tasks_single`` rely on ordered streaming
+when chaining async generators.
 """
 
 from typing import Any, AsyncGenerator, Optional
@@ -13,7 +20,21 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.users.models import User
 
 from ..tasks.task import Task
-from .worker_pipeline import _NO_DATA, _ErroredItem, run_worker_pipeline
+from .worker_pipeline import (
+    FixedWorkers,
+    _NO_DATA,
+    _ErroredItem,
+    run_worker_pipeline,
+)
+
+
+def _pin_to_single_worker(task: Task) -> Task:
+    """Return a clone of ``task`` with ``workers=FixedWorkers(1)`` unless the
+    caller already set an explicit ``workers`` strategy. Preserves any other
+    task_config / batch_size / timeout settings via ``with_config``."""
+    if task.task_config.get("workers") is not None:
+        return task
+    return task.with_config(workers=FixedWorkers(1))
 
 
 async def run_tasks_single(
@@ -34,9 +55,10 @@ async def run_tasks_single(
         return
 
     head_payload = _NO_DATA if data is None else data
+    serial_tasks = [_pin_to_single_worker(t) for t in tasks]
 
     async for envelope in run_worker_pipeline(
-        tasks=tasks,
+        tasks=serial_tasks,
         data_iterable=[head_payload],
         user=user,
         ctx=ctx,

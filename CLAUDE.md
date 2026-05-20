@@ -495,6 +495,8 @@ async def my_custom_task(data):
 task = Task(my_custom_task)
 ```
 
+**Ordering contract.** The pipeline executor defaults to `FixedWorkers(20)` per stage — items can be processed in any order across invocations, and a downstream stage may receive yields in completion order rather than input order. Custom tasks must be **order-independent**: don't rely on positional pairing of items between stages, don't accumulate cross-invocation state, and don't assume "item N+1 follows item N". Use `Task(fn, workers=FixedWorkers(1))` on every stage when you need end-to-end input order.
+
 ### Accessing Databases Directly
 ```python
 from cognee.infrastructure.databases.graph import get_graph_engine
