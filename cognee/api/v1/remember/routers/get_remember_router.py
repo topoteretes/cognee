@@ -37,7 +37,7 @@ def get_remember_router() -> APIRouter:
         custom_prompt: Optional[str] = Form(default=""),
         chunk_size: Optional[int] = Form(default=4096),
         chunks_per_batch: Optional[int] = Form(default=36),
-        content_type: Optional[str] = Form(default=None),
+        content_type: Optional[str] = Form(default=None, examples=[""]),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -82,6 +82,7 @@ def get_remember_router() -> APIRouter:
         from cognee.api.v1.remember import remember as cognee_remember
 
         try:
+            print(content_type, type(content_type))
             result = await cognee_remember(
                 data,
                 dataset_name=datasetName,
