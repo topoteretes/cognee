@@ -92,6 +92,13 @@ async def forget(
         if dataset:
             span.set_attribute(COGNEE_DATASET_NAME, str(dataset))
 
+        # Coerce stringified UUIDs so a UUID-shaped string isn't mistaken for a name.
+        if isinstance(dataset, str):
+            try:
+                dataset = UUID(dataset)
+            except ValueError:
+                pass
+
         from cognee.api.v1.serve.state import get_remote_client
 
         client = get_remote_client()
