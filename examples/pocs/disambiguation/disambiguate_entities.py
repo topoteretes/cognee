@@ -208,6 +208,20 @@ async def disambiguate_entities_pipeline(
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
 
+    # If the caller supplied batch_size via kwargs, honor it as the fallback
+    # for chunks_per_batch when chunks_per_batch is unset. Reject conflicting
+    # values so silent overrides don't hide the caller's intent.
+    forwarded_batch_size = kwargs.get("batch_size")
+    if forwarded_batch_size is not None:
+        if chunks_per_batch is None:
+            chunks_per_batch = forwarded_batch_size
+        elif forwarded_batch_size != chunks_per_batch:
+            raise ValueError(
+                "Pass only one of 'chunks_per_batch' or 'batch_size' — "
+                f"got chunks_per_batch={chunks_per_batch!r}, "
+                f"batch_size={forwarded_batch_size!r}"
+            )
+
     if chunks_per_batch is None:
         chunks_per_batch = (
             cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100

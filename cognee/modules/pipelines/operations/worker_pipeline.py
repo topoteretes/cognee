@@ -1171,11 +1171,15 @@ async def _run_stage(
             # the in-progress target reflects partial discovery and would
             # mislead the next run if persisted.
             await pool.stop_ticker(persist=not (cancelled or failed))
-        if out_queue is not None and not (cancelled or failed):
-            # Skip the EOF fan-out on cancellation/failure: the next stage is
-            # also being torn down (see consumer-abort path in
-            # run_worker_pipeline), so no one is draining out_queue. ``put`` on
-            # a bounded intermediate queue would block indefinitely.
+        if out_queue is not None and not cancelled:
+            # Skip the EOF fan-out only on cancellation: the consumer has
+            # already aborted and cancelled the producer, so no one is
+            # draining out_queue and ``put`` on a bounded intermediate
+            # queue would block indefinitely. On a non-cancelled failure
+            # the consumer is still parked on ``output_q.get()`` waiting
+            # for EOF — we MUST send sentinels here, otherwise the
+            # consumer deadlocks and never reaches the gather() that
+            # would surface the original exception.
             for _ in range(next_workers_count):
                 await out_queue.put(_SENTINEL)
 
