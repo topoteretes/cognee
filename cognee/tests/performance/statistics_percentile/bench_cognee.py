@@ -23,6 +23,8 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
 DEFAULT_MEMORIES_FILE = Path(__file__).with_name("memories.json")
@@ -33,7 +35,35 @@ DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMS = 1536
 DATASET_NAME = "bench_memories"
 
+ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
+
 os.environ.setdefault("COGNEE_SKIP_CONNECTION_TEST", "true")
+
+
+def _resolve_config(args: argparse.Namespace) -> dict:
+    """Resolve config values: CLI arg → .env file → script defaults."""
+    env = dotenv_values(ENV_FILE) if ENV_FILE.exists() else {}
+
+    def pick(cli_val, env_key: str, default):
+        if cli_val is not None:
+            return cli_val
+        env_val = env.get(env_key) or os.environ.get(env_key)
+        if env_val is not None:
+            return type(default)(env_val) if not isinstance(default, str) else env_val
+        return default
+
+    api_key = pick(None, "LLM_API_KEY", "") or pick(None, "OPENAI_API_KEY", "")
+    if not api_key:
+        sys.exit("Error: LLM_API_KEY is not set (CLI, .env, or environment)")
+
+    return {
+        "api_key": api_key,
+        "llm_provider": pick(args.llm_provider, "LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
+        "llm_model": pick(args.llm_model, "LLM_MODEL", DEFAULT_LLM_MODEL),
+        "embedding_provider": pick(args.embedding_provider, "EMBEDDING_PROVIDER", DEFAULT_EMBEDDING_PROVIDER),
+        "embedding_model": pick(args.embedding_model, "EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+        "embedding_dims": pick(args.embedding_dims, "EMBEDDING_DIMENSIONS", DEFAULT_EMBEDDING_DIMS),
+    }
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,29 +93,22 @@ def memory_to_text(mem: dict) -> str:
 async def run_benchmark(
     memories: list[dict],
     *,
-    llm_model: str,
-    llm_provider: str,
-    embedding_provider: str,
-    embedding_model: str,
-    embedding_dims: int,
+    config: dict,
 ) -> dict:
     import cognee
 
-    api_key = os.environ.get("LLM_API_KEY", None)
-    if not api_key:
-        api_key = os.environ.get("OPENAI_API_KEY")
+    llm_model = config["llm_model"]
+    llm_provider = config["llm_provider"]
+    embedding_model = config["embedding_model"]
+    embedding_dims = config["embedding_dims"]
 
-    if not api_key:
-        sys.exit("Error: LLM_API_KEY environment variable is not set")
-
-    # ── Configure ────────────────────────────────────────────────────────
-    cognee.config.set_llm_api_key(api_key)
+    cognee.config.set_llm_api_key(config["api_key"])
     cognee.config.set_llm_provider(llm_provider)
     cognee.config.set_llm_model(llm_model)
-    cognee.config.set_embedding_provider(embedding_provider)
+    cognee.config.set_embedding_provider(config["embedding_provider"])
     cognee.config.set_embedding_model(embedding_model)
     cognee.config.set_embedding_dimensions(embedding_dims)
-    cognee.config.set_embedding_api_key(api_key)
+    cognee.config.set_embedding_api_key(config["api_key"])
 
     # ── Prune (clean slate) ──────────────────────────────────────────────
     print("Pruning previous data...")
@@ -177,18 +200,24 @@ def main():
         help=f"JSON file with memories array (default: {DEFAULT_MEMORIES_FILE.name})",
     )
     parser.add_argument(
-        "--llm-model", default=DEFAULT_LLM_MODEL,
-        help=f"OpenAI LLM model for cognee (default: {DEFAULT_LLM_MODEL})",
+        "--llm-model", default=None,
+        help=f"LLM model (default: .env LLM_MODEL or {DEFAULT_LLM_MODEL})",
     )
     parser.add_argument(
-        "--embedding-model", default=DEFAULT_EMBEDDING_MODEL,
-        help=f"OpenAI embedding model (default: {DEFAULT_EMBEDDING_MODEL})",
+        "--embedding-model", default=None,
+        help=f"Embedding model (default: .env EMBEDDING_MODEL or {DEFAULT_EMBEDDING_MODEL})",
     )
-    parser.add_argument("--llm-provider", default=DEFAULT_LLM_PROVIDER)
-    parser.add_argument("--embedding-provider", default=DEFAULT_EMBEDDING_PROVIDER)
     parser.add_argument(
-        "--embedding-dims", type=int, default=DEFAULT_EMBEDDING_DIMS,
-        help=f"Embedding dimensions (default: {DEFAULT_EMBEDDING_DIMS})",
+        "--llm-provider", default=None,
+        help=f"LLM provider (default: .env LLM_PROVIDER or {DEFAULT_LLM_PROVIDER})",
+    )
+    parser.add_argument(
+        "--embedding-provider", default=None,
+        help=f"Embedding provider (default: .env EMBEDDING_PROVIDER or {DEFAULT_EMBEDDING_PROVIDER})",
+    )
+    parser.add_argument(
+        "--embedding-dims", type=int, default=None,
+        help=f"Embedding dimensions (default: .env EMBEDDING_DIMENSIONS or {DEFAULT_EMBEDDING_DIMS})",
     )
     parser.add_argument(
         "--num-memories", type=int, default=None,
@@ -200,20 +229,15 @@ def main():
     )
     args = parser.parse_args()
 
+    config = _resolve_config(args)
+
     memories = load_memories(args.memories)
     if args.num_memories is not None:
         memories = memories[:args.num_memories]
     print(f"Loaded {len(memories)} memories from {args.memories}")
-    print(f"Config: llm={args.llm_model}, embeddings={args.embedding_model} ({args.embedding_dims}d)\n")
+    print(f"Config: llm={config['llm_model']}, embeddings={config['embedding_model']} ({config['embedding_dims']}d)\n")
 
-    results = asyncio.run(run_benchmark(
-        memories,
-        llm_model=args.llm_model,
-        llm_provider=args.llm_provider,
-        embedding_provider=args.embedding_provider,
-        embedding_model=args.embedding_model,
-        embedding_dims=args.embedding_dims,
-    ))
+    results = asyncio.run(run_benchmark(memories, config=config))
 
     if args.output:
         with open(args.output, "w") as f:
