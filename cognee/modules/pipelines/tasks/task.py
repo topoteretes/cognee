@@ -73,14 +73,33 @@ class TaskSpec:
         result = await extract_graph_task.direct(chunks, graph_model=KnowledgeGraph)
     """
 
-    def __init__(self, fn, batch_size=None, enriches=False, **default_params):
+    def __init__(
+        self,
+        fn,
+        batch_size=None,
+        enriches=False,
+        workers: Optional["WorkerStrategy"] = None,
+        timeout: Optional[float] = None,
+        **default_params,
+    ):
         self._fn = fn
         self._batch_size = batch_size
         self._enriches = enriches
+        self._workers = workers
+        self._timeout = timeout
         self._default_params = default_params
 
-        # Pre-build the base Task
-        self._base_task = Task(fn, batch_size=batch_size, enriches=enriches, **default_params)
+        # Pre-build the base Task. workers/timeout are Task-level config, not
+        # callable kwargs — keep them out of self._default_params so .direct()
+        # doesn't forward them into the underlying function.
+        self._base_task = Task(
+            fn,
+            batch_size=batch_size,
+            enriches=enriches,
+            workers=workers,
+            timeout=timeout,
+            **default_params,
+        )
 
         # Copy function metadata for introspection
         self.__name__ = fn.__name__
@@ -94,17 +113,27 @@ class TaskSpec:
         Special kwargs:
             batch_size: Override the Task's batch_size for this pipeline step.
             enriches: Override the enriches flag for this pipeline step.
+            workers: Override the WorkerStrategy for this pipeline step.
+            timeout: Override the per-call timeout for this pipeline step.
 
         All other kwargs are passed to the underlying function at execution time.
         """
         batch_size = kwargs.pop("batch_size", None)
         enriches = kwargs.pop("enriches", None)
+        workers = kwargs.pop("workers", None)
+        timeout = kwargs.pop("timeout", None)
 
-        if batch_size is not None or enriches is not None:
-            inner = self._base_task.with_config(
-                **({"batch_size": batch_size} if batch_size is not None else {}),
-                **({"enriches": enriches} if enriches is not None else {}),
-            )
+        if any(v is not None for v in (batch_size, enriches, workers, timeout)):
+            overrides: dict = {}
+            if batch_size is not None:
+                overrides["batch_size"] = batch_size
+            if enriches is not None:
+                overrides["enriches"] = enriches
+            if workers is not None:
+                overrides["workers"] = workers
+            if timeout is not None:
+                overrides["timeout"] = timeout
+            inner = self._base_task.with_config(**overrides)
         else:
             inner = self._base_task
 
@@ -128,7 +157,15 @@ class TaskSpec:
         return f"TaskSpec({self.__name__}, batch_size={bs})"
 
 
-def task(fn=None, *, batch_size=None, enriches=False, **default_params):
+def task(
+    fn=None,
+    *,
+    batch_size=None,
+    enriches=False,
+    workers: Optional["WorkerStrategy"] = None,
+    timeout: Optional[float] = None,
+    **default_params,
+):
     """Create a TaskSpec from a function.
 
     Can be used as a decorator or as a functional wrapper::
@@ -155,7 +192,14 @@ def task(fn=None, *, batch_size=None, enriches=False, **default_params):
     """
 
     def decorator(func):
-        return TaskSpec(func, batch_size=batch_size, enriches=enriches, **default_params)
+        return TaskSpec(
+            func,
+            batch_size=batch_size,
+            enriches=enriches,
+            workers=workers,
+            timeout=timeout,
+            **default_params,
+        )
 
     if fn is not None:
         return decorator(fn)
