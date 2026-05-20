@@ -1,7 +1,19 @@
-from typing import Union, Callable, Any, Coroutine, Generator, AsyncGenerator
+from typing import (
+    Union,
+    Callable,
+    Any,
+    Coroutine,
+    Generator,
+    AsyncGenerator,
+    Optional,
+    TYPE_CHECKING,
+)
 import inspect
 
 from cognee.pipelines.types import _Drop
+
+if TYPE_CHECKING:
+    from cognee.modules.pipelines.operations.worker_pipeline import WorkerStrategy
 
 
 class BoundTask:
@@ -191,8 +203,8 @@ class Task:
         task_config=None,
         batch_size=None,
         enriches=False,
-        workers=None,
-        timeout=None,
+        workers: Optional["WorkerStrategy"] = None,
+        timeout: Optional[float] = None,
         **kwargs,
     ):
         self.executable = executable

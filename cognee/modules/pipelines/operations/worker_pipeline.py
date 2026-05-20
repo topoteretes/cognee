@@ -826,9 +826,18 @@ def _resolve_stage_configs(tasks: list[Task], data_per_batch: int) -> list[_Stag
         if queue_maxsize < 0:
             raise ValueError(f"Task '{task_name}': queue_maxsize must be >= 0, got {queue_maxsize}")
         if adaptive:
+            if int(min_workers) <= 0:
+                raise ValueError(
+                    f"Task '{task_name}': min_workers must be >= 1, got {int(min_workers)}"
+                )
             if int(initial_workers) <= 0:
                 raise ValueError(
                     f"Task '{task_name}': initial_workers must be >= 1, got {int(initial_workers)}"
+                )
+            if int(min_workers) > int(num_workers):
+                raise ValueError(
+                    f"Task '{task_name}': min_workers ({int(min_workers)}) must be <= "
+                    f"num_workers ({int(num_workers)})"
                 )
             if strategy.max_workers is not None and int(strategy.max_workers) <= 0:
                 raise ValueError(
@@ -840,6 +849,8 @@ def _resolve_stage_configs(tasks: list[Task], data_per_batch: int) -> list[_Stag
                 raise ValueError(
                     f"Task '{task_name}': tick_seconds must be > 0, got {float(tick_seconds)}"
                 )
+        if per_call_timeout is not None and per_call_timeout <= 0:
+            raise ValueError(f"Task '{task_name}': timeout must be > 0, got {per_call_timeout}")
 
         configs.append(
             _StageConfig(
