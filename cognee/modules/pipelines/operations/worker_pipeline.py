@@ -482,11 +482,18 @@ class _AdaptivePool:
         if removed <= 0:
             return
         self.target = new_target
-        # Burn `removed` permits so the worker pool collapses to the new target.
-        # Each acquire blocks until a worker releases its permit (i.e. finishes
-        # its current item), so shrink is paced by natural completions.
+        # Burn permits opportunistically: drain whatever is idle right now, but
+        # never block waiting for a busy worker — a hung task would otherwise
+        # wedge the ticker (and shutdown) behind it. ``wait_for(..., timeout=0)``
+        # only succeeds when the acquire completes synchronously (i.e. a permit
+        # is free); otherwise it raises and we stop trying for this tick. Any
+        # excess permits we couldn't reclaim now will be picked up by future
+        # ticks as workers complete.
         for _ in range(removed):
-            await self._sem.acquire()
+            try:
+                await asyncio.wait_for(self._sem.acquire(), timeout=0)
+            except asyncio.TimeoutError:
+                break
         self.total_shrink_events += 1
 
     def start_ticker(self, in_queue: "InstrumentedQueue") -> None:
@@ -654,7 +661,7 @@ class _AdaptivePool:
 
         self._tick_task = asyncio.create_task(_ticker())
 
-    async def stop_ticker(self) -> None:
+    async def stop_ticker(self, persist: bool = True) -> None:
         self._stop.set()
         if self._tick_task is not None and not self._tick_task.done():
             try:
@@ -663,7 +670,10 @@ class _AdaptivePool:
                 pass
         # Persist the converged target so the next pipeline run for the same
         # task can resume here instead of paying the discovery cost again.
-        _ADAPTIVE_TARGET_REGISTRY[self.task_name] = self.target
+        # Skip when persist=False so cancelled runs don't cache a transient
+        # mid-discovery target that would mislead the next run.
+        if persist:
+            _ADAPTIVE_TARGET_REGISTRY[self.task_name] = self.target
 
     def stats(self) -> dict:
         targets = [t for _, t in self._target_history] or [self.target]
@@ -777,14 +787,19 @@ def _resolve_stage_configs(tasks: list[Task], data_per_batch: int) -> list[_Stag
         if isinstance(strategy, AdaptiveWorkers):
             adaptive = True
             num_workers = strategy.max_workers or data_per_batch
-            initial_workers = strategy.initial_workers
+            # Clamp initial_workers into [1, num_workers]: ``AdaptiveWorkers()``
+            # defaults to 40, but a small ``data_per_batch`` (the implicit
+            # max_workers ceiling) would otherwise make the defaults invalid
+            # at validation time.
+            initial_workers = max(1, min(strategy.initial_workers, num_workers))
             # Resolve min_workers floor: when unspecified, default to a quarter
-            # of initial_workers (floor 1) so a throttle storm can't collapse
-            # the pool down to a single worker.
+            # of (clamped) initial_workers so a throttle storm can't collapse
+            # the pool down to a single worker. Then clamp into
+            # [1, initial_workers] to keep min <= initial <= max.
             if strategy.min_workers is None:
-                min_workers = max(1, strategy.initial_workers // 4)
+                min_workers = max(1, initial_workers // 4)
             else:
-                min_workers = strategy.min_workers
+                min_workers = max(1, min(strategy.min_workers, initial_workers))
             step = strategy.step
             tick_seconds = strategy.tick_seconds
             throughput_improvement_ratio = strategy.throughput_improvement_ratio
@@ -1099,11 +1114,18 @@ async def _run_stage(
         )
         for _ in range(num_workers)
     ]
+    cancelled = False
     try:
         await asyncio.gather(*workers)
+    except asyncio.CancelledError:
+        cancelled = True
+        raise
     finally:
         if pool is not None:
-            await pool.stop_ticker()
+            # Don't cache the adaptive target from a cancelled run — the
+            # in-progress target reflects partial discovery and would mislead
+            # the next run if persisted.
+            await pool.stop_ticker(persist=not cancelled)
         if out_queue is not None:
             for _ in range(next_workers_count):
                 await out_queue.put(_SENTINEL)

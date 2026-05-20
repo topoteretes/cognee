@@ -55,9 +55,9 @@ async def test_single_worker_preserves_order():
     assert out == expected, f"Expected ordered output but got {out!r}"
 
 
-def test_single_worker_preserves_order_sync():
+def _run_single_worker_preserves_order_sync():
     asyncio.run(test_single_worker_preserves_order())
 
 
 if __name__ == "__main__":
-    test_single_worker_preserves_order_sync()
+    _run_single_worker_preserves_order_sync()
