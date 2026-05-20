@@ -243,6 +243,7 @@ async def _build_global_context_index(
             user=user,
             dataset=dataset,
             run_in_background=False,
+            bucketing_strategy="graph",
         )
         logger.info("improve: global context index updated")
         return True
