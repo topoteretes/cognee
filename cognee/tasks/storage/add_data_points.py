@@ -46,6 +46,7 @@ async def add_data_points(
     user = ctx.user if ctx else None
     data_item = ctx.data_item if ctx else None
     dataset = ctx.dataset if ctx else None
+    pipeline_run_id = ctx.pipeline_run_id if ctx else None
 
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
@@ -78,11 +79,43 @@ async def add_data_points(
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
     edges = ensure_default_edge_properties(edges)
+    custom_edges = (
+        ensure_default_edge_properties(custom_edges)
+        if isinstance(custom_edges, list) and custom_edges
+        else None
+    )
 
     unified = await get_unified_engine()
     graph_engine = unified.graph
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
+
+    if user and dataset and data_item:
+        await upsert_nodes(
+            nodes,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            dataset_id=dataset.id,
+            data_id=data_item.id,
+            pipeline_run_id=pipeline_run_id,
+        )
+        await upsert_edges(
+            edges,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            dataset_id=dataset.id,
+            data_id=data_item.id,
+            pipeline_run_id=pipeline_run_id,
+        )
+        if custom_edges:
+            await upsert_edges(
+                custom_edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data_item.id,
+                pipeline_run_id=pipeline_run_id,
+            )
 
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
@@ -95,22 +128,6 @@ async def add_data_points(
             ),
         )
 
-    if user and dataset and data_item:
-        await upsert_nodes(
-            nodes,
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            dataset_id=dataset.id,
-            data_id=data_item.id,
-        )
-        await upsert_edges(
-            edges,
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            dataset_id=dataset.id,
-            data_id=data_item.id,
-        )
-
     if use_hybrid:
         await graph_engine.add_edges_with_vectors(edges)
     else:
@@ -118,24 +135,14 @@ async def add_data_points(
             graph_engine.add_edges(edges), index_graph_edges(edges, vector_engine=vector_engine)
         )
 
-    if isinstance(custom_edges, list) and custom_edges:
+    if custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
-        custom_edges = ensure_default_edge_properties(custom_edges)
         if use_hybrid:
             await graph_engine.add_edges_with_vectors(custom_edges)
         else:
             await asyncio.gather(
                 graph_engine.add_edges(custom_edges),
                 index_graph_edges(custom_edges, vector_engine=vector_engine),
-            )
-
-        if user and dataset and data_item:
-            await upsert_edges(
-                custom_edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=dataset.id,
-                data_id=data_item.id,
             )
 
         edges.extend(custom_edges)

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from uuid import NAMESPACE_OID, UUID, uuid5
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,7 @@ async def upsert_nodes(
     dataset_id: UUID,
     data_id: UUID,
     session: AsyncSession,
+    pipeline_run_id: Optional[UUID] = None,
 ):
     """
     Adds nodes to the nodes table.
@@ -42,6 +43,7 @@ async def upsert_nodes(
             "user_id": user_id,
             "data_id": data_id,
             "dataset_id": dataset_id,
+            "pipeline_run_id": pipeline_run_id,
             "type": sanitize_relational_payload(node.type),
             "indexed_fields": sanitize_relational_payload(
                 DataPoint.get_embeddable_property_names(node)

@@ -2,7 +2,7 @@ import os
 
 import asyncio
 from functools import wraps
-from typing import Any, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -62,6 +62,7 @@ async def run_tasks(
     incremental_loading: bool = False,
     data_per_batch: int = 20,
     extras: Optional[dict] = None,
+    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -109,6 +110,7 @@ async def run_tasks(
                             user=user,
                             data_item=data_item,
                             dataset=dataset,
+                            pipeline_run_id=pipeline_run_id,
                             pipeline_name=pipeline_name,
                             extras=extras if isinstance(extras, dict) else {},
                         ),
@@ -168,6 +170,21 @@ async def run_tasks(
                 await relational_engine.push_to_s3()
 
         except Exception as error:
+            if callable(rollback_handler):
+                try:
+                    await rollback_handler(
+                        pipeline_run_id=pipeline_run_id,
+                        pipeline_id=pipeline_id,
+                        pipeline_name=pipeline_name,
+                        dataset=dataset,
+                        user=user,
+                        data=data,
+                        data_ingestion_info=locals().get("results"),
+                        error=error,
+                    )
+                except Exception as rollback_error:
+                    logger.error("Rollback errored: %s", rollback_error, exc_info=True)
+
             await log_pipeline_run_error(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
             )

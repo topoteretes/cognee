@@ -26,6 +26,9 @@ class Node(Base):
     data_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
     dataset_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    pipeline_run_id: Mapped[UUID | None] = mapped_column(
+        UUID(as_uuid=True), index=True, nullable=True
+    )
 
     label: Mapped[str | None] = mapped_column(String(255))
     type: Mapped[str] = mapped_column(String(255), nullable=False)
