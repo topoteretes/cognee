@@ -38,7 +38,7 @@ from cognee import __version__ as cognee_version
 from cognee.tasks.ingestion import resolve_data_directories, save_data_item_to_storage
 
 from ..tasks.task import Task
-from .worker_pipeline import _ErroredItem, run_worker_pipeline
+from .worker_pipeline import _ErroredItem, _OriginRef, run_worker_pipeline
 
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
@@ -115,20 +115,35 @@ async def _preflight(
     dataset,
     pipeline_name: str,
     incremental_loading: bool,
+    data_per_batch: int,
 ) -> Tuple[List[Tuple[Any, Any]], List[Any]]:
     """Resolve data_ids and (for incremental mode) filter out items that have
     already been processed.
 
     Returns ``(items_to_process, already_completed_ids)`` where each item in
     ``items_to_process`` is ``(data_item, data_id_or_None)``.
+
+    Concurrency for the ``asyncio.gather`` fan-outs below is capped at
+    ``data_per_batch`` via a semaphore so large input lists do not exhaust the
+    relational DB connection pool when resolving / checking many items in
+    parallel.
     """
     if not incremental_loading:
         return [(item, None) for item in data], []
 
-    data_ids = await asyncio.gather(*[_resolve_data_id(item, user) for item in data])
-    completion_flags = await asyncio.gather(
-        *[_is_already_completed(did, pipeline_name, dataset.id) for did in data_ids]
-    )
+    sem = asyncio.Semaphore(data_per_batch)
+
+    async def _bounded_resolve(item):
+        async with sem:
+            return await _resolve_data_id(item, user)
+
+    data_ids = await asyncio.gather(*[_bounded_resolve(item) for item in data])
+
+    async def _bounded_check(did):
+        async with sem:
+            return await _is_already_completed(did, pipeline_name, dataset.id)
+
+    completion_flags = await asyncio.gather(*[_bounded_check(did) for did in data_ids])
 
     to_process: List[Tuple[Any, Any]] = []
     already_done: List[Any] = []
@@ -185,7 +200,7 @@ async def run_tasks(
     send_telemetry(
         "Pipeline Run Started",
         user.id,
-        additional_properties=_pipeline_telemetry_props(pipeline_id, user),
+        additional_properties=_pipeline_telemetry_props(pipeline_name, user),
     )
 
     # Note: Setting of global context has to be done after yielding PipelineRunStarted
@@ -204,6 +219,7 @@ async def run_tasks(
                 dataset=dataset,
                 pipeline_name=pipeline_name,
                 incremental_loading=incremental_loading,
+                data_per_batch=data_per_batch,
             )
 
             results: list = []
@@ -219,17 +235,6 @@ async def run_tasks(
                     }
                 )
 
-            # Track per-origin processing state keyed by id(item): we need identity-based
-            # lookup (Data items may be value-equal duplicates, so __hash__/__eq__ won't do)
-            # and id() is the cheap hashable proxy. Correctness depends on to_process holding
-            # strong refs to every (item, did) tuple for the whole run, which prevents GC and
-            # id reuse. Do NOT drop items from to_process early, or weakref them elsewhere,
-            # without rekeying this map -- a recycled id() would alias the wrong entry.
-            origin_state: dict = {
-                id(item): {"data_id": did, "error": None, "successes": 0}
-                for item, did in to_process
-            }
-
             ctx = PipelineContext(
                 user=user,
                 data_item=None,  # set per-call inside workers via dataclasses.replace
@@ -240,9 +245,27 @@ async def run_tasks(
 
             # First task expects a list of Data items (cognee convention),
             # so wrap each item as [item] entering the pipeline. The
-            # ``origin`` (second tuple element) stays the unwrapped item so
-            # ctx.data_item points to the original Data downstream.
-            pipeline_inputs = [([item], item) for item, _ in to_process]
+            # ``origin`` (second tuple element) is a fresh ``_OriginRef``
+            # wrapper per pipeline item — each wrapper has a distinct
+            # ``id()`` even when the caller deduplicated by reusing the same
+            # Python object across multiple inputs, so ``origin_state`` keys
+            # never alias. Workers unwrap ``ref.item`` to populate
+            # ``ctx.data_item`` with the original Data downstream.
+            pipeline_inputs = [([item], _OriginRef(item)) for item, _ in to_process]
+
+            # Track per-origin processing state keyed by id(ref) where ``ref``
+            # is the same ``_OriginRef`` instance pushed into the pipeline. We
+            # need identity-based lookup (Data items may be value-equal
+            # duplicates, so __hash__/__eq__ won't do); the ``_OriginRef``
+            # wrapper guarantees a distinct ``id()`` per pipeline item even
+            # when the underlying value is shared. Correctness still depends
+            # on ``pipeline_inputs`` (and thus the wrappers) being held by a
+            # strong reference for the whole run so the GC cannot recycle an
+            # id() while the map is live.
+            origin_state: dict = {
+                id(ref): {"data_id": did, "error": None, "successes": 0, "item": item}
+                for (_, ref), (item, did) in zip(pipeline_inputs, to_process)
+            }
 
             try:
                 async for envelope in run_worker_pipeline(
@@ -285,9 +308,11 @@ async def run_tasks(
                 ) from worker_pipeline_error
 
             # Per-item post-flight: mark completed in DB for incremental mode,
-            # and build the per-item results dict.
-            for item, did in to_process:
-                state = origin_state[id(item)]
+            # and build the per-item results dict. Iterate the same _OriginRef
+            # wrappers used as origin_state keys so duplicate item objects
+            # don't alias to a single state entry.
+            for (_, ref), (item, did) in zip(pipeline_inputs, to_process):
+                state = origin_state[id(ref)]
                 if state["error"] is not None:
                     results.append(
                         {
@@ -332,7 +357,7 @@ async def run_tasks(
             send_telemetry(
                 "Pipeline Run Completed",
                 user.id,
-                additional_properties=_pipeline_telemetry_props(pipeline_id, user),
+                additional_properties=_pipeline_telemetry_props(pipeline_name, user),
             )
 
             yield PipelineRunCompleted(
@@ -358,7 +383,7 @@ async def run_tasks(
             send_telemetry(
                 "Pipeline Run Errored",
                 user.id,
-                additional_properties=_pipeline_telemetry_props(pipeline_id, user),
+                additional_properties=_pipeline_telemetry_props(pipeline_name, user),
             )
 
             yield PipelineRunErrored(

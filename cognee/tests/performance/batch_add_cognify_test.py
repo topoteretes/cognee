@@ -142,7 +142,7 @@ def add_files_batch(base_url: str, api_key: str, count: int, dataset_name: str) 
     elapsed = time.time() - start
 
     if resp.status_code != 200:
-        log(f"  ERROR: {resp.status_code} - {resp.text[:300]}")
+        raise SystemExit(f"  ERROR: {resp.status_code} - {resp.text[:300]}")
     return elapsed
 
 
@@ -160,7 +160,7 @@ def cognify(base_url: str, api_key: str, dataset_name: str) -> float:
     elapsed = time.time() - start
 
     if resp.status_code != 200:
-        log(f"  Cognify ERROR: {resp.status_code} - {resp.text[:300]}")
+        raise SystemExit(f"  Cognify ERROR: {resp.status_code} - {resp.text[:300]}")
     return elapsed
 
 
