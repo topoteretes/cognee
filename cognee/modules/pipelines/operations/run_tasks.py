@@ -178,6 +178,9 @@ async def run_tasks(
     pipeline absorbs all data items, with per-task ``num_workers`` (default
     ``data_per_batch`` when the task allows reordering) providing input
     parallelism."""
+    if data_per_batch <= 0:
+        raise ValueError(f"data_per_batch must be > 0, got {data_per_batch}")
+
     if not user:
         user = await get_default_user()
 
