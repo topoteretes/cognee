@@ -1202,15 +1202,17 @@ async def run_worker_pipeline(
     async def _produce():
         head_q = queues[0]
         seq = 0
-        async for item in _as_async_iterable(data_iterable):
-            if isinstance(item, tuple) and len(item) == 2:
-                value, origin = item
-            else:
-                value, origin = item, item
-            await head_q.put(_ItemEnvelope(value=value, origin=origin, seq=seq))
-            seq += 1
-        for _ in range(stage_configs[0].num_workers):
-            await head_q.put(_SENTINEL)
+        try:
+            async for item in _as_async_iterable(data_iterable):
+                if isinstance(item, tuple) and len(item) == 2:
+                    value, origin = item
+                else:
+                    value, origin = item, item
+                await head_q.put(_ItemEnvelope(value=value, origin=origin, seq=seq))
+                seq += 1
+        finally:
+            for _ in range(stage_configs[0].num_workers):
+                await head_q.put(_SENTINEL)
 
     producer_task = asyncio.create_task(_produce())
 
