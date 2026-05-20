@@ -91,9 +91,7 @@ def get_remember_router() -> APIRouter:
             config_to_use = None
             if ontology_key:
                 ontology_service = OntologyService()
-                ontology_contents = ontology_service.get_ontology_contents(
-                    ontology_key, user
-                )
+                ontology_contents = ontology_service.get_ontology_contents(ontology_key, user)
 
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
@@ -104,9 +102,7 @@ def get_remember_router() -> APIRouter:
                 ontology_streams = [StringIO(content) for content in ontology_contents]
                 config_to_use: Config = {
                     "ontology_config": {
-                        "ontology_resolver": RDFLibOntologyResolver(
-                            ontology_file=ontology_streams
-                        )
+                        "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)
                     }
                 }
 
