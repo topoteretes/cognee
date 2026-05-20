@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     from cognee.modules.pipelines.operations.worker_pipeline import WorkerStrategy
 
 
+# Module-level sentinel for distinguishing "kwarg not passed" from
+# "kwarg explicitly None" in TaskSpec.__call__ overrides.
+_UNSET_SENTINEL = object()
+
+
 class BoundTask:
     """A Task with pre-bound keyword arguments, ready for pipeline chaining.
 
@@ -118,20 +123,24 @@ class TaskSpec:
 
         All other kwargs are passed to the underlying function at execution time.
         """
-        batch_size = kwargs.pop("batch_size", None)
-        enriches = kwargs.pop("enriches", None)
-        workers = kwargs.pop("workers", None)
-        timeout = kwargs.pop("timeout", None)
+        # Distinct sentinel so callers can pass `workers=None` / `timeout=None`
+        # to explicitly clear the TaskSpec-level default, instead of having
+        # None silently mean "kwarg not passed".
+        _UNSET = _UNSET_SENTINEL
+        batch_size = kwargs.pop("batch_size", _UNSET)
+        enriches = kwargs.pop("enriches", _UNSET)
+        workers = kwargs.pop("workers", _UNSET)
+        timeout = kwargs.pop("timeout", _UNSET)
 
-        if any(v is not None for v in (batch_size, enriches, workers, timeout)):
+        if any(v is not _UNSET for v in (batch_size, enriches, workers, timeout)):
             overrides: dict = {}
-            if batch_size is not None:
+            if batch_size is not _UNSET:
                 overrides["batch_size"] = batch_size
-            if enriches is not None:
+            if enriches is not _UNSET:
                 overrides["enriches"] = enriches
-            if workers is not None:
+            if workers is not _UNSET:
                 overrides["workers"] = workers
-            if timeout is not None:
+            if timeout is not _UNSET:
                 overrides["timeout"] = timeout
             inner = self._base_task.with_config(**overrides)
         else:

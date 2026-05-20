@@ -484,16 +484,15 @@ class _AdaptivePool:
         self.target = new_target
         # Burn permits opportunistically: drain whatever is idle right now, but
         # never block waiting for a busy worker — a hung task would otherwise
-        # wedge the ticker (and shutdown) behind it. ``wait_for(..., timeout=0)``
-        # only succeeds when the acquire completes synchronously (i.e. a permit
-        # is free); otherwise it raises and we stop trying for this tick. Any
-        # excess permits we couldn't reclaim now will be picked up by future
-        # ticks as workers complete.
+        # wedge the ticker (and shutdown) behind it. ``Semaphore.locked()``
+        # tells us whether any permit is free; when it isn't, ``acquire()``
+        # decrements and returns synchronously (no yield), so the loop below
+        # never blocks. Permits we couldn't reclaim now stay in the semaphore
+        # and will be drained by future ticks as workers complete.
         for _ in range(removed):
-            try:
-                await asyncio.wait_for(self._sem.acquire(), timeout=0)
-            except asyncio.TimeoutError:
+            if self._sem.locked():
                 break
+            await self._sem.acquire()
         self.total_shrink_events += 1
 
     def start_ticker(self, in_queue: "InstrumentedQueue") -> None:
@@ -544,12 +543,11 @@ class _AdaptivePool:
                             f"util={utilization:.0%}, queue={in_queue.qsize()})"
                         )
 
-                    # Criterion 1: no completions in window → skip (no signal).
-                    if completions == 0:
-                        _log_no_change("no completions in window")
-                        continue
-
-                    # Criterion 2: throttling exceptions / timeouts → shrink.
+                    # Criterion 1: throttling exceptions / timeouts → shrink.
+                    # Handle this *before* the no-completions short-circuit so a
+                    # window that's all timeouts (e.g. embedding endpoint is
+                    # 429ing every call) still backs the pool off instead of
+                    # staying pinned at peak pressure.
                     if throttled > 0:
                         if self.target > self.min_workers:
                             await self._shrink(self.step)
@@ -560,6 +558,11 @@ class _AdaptivePool:
                             _log_no_change(f"{throttled} throttle event(s) but at min_workers")
                         now = loop.time() - self._start_time
                         self._target_history.append((now, self.target))
+                        continue
+
+                    # Criterion 2: no completions in window → skip (no signal).
+                    if completions == 0:
+                        _log_no_change("no completions in window")
                         continue
 
                     # Criterion 3: under-utilized → shrink (pool is over-provisioned).
@@ -777,7 +780,9 @@ def _resolve_stage_configs(tasks: list[Task], data_per_batch: int) -> list[_Stag
     _adaptive_defaults = AdaptiveWorkers()
     for i, task in enumerate(tasks):
         cfg = task.task_config or {}
-        strategy = cfg.get("workers", _DEFAULT_STRATEGY)
+        # Treat both missing and explicit-None as "use the framework default"
+        # so callers can clear a TaskSpec-level workers binding via with_config.
+        strategy = cfg.get("workers") or _DEFAULT_STRATEGY
         if not isinstance(strategy, WorkerStrategy):
             raise TypeError(
                 f"Task '{task.executable.__name__}': task_config['workers'] must be a "
