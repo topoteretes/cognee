@@ -25,7 +25,14 @@ from pathlib import Path
 BENCH_SCRIPT = (Path(__file__).parent / "statistics_percentile" / "bench_cognee.py").resolve()
 RESULTS_DIR = Path(__file__).parent / "results"
 COGNEE_DIR = Path(__file__).resolve().parents[3]
-METRICS = ["add_time_s", "cognify_time_s", "total_ingest_time_s", "search_time", "prune_time_s", "db_setup_time_s"]
+METRICS = [
+    "add_time_s",
+    "cognify_time_s",
+    "total_ingest_time_s",
+    "search_time",
+    "prune_time_s",
+    "db_setup_time_s",
+]
 PERCENTILES = [50, 75, 90, 95, 99]
 LABELS = {
     "add_time_s": "cognee.add()",
@@ -54,9 +61,9 @@ def run_single(run_num: int, total: int, extra_args: list[str]) -> dict:
         tmp_path = tmp.name
 
     cmd = [sys.executable, str(BENCH_SCRIPT), "--output", tmp_path] + extra_args
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  RUN {run_num}/{total}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     t0 = time.time()
     result = subprocess.run(cmd, text=True, cwd=str(COGNEE_DIR))
@@ -91,11 +98,13 @@ def build_report(runs: list[dict]) -> dict:
 
 
 def print_report(stats: dict, num_runs: int, config: dict):
-    print(f"\n{'#'*60}")
+    print(f"\n{'#' * 60}")
     print(f"  PERCENTILE REPORT  ({num_runs} run{'s' if num_runs != 1 else ''})")
-    print(f"{'#'*60}")
+    print(f"{'#' * 60}")
     print(f"  LLM model       : {config.get('llm_model', '?')}")
-    print(f"  Embedding model  : {config.get('embedding_model', '?')} ({config.get('embedding_dimensions', '?')}d)")
+    print(
+        f"  Embedding model  : {config.get('embedding_model', '?')} ({config.get('embedding_dimensions', '?')}d)"
+    )
     print()
 
     header = f"  {'Metric':<22} {'min':>8} {'p50':>8} {'p75':>8} {'p90':>8} {'p95':>8} {'p99':>8} {'max':>8} {'mean':>8}"
@@ -110,10 +119,10 @@ def print_report(stats: dict, num_runs: int, config: dict):
         print(" ".join(parts))
 
     print()
-    print(f"  Individual run values (total_ingest_time_s):")
+    print("  Individual run values (total_ingest_time_s):")
     for i, v in enumerate(stats["total_ingest_time_s"]["values"], 1):
         print(f"    Run {i}: {v:.2f}s")
-    print(f"{'#'*60}\n")
+    print(f"{'#' * 60}\n")
 
 
 def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], path: Path):
@@ -267,19 +276,39 @@ new Chart(lineCtx, {{
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run bench_cognee.py N times and produce a percentile report.")
-    parser.add_argument("--runs", "-n", type=int, default=5, help="Number of sequential runs (default: 5)")
+    parser = argparse.ArgumentParser(
+        description="Run bench_cognee.py N times and produce a percentile report."
+    )
+    parser.add_argument(
+        "--runs", "-n", type=int, default=5, help="Number of sequential runs (default: 5)"
+    )
     parser.add_argument("--output", "-o", type=Path, default=None, help="Save full report as JSON")
-    parser.add_argument("--html", type=Path, default=RESULTS_DIR / "report.html", help="Save HTML report (default: results/report.html)")
+    parser.add_argument(
+        "--html",
+        type=Path,
+        default=RESULTS_DIR / "report.html",
+        help="Save HTML report (default: results/report.html)",
+    )
     parser.add_argument("--memories", type=Path, default=None, help="Forward to bench_cognee.py")
     parser.add_argument("--llm-model", default=None, help="Forward to bench_cognee.py")
     parser.add_argument("--llm-provider", default=None, help="Forward to bench_cognee.py")
     parser.add_argument("--embedding-model", default=None, help="Forward to bench_cognee.py")
     parser.add_argument("--embedding-provider", default=None, help="Forward to bench_cognee.py")
-    parser.add_argument("--embedding-dims", type=int, default=None, help="Forward to bench_cognee.py")
-    parser.add_argument("--num-memories", type=int, default=None, help="Limit number of memories to load")
-    parser.add_argument("--mock-llm", action="store_true", default=False, help="Use mock LLM/embedding (no API calls)")
-    parser.add_argument("--mock-memories", type=Path, default=None, help="Forward to bench_cognee.py")
+    parser.add_argument(
+        "--embedding-dims", type=int, default=None, help="Forward to bench_cognee.py"
+    )
+    parser.add_argument(
+        "--num-memories", type=int, default=None, help="Limit number of memories to load"
+    )
+    parser.add_argument(
+        "--mock-llm",
+        action="store_true",
+        default=False,
+        help="Use mock LLM/embedding (no API calls)",
+    )
+    parser.add_argument(
+        "--mock-memories", type=Path, default=None, help="Forward to bench_cognee.py"
+    )
     args = parser.parse_args()
 
     extra_args = []
@@ -323,7 +352,9 @@ def main():
         report = {
             "num_runs": args.runs,
             "config": config,
-            "stats": {k: {sk: sv for sk, sv in v.items() if sk != "values"} for k, v in stats.items()},
+            "stats": {
+                k: {sk: sv for sk, sv in v.items() if sk != "values"} for k, v in stats.items()
+            },
             "raw_runs": runs,
         }
         with open(args.output, "w") as f:

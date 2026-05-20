@@ -62,7 +62,9 @@ def _resolve_config(args: argparse.Namespace) -> dict:
         "api_key": api_key or "mock-key",
         "llm_provider": pick(args.llm_provider, "LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
         "llm_model": pick(args.llm_model, "LLM_MODEL", DEFAULT_LLM_MODEL),
-        "embedding_provider": pick(args.embedding_provider, "EMBEDDING_PROVIDER", DEFAULT_EMBEDDING_PROVIDER),
+        "embedding_provider": pick(
+            args.embedding_provider, "EMBEDDING_PROVIDER", DEFAULT_EMBEDDING_PROVIDER
+        ),
         "embedding_model": pick(args.embedding_model, "EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
         "embedding_dims": pick(args.embedding_dims, "EMBEDDING_DIMENSIONS", DEFAULT_EMBEDDING_DIMS),
         "mock_llm": mock_llm,
@@ -70,6 +72,7 @@ def _resolve_config(args: argparse.Namespace) -> dict:
 
 
 # ── Mock LLM / Embedding ────────────────────────────────────────────────────
+
 
 def _load_mock_data(path: Path) -> dict:
     with open(path) as f:
@@ -92,9 +95,7 @@ def _install_mocks(mock_data: dict[str, dict], embedding_dims: int) -> None:
     emb_mod = importlib.import_module(
         "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine"
     )
-    vec_mod = importlib.import_module(
-        "cognee.infrastructure.databases.vector.create_vector_engine"
-    )
+    vec_mod = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
 
     def _match_memory(text_input: str) -> dict | None:
         for title, entry in mock_data.items():
@@ -138,7 +139,7 @@ def _install_mocks(mock_data: dict[str, dict], embedding_dims: int) -> None:
                 vec = []
                 for i in range(self._dims):
                     offset = (i * 4) % len(h)
-                    chunk = h[offset:offset + 4].ljust(4, b"\x00")
+                    chunk = h[offset : offset + 4].ljust(4, b"\x00")
                     val = struct.unpack("<f", chunk)[0]
                     vec.append(max(-1.0, min(1.0, val / 1e38)))
                 results.append(vec)
@@ -162,6 +163,7 @@ def _install_mocks(mock_data: dict[str, dict], embedding_dims: int) -> None:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def load_memories(path: Path) -> list[dict]:
     with open(path) as f:
         memories = json.load(f)
@@ -183,6 +185,7 @@ def memory_to_text(mem: dict) -> str:
 
 
 # ── Benchmark ────────────────────────────────────────────────────────────────
+
 
 async def run_benchmark(
     memories: list[dict],
@@ -218,6 +221,7 @@ async def run_benchmark(
     print(f"  Prune completed in {t_prune:.2f}s")
 
     from cognee.modules.engine.operations.setup import setup
+
     t_db_setup_start = time.time()
     await setup()
     t_db_setup = time.time() - t_db_setup_start
@@ -236,7 +240,7 @@ async def run_benchmark(
     t_add = time.time() - t_add_start
 
     # ── Phase 2: cognee.cognify() ────────────────────────────────────────
-    print(f"\nPhase 2: Running cognee.cognify() (knowledge graph build)...")
+    print("\nPhase 2: Running cognee.cognify() (knowledge graph build)...")
     t_cognify_start = time.time()
     await cognee.cognify(data_per_batch=n)
     t_cognify = time.time() - t_cognify_start
@@ -244,7 +248,7 @@ async def run_benchmark(
     t_total = t_add + t_cognify
 
     # ── Phase 3: cognee.search() ─────────────────────────────────────────
-    print(f"\nPhase 3: Running search queries...")
+    print("\nPhase 3: Running search queries...")
     t_q_start = time.time()
     await cognee.search(query_text="What is in the document", only_context=True)
     t_search = time.time() - t_q_start
@@ -281,9 +285,9 @@ async def run_benchmark(
     print(f"  LLM model         : {llm_model}")
     print(f"  Embedding model   : {embedding_model} ({embedding_dims}d)")
     if config.get("mock_llm"):
-        print(f"  Mock mode         : ON")
+        print("  Mock mode         : ON")
     if add_errors:
-        print(f"\n  Add Errors:")
+        print("\n  Add Errors:")
         for err in add_errors:
             print(f"    - {err}")
     print("=" * 60)
@@ -293,48 +297,66 @@ async def run_benchmark(
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Benchmark Cognee memory ingestion (add + cognify).",
     )
     parser.add_argument(
-        "--memories", type=Path, default=DEFAULT_MEMORIES_FILE,
+        "--memories",
+        type=Path,
+        default=DEFAULT_MEMORIES_FILE,
         help=f"JSON file with memories array (default: {DEFAULT_MEMORIES_FILE.name})",
     )
     parser.add_argument(
-        "--llm-model", default=None,
+        "--llm-model",
+        default=None,
         help=f"LLM model (default: .env LLM_MODEL or {DEFAULT_LLM_MODEL})",
     )
     parser.add_argument(
-        "--embedding-model", default=None,
+        "--embedding-model",
+        default=None,
         help=f"Embedding model (default: .env EMBEDDING_MODEL or {DEFAULT_EMBEDDING_MODEL})",
     )
     parser.add_argument(
-        "--llm-provider", default=None,
+        "--llm-provider",
+        default=None,
         help=f"LLM provider (default: .env LLM_PROVIDER or {DEFAULT_LLM_PROVIDER})",
     )
     parser.add_argument(
-        "--embedding-provider", default=None,
+        "--embedding-provider",
+        default=None,
         help=f"Embedding provider (default: .env EMBEDDING_PROVIDER or {DEFAULT_EMBEDDING_PROVIDER})",
     )
     parser.add_argument(
-        "--embedding-dims", type=int, default=None,
+        "--embedding-dims",
+        type=int,
+        default=None,
         help=f"Embedding dimensions (default: .env EMBEDDING_DIMENSIONS or {DEFAULT_EMBEDDING_DIMS})",
     )
     parser.add_argument(
-        "--num-memories", type=int, default=None,
+        "--num-memories",
+        type=int,
+        default=None,
         help="Limit the number of memories to load (default: all)",
     )
     parser.add_argument(
-        "--mock-llm", action="store_true", default=False,
+        "--mock-llm",
+        action="store_true",
+        default=False,
         help="Use mock LLM/embedding responses from mock_memories.json instead of real API calls",
     )
     parser.add_argument(
-        "--mock-memories", type=Path, default=DEFAULT_MOCK_MEMORIES_FILE,
+        "--mock-memories",
+        type=Path,
+        default=DEFAULT_MOCK_MEMORIES_FILE,
         help=f"Mock responses JSON file (default: {DEFAULT_MOCK_MEMORIES_FILE.name})",
     )
     parser.add_argument(
-        "--output", "-o", type=Path, default=None,
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
         help="Write JSON results to this file",
     )
     args = parser.parse_args()
@@ -345,10 +367,12 @@ def main():
 
     memories = load_memories(args.memories)
     if args.num_memories is not None:
-        memories = memories[:args.num_memories]
+        memories = memories[: args.num_memories]
     print(f"Loaded {len(memories)} memories from {args.memories}")
     mock_label = " [MOCK]" if config["mock_llm"] else ""
-    print(f"Config: llm={config['llm_model']}, embeddings={config['embedding_model']} ({config['embedding_dims']}d){mock_label}\n")
+    print(
+        f"Config: llm={config['llm_model']}, embeddings={config['embedding_model']} ({config['embedding_dims']}d){mock_label}\n"
+    )
 
     results = asyncio.run(run_benchmark(memories, config=config))
 
