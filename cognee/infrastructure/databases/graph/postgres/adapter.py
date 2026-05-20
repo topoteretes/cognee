@@ -1,5 +1,6 @@
 """Postgres graph adapter using two tables (graph_node, graph_edge) over SQLAlchemy + asyncpg."""
 
+import asyncio
 import json
 from uuid import UUID
 from datetime import datetime, timezone
@@ -10,9 +11,9 @@ from sqlalchemy import text, values, select, exists, func, String
 from sqlalchemy import column as sa_column
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.exc import DBAPIError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError
-from sqlalchemy.exc import DBAPIError
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -34,6 +35,7 @@ class PostgresAdapter(GraphDBInterface):
         self.db_uri = connection_string
         self.engine = create_async_engine(self.db_uri)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+        self._write_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
@@ -102,11 +104,6 @@ class PostgresAdapter(GraphDBInterface):
         else:
             await self.add_nodes([node])
 
-    @retry(
-        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=2, min=1, max=6),
-    )
     async def add_nodes(self, nodes: Union[List[Tuple[str, Dict]], List[DataPoint]]) -> None:
         """Add multiple nodes via batch upsert.
 
@@ -155,9 +152,10 @@ class PostgresAdapter(GraphDBInterface):
             },
         )
 
-        async with self._session() as session:
-            await session.execute(stmt)
-            await session.commit()
+        async with self._write_lock:
+            async with self._session() as session:
+                await session.execute(stmt)
+                await session.commit()
 
     async def delete_node(self, node_id: str) -> None:
         """Delete a single node. Delegates to delete_nodes.
@@ -237,11 +235,6 @@ class PostgresAdapter(GraphDBInterface):
             [(str(source_id), str(target_id), relationship_name, properties or {})]
         )
 
-    @retry(
-        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=2, min=1, max=6),
-    )
     async def add_edges(
         self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
     ) -> None:
@@ -284,9 +277,10 @@ class PostgresAdapter(GraphDBInterface):
             },
         )
 
-        async with self._session() as session:
-            await session.execute(stmt)
-            await session.commit()
+        async with self._write_lock:
+            async with self._session() as session:
+                await session.execute(stmt)
+                await session.commit()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         """Check whether a single edge exists.
