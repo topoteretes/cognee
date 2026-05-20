@@ -849,6 +849,11 @@ def _resolve_stage_configs(tasks: list[Task], data_per_batch: int) -> list[_Stag
                 raise ValueError(
                     f"Task '{task_name}': tick_seconds must be > 0, got {float(tick_seconds)}"
                 )
+            if float(throughput_improvement_ratio) <= 0:
+                raise ValueError(
+                    f"Task '{task_name}': throughput_improvement_ratio must be > 0, "
+                    f"got {float(throughput_improvement_ratio)}"
+                )
         if per_call_timeout is not None and per_call_timeout <= 0:
             raise ValueError(f"Task '{task_name}': timeout must be > 0, got {per_call_timeout}")
 
@@ -950,17 +955,15 @@ async def _run_worker(
                         # task.execute only — wrapping out_queue.put() would let
                         # downstream backpressure masquerade as a hung task and
                         # trigger spurious throttling reports.
-                        result_iter = task.execute(
-                            args_for_execute, kwargs, next_batch_size
-                        ).__aiter__()
+                        result_iter = aiter(task.execute(args_for_execute, kwargs, next_batch_size))
                         while True:
                             try:
                                 if per_call_timeout is not None:
                                     result_data = await asyncio.wait_for(
-                                        result_iter.__anext__(), timeout=per_call_timeout
+                                        anext(result_iter), timeout=per_call_timeout
                                     )
                                 else:
-                                    result_data = await result_iter.__anext__()
+                                    result_data = await anext(result_iter)
                             except StopAsyncIteration:
                                 break
                             if isinstance(result_data, list):
