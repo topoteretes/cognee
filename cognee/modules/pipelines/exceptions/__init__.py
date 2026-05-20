@@ -1,1 +1,1 @@
-from .exceptions import PipelineRunFailedError
+from .exceptions import PipelineItemFailure, PipelineRunFailedError

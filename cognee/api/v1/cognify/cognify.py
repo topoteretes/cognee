@@ -11,6 +11,10 @@ from cognee.infrastructure.llm import get_max_chunk_tokens
 
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.pipelines.operations.worker_pipeline import (
+    AdaptiveWorkers,
+    FixedWorkers,
+)
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
@@ -313,14 +317,16 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
         )
 
+    # Cognify default: each stage runs FixedWorkers(50). The two LLM-heavy
+    # stages override with AdaptiveWorkers — their concurrency tunes itself
+    # based on observed throughput / throttling / utilization.
     default_tasks = [
-        # EXTRACT: classify raw Data items into typed Document objects
-        Task(classify_documents),
-        # EXTRACT: split Documents into semantic text chunks
+        Task(classify_documents, workers=FixedWorkers(50)),
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
+            workers=FixedWorkers(50),
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
         # COGNIFY: LLM-summarize each chunk for retrieval
@@ -329,16 +335,19 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
-            task_config={"batch_size": chunks_per_batch},
+            batch_size=chunks_per_batch,
+            workers=AdaptiveWorkers(initial_workers=90, max_workers=90),
+            timeout=300.0,
             **kwargs,
         ),
-        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
             add_data_points,
             embed_triplets=embed_triplets,
-            task_config={"batch_size": chunks_per_batch},
+            batch_size=chunks_per_batch,
+            workers=AdaptiveWorkers(initial_workers=90, max_workers=90),
+            timeout=300.0,
         ),
-        Task(extract_dlt_fk_edges),
+        Task(extract_dlt_fk_edges, workers=FixedWorkers(50)),
     ]
 
     return default_tasks
@@ -382,11 +391,11 @@ async def get_temporal_tasks(
             chunker=chunker,
         ),
         # COGNIFY: extract temporal events and timestamps from chunks
-        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
+        Task(extract_events_and_timestamps, batch_size=chunks_per_batch),
         # COGNIFY: build knowledge graph from extracted events
         Task(extract_knowledge_graph_from_events),
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
+        Task(add_data_points, batch_size=chunks_per_batch),
     ]
 
     return temporal_tasks
