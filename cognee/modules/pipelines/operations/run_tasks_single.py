@@ -32,7 +32,7 @@ def _pin_to_single_worker(task: Task) -> Task:
     """Return a clone of ``task`` with ``workers=FixedWorkers(1)`` unless the
     caller already set an explicit ``workers`` strategy. Preserves any other
     task_config / batch_size / timeout settings via ``with_config``."""
-    if task.task_config.get("workers") is not None:
+    if (task.task_config or {}).get("workers") is not None:
         return task
     return task.with_config(workers=FixedWorkers(1))
 
