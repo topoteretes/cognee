@@ -90,12 +90,16 @@ def build_report(runs: list[dict]) -> dict:
     return stats
 
 
-def print_report(stats: dict, num_runs: int, config: dict):
+def print_report(stats: dict, num_runs: int, config: dict, runs: list[dict]):
+    succeeded = sum(1 for r in runs if r.get("success", True))
+    failed = num_runs - succeeded
+
     print(f"\n{'#'*60}")
     print(f"  PERCENTILE REPORT  ({num_runs} run{'s' if num_runs != 1 else ''})")
     print(f"{'#'*60}")
     print(f"  LLM model       : {config.get('llm_model', '?')}")
     print(f"  Embedding model  : {config.get('embedding_model', '?')} ({config.get('embedding_dimensions', '?')}d)")
+    print(f"  Success rate     : {succeeded}/{num_runs} ({failed} failed)")
     print()
 
     header = f"  {'Metric':<22} {'min':>8} {'p50':>8} {'p75':>8} {'p90':>8} {'p95':>8} {'p99':>8} {'max':>8} {'mean':>8}"
@@ -110,9 +114,16 @@ def print_report(stats: dict, num_runs: int, config: dict):
         print(" ".join(parts))
 
     print()
-    print(f"  Individual run values (total_ingest_time_s):")
-    for i, v in enumerate(stats["total_ingest_time_s"]["values"], 1):
-        print(f"    Run {i}: {v:.2f}s")
+    print(f"  Individual runs:")
+    for i, r in enumerate(runs, 1):
+        ok = r.get("success", True)
+        tag = "OK" if ok else "FAIL"
+        detail = ""
+        if not ok:
+            status = r.get("status", {})
+            failures = [f"{k}: {v}" for k, v in status.items() if v != "success"]
+            detail = f"  ({'; '.join(failures)})"
+        print(f"    Run {i}: {r['total_ingest_time_s']:.2f}s  [{tag}]{detail}")
     print(f"{'#'*60}\n")
 
 
@@ -128,9 +139,19 @@ def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], pa
         table_rows += f"<tr><td class='metric-name'>{label}</td>{cells}</tr>\n"
 
     # Per-run breakdown rows
+    succeeded = sum(1 for r in runs if r.get("success", True))
+    failed = num_runs - succeeded
     run_rows = ""
     for i, r in enumerate(runs, 1):
         cells = "".join(f"<td>{r.get(m, 0):.3f}s</td>" for m in METRICS + ["wall_time_s"])
+        ok = r.get("success", True)
+        status_style = "color: var(--green)" if ok else "color: var(--red)"
+        status_label = "OK" if ok else "FAIL"
+        if not ok:
+            st = r.get("status", {})
+            failures = [k for k, v in st.items() if v != "success"]
+            status_label = f"FAIL ({', '.join(failures)})"
+        cells += f"<td style='{status_style}'>{status_label}</td>"
         run_rows += f"<tr><td>Run {i}</td>{cells}</tr>\n"
 
     # Chart data
@@ -190,6 +211,7 @@ def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], pa
   <div class="config-card"><div class="label">Embedding Model</div><div class="value">{config.get("embedding_model", "?")} ({config.get("embedding_dimensions", "?")}d)</div></div>
   <div class="config-card"><div class="label">Memories</div><div class="value">{runs[0].get("memories_count", "?")}</div></div>
   <div class="config-card"><div class="label">Runs</div><div class="value">{num_runs}</div></div>
+  <div class="config-card"><div class="label">Success Rate</div><div class="value" style="color: {'var(--green)' if failed == 0 else 'var(--red)'}">{succeeded}/{num_runs}</div></div>
 </div>
 
 <div class="charts">
@@ -211,7 +233,7 @@ def generate_html(stats: dict, num_runs: int, config: dict, runs: list[dict], pa
 
 <h2 class="section-title">Individual Runs</h2>
 <table>
-  <thead><tr><th>Run</th><th>add()</th><th>cognify()</th><th>Total Ingest</th><th>Search</th><th>Prune</th><th>DB Setup</th><th>Wall Clock</th></tr></thead>
+  <thead><tr><th>Run</th><th>add()</th><th>cognify()</th><th>Total Ingest</th><th>Search</th><th>Prune</th><th>DB Setup</th><th>Wall Clock</th><th>Status</th></tr></thead>
   <tbody>{run_rows}</tbody>
 </table>
 
@@ -317,11 +339,14 @@ def main():
 
     stats = build_report(runs)
     config = runs[0].get("config", {})
-    print_report(stats, args.runs, config)
+    print_report(stats, args.runs, config, runs)
 
     if args.output:
+        succeeded = sum(1 for r in runs if r.get("success", True))
         report = {
             "num_runs": args.runs,
+            "succeeded": succeeded,
+            "failed": args.runs - succeeded,
             "config": config,
             "stats": {k: {sk: sv for sk, sv in v.items() if sk != "values"} for k, v in stats.items()},
             "raw_runs": runs,

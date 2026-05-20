@@ -209,45 +209,82 @@ async def run_benchmark(
         _install_mocks(mock_data, embedding_dims)
         print("Mock LLM/embedding mode enabled")
 
+    n = len(memories)
+    status = {
+        "prune": "success",
+        "db_setup": "success",
+        "add": "success",
+        "cognify": "success",
+        "search": "success",
+    }
+    t_prune = 0.0
+    t_db_setup = 0.0
+    t_add = 0.0
+    t_cognify = 0.0
+    t_search = 0.0
+
     # ── Prune (clean slate) ──────────────────────────────────────────────
     print("Pruning previous data...")
-    t_prune_start = time.time()
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    t_prune = time.time() - t_prune_start
-    print(f"  Prune completed in {t_prune:.2f}s")
+    try:
+        t_prune_start = time.time()
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        t_prune = time.time() - t_prune_start
+        print(f"  Prune completed in {t_prune:.2f}s")
+    except Exception as e:
+        t_prune = time.time() - t_prune_start
+        status["prune"] = f"failed: {e}"
+        print(f"  Prune FAILED: {e}")
 
-    from cognee.modules.engine.operations.setup import setup
-    t_db_setup_start = time.time()
-    await setup()
-    t_db_setup = time.time() - t_db_setup_start
-
-    n = len(memories)
-    add_errors: list[str] = []
+    # ── DB Setup ─────────────────────────────────────────────────────────
+    try:
+        from cognee.modules.engine.operations.setup import setup
+        t_db_setup_start = time.time()
+        await setup()
+        t_db_setup = time.time() - t_db_setup_start
+    except Exception as e:
+        t_db_setup = time.time() - t_db_setup_start
+        status["db_setup"] = f"failed: {e}"
+        print(f"  DB setup FAILED: {e}")
 
     # ── Phase 1: cognee.add() ────────────────────────────────────────────
     print(f"\nPhase 1: Adding {n} memories via cognee.add()...")
-    text_list = []
-    for i, mem in enumerate(memories):
-        text_list.append(memory_to_text(mem))
+    text_list = [memory_to_text(mem) for mem in memories]
 
-    t_add_start = time.time()
-    await cognee.add(text_list, dataset_name=DATASET_NAME)
-    t_add = time.time() - t_add_start
+    try:
+        t_add_start = time.time()
+        await cognee.add(text_list, dataset_name=DATASET_NAME)
+        t_add = time.time() - t_add_start
+    except Exception as e:
+        t_add = time.time() - t_add_start
+        status["add"] = f"failed: {e}"
+        print(f"  Add FAILED: {e}")
 
     # ── Phase 2: cognee.cognify() ────────────────────────────────────────
     print(f"\nPhase 2: Running cognee.cognify() (knowledge graph build)...")
-    t_cognify_start = time.time()
-    await cognee.cognify(data_per_batch=n)
-    t_cognify = time.time() - t_cognify_start
+    try:
+        t_cognify_start = time.time()
+        await cognee.cognify(data_per_batch=n)
+        t_cognify = time.time() - t_cognify_start
+    except Exception as e:
+        t_cognify = time.time() - t_cognify_start
+        status["cognify"] = f"failed: {e}"
+        print(f"  Cognify FAILED: {e}")
 
     t_total = t_add + t_cognify
 
     # ── Phase 3: cognee.search() ─────────────────────────────────────────
     print(f"\nPhase 3: Running search queries...")
-    t_q_start = time.time()
-    await cognee.search(query_text="What is in the document", only_context=True)
-    t_search = time.time() - t_q_start
+    try:
+        t_q_start = time.time()
+        await cognee.search(query_text="What is in the document", only_context=True)
+        t_search = time.time() - t_q_start
+    except Exception as e:
+        t_search = time.time() - t_q_start
+        status["search"] = f"failed: {e}"
+        print(f"  Search FAILED: {e}")
+
+    all_ok = all(v == "success" for v in status.values())
 
     # ── Report ───────────────────────────────────────────────────────────
     results = {
@@ -258,6 +295,8 @@ async def run_benchmark(
         "prune_time_s": round(t_prune, 3),
         "db_setup_time_s": round(t_db_setup, 3),
         "search_time": t_search,
+        "status": status,
+        "success": all_ok,
         "config": {
             "llm_model": llm_model,
             "embedding_model": embedding_model,
@@ -271,21 +310,17 @@ async def run_benchmark(
     print("RESULTS")
     print("=" * 60)
     print(f"  Memories inserted : {n}")
-    print(f"  Add errors        : {len(add_errors)}")
-    print(f"  cognee.add() time : {t_add:.2f}s  ({t_add / n:.2f}s per memory)")
-    print(f"  cognify() time    : {t_cognify:.2f}s")
+    print(f"  cognee.add() time : {t_add:.2f}s  ({t_add / n:.2f}s per memory)  [{status['add']}]")
+    print(f"  cognify() time    : {t_cognify:.2f}s  [{status['cognify']}]")
     print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
-    print(f"  Search total      : {t_search:.2f}s")
-    print(f"  DB setup time     : {t_db_setup:.2f}s")
-    print(f"  Prune time        : {t_prune:.2f}s  (not included in ingest total)")
+    print(f"  Search total      : {t_search:.2f}s  [{status['search']}]")
+    print(f"  DB setup time     : {t_db_setup:.2f}s  [{status['db_setup']}]")
+    print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
     print(f"  LLM model         : {llm_model}")
     print(f"  Embedding model   : {embedding_model} ({embedding_dims}d)")
     if config.get("mock_llm"):
         print(f"  Mock mode         : ON")
-    if add_errors:
-        print(f"\n  Add Errors:")
-        for err in add_errors:
-            print(f"    - {err}")
+    print(f"  Overall           : {'ALL OK' if all_ok else 'SOME FAILURES'}")
     print("=" * 60)
 
     return results
