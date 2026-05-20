@@ -15,6 +15,14 @@ from ..tasks.task import Task
 logger = get_logger("run_tasks_with_telemetry()")
 
 
+def _safe_send_telemetry(event_name: str, user_id, additional_properties: dict) -> None:
+    """Emit telemetry without letting an outage mask the original pipeline outcome."""
+    try:
+        _safe_send_telemetry(event_name, user_id, additional_properties=additional_properties)
+    except Exception:
+        logger.warning("Telemetry emission failed for %s", event_name, exc_info=True)
+
+
 async def run_tasks_with_telemetry(
     tasks: list[Task], data, user: User, pipeline_name: str, ctx: Optional[PipelineContext] = None
 ):
@@ -24,7 +32,7 @@ async def run_tasks_with_telemetry(
 
     try:
         logger.info("Pipeline run started: `%s`", pipeline_name)
-        send_telemetry(
+        _safe_send_telemetry(
             "Pipeline Run Started",
             user.id,
             additional_properties={
@@ -39,7 +47,7 @@ async def run_tasks_with_telemetry(
             yield result
 
         logger.info("Pipeline run completed: `%s`", pipeline_name)
-        send_telemetry(
+        _safe_send_telemetry(
             "Pipeline Run Completed",
             user.id,
             additional_properties={
@@ -56,7 +64,7 @@ async def run_tasks_with_telemetry(
             str(error),
             exc_info=True,
         )
-        send_telemetry(
+        _safe_send_telemetry(
             "Pipeline Run Errored",
             user.id,
             additional_properties={
