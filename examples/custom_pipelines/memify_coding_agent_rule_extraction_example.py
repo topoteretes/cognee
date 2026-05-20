@@ -66,7 +66,7 @@ async def main():
         Task(
             add_rule_associations,
             rules_nodeset_name="coding_agent_rules",
-            task_config={"batch_size": 1},
+            batch_size=1,
         ),
     ]
 

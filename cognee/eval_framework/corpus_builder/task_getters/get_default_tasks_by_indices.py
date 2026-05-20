@@ -35,7 +35,7 @@ async def get_no_summary_tasks(
 
     graph_task_kwargs = {
         "graph_model": graph_model,
-        "task_config": {"batch_size": 10},
+        "batch_size": 10,
     }
     if ontology_file_path is not None:
         ontology_resolver = RDFLibOntologyResolver(ontology_file=ontology_file_path)
@@ -43,7 +43,7 @@ async def get_no_summary_tasks(
 
     graph_task = Task(extract_graph_from_data, **graph_task_kwargs)
 
-    add_data_points_task = Task(add_data_points, task_config={"batch_size": 10})
+    add_data_points_task = Task(add_data_points, batch_size=10)
 
     return base_tasks + [graph_task, add_data_points_task]
 
@@ -55,6 +55,6 @@ async def get_just_chunks_tasks(
     # Get base tasks (0=classify, 1=extract_chunks)
     base_tasks = await get_default_tasks_by_indices([0, 1], chunk_size, chunker)
 
-    add_data_points_task = Task(add_data_points, task_config={"batch_size": 10})
+    add_data_points_task = Task(add_data_points, batch_size=10)
 
     return base_tasks + [add_data_points_task]

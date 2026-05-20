@@ -37,7 +37,7 @@ async def create_triplet_embeddings(
         extraction_tasks = [Task(get_triplet_datapoints, triplets_batch_size=triplets_batch_size)]
 
         enrichment_tasks = [
-            Task(index_data_points, task_config={"batch_size": triplets_batch_size}),
+            Task(index_data_points, batch_size=triplets_batch_size),
         ]
 
         result = await memify(
