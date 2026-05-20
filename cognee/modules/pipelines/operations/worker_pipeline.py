@@ -919,6 +919,15 @@ def _user_id(user: Optional[User]):
     return user.id if user is not None else None
 
 
+def _safe_send_telemetry(event_name: str, user_id, additional_properties: dict) -> None:
+    """Emit a telemetry event without letting a telemetry outage abort the
+    pipeline. Mirrors the helper in run_tasks.py."""
+    try:
+        send_telemetry(event_name, user_id, additional_properties=additional_properties)
+    except Exception:
+        logger.warning("Telemetry emission failed for %s", event_name, exc_info=True)
+
+
 async def _run_worker(
     task: Task,
     task_name: str,
@@ -971,7 +980,7 @@ async def _run_worker(
                 kwargs["ctx"] = item_ctx
 
             logger.info(f"{task_type} task started: `{task_name}`")
-            send_telemetry(
+            _safe_send_telemetry(
                 f"{task_type} Task Started",
                 _user_id(user),
                 additional_properties=_telemetry_props(task_name, user),
@@ -1038,7 +1047,7 @@ async def _run_worker(
                     )
 
                     logger.info(f"{task_type} task completed: `{task_name}`")
-                    send_telemetry(
+                    _safe_send_telemetry(
                         f"{task_type} Task Completed",
                         _user_id(user),
                         additional_properties=_telemetry_props(task_name, user),
@@ -1054,7 +1063,7 @@ async def _run_worker(
                         f"{task_type} task timed out after {per_call_timeout}s: `{task_name}`",
                         exc_info=True,
                     )
-                    send_telemetry(
+                    _safe_send_telemetry(
                         f"{task_type} Task Errored",
                         _user_id(user),
                         additional_properties=_telemetry_props(task_name, user),
@@ -1077,7 +1086,7 @@ async def _run_worker(
                         f"{task_type} task errored: `{task_name}`\n{str(error)}\n",
                         exc_info=True,
                     )
-                    send_telemetry(
+                    _safe_send_telemetry(
                         f"{task_type} Task Errored",
                         _user_id(user),
                         additional_properties=_telemetry_props(task_name, user),
@@ -1354,7 +1363,7 @@ async def run_worker_pipeline(
         in_q = queues[i]
         stats = _compute_queue_stats(in_q.samples, in_q.maxsize)
         adaptive_stats = pools[i].stats() if pools[i] is not None else {}
-        send_telemetry(
+        _safe_send_telemetry(
             "Task Queue Metrics",
             _user_id(user),
             additional_properties={
