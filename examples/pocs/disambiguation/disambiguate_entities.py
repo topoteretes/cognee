@@ -213,6 +213,10 @@ async def disambiguate_entities_pipeline(
             cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
         )
 
+    # batch_size is set explicitly below; strip any duplicate from forwarded
+    # kwargs so Task(...) doesn't see the same keyword twice.
+    task_kwargs = {k: v for k, v in kwargs.items() if k != "batch_size"}
+
     tasks = [
         Task(classify_documents),
         Task(
@@ -226,7 +230,7 @@ async def disambiguate_entities_pipeline(
             config=config,
             custom_prompt=custom_prompt,
             batch_size=chunks_per_batch,
-            **kwargs,
+            **task_kwargs,
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,

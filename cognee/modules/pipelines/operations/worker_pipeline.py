@@ -1171,7 +1171,11 @@ async def _run_stage(
             # the in-progress target reflects partial discovery and would
             # mislead the next run if persisted.
             await pool.stop_ticker(persist=not (cancelled or failed))
-        if out_queue is not None:
+        if out_queue is not None and not (cancelled or failed):
+            # Skip the EOF fan-out on cancellation/failure: the next stage is
+            # also being torn down (see consumer-abort path in
+            # run_worker_pipeline), so no one is draining out_queue. ``put`` on
+            # a bounded intermediate queue would block indefinitely.
             for _ in range(next_workers_count):
                 await out_queue.put(_SENTINEL)
 
