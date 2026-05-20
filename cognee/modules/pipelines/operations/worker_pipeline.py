@@ -108,6 +108,16 @@ class _ItemEnvelope:
     seq: int
 
 
+@dataclass
+class _OriginRef:
+    """Identity-distinct wrapper for envelope.origin so that ``id(ref)`` is
+    unique per pipeline item even when the underlying value is the same
+    Python object as another item (caller-side deduplication). Workers
+    consult ``ref.item`` to populate ``ctx.data_item``."""
+
+    item: Any
+
+
 # ---------------------------------------------------------------------------
 # Instrumented queue
 # ---------------------------------------------------------------------------
@@ -800,11 +810,37 @@ def _resolve_stage_configs(tasks: list[Task], data_per_batch: int) -> list[_Stag
         # is the same size. Floor at 4 so tiny pipelines still have a small
         # buffer.
         queue_maxsize = int(cfg.get("queue_maxsize", max(data_per_batch, 4)))
-        next_batch_size = (
-            int(tasks[i + 1].task_config.get("batch_size", 1)) if i + 1 < len(tasks) else 1
-        )
+        if i + 1 < len(tasks):
+            next_cfg = tasks[i + 1].task_config or {}
+            next_batch_size = int(next_cfg.get("batch_size", 1))
+        else:
+            next_batch_size = 1
         per_call_timeout_raw = cfg.get("timeout")
         per_call_timeout = float(per_call_timeout_raw) if per_call_timeout_raw is not None else None
+
+        task_name = task.executable.__name__
+        if int(num_workers) <= 0:
+            raise ValueError(
+                f"Task '{task_name}': num_workers must be >= 1, got {int(num_workers)}"
+            )
+        if queue_maxsize < 0:
+            raise ValueError(f"Task '{task_name}': queue_maxsize must be >= 0, got {queue_maxsize}")
+        if adaptive:
+            if int(initial_workers) <= 0:
+                raise ValueError(
+                    f"Task '{task_name}': initial_workers must be >= 1, got {int(initial_workers)}"
+                )
+            if strategy.max_workers is not None and int(strategy.max_workers) <= 0:
+                raise ValueError(
+                    f"Task '{task_name}': max_workers must be >= 1, got {int(strategy.max_workers)}"
+                )
+            if int(step) <= 0:
+                raise ValueError(f"Task '{task_name}': step must be >= 1, got {int(step)}")
+            if float(tick_seconds) <= 0:
+                raise ValueError(
+                    f"Task '{task_name}': tick_seconds must be > 0, got {float(tick_seconds)}"
+                )
+
         configs.append(
             _StageConfig(
                 queue_maxsize=queue_maxsize,
@@ -872,7 +908,12 @@ async def _run_worker(
             # is a Set passed by reference so all clones share the same instance.
             kwargs = {}
             if shared_ctx is not None and task.accepts_ctx:
-                item_ctx = dataclasses.replace(shared_ctx, data_item=envelope.origin)
+                origin_item = (
+                    envelope.origin.item
+                    if isinstance(envelope.origin, _OriginRef)
+                    else envelope.origin
+                )
+                item_ctx = dataclasses.replace(shared_ctx, data_item=origin_item)
                 kwargs["ctx"] = item_ctx
 
             logger.info(f"{task_type} task started: `{task_name}`")

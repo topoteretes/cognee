@@ -244,12 +244,16 @@ class Task:
         """
         batch_size = overrides.pop("batch_size", self.task_config["batch_size"])
         enriches = overrides.pop("enriches", self.enriches)
+        workers = overrides.pop("workers", self.task_config.get("workers"))
+        timeout = overrides.pop("timeout", self.task_config.get("timeout"))
         merged_kwargs = {**self.default_params["kwargs"], **overrides}
         return Task(
             self.executable,
             *self.default_params["args"],
             batch_size=batch_size,
             enriches=enriches,
+            workers=workers,
+            timeout=timeout,
             **merged_kwargs,
         )
 

@@ -48,25 +48,30 @@ async def test_adaptive_pool_freezes_when_upstream_bound():
     reporter = asyncio.create_task(_report_loop())
     pool.start_ticker(queue)
 
-    # Wait long enough for the freeze counter to exceed the threshold.
-    # Generous margin keeps the test stable on a loaded scheduler.
-    await asyncio.sleep(tick * 20)
-    assert pool._consecutive_low_util_ticks >= 3, (
-        f"expected freeze counter >=3, got {pool._consecutive_low_util_ticks}"
-    )
+    try:
+        # Wait long enough for the freeze counter to exceed the threshold.
+        # Generous margin keeps the test stable on a loaded scheduler.
+        await asyncio.sleep(tick * 20)
+        assert pool._consecutive_low_util_ticks >= 3, (
+            f"expected freeze counter >=3, got {pool._consecutive_low_util_ticks}"
+        )
 
-    # Once frozen, the target must hold steady across additional ticks.
-    frozen_target = pool.target
-    await asyncio.sleep(tick * 10)
-    target_after_more_ticks = pool.target
+        # Once frozen, the target must hold steady across additional ticks.
+        frozen_target = pool.target
+        await asyncio.sleep(tick * 10)
+        target_after_more_ticks = pool.target
 
-    stop_reporter.set()
-    await reporter
-    await pool.stop_ticker()
-
-    assert target_after_more_ticks == frozen_target, (
-        f"target changed while frozen: {frozen_target} → {target_after_more_ticks}"
-    )
+        assert target_after_more_ticks == frozen_target, (
+            f"target changed while frozen: {frozen_target} → {target_after_more_ticks}"
+        )
+    finally:
+        stop_reporter.set()
+        reporter.cancel()
+        try:
+            await reporter
+        except asyncio.CancelledError:
+            pass
+        await pool.stop_ticker()
 
 
 @pytest.mark.asyncio
