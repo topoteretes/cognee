@@ -26,6 +26,20 @@ class ChunksRetriever(BaseRetriever):
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
     ):
+        """
+        Initializes the chunk retriever.
+
+        Parameters:
+        -----------
+
+            - top_k (Optional[int]): Maximum number of chunks to retrieve.
+              Defaults to 5.
+            - node_name (Optional[List[str]]): Node names used to filter chunks by
+              their belongs_to_set relationship. Defaults to None, which applies no
+              node set filtering.
+            - node_name_filter_operator (str): Logical operator used when applying
+              multiple node_name filters, such as "OR" or "AND". Defaults to "OR".
+        """
         self.top_k = top_k
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
