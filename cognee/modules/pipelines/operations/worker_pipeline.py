@@ -1130,17 +1130,30 @@ async def _run_stage(
         for _ in range(num_workers)
     ]
     cancelled = False
+    failed = False
     try:
         await asyncio.gather(*workers)
     except asyncio.CancelledError:
         cancelled = True
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+        raise
+    except BaseException:
+        # One worker escaped with an unhandled exception. Cancel its siblings
+        # and drain them before propagating so the downstream stage isn't
+        # racing partial workers into the EOF sentinel.
+        failed = True
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
         raise
     finally:
         if pool is not None:
-            # Don't cache the adaptive target from a cancelled run — the
-            # in-progress target reflects partial discovery and would mislead
-            # the next run if persisted.
-            await pool.stop_ticker(persist=not cancelled)
+            # Don't cache the adaptive target from a cancelled or failed run —
+            # the in-progress target reflects partial discovery and would
+            # mislead the next run if persisted.
+            await pool.stop_ticker(persist=not (cancelled or failed))
         if out_queue is not None:
             for _ in range(next_workers_count):
                 await out_queue.put(_SENTINEL)
@@ -1270,6 +1283,7 @@ async def run_worker_pipeline(
     async def _produce():
         head_q = queues[0]
         seq = 0
+        producer_cancelled = False
         try:
             async for item in _as_async_iterable(data_iterable):
                 if isinstance(item, tuple) and len(item) == 2:
@@ -1278,9 +1292,17 @@ async def run_worker_pipeline(
                     value, origin = item, item
                 await head_q.put(_ItemEnvelope(value=value, origin=origin, seq=seq))
                 seq += 1
+        except asyncio.CancelledError:
+            # Consumer aborted and cancelled us. The stage-0 workers are also
+            # being torn down, so no one is draining head_q — awaiting put()
+            # below would block forever. Skip the sentinel fan-out entirely;
+            # cancellation already signals shutdown.
+            producer_cancelled = True
+            raise
         finally:
-            for _ in range(stage_configs[0].num_workers):
-                await head_q.put(_SENTINEL)
+            if not producer_cancelled:
+                for _ in range(stage_configs[0].num_workers):
+                    await head_q.put(_SENTINEL)
 
     producer_task = asyncio.create_task(_produce())
 
