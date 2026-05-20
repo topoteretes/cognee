@@ -175,11 +175,12 @@ class PostgresAdapter(GraphDBInterface):
         """
         if not node_ids:
             return
-        async with self._session() as session:
-            await session.execute(
-                text("DELETE FROM graph_node WHERE id = ANY(:ids)"), {"ids": node_ids}
-            )
-            await session.commit()
+        async with self._write_lock:
+            async with self._session() as session:
+                await session.execute(
+                    text("DELETE FROM graph_node WHERE id = ANY(:ids)"), {"ids": node_ids}
+                )
+                await session.commit()
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a single node by ID.
@@ -811,9 +812,10 @@ class PostgresAdapter(GraphDBInterface):
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
         await self.initialize()
-        async with self._session() as session:
-            await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
-            await session.commit()
+        async with self._write_lock:
+            async with self._session() as session:
+                await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
+                await session.commit()
 
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
         """Retrieve a batch of (source, relationship, target) triplets.
