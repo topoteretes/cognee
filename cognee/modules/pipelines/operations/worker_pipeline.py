@@ -946,9 +946,23 @@ async def _run_worker(
 
                     async def _consume_execute():
                         nonlocal result_count
-                        async for result_data in task.execute(
+                        # Scope per_call_timeout to fetching the next item from
+                        # task.execute only — wrapping out_queue.put() would let
+                        # downstream backpressure masquerade as a hung task and
+                        # trigger spurious throttling reports.
+                        result_iter = task.execute(
                             args_for_execute, kwargs, next_batch_size
-                        ):
+                        ).__aiter__()
+                        while True:
+                            try:
+                                if per_call_timeout is not None:
+                                    result_data = await asyncio.wait_for(
+                                        result_iter.__anext__(), timeout=per_call_timeout
+                                    )
+                                else:
+                                    result_data = await result_iter.__anext__()
+                            except StopAsyncIteration:
+                                break
                             if isinstance(result_data, list):
                                 result_count += len(result_data)
                             else:
@@ -971,10 +985,7 @@ async def _run_worker(
                                     )
                                 )
 
-                    if per_call_timeout is not None:
-                        await asyncio.wait_for(_consume_execute(), timeout=per_call_timeout)
-                    else:
-                        await _consume_execute()
+                    await _consume_execute()
 
                     if pool is not None:
                         pool.report_success()
@@ -1251,19 +1262,20 @@ async def run_worker_pipeline(
             yield envelope
     except BaseException as e:
         consumer_error = e
+        # Stop producer/stages promptly so a caller abort doesn't leave the
+        # pipeline pushing items into queues nobody is draining.
+        producer_task.cancel()
+        for stage_task in stage_tasks:
+            stage_task.cancel()
 
-    # Either way, await producer + stages so we surface their exceptions.
-    try:
-        await producer_task
-    except BaseException as e:
-        if consumer_error is None:
-            consumer_error = e
-
-    try:
-        await asyncio.gather(*stage_tasks)
-    except BaseException as e:
-        if consumer_error is None:
-            consumer_error = e
+    # Gather producer + stages so we surface their exceptions without
+    # blocking on incomplete work after a consumer abort.
+    background_results = await asyncio.gather(producer_task, *stage_tasks, return_exceptions=True)
+    if consumer_error is None:
+        for result in background_results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                consumer_error = result
+                break
 
     # Emit one Task Queue Metrics event per task (using the upstream-of-queue
     # task as the label so a "full queue X" event indicates the downstream
