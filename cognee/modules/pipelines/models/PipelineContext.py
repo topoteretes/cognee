@@ -33,6 +33,12 @@ class PipelineContext:
     lets ``_stamp_provenance`` deduplicate visits across workers and across
     pipeline stages within one run.
 
+    ``extras`` is also shared by reference across per-item contexts (same
+    shallow-copy reason). It is meant for caller-supplied configuration read
+    by tasks, not as a per-item scratchpad — treat it as read-mostly. If
+    tasks need per-item state, store it in returned values or in a per-item
+    field instead of mutating ``extras`` mid-pipeline.
+
     Warning for future maintainers: any new mutable field added to this
     class must either be
 

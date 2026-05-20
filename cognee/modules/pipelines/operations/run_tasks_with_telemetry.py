@@ -18,7 +18,7 @@ logger = get_logger("run_tasks_with_telemetry()")
 def _safe_send_telemetry(event_name: str, user_id, additional_properties: dict) -> None:
     """Emit telemetry without letting an outage mask the original pipeline outcome."""
     try:
-        _safe_send_telemetry(event_name, user_id, additional_properties=additional_properties)
+        send_telemetry(event_name, user_id, additional_properties=additional_properties)
     except Exception:
         logger.warning("Telemetry emission failed for %s", event_name, exc_info=True)
 
