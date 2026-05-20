@@ -391,11 +391,11 @@ async def get_temporal_tasks(
             chunker=chunker,
         ),
         # COGNIFY: extract temporal events and timestamps from chunks
-        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
+        Task(extract_events_and_timestamps, batch_size=chunks_per_batch),
         # COGNIFY: build knowledge graph from extracted events
         Task(extract_knowledge_graph_from_events),
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
+        Task(add_data_points, batch_size=chunks_per_batch),
     ]
 
     return temporal_tasks

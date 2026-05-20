@@ -225,17 +225,17 @@ async def disambiguate_entities_pipeline(
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
-            task_config={"batch_size": chunks_per_batch},
+            batch_size=chunks_per_batch,
             **kwargs,
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,
-            task_config={"batch_size": chunks_per_batch},
+            batch_size=chunks_per_batch,
         ),
         Task(
             add_data_points,
             embed_triplets=embed_triplets,
-            task_config={"batch_size": chunks_per_batch},
+            batch_size=chunks_per_batch,
         ),
     ]
 

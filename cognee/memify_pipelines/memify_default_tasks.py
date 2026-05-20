@@ -14,7 +14,7 @@ def get_default_memify_extraction_tasks():
 
 
 def get_default_memify_enrichment_tasks():
-    return [Task(index_data_points, task_config={"batch_size": 100})]
+    return [Task(index_data_points, batch_size=100)]
 
 
 def get_session_memify_tasks():

@@ -60,9 +60,7 @@ async def apply_feedback_weights_pipeline(
         dataset_to_write[0].id, dataset_to_write[0].owner_id
     ):
         extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
-        enrichment_tasks = [
-            Task(apply_feedback_weights, alpha=alpha, task_config={"batch_size": batch_size})
-        ]
+        enrichment_tasks = [Task(apply_feedback_weights, alpha=alpha, batch_size=batch_size)]
 
         result = await memify(
             extraction_tasks=extraction_tasks,

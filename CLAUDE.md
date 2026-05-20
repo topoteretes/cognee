@@ -484,7 +484,7 @@ For production deployments, review and tighten these settings.
 
 ### Creating a Custom Pipeline Task
 ```python
-from cognee.modules.pipelines.tasks.Task import Task
+from cognee.modules.pipelines.tasks.task import Task
 
 async def my_custom_task(data):
     # Your logic here
