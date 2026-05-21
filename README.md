@@ -157,6 +157,18 @@ if __name__ == '__main__':
 
 ```
 
+### Understanding the Output
+
+After running the pipeline above, here's what happens:
+
+- **`remember`** takes your text, splits it into chunks, generates embeddings, and stores them in both a vector index (for semantic search) and a knowledge graph (for relationship-aware queries). The call is non-blocking — processing happens in the background.
+
+- **`recall`** returns a list of relevant text chunks ordered by relevance score. Each result is a piece of the original text with context attached — not raw data, but meaningfully retrieved fragments ready for an agent to use.
+
+- **Session memory** (`session_id` variant) lives in a fast cache and is ideal for short-lived context like ongoing conversations. It automatically falls through to the permanent graph when a session expires.
+
+**What to put in memory:** Plain text works, but cognee handles richer sources — support tickets, meeting notes, Slack threads, PDF documents, database records. The more structured your data, the more useful the graph relationships become. Start with whatever data is most relevant to your agent's goals.
+
 ### Use the Cognee CLI
 
 ```bash
