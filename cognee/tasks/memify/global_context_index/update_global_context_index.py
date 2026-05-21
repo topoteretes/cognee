@@ -82,6 +82,32 @@ async def filter_graph_dataset_text_summaries(
     return [summaries_by_id[summary_id] for summary_id in sorted(dataset_summary_ids)]
 
 
+async def filter_text_summaries_for_strategy(
+    bucketing_strategy: BucketingStrategyName,
+    dataset_id: str,
+    text_summaries: list[SummaryNode],
+) -> list[SummaryNode]:
+    if bucketing_strategy != "graph":
+        return text_summaries
+    return await filter_graph_dataset_text_summaries(dataset_id, text_summaries)
+
+
+async def load_validated_graph_input(
+    bucketing_strategy: BucketingStrategyName,
+    dataset_id: str,
+    text_summaries: list[SummaryNode],
+) -> GlobalContextGraphInput | None:
+    if bucketing_strategy != "graph" or not text_summaries:
+        return None
+
+    graph_input = await load_global_context_graph_input(
+        dataset_id,
+        [summary.id for summary in text_summaries],
+    )
+    validate_graph_rebuild_input(graph_input)
+    return graph_input
+
+
 async def reset_context_index_for_rebuild(
     context_input: GlobalContextIndexInput,
     text_summaries: list[SummaryNode],
@@ -104,6 +130,17 @@ def select_new_context_index_items(
     if rebuild:
         return text_summaries
     return [summary for summary in text_summaries if not summary.global_context_bucket_id]
+
+
+def validate_existing_buckets_can_be_extended(
+    bucketing_strategy: BucketingStrategyName,
+    existing_buckets: list[SummaryNode],
+) -> None:
+    if bucketing_strategy == "graph":
+        validate_graph_buckets_can_be_extended(existing_buckets)
+        return
+
+    validate_vector_buckets_can_be_extended(existing_buckets)
 
 
 @task_summary("Updated {n} global context index node(s)")
@@ -140,21 +177,25 @@ async def update_global_context_index(
 
     context_input = await load_context_index_input(data, dataset_id, ctx)
     text_summaries = [summary for summary in context_input.text_summaries if summary.text]
+    text_summaries = await filter_text_summaries_for_strategy(
+        bucketing_strategy,
+        dataset_id,
+        text_summaries,
+    )
 
     unified_engine = None
+    graph_input = None
 
     if rebuild:
+        graph_input = await load_validated_graph_input(
+            bucketing_strategy,
+            dataset_id,
+            text_summaries,
+        )
         unified_engine = await get_unified_engine()
         await reset_context_index_for_rebuild(context_input, text_summaries, unified_engine)
-
-    if bucketing_strategy == "graph":
-        text_summaries = await filter_graph_dataset_text_summaries(dataset_id, text_summaries)
-
-    if not rebuild:
-        if bucketing_strategy == "graph":
-            validate_graph_buckets_can_be_extended(context_input.buckets)
-        else:
-            validate_vector_buckets_can_be_extended(context_input.buckets)
+    else:
+        validate_existing_buckets_can_be_extended(bucketing_strategy, context_input.buckets)
 
     if not text_summaries:
         return []
@@ -172,11 +213,11 @@ async def update_global_context_index(
     idf_weights: dict[str, float] = {}
 
     if bucketing_strategy == "graph":
-        graph_input = await load_global_context_graph_input(
+        graph_input = graph_input or await load_validated_graph_input(
+            bucketing_strategy,
             dataset_id,
-            [summary.id for summary in text_summaries],
+            text_summaries,
         )
-        validate_graph_rebuild_input(graph_input)
         entities_by_summary_id = graph_input.entities_by_summary_id
         idf_weights = graph_input.idf_weights
 

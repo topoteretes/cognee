@@ -1111,9 +1111,26 @@ async def test_update_global_context_index_graph_incremental_extends_graph_bucke
 
 
 @pytest.mark.asyncio
-async def test_update_global_context_index_graph_rebuild_rejects_missing_made_from(monkeypatch):
+async def test_update_global_context_index_graph_rebuild_rejects_missing_made_from_before_delete(
+    monkeypatch,
+):
     summary = _summary_node("summary")
     dataset_id = uuid4()
+    existing_bucket = SummaryNode(
+        id=str(uuid4()),
+        text="old bucket",
+        type="GlobalContextSummary",
+        level=0,
+        child_ids={summary.id},
+        graph_bucket_entity_ids={"old-entity"},
+    )
+    existing_root = SummaryNode(
+        id=str(uuid4()),
+        text="old root",
+        type="GlobalContextSummary",
+        level=1,
+        is_root=True,
+    )
     unified_engine = _unified_engine()
     _stub_global_context_index_io(monkeypatch, unified_engine)
     monkeypatch.setattr(
@@ -1135,10 +1152,16 @@ async def test_update_global_context_index_graph_rebuild_rejects_missing_made_fr
 
     with pytest.raises(ValueError, match="made_from"):
         await update_global_context_index(
-            GlobalContextIndexInput(text_summaries=[summary], buckets=[]),
+            GlobalContextIndexInput(
+                text_summaries=[summary],
+                buckets=[existing_bucket],
+                root=existing_root,
+            ),
             rebuild=True,
             bucketing_strategy="graph",
             ctx=PipelineContext(dataset=SimpleNamespace(id=dataset_id)),
         )
 
+    unified_engine.graph.delete_nodes.assert_not_awaited()
+    unified_engine.vector.delete_data_points.assert_not_awaited()
     unified_engine.graph.add_edges.assert_not_awaited()
