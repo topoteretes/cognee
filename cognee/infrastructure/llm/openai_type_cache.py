@@ -59,8 +59,6 @@ def install() -> bool:
             except TypeError:
                 return fn(arg)
 
-        safe.cache_info = wrapped.cache_info  # type: ignore[attr-defined]
-        safe.cache_clear = wrapped.cache_clear  # type: ignore[attr-defined]
         return safe
 
     cached_get_origin = _cached(_ou_compat.get_origin)
