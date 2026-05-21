@@ -11,6 +11,13 @@ inside ``openai/*``. Patching the source module alone is insufficient because
 most consumers use ``from ._compat import get_origin``, which captures the
 name at import time.
 
+This module touches openai-python's **private** modules (``openai._models``,
+``openai._utils._compat``, ``openai._utils._typing``, ``openai._response``,
+``openai._legacy_response``, ``openai._base_client``). They are not covered
+by openai-python's compatibility guarantees and may move between releases. If
+that happens, the import block fails fast and ``install()`` becomes a no-op —
+cognee keeps working with the uncached originals.
+
 Safe assumptions:
 - Inputs to all four helpers are hashable type objects (PEP 484/585/604).
 - The helpers are pure functions of their input.
@@ -21,6 +28,10 @@ from __future__ import annotations
 
 import functools
 from typing import Any, Callable
+
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 _INSTALLED = False
 
@@ -44,19 +55,30 @@ def install() -> bool:
             _models,
             _response,
         )
-    except ImportError:
+    except ImportError as exc:
+        logger.debug(
+            "openai SDK not available or has shifted private modules; "
+            "skipping type-cache install: %s",
+            exc,
+        )
         return False
 
     def _cached(fn: Callable[..., Any]) -> Callable[..., Any]:
+        """Wrap ``fn`` with an LRU cache, falling back to ``fn`` on unhashable args.
+
+        The helpers we patch all take a single positional argument; we keep the
+        wrapper signature one-arg on purpose rather than ``*args, **kwargs`` so
+        an accidental future use with a different shape fails loudly.
+        """
         wrapped = functools.lru_cache(maxsize=_CACHE_MAXSIZE)(fn)
 
-        # Fall back to the uncached function if a caller ever passes an
-        # unhashable argument — never block a real LLM response on caching.
         @functools.wraps(fn)
         def safe(arg: Any) -> Any:
+            """Cached call; falls back to the uncached ``fn`` on TypeError."""
             try:
                 return wrapped(arg)
             except TypeError:
+                # Unhashable input — caching can never block a real LLM call.
                 return fn(arg)
 
         return safe
@@ -97,4 +119,9 @@ def install() -> bool:
             setattr(module, attr, replacement)
 
     _INSTALLED = True
+    logger.debug(
+        "openai type-introspection cache installed (maxsize=%d, %d rebind sites)",
+        _CACHE_MAXSIZE,
+        len(rebind_targets),
+    )
     return True
