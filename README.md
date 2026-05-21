@@ -167,7 +167,7 @@ After running the pipeline above, here's what happens:
 
 - **Session memory** (`session_id` variant) lives in a fast cache and is ideal for short-lived context like ongoing conversations. It automatically falls through to the permanent graph when a session expires.
 
-**What to put in memory:** Plain text works, but cognee handles richer sources — support tickets, meeting notes, Slack threads, PDF documents, database records. The more structured your data, the more useful the graph relationships become. Start with whatever data is most relevant to your agent's goals.
+**What to put in memory:** Plain text works, but Cognee handles richer sources — support tickets, meeting notes, Slack threads, PDF documents, database records. The more structured your data, the more useful the graph relationships become. Start with whatever data is most relevant to your agent's goals.
 
 ### Use the Cognee CLI
 
