@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.pipelines.models import PipelineContext
@@ -33,6 +34,19 @@ async def delete_context_index_nodes(unified_engine: Any, bucket_ids: list[str])
     await safe_delete_context_vectors(unified_engine.vector, bucket_ids)
 
 
+def ensure_global_context_storage_context(
+    ctx: PipelineContext | None,
+) -> PipelineContext | None:
+    if ctx is None or getattr(ctx.data_item, "id", None) is not None:
+        return ctx
+
+    dataset_id = getattr(ctx.dataset, "id", ctx.dataset)
+    ctx.data_item = SimpleNamespace(
+        id=uuid5(NAMESPACE_URL, f"cognee:global-context-index:{dataset_id}")
+    )
+    return ctx
+
+
 def build_context_index_edges(assignments: list[BucketAssignment]) -> list:
     edges = []
     updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -60,7 +74,10 @@ async def persist_context_summaries(
     ctx: PipelineContext | None,
 ) -> None:
     if summary_datapoints:
-        await add_data_points(summary_datapoints, ctx=ctx)
+        await add_data_points(
+            summary_datapoints,
+            ctx=ensure_global_context_storage_context(ctx),
+        )
 
 
 async def persist_context_index_edges(

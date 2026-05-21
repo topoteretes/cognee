@@ -11,6 +11,7 @@ Requires:
 import asyncio
 
 import cognee
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import ERROR, setup_logging
 
@@ -83,10 +84,21 @@ def _has_global_context_prelude(context: str) -> bool:
     return WORLD_SUMMARY_HEADER in context or RELEVANT_AREAS_HEADER in context
 
 
+async def _run_startup_migrations() -> None:
+    try:
+        await cognee.run_startup_migrations()
+    except Exception:
+        relational = get_relational_engine()
+        await relational.create_database()
+        await cognee.run_startup_migrations()
+
+
 async def main() -> None:
     print(f"Dataset: {DATASET}")
     print("Clearing existing data...")
-    await cognee.forget(everything=True)
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await _run_startup_migrations()
 
     print("Ingesting conversation with remember()...")
     await cognee.remember(

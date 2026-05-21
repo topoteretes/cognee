@@ -1,7 +1,7 @@
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 
@@ -25,6 +25,9 @@ from cognee.tasks.memify.global_context_index.graph_input import (
 )
 from cognee.tasks.memify.global_context_index.graph_providers import GlobalContextGraphInput
 from cognee.tasks.memify.global_context_index.models import GlobalContextIndexInput, SummaryNode
+from cognee.tasks.memify.global_context_index.persistence import (
+    ensure_global_context_storage_context,
+)
 from cognee.tasks.memify.global_context_index.update_global_context_index import (
     update_global_context_index,
 )
@@ -91,6 +94,23 @@ def _add_summarized_in_edge(graph: CogneeGraph, child: Node, parent: Node) -> No
 def _assert_add_data_points_used_context(add_data_points_mock: AsyncMock, ctx) -> None:
     assert add_data_points_mock.await_args_list
     assert all(call.kwargs.get("ctx") is ctx for call in add_data_points_mock.await_args_list)
+
+
+def test_ensure_global_context_storage_context_adds_stable_data_item_id():
+    dataset_id = uuid4()
+    ctx = PipelineContext(
+        user=SimpleNamespace(id=uuid4()),
+        dataset=SimpleNamespace(id=dataset_id),
+        data_item={},
+    )
+
+    result = ensure_global_context_storage_context(ctx)
+
+    assert result is ctx
+    assert ctx.data_item.id == uuid5(
+        NAMESPACE_URL,
+        f"cognee:global-context-index:{dataset_id}",
+    )
 
 
 def _graph_input(
