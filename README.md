@@ -157,6 +157,17 @@ if __name__ == '__main__':
 
 ```
 
+### What this example creates
+
+The Quickstart stores two small memories:
+
+- `Cognee turns documents into AI memory.` goes into the default dataset and is processed into long-term memory.
+- `User prefers detailed explanations.` is attached to the `chat_1` session so it can be recalled in that conversation before falling back to graph memory.
+
+When `recall("What does Cognee do?")` runs, Cognee searches the memory built from the first input and returns the matching context. When `recall(..., session_id="chat_1")` runs, it checks session memory first, so the answer can include the user preference without mixing it into every dataset.
+
+You can start with plain text like the example above, then replace it with a document, support ticket, meeting note, or any other source you want your agent to remember.
+
 ### Use the Cognee CLI
 
 ```bash
