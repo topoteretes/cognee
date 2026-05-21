@@ -10,7 +10,11 @@ class CognifyConfig(BaseSettings):
     triplet_embedding: bool = False
     chunks_per_batch: Optional[int] = None
     ontology_generation: Literal[
-        "DEFAULT", "AUTO_RESTRICTED", "AUTO_RESTRICTED_ITERATIVE", "AUTO_LOW_LEVEL"
+        "DEFAULT",
+        "AUTO_RESTRICTED",
+        "AUTO_RESTRICTED_ITERATIVE",
+        "AUTO_LOW_LEVEL",
+        "AUTO_LOW_LEVEL_CANONICAL",
     ] = "DEFAULT"
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

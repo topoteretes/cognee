@@ -315,12 +315,20 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         "AUTO_RESTRICTED",
         "AUTO_RESTRICTED_ITERATIVE",
         "AUTO_LOW_LEVEL",
+        "AUTO_LOW_LEVEL_CANONICAL",
     ):
         if graph_model is KnowledgeGraph:
-            if cognify_config.ontology_generation == "AUTO_LOW_LEVEL":
-                from cognee.tasks.graph.auto_low_level_ontology import AutoLowLevelOntology
+            if cognify_config.ontology_generation in ("AUTO_LOW_LEVEL", "AUTO_LOW_LEVEL_CANONICAL"):
+                from cognee.tasks.graph.auto_low_level_ontology import (
+                    AutoLowLevelCanonicalOntology,
+                    AutoLowLevelOntology,
+                )
 
-                ontology = AutoLowLevelOntology()
+                ontology = (
+                    AutoLowLevelCanonicalOntology()
+                    if cognify_config.ontology_generation == "AUTO_LOW_LEVEL_CANONICAL"
+                    else AutoLowLevelOntology()
+                )
                 extraction_graph_model = DataPoint
             elif cognify_config.ontology_generation == "AUTO_RESTRICTED_ITERATIVE":
                 from cognee.tasks.graph.auto_restricted_iterative_ontology import (
