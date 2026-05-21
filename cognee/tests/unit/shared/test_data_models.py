@@ -27,5 +27,7 @@ def test_generate_graph_prompt_requests_concrete_edge_descriptions():
     prompt = prompt_path.read_text()
 
     assert "Every edge should include a description" in prompt
-    assert "Alice works at Acme." in prompt
+    assert "stay dry and efficient" in prompt
+    assert "Alice works at Acme as a platform engineer on the search team." in prompt
+    assert "Do not add outside knowledge." in prompt
     assert "This edge describes an employment relationship." in prompt

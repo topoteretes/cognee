@@ -143,7 +143,7 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
         target_id,
         "contains",
         {
-            "edge_text": "This chunk mentions Ali\x00ce: bad\x00 text",
+            "edge_text": "Document chunk mentions Ali\x00ce: bad\x00 text",
             "no\x00te": "nul\x00 byte",
         },
     )
@@ -159,7 +159,7 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
         )
 
     payload = statement.values_arg[0]
-    expected_relationship_name = "This chunk mentions Alice: bad text"
+    expected_relationship_name = "Document chunk mentions Alice: bad text"
     assert payload["relationship_name"] == expected_relationship_name
     assert payload["label"] == "contains"
     assert payload["attributes"] == {

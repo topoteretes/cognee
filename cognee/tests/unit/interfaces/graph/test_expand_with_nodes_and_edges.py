@@ -77,8 +77,8 @@ def test_chunk_contains_edge_text_uses_per_chunk_description():
     second_edge, second_entity = chunk2.contains[0]
 
     assert first_entity is second_entity
-    assert first_edge.edge_text == "This chunk mentions alice: Alice founded Acme."
-    assert second_edge.edge_text == "This chunk mentions alice: Alice lives in Paris."
+    assert first_edge.edge_text == "Document chunk mentions alice: Alice founded Acme."
+    assert second_edge.edge_text == "Document chunk mentions alice: Alice lives in Paris."
 
 
 def test_blank_chunk_description_leaves_edge_text_none_before_storage():

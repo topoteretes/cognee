@@ -262,7 +262,7 @@ def _process_graph_nodes(
 
         entity_description = _strip_nonblank_text(node.description)
         edge_text = (
-            f"This chunk mentions {entity_node.name}: {entity_description}"
+            f"Document chunk mentions {entity_node.name}: {entity_description}"
             if entity_description
             else None
         )
