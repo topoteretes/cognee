@@ -14,6 +14,8 @@ from uuid import NAMESPACE_OID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.engine import DataPoint, Edge as DataPointEdge
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
@@ -46,6 +48,14 @@ class GeneratedLowLevelDataPointClass(BaseModel):
 
 class GeneratedLowLevelDataPointModel(BaseModel):
     classes: list[GeneratedLowLevelDataPointClass] = Field(default_factory=list)
+
+
+class LowLevelCanonicalStructure(DataPoint):
+    text: str
+    structure_json: str
+    dataset_id: str
+    dataset_name: str | None = None
+    metadata: dict = {"index_fields": ["text"]}
 
 
 def _snake_case(value: str) -> str:
@@ -96,6 +106,96 @@ def _unique(values: list[str]) -> list[str]:
         if key and key not in unique_values:
             unique_values[key] = value
     return list(unique_values.values())
+
+
+def _canonical_structure_json(model: GeneratedLowLevelDataPointModel) -> str:
+    return _normalize_low_level_model(model).model_dump_json()
+
+
+def _canonical_structure_search_text(model: GeneratedLowLevelDataPointModel) -> str:
+    model = _normalize_low_level_model(model)
+    parts = []
+    for class_spec in model.classes:
+        scalar_names = [
+            field.name for field in class_spec.scalar_fields if field.name not in {"name", "text"}
+        ]
+        relation_descriptions = [
+            f"{relation.name}->{relation.target_class}" for relation in class_spec.relation_fields
+        ]
+        parts.append(
+            " ".join(
+                [
+                    class_spec.class_name,
+                    class_spec.description,
+                    "fields:",
+                    ", ".join(scalar_names),
+                    "relations:",
+                    ", ".join(relation_descriptions),
+                ]
+            )
+        )
+    return "\n".join(part.strip() for part in parts if part.strip())
+
+
+def _canonical_collection_name() -> str:
+    return "low_level_canonical_text"
+
+
+def _parse_low_level_model_json(value: str | None) -> GeneratedLowLevelDataPointModel | None:
+    if not value:
+        return None
+    try:
+        return _normalize_low_level_model(GeneratedLowLevelDataPointModel.model_validate_json(value))
+    except Exception:
+        logger.warning("AUTO_LOW_LEVEL_CANONICAL skipped invalid canonical structure payload.")
+        return None
+
+
+def _format_canonical_context(models: list[GeneratedLowLevelDataPointModel]) -> str:
+    if not models:
+        return ""
+    formatted = "\n\n".join(
+        f"CANONICAL STRUCTURE {index + 1}:\n{_canonical_structure_json(model)}"
+        for index, model in enumerate(models)
+    )
+    return f"""
+
+Nearby canonical low-level structures retrieved for this chunk:
+{formatted}
+
+When designing the new structure, take these nearby canonical structures into consideration:
+- Reuse compatible class names, scalar field names, relation names, and target classes.
+- Resolve synonyms or near-duplicates to the retrieved canonical names when they fit.
+- Add new classes or relationships only when the text contains important concepts that
+  the retrieved structures cannot represent cleanly.
+- Do not force unrelated text into an incompatible retrieved structure.
+"""
+
+
+def _build_low_level_extraction_prompt(generated_model: GeneratedLowLevelDataPointModel) -> str:
+    return f"""
+Extract low-level Cognee DataPoint instances from the source text.
+
+The following JSON specification describes the generated DataPoint classes:
+{generated_model.model_dump_json()}
+
+Extraction rules:
+- Fill the per-class lists with instances grounded in the source text.
+- local_id is only for this response. Use short stable ids so relationships can
+  point to them.
+- Every object must fill both name and text.
+- name is the compact human-readable label.
+- Concatenate every relevant textual property for that object into text.
+- Put only atomic non-narrative scalar properties on the object fields.
+- Put edges in relationships using source_class, source_id, relationship_name,
+  target_class, and target_id.
+- relationship_name must be a relation field declared on source_class, and
+  target_class must match that relation field's target_class.
+- Do not pack repeated, nested, section-like, list-like, or separable objects
+  into a parent scalar field. Extract them as their own objects and connect them
+  with relationships.
+- Do not invent objects or relationships not supported by the text.
+"""
 
 
 _FORBIDDEN_LOW_LEVEL_CLASS_NAMES = {"Summary"}
@@ -205,13 +305,15 @@ def _normalize_low_level_model(
 
 async def generate_low_level_model_from_chunks(
     chunks: list[DocumentChunk],
+    canonical_models: list[GeneratedLowLevelDataPointModel] | None = None,
     **kwargs: Any,
 ) -> GeneratedLowLevelDataPointModel:
     sample = "\n\n".join(chunk.text for chunk in chunks if getattr(chunk, "text", None))
+    canonical_context = _format_canonical_context(canonical_models or [])
 
     generated = await LLMGateway.acreate_structured_output(
         text_input=f"SOURCE TEXT:\n\n{sample}",
-        system_prompt="""
+        system_prompt=f"""
 You design low-level Cognee graph models for information extraction.
 
 Important: a Cognee DataPoint is a Python object that Cognee stores as a graph node.
@@ -266,6 +368,7 @@ Modeling rules:
 - Any descriptive, narrative, list-like, section-like, or compound text belongs
   in the node's text field, or in related child nodes when
   it describes a separable object.
+{canonical_context}
 """,
         response_model=GeneratedLowLevelDataPointModel,
         **kwargs,
@@ -494,6 +597,7 @@ class AutoLowLevelOntology:
 
         llm_kwargs = dict(kwargs)
         llm_kwargs.pop("calculate_chunk_graphs", None)
+        llm_kwargs.pop("ctx", None)
 
         async def extract_chunk(chunk: DocumentChunk) -> list[DataPoint]:
             generated_model = await generate_low_level_model_from_chunks(
@@ -507,29 +611,147 @@ class AutoLowLevelOntology:
             )
 
             extraction_model, _ = build_low_level_extraction_model(generated_model)
-            extraction_prompt = f"""
-Extract low-level Cognee DataPoint instances from the source text.
+            extraction_prompt = _build_low_level_extraction_prompt(generated_model)
 
-The following JSON specification describes the generated DataPoint classes:
-{generated_model.model_dump_json()}
+            extraction = await LLMGateway.acreate_structured_output(
+                chunk.text,
+                extraction_prompt,
+                extraction_model,
+                **llm_kwargs,
+            )
 
-Extraction rules:
-- Fill the per-class lists with instances grounded in the source text.
-- local_id is only for this response. Use short stable ids so relationships can
-  point to them.
-- Every object must fill both name and text.
-- name is the compact human-readable label.
-- Concatenate every relevant textual property for that object into text.
-- Put only atomic non-narrative scalar properties on the object fields.
-- Put edges in relationships using source_class, source_id, relationship_name,
-  target_class, and target_id.
-- relationship_name must be a relation field declared on source_class, and
-  target_class must match that relation field's target_class.
-- Do not pack repeated, nested, section-like, list-like, or separable objects
-  into a parent scalar field. Extract them as their own objects and connect them
-  with relationships.
-- Do not invent objects or relationships not supported by the text.
-"""
+            return instantiate_low_level_datapoints(extraction, generated_model)
+
+        return await asyncio.gather(*[extract_chunk(chunk) for chunk in chunks])
+
+
+class AutoLowLevelCanonicalOntology:
+    """Generate low-level structures with dataset-scoped canonical schema memory."""
+
+    def __init__(self, top_k: int = 2) -> None:
+        self.top_k = top_k
+        self._lock = asyncio.Lock()
+        self._memory_models: list[GeneratedLowLevelDataPointModel] = []
+        self._memory_structure_ids: set[str] = set()
+        self._warned_run_local = False
+
+    async def _get_nearby_models_from_vector_store(
+        self,
+        chunk: DocumentChunk,
+    ) -> list[GeneratedLowLevelDataPointModel]:
+        vector_engine = get_vector_engine()
+        collection_name = _canonical_collection_name()
+        try:
+            results = await vector_engine.search(
+                collection_name,
+                chunk.text,
+                limit=self.top_k,
+                include_payload=True,
+            )
+        except CollectionNotFoundError:
+            return []
+
+        models: list[GeneratedLowLevelDataPointModel] = []
+        for result in results:
+            payload = result.payload or {}
+            model = _parse_low_level_model_json(payload.get("structure_json"))
+            if model is not None:
+                models.append(model)
+        return models
+
+    def _get_nearby_models_from_memory(self) -> list[GeneratedLowLevelDataPointModel]:
+        return self._memory_models[-self.top_k :]
+
+    async def _store_model_in_vector_store(
+        self,
+        model: GeneratedLowLevelDataPointModel,
+        dataset_id: str,
+        dataset_name: str | None,
+    ) -> None:
+        structure_json = _canonical_structure_json(model)
+        structure_id = uuid5(NAMESPACE_OID, f"LowLevelCanonicalStructure:{dataset_id}:{structure_json}")
+        vector_engine = get_vector_engine()
+        collection_name = _canonical_collection_name()
+
+        existing = await vector_engine.retrieve(collection_name, [str(structure_id)])
+        if existing:
+            return
+
+        canonical_structure = LowLevelCanonicalStructure(
+            id=structure_id,
+            text=_canonical_structure_search_text(model),
+            structure_json=structure_json,
+            dataset_id=str(dataset_id),
+            dataset_name=dataset_name,
+        )
+        await vector_engine.create_data_points(collection_name, [canonical_structure])
+
+    def _store_model_in_memory(self, model: GeneratedLowLevelDataPointModel) -> None:
+        structure_json = _canonical_structure_json(model)
+        if structure_json in self._memory_structure_ids:
+            return
+        self._memory_structure_ids.add(structure_json)
+        self._memory_models.append(model)
+
+    async def _generate_and_store_model(
+        self,
+        chunk: DocumentChunk,
+        dataset: Any,
+        llm_kwargs: dict[str, Any],
+    ) -> GeneratedLowLevelDataPointModel:
+        dataset_id = str(getattr(dataset, "id", "")) if dataset is not None else ""
+        dataset_name = getattr(dataset, "name", None) if dataset is not None else None
+
+        async with self._lock:
+            if dataset_id:
+                nearby_models = await self._get_nearby_models_from_vector_store(chunk)
+            else:
+                if not self._warned_run_local:
+                    logger.warning(
+                        "AUTO_LOW_LEVEL_CANONICAL has no dataset context; "
+                        "using run-local in-memory canonical structures."
+                    )
+                    self._warned_run_local = True
+                nearby_models = self._get_nearby_models_from_memory()
+
+            generated_model = await generate_low_level_model_from_chunks(
+                [chunk],
+                canonical_models=nearby_models,
+                **llm_kwargs,
+            )
+
+            logger.info(
+                "AUTO_LOW_LEVEL_CANONICAL generated DataPoint model: %s",
+                generated_model.model_dump_json(),
+            )
+
+            if dataset_id:
+                await self._store_model_in_vector_store(generated_model, dataset_id, dataset_name)
+            else:
+                self._store_model_in_memory(generated_model)
+
+            return generated_model
+
+    async def calculate_chunk_graphs(
+        self,
+        chunks: list[DocumentChunk],
+        graph_model: Type[BaseModel],
+        custom_prompt: str | None = None,
+        **kwargs: Any,
+    ) -> list[list[DataPoint]]:
+        if not chunks:
+            return []
+
+        ctx = kwargs.get("ctx")
+        dataset = getattr(ctx, "dataset", None) if ctx is not None else None
+        llm_kwargs = dict(kwargs)
+        llm_kwargs.pop("calculate_chunk_graphs", None)
+        llm_kwargs.pop("ctx", None)
+
+        async def extract_chunk(chunk: DocumentChunk) -> list[DataPoint]:
+            generated_model = await self._generate_and_store_model(chunk, dataset, llm_kwargs)
+            extraction_model, _ = build_low_level_extraction_model(generated_model)
+            extraction_prompt = _build_low_level_extraction_prompt(generated_model)
 
             extraction = await LLMGateway.acreate_structured_output(
                 chunk.text,

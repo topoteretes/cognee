@@ -217,6 +217,7 @@ class AutoRestrictedOntologyIterative:
 
         llm_kwargs = dict(kwargs)
         llm_kwargs.pop("calculate_chunk_graphs", None)
+        llm_kwargs.pop("ctx", None)
 
         async with self._lock:
             self.canonical = await _generate_iterative_restriction(

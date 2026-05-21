@@ -281,6 +281,7 @@ class AutoRestrictedOntology:
 
         llm_kwargs = dict(kwargs)
         llm_kwargs.pop("calculate_chunk_graphs", None)
+        llm_kwargs.pop("ctx", None)
 
         canonical = await self._update_canonical(chunks, **llm_kwargs)
 
