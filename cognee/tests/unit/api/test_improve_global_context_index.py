@@ -85,6 +85,7 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
             user=user,
             dataset="docs",
             run_in_background=False,
+            bucketing_strategy="graph",
         )
     else:
         global_context_mock.assert_not_awaited()
