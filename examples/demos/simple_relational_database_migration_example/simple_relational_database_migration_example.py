@@ -10,18 +10,13 @@ load_dotenv(override=True)
 
 # Configure process-level Cognee settings before importing Cognee.
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
-os.environ["MIGRATION_DB_PROVIDER"] = "postgres"
-os.environ.setdefault("MIGRATION_DB_HOST", "127.0.0.1")
-os.environ.setdefault("MIGRATION_DB_PORT", "5432")
-os.environ.setdefault("MIGRATION_DB_NAME", "cognee_migration")
-os.environ.setdefault("MIGRATION_DB_USERNAME", "cognee")
-os.environ.setdefault("MIGRATION_DB_PASSWORD", "cognee")
 
-MIGRATION_DB_HOST = os.environ["MIGRATION_DB_HOST"]
-MIGRATION_DB_PORT = os.environ["MIGRATION_DB_PORT"]
-MIGRATION_DB_NAME = os.environ["MIGRATION_DB_NAME"]
-MIGRATION_DB_USERNAME = os.environ["MIGRATION_DB_USERNAME"]
-MIGRATION_DB_PASSWORD = os.environ["MIGRATION_DB_PASSWORD"]
+MIGRATION_DB_PROVIDER = "postgres"
+MIGRATION_DB_HOST = os.environ.get("MIGRATION_DB_HOST", "127.0.0.1")
+MIGRATION_DB_PORT = os.environ.get("MIGRATION_DB_PORT", "5432")
+MIGRATION_DB_NAME = os.environ.get("MIGRATION_DB_NAME", "cognee_migration")
+MIGRATION_DB_USERNAME = os.environ.get("MIGRATION_DB_USERNAME", "cognee")
+MIGRATION_DB_PASSWORD = os.environ.get("MIGRATION_DB_PASSWORD", "cognee")
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -29,6 +24,7 @@ from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
     get_migration_relational_engine,
 )
+from cognee.infrastructure.databases.relational.config import get_migration_config
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_vector_db_and_tables,
 )
@@ -121,6 +117,14 @@ def fetch_texts_from_postgres() -> list[str]:
 async def main(ontology_path: str = None):
     # Create a small Postgres DB schema to migrate.
     create_example_postgres_db()
+
+    migration_config = get_migration_config()
+    migration_config.migration_db_provider = MIGRATION_DB_PROVIDER
+    migration_config.migration_db_host = MIGRATION_DB_HOST
+    migration_config.migration_db_port = MIGRATION_DB_PORT
+    migration_config.migration_db_name = MIGRATION_DB_NAME
+    migration_config.migration_db_username = MIGRATION_DB_USERNAME
+    migration_config.migration_db_password = MIGRATION_DB_PASSWORD
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
