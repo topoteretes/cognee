@@ -114,14 +114,17 @@ def install() -> bool:
         (_base_client, "get_origin", cached_get_origin),
     ]
 
+    rebound = 0
     for module, attr, replacement in rebind_targets:
         if hasattr(module, attr):
             setattr(module, attr, replacement)
+            rebound += 1
 
     _INSTALLED = True
     logger.debug(
-        "openai type-introspection cache installed (maxsize=%d, %d rebind sites)",
+        "openai type-introspection cache installed (maxsize=%d, %d/%d rebind sites)",
         _CACHE_MAXSIZE,
+        rebound,
         len(rebind_targets),
     )
     return True
