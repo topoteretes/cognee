@@ -25,7 +25,6 @@ window should be re-split immediately, not re-queued.
 from __future__ import annotations
 
 import asyncio
-from typing import List, Optional, Set, Tuple
 
 from cognee.shared.logging_utils import get_logger
 
@@ -34,7 +33,7 @@ from .EmbeddingEngine import EmbeddingEngine
 logger = get_logger("AccumulatingEmbeddingEngine")
 
 
-_PendingItem = Tuple[List[str], asyncio.Future]
+_PendingItem = tuple[list[str], asyncio.Future]
 
 
 class AccumulatingEmbeddingEngine:
@@ -66,32 +65,40 @@ class AccumulatingEmbeddingEngine:
         self._flush_timeout = flush_timeout_seconds
 
         self._lock = asyncio.Lock()
-        self._queue: List[_PendingItem] = []
+        self._queue: list[_PendingItem] = []
         self._pending_strings = 0
-        self._oldest_enqueued_at: Optional[float] = None
-        self._timer_task: Optional[asyncio.Task] = None
+        self._oldest_enqueued_at: float | None = None
+        self._timer_task: asyncio.Task | None = None
         # Keep references to in-flight dispatch tasks so they aren't garbage
         # collected mid-flight (which would cancel the underlying API call).
-        self._inflight: Set[asyncio.Task] = set()
+        self._inflight: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
 
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         if not text:
             return []
 
         # Oversized request: pass through directly. Splitting it into the
         # accumulator would just delay it and the inner engine already
-        # knows how to handle large inputs.
+        # knows how to handle large inputs. Still validate the response
+        # length so the bypass path can't silently return a wrong-sized
+        # result while the coalesced path raises.
         if len(text) >= self._max_batch_size:
-            return await self._inner.embed_text(text)
+            vectors = await self._inner.embed_text(text)
+            if len(vectors) != len(text):
+                raise RuntimeError(
+                    f"Embedding engine returned {len(vectors)} vectors "
+                    f"for {len(text)} inputs."
+                )
+            return vectors
 
         loop = asyncio.get_running_loop()
-        future: asyncio.Future[List[List[float]]] = loop.create_future()
+        future: asyncio.Future[list[list[float]]] = loop.create_future()
 
-        items_to_dispatch: Optional[List[_PendingItem]] = None
+        items_to_dispatch: list[_PendingItem] | None = None
         async with self._lock:
             # If appending would overflow the batch, flush the current queue
             # first so this request starts a fresh accumulation window.
@@ -136,13 +143,17 @@ class AccumulatingEmbeddingEngine:
     # Internal helpers
     # ------------------------------------------------------------------ #
 
-    def _drain_locked(self) -> List[_PendingItem]:
+    def _drain_locked(self) -> list[_PendingItem]:
         """Atomically remove and return all queued items. Caller holds lock."""
         items = self._queue
         self._queue = []
         self._pending_strings = 0
         self._oldest_enqueued_at = None
         if self._timer_task is not None and not self._timer_task.done():
+            # Cancellation is delivered asynchronously, so a freshly-started
+            # timer may still run one more loop iteration before observing
+            # the cancel. That's harmless: the next iteration takes the lock
+            # and sees an empty queue (or one re-armed under a fresh timer).
             self._timer_task.cancel()
         self._timer_task = None
         return items
@@ -159,42 +170,38 @@ class AccumulatingEmbeddingEngine:
         (e.g. because items were drained by a batch-full flush and a new
         item was enqueued after).
         """
-        try:
-            while True:
-                async with self._lock:
-                    if not self._queue or self._oldest_enqueued_at is None:
-                        # Nothing to do — let the next embed_text restart us.
-                        self._timer_task = None
-                        return
-                    age = asyncio.get_running_loop().time() - self._oldest_enqueued_at
-                    remaining = self._flush_timeout - age
-                    if remaining <= 0:
-                        items = self._drain_locked()
-                        # We just nulled self._timer_task in _drain_locked;
-                        # dispatch and exit.
-                        if items:
-                            self._start_dispatch(items)
-                        return
-                await asyncio.sleep(remaining)
-        except asyncio.CancelledError:
-            # Cancelled because a full-batch flush happened. Fine.
-            raise
+        while True:
+            async with self._lock:
+                if not self._queue or self._oldest_enqueued_at is None:
+                    # Nothing to do — let the next embed_text restart us.
+                    self._timer_task = None
+                    return
+                age = asyncio.get_running_loop().time() - self._oldest_enqueued_at
+                remaining = self._flush_timeout - age
+                if remaining <= 0:
+                    items = self._drain_locked()
+                    # We just nulled self._timer_task in _drain_locked;
+                    # dispatch and exit.
+                    if items:
+                        self._start_dispatch(items)
+                    return
+            await asyncio.sleep(remaining)
 
-    def _start_dispatch(self, items: List[_PendingItem]) -> None:
+    def _start_dispatch(self, items: list[_PendingItem]) -> None:
         """Spawn a dispatch task and retain a reference until it finishes."""
         task = asyncio.create_task(self._dispatch(items))
         self._inflight.add(task)
         task.add_done_callback(self._inflight.discard)
 
-    async def _dispatch(self, items: List[_PendingItem]) -> None:
+    async def _dispatch(self, items: list[_PendingItem]) -> None:
         """Merge queued requests into a single API call and split the result."""
         # If every waiter has been cancelled before we even started, skip the
         # API call entirely.
         if all(future.done() for _, future in items):
             return
 
-        merged: List[str] = []
-        sizes: List[int] = []
+        merged: list[str] = []
+        sizes: list[int] = []
         for texts, _ in items:
             merged.extend(texts)
             sizes.append(len(texts))

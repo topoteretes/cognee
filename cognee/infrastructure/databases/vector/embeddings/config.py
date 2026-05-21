@@ -113,6 +113,12 @@ class EmbeddingConfig(BaseSettings):
         elif not self.embedding_batch_size:
             self.embedding_batch_size = 36
 
+        if self.accumulate_embedding_timeout_ms <= 0:
+            raise ValueError(
+                f"ACCUMULATE_EMBEDDING_TIMEOUT_MS must be > 0, got "
+                f"{self.accumulate_embedding_timeout_ms}."
+            )
+
     def to_dict(self) -> dict:
         """
         Serialize all embedding configuration settings to a dictionary.

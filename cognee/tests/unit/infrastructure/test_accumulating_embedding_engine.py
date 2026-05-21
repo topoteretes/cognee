@@ -46,16 +46,27 @@ async def test_concurrent_calls_are_coalesced_into_single_inner_call():
 
 @pytest.mark.asyncio
 async def test_full_batch_flushes_immediately_without_waiting_for_timeout():
+    """Two concurrent sub-batch-size calls summing to batch_size should
+    trigger the in-queue full-batch flush, not the timer-based flush.
+
+    Sending a single ``[a,b,c,d]`` call would hit the oversized-bypass
+    path instead, which is covered by ``test_oversized_request_bypasses_queue``.
+    """
     inner = FakeEngine(batch_size=4)
     # Set a long timeout so the test fails if we accidentally waited on it.
     eng = AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=5.0)
 
     started = asyncio.get_running_loop().time()
-    r = await eng.embed_text(["a", "b", "c", "d"])
+    r1, r2 = await asyncio.gather(
+        eng.embed_text(["a", "b"]),
+        eng.embed_text(["c", "d"]),
+    )
     elapsed = asyncio.get_running_loop().time() - started
 
-    assert len(r) == 4
+    assert len(r1) == 2 and len(r2) == 2
+    # One merged inner call: queue fills to batch_size and flushes immediately.
     assert len(inner.calls) == 1
+    assert sum(len(c) for c in inner.calls) == 4
     # Should be near-instant (well below the 5s timeout).
     assert elapsed < 1.0
 
@@ -74,7 +85,10 @@ async def test_oversized_request_bypasses_queue():
 @pytest.mark.asyncio
 async def test_overflow_flushes_existing_queue_before_new_request():
     inner = FakeEngine(batch_size=4)
-    eng = AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=5.0)
+    # Overflow flush is synchronous (happens before any timer is consulted),
+    # so a short timeout is enough — and avoids waiting on the timer for the
+    # second sub-batch.
+    eng = AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=0.05)
 
     # Pending = 3. Next request adds 2 -> total 5 > 4 -> existing queue flushes.
     first = asyncio.create_task(eng.embed_text(["a", "b", "c"]))
@@ -103,6 +117,21 @@ async def test_inner_engine_error_propagates_to_every_waiter():
     results = await asyncio.gather(r1, r2, return_exceptions=True)
 
     assert all(isinstance(r, RuntimeError) and "upstream failure" in str(r) for r in results)
+
+
+@pytest.mark.asyncio
+async def test_oversized_bypass_validates_response_length():
+    """The oversized-bypass fast path must still verify vector count matches inputs."""
+
+    class TruncatingInner(FakeEngine):
+        async def embed_text(self, text):
+            # Drop the last vector regardless of size.
+            return [[0.0] * self._dimensions for _ in range(len(text) - 1)]
+
+    eng = AccumulatingEmbeddingEngine(TruncatingInner(batch_size=4), flush_timeout_seconds=0.05)
+
+    with pytest.raises(RuntimeError):
+        await eng.embed_text(["a", "b", "c", "d", "e"])  # 5 >= batch_size=4
 
 
 @pytest.mark.asyncio
@@ -181,8 +210,7 @@ async def test_cancelled_waiters_skip_api_call():
     assert inner.calls == [], "inner.embed_text should not be called when all waiters cancel"
 
 
-@pytest.mark.asyncio
-async def test_rejects_inner_with_zero_batch_size():
+def test_rejects_inner_with_zero_batch_size():
     class NoBatchSize(FakeEngine):
         def get_batch_size(self) -> int:
             return 0
@@ -191,8 +219,7 @@ async def test_rejects_inner_with_zero_batch_size():
         AccumulatingEmbeddingEngine(NoBatchSize(), flush_timeout_seconds=0.05)
 
 
-@pytest.mark.asyncio
-async def test_rejects_non_positive_flush_timeout():
+def test_rejects_non_positive_flush_timeout():
     inner = FakeEngine(batch_size=4)
     with pytest.raises(ValueError):
         AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=0)
