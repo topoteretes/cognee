@@ -1,7 +1,27 @@
+# ruff: noqa: E402
 import asyncio
 import os
 from pathlib import Path
 import sqlalchemy as sa
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+# Configure process-level Cognee settings before importing Cognee.
+os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
+os.environ["MIGRATION_DB_PROVIDER"] = "postgres"
+os.environ.setdefault("MIGRATION_DB_HOST", "127.0.0.1")
+os.environ.setdefault("MIGRATION_DB_PORT", "5432")
+os.environ.setdefault("MIGRATION_DB_NAME", "cognee_migration")
+os.environ.setdefault("MIGRATION_DB_USERNAME", "cognee")
+os.environ.setdefault("MIGRATION_DB_PASSWORD", "cognee")
+
+MIGRATION_DB_HOST = os.environ["MIGRATION_DB_HOST"]
+MIGRATION_DB_PORT = os.environ["MIGRATION_DB_PORT"]
+MIGRATION_DB_NAME = os.environ["MIGRATION_DB_NAME"]
+MIGRATION_DB_USERNAME = os.environ["MIGRATION_DB_USERNAME"]
+MIGRATION_DB_PASSWORD = os.environ["MIGRATION_DB_PASSWORD"]
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -105,15 +125,10 @@ PRODUCTS = [
 
 
 def _get_postgres_engine() -> sa.Engine:
-    db_host = os.environ.get("MIGRATION_DB_HOST", "127.0.0.1")
-    db_port = os.environ.get("MIGRATION_DB_PORT", "5432")
-    db_name = os.environ.get("MIGRATION_DB_NAME", "cognee_migration")
-    db_user = os.environ.get("MIGRATION_DB_USERNAME", "cognee")
-    db_password = os.environ.get("MIGRATION_DB_PASSWORD", "cognee")
-
     # Requires a running Postgres database and a pre-created database (db_name).
     connection_string = (
-        f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+        f"postgresql+psycopg2://{MIGRATION_DB_USERNAME}:{MIGRATION_DB_PASSWORD}"
+        f"@{MIGRATION_DB_HOST}:{MIGRATION_DB_PORT}/{MIGRATION_DB_NAME}"
     )
     return sa.create_engine(connection_string)
 
@@ -251,18 +266,8 @@ def fetch_texts_from_postgres() -> list[str]:
 
 
 async def main(ontology_path: str = None):
-    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
-
     # Create a small Postgres DB schema to migrate.
     create_example_postgres_db()
-
-    # Point migration config to the example DB.
-    os.environ["MIGRATION_DB_PROVIDER"] = "postgres"
-    os.environ.setdefault("MIGRATION_DB_HOST", "127.0.0.1")
-    os.environ.setdefault("MIGRATION_DB_PORT", "5432")
-    os.environ.setdefault("MIGRATION_DB_NAME", "cognee_migration")
-    os.environ.setdefault("MIGRATION_DB_USERNAME", "cognee")
-    os.environ.setdefault("MIGRATION_DB_PASSWORD", "cognee")
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)

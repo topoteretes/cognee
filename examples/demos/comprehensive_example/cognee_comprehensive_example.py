@@ -1,14 +1,7 @@
+# ruff: noqa: E402
 import os
-import cognee
 import asyncio
 from pathlib import Path
-from cognee.modules.engine.models.node_set import NodeSet
-
-# provide your OpenAI key here
-os.environ["LLM_API_KEY"] = "your_api_key"
-
-# create artifacts directory for storing visualization outputs
-artifacts_path = ".artifacts"
 
 developer_intro = (
     "Hi, I'm an AI/Backend engineer. "
@@ -27,6 +20,16 @@ human_agent_conversations = asset_paths["human_agent_conversations"]
 python_zen_principles = asset_paths["python_zen_principles"]
 ontology_path = asset_paths["ontology"]
 
+# Provide your OpenAI key here and configure ontology before importing Cognee.
+os.environ["LLM_API_KEY"] = "your_api_key"
+os.environ["ONTOLOGY_FILE_PATH"] = ontology_path
+
+import cognee
+from cognee.modules.engine.models.node_set import NodeSet
+
+# create artifacts directory for storing visualization outputs
+artifacts_path = ".artifacts"
+
 
 async def main():
     await cognee.prune.prune_data()
@@ -35,9 +38,6 @@ async def main():
     await cognee.add(developer_intro, node_set=["developer_data"])
     await cognee.add(human_agent_conversations, node_set=["developer_data"])
     await cognee.add(python_zen_principles, node_set=["principles_data"])
-
-    # configure ontology file path for structured data processing
-    os.environ["ONTOLOGY_FILE_PATH"] = ontology_path
 
     # transform all the data in the cognee store into a knowledge graph backed by embeddings
     await cognee.cognify()

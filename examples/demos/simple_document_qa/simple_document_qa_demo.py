@@ -1,11 +1,12 @@
+# ruff: noqa: E402
 import asyncio
-import cognee
-
 import os
 
 # By default cognee uses OpenAI's gpt-5-mini LLM model
 # Provide your OpenAI LLM API KEY
 os.environ["LLM_API_KEY"] = ""
+
+import cognee
 
 
 async def cognee_demo():

@@ -1,5 +1,10 @@
+# ruff: noqa: E402
 import os
 import asyncio
+
+# Enable session feedback caching before importing Cognee.
+os.environ.setdefault("CACHING", "true")
+os.environ.setdefault("CACHE_BACKEND", "redis")
 
 import cognee
 from cognee.api.v1.search import SearchType
@@ -8,11 +13,6 @@ from cognee.shared.logging_utils import setup_logging, INFO
 
 
 async def main():
-    if os.environ.get("CACHING") is None:
-        os.environ["CACHING"] = "true"
-    if os.environ.get("CACHE_BACKEND") is None:
-        os.environ["CACHE_BACKEND"] = "redis"
-
     print("Resetting cognee data...")
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)

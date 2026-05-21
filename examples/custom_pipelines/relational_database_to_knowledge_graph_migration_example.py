@@ -1,6 +1,22 @@
+# ruff: noqa: E402
 from pathlib import Path
 import asyncio
 import os
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+# Disable backend access control to avoid dataset handler mismatch.
+os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+
+# In case environment variables are not set use the example database from the Cognee repo.
+MIGRATION_DB_PROVIDER = os.environ.get("MIGRATION_DB_PROVIDER", "sqlite")
+MIGRATION_DB_PATH = os.environ.get(
+    "MIGRATION_DB_PATH",
+    os.path.join(Path(__file__).resolve().parent.parent.parent, "cognee/tests/test_data"),
+)
+MIGRATION_DB_NAME = os.environ.get("MIGRATION_DB_NAME", "migration_database.sqlite")
 
 import cognee
 from cognee.infrastructure.databases.relational.config import get_migration_config
@@ -31,9 +47,6 @@ from cognee.infrastructure.databases.vector.pgvector import (
 
 
 async def main():
-    # Disable backend access control to avoid dataset handler mismatch
-    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
-
     # Clean all data stored in Cognee
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -42,18 +55,10 @@ async def main():
     await create_relational_db_and_tables()
     await create_vector_db_and_tables()
 
-    # In case environment variables are not set use the example database from the Cognee repo
-    migration_db_provider = os.environ.get("MIGRATION_DB_PROVIDER", "sqlite")
-    migration_db_path = os.environ.get(
-        "MIGRATION_DB_PATH",
-        os.path.join(Path(__file__).resolve().parent.parent.parent, "cognee/tests/test_data"),
-    )
-    migration_db_name = os.environ.get("MIGRATION_DB_NAME", "migration_database.sqlite")
-
     migration_config = get_migration_config()
-    migration_config.migration_db_provider = migration_db_provider
-    migration_config.migration_db_path = migration_db_path
-    migration_config.migration_db_name = migration_db_name
+    migration_config.migration_db_provider = MIGRATION_DB_PROVIDER
+    migration_config.migration_db_path = MIGRATION_DB_PATH
+    migration_config.migration_db_name = MIGRATION_DB_NAME
 
     engine = get_migration_relational_engine()
 

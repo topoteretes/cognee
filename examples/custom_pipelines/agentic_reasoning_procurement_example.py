@@ -1,21 +1,22 @@
+# ruff: noqa: E402
 import os
 import logging
-import cognee
 import asyncio
 
-from cognee.context_global_variables import backend_access_control_enabled
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from dotenv import load_dotenv
-from cognee.api.v1.search import SearchType
-from cognee.modules.engine.models import NodeSet
-from cognee.shared.logging_utils import setup_logging
-
 
 load_dotenv()
 
 os.environ["LLM_API_KEY"] = ""
 # Notes: Nodesets cognee feature only works with Ladybug and Neo4j graph databases
 os.environ["GRAPH_DATABASE_PROVIDER"] = "ladybug"
+
+import cognee
+from cognee.context_global_variables import backend_access_control_enabled
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.api.v1.search import SearchType
+from cognee.modules.engine.models import NodeSet
+from cognee.shared.logging_utils import setup_logging
 
 
 class ProcurementMemorySystem:

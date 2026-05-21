@@ -1,6 +1,14 @@
+# ruff: noqa: E402
 import os
 import pathlib
 import asyncio
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+DB_HOST = os.environ.get("DB_HOST", "127.0.0.1")
+
 import cognee
 from cognee.modules.search.types import SearchType
 
@@ -29,7 +37,7 @@ async def main():
         {
             "db_path": "",
             "db_name": "cognee_db",
-            "db_host": os.environ.get("DB_HOST", "127.0.0.1"),
+            "db_host": DB_HOST,
             "db_port": "5432",
             "db_username": "cognee",
             "db_password": "cognee",
