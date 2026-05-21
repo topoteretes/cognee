@@ -195,7 +195,9 @@ def _normalize_existing_graph_buckets(
     for bucket in existing_buckets:
         child_entity_ids = _union_entities(sorted(bucket.child_ids), entities_by_summary_id)
         normalized_entity_ids = (
-            child_entity_ids if _has_positive_entity_weight(child_entity_ids, idf_weights) else set()
+            child_entity_ids
+            if _has_positive_entity_weight(child_entity_ids, idf_weights)
+            else set()
         )
         if bucket.graph_bucket_entity_ids != normalized_entity_ids:
             bucket.graph_bucket_entity_ids = normalized_entity_ids
@@ -543,6 +545,5 @@ def _union_entities(
 
 def _chunk_ids(summary_ids: list[str], chunk_size: int) -> list[list[str]]:
     return [
-        summary_ids[index : index + chunk_size]
-        for index in range(0, len(summary_ids), chunk_size)
+        summary_ids[index : index + chunk_size] for index in range(0, len(summary_ids), chunk_size)
     ]

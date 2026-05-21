@@ -80,10 +80,7 @@ async def _ingest_dataset(dataset_name: str) -> str:
             self_improvement=False,
         )
     except Exception as error:
-        print(
-            "Setup: ingestion failed. Ensure LLM configuration is available. "
-            f"Error: {error}"
-        )
+        print(f"Setup: ingestion failed. Ensure LLM configuration is available. Error: {error}")
         return ""
 
     dataset_id = getattr(result, "dataset_id", None)

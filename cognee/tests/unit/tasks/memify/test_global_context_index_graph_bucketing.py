@@ -267,9 +267,7 @@ def test_validate_graph_buckets_can_be_extended_accepts_empty_graph_state():
 
 def test_validate_vector_buckets_can_be_extended_rejects_graph_built_buckets():
     with pytest.raises(ValueError, match="cannot extend graph-built"):
-        validate_vector_buckets_can_be_extended(
-            [_bucket("graph-bucket", {"s1"}, {"alice"})]
-        )
+        validate_vector_buckets_can_be_extended([_bucket("graph-bucket", {"s1"}, {"alice"})])
 
 
 def test_graph_incremental_places_summary_into_matching_existing_bucket():

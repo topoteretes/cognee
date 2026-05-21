@@ -28,9 +28,7 @@ from cognee.tasks.summarization.models import GlobalContextSummary
 update_global_context_index_module = import_module(
     "cognee.tasks.memify.global_context_index.update"
 )
-summary_generation_module = import_module(
-    "cognee.tasks.memify.global_context_index.summarize"
-)
+summary_generation_module = import_module("cognee.tasks.memify.global_context_index.summarize")
 
 
 def _summary_node(text: str = "summary", bucket_id: str | None = None) -> SummaryNode:

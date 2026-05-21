@@ -23,7 +23,7 @@ def main() -> None:
             "populated-state",
             dataset_id,
             graph_bucket_entity_ids=["entity-b", "entity-a"],
-        )
+        ),
     ]:
         graph.add_node(node)
 

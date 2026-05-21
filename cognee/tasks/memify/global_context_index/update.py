@@ -6,7 +6,9 @@ from numbers import Real
 from typing import Any
 
 from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.modules.graph.methods.get_global_context_graph_inputs import get_dataset_text_summary_ids
+from cognee.modules.graph.methods.get_global_context_graph_inputs import (
+    get_dataset_text_summary_ids,
+)
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger

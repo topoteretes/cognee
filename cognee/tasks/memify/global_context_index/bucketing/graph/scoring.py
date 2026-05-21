@@ -24,8 +24,7 @@ def compute_idf_from_counts(
             continue
         if entity_chunk_count > chunk_count:
             raise ValueError(
-                "entity_chunk_count cannot be greater than chunk_count "
-                f"for entity {entity_id!r}."
+                f"entity_chunk_count cannot be greater than chunk_count for entity {entity_id!r}."
             )
         idf_weights[entity_id] = math.log(chunk_count / entity_chunk_count)
 
