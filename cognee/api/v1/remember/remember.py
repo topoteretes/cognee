@@ -780,6 +780,9 @@ async def _remember_inner(
         from cognee.context_global_variables import set_database_global_context_variables
         from cognee.modules.engine.operations.setup import setup
         from cognee.modules.tools import add_skills
+        from pathlib import Path as _Path
+        import shutil as _shutil
+        import tempfile as _tempfile
 
         await setup()
 
@@ -794,13 +797,38 @@ async def _remember_inner(
         if owner_id is None:
             raise ValueError("Skill ingestion requires a dataset owner or user.")
 
-        async with set_database_global_context_variables(dataset.id, owner_id):
-            skills = await add_skills(
-                data,
-                node_set=skills_node_set,
-                user=user,
-                dataset=dataset,
-            )
+        # HTTP multipart hands us a list of UploadFiles; the skills parser
+        # reads from disk under a path-safety-checked root. Spool uploads
+        # into a tempdir under cwd (always an allowed root) so the same
+        # codepath works for both SDK (path) and HTTP (uploads) callers.
+        materialized_source = data
+        cleanup_dir = None
+        if isinstance(data, list) and data and not isinstance(data[0], (str, _Path)):
+            cleanup_dir = _Path(_tempfile.mkdtemp(prefix=".cognee_skills_upload_", dir=_Path.cwd()))
+            for index, upload in enumerate(data):
+                filename = getattr(upload, "filename", None) or "skill.md"
+                if not filename.lower().endswith(".md"):
+                    continue
+                stem = _Path(filename).stem or f"skill_{index}"
+                skill_dir = cleanup_dir / f"{stem}_{index}"
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                content = await upload.read()
+                if isinstance(content, str):
+                    content = content.encode("utf-8")
+                (skill_dir / "SKILL.md").write_bytes(content)
+            materialized_source = cleanup_dir
+
+        try:
+            async with set_database_global_context_variables(dataset.id, owner_id):
+                skills = await add_skills(
+                    materialized_source,
+                    node_set=skills_node_set,
+                    user=user,
+                    dataset=dataset,
+                )
+        finally:
+            if cleanup_dir is not None:
+                _shutil.rmtree(cleanup_dir, ignore_errors=True)
         result = RememberResult(
             status="completed",
             dataset_name=dataset.name,
