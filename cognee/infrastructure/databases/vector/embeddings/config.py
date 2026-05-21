@@ -81,6 +81,13 @@ class EmbeddingConfig(BaseSettings):
     embedding_max_completion_tokens: Optional[int] = 8191
     embedding_batch_size: Optional[int] = None
     huggingface_tokenizer: Optional[str] = None
+    # When True, embed_text calls are coalesced via AccumulatingEmbeddingEngine:
+    # concurrent callers share a queue and are flushed together once either
+    # embedding_batch_size strings are pending or the oldest item has waited
+    # accumulate_embedding_timeout_ms milliseconds. Helps when the cognify
+    # pipeline emits many small (bs=1..3) requests.
+    accumulate_embedding_calls: bool = False
+    accumulate_embedding_timeout_ms: int = 100
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def model_post_init(self, __context) -> None:

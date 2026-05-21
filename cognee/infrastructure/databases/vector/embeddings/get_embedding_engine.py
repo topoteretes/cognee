@@ -35,6 +35,8 @@ def get_embedding_engine() -> EmbeddingEngine:
         config.huggingface_tokenizer,
         llm_config.llm_api_key,
         llm_config.llm_provider,
+        config.accumulate_embedding_calls,
+        config.accumulate_embedding_timeout_ms,
     )
 
 
@@ -51,6 +53,8 @@ def create_embedding_engine(
     huggingface_tokenizer,
     llm_api_key,
     llm_provider,
+    accumulate_embedding_calls=False,
+    accumulate_embedding_timeout_ms=100,
 ):
     """
     Create and return an embedding engine based on the specified provider.
@@ -82,17 +86,16 @@ def create_embedding_engine(
     if embedding_provider == "fastembed":
         from .FastembedEmbeddingEngine import FastembedEmbeddingEngine
 
-        return FastembedEmbeddingEngine(
+        engine = FastembedEmbeddingEngine(
             model=embedding_model,
             dimensions=embedding_dimensions,
             max_completion_tokens=embedding_max_completion_tokens,
             batch_size=embedding_batch_size,
         )
-
-    if embedding_provider == "ollama":
+    elif embedding_provider == "ollama":
         from .OllamaEmbeddingEngine import OllamaEmbeddingEngine
 
-        return OllamaEmbeddingEngine(
+        engine = OllamaEmbeddingEngine(
             model=embedding_model,
             dimensions=embedding_dimensions,
             max_completion_tokens=embedding_max_completion_tokens,
@@ -100,11 +103,10 @@ def create_embedding_engine(
             huggingface_tokenizer=huggingface_tokenizer,
             batch_size=embedding_batch_size,
         )
-
-    if embedding_provider == "openai_compatible":
+    elif embedding_provider == "openai_compatible":
         from .OpenAICompatibleEmbeddingEngine import OpenAICompatibleEmbeddingEngine
 
-        return OpenAICompatibleEmbeddingEngine(
+        engine = OpenAICompatibleEmbeddingEngine(
             model=embedding_model,
             dimensions=embedding_dimensions,
             max_completion_tokens=embedding_max_completion_tokens,
@@ -112,17 +114,27 @@ def create_embedding_engine(
             api_key=embedding_api_key or llm_api_key,
             batch_size=embedding_batch_size,
         )
+    else:
+        from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
 
-    from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
+        engine = LiteLLMEmbeddingEngine(
+            provider=embedding_provider,
+            api_key=embedding_api_key
+            or (embedding_api_key if llm_provider == "custom" else llm_api_key),
+            endpoint=embedding_endpoint,
+            api_version=embedding_api_version,
+            model=embedding_model,
+            dimensions=embedding_dimensions,
+            max_completion_tokens=embedding_max_completion_tokens,
+            batch_size=embedding_batch_size,
+        )
 
-    return LiteLLMEmbeddingEngine(
-        provider=embedding_provider,
-        api_key=embedding_api_key
-        or (embedding_api_key if llm_provider == "custom" else llm_api_key),
-        endpoint=embedding_endpoint,
-        api_version=embedding_api_version,
-        model=embedding_model,
-        dimensions=embedding_dimensions,
-        max_completion_tokens=embedding_max_completion_tokens,
-        batch_size=embedding_batch_size,
-    )
+    if accumulate_embedding_calls:
+        from .AccumulatingEmbeddingEngine import AccumulatingEmbeddingEngine
+
+        engine = AccumulatingEmbeddingEngine(
+            inner=engine,
+            flush_timeout_seconds=accumulate_embedding_timeout_ms / 1000.0,
+        )
+
+    return engine
