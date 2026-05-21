@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from numbers import Real
 from typing import Any
 
@@ -11,18 +12,26 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.summarization.models import GlobalContextSummary
 
-from .build_context_index import build_context_index, group_buckets_by_level
-from .bucketing_strategy import BucketingStrategyName
-from .graph_bucketing import (
+from .bucketing.graph.inputs import load_graph_bucketing_inputs
+from .bucketing.graph.placement import (
     validate_graph_buckets_can_be_extended,
     validate_vector_buckets_can_be_extended,
 )
-from .graph_input import dataset_id_from_context, load_context_index_input
-from .graph_providers import GlobalContextGraphInput, load_global_context_graph_input
-from .models import GlobalContextIndexInput, SummaryNode
-from .persistence import delete_context_index_nodes, persist_context_index_edges
+from .build import build_context_index, group_buckets_by_level
+from .bucketing_strategy import BucketingStrategyName
+from .load import dataset_id_from_context, load_context_index_input
+from .models import GlobalContextIndexUpdateData, SummaryNode
+from .persist import delete_context_index_nodes, persist_context_index_edges
 
 logger = get_logger("global_context_index")
+GraphBucketingInputs = tuple[dict[str, set[str]], dict[str, float]]
+
+
+@dataclass
+class UpdateScope:
+    dataset_id: str
+    context_input: GlobalContextIndexUpdateData
+    text_summaries: list[SummaryNode]
 
 
 def validate_global_context_index_config(
@@ -52,15 +61,12 @@ def validate_global_context_index_config(
         raise ValueError("min_overlap must be a finite number in [0.0, 1.0].")
 
 
-def validate_graph_rebuild_input(graph_input: GlobalContextGraphInput) -> None:
-    missing = graph_input.summary_entities.missing_made_from_summary_ids
-    if missing:
-        sample = ", ".join(sorted(missing)[:5])
-        suffix = "..." if len(missing) > 5 else ""
-        raise ValueError(
-            'bucketing_strategy="graph" requires every TextSummary to have a made_from '
-            f"chunk edge. Missing made_from for {len(missing)} summary id(s): {sample}{suffix}"
-        )
+def validate_graph_dataset_context(
+    bucketing_strategy: BucketingStrategyName,
+    dataset_id: str,
+) -> None:
+    if bucketing_strategy == "graph" and not dataset_id:
+        raise ValueError('bucketing_strategy="graph" requires a dataset context.')
 
 
 async def filter_graph_dataset_text_summaries(
@@ -82,34 +88,33 @@ async def filter_graph_dataset_text_summaries(
     return [summaries_by_id[summary_id] for summary_id in sorted(dataset_summary_ids)]
 
 
-async def filter_text_summaries_for_strategy(
+async def select_text_summaries_for_strategy(
     bucketing_strategy: BucketingStrategyName,
     dataset_id: str,
     text_summaries: list[SummaryNode],
 ) -> list[SummaryNode]:
+    text_summaries = [summary for summary in text_summaries if summary.text]
     if bucketing_strategy != "graph":
         return text_summaries
     return await filter_graph_dataset_text_summaries(dataset_id, text_summaries)
 
 
-async def load_validated_graph_input(
+async def load_graph_bucketing_data_if_needed(
     bucketing_strategy: BucketingStrategyName,
     dataset_id: str,
     text_summaries: list[SummaryNode],
-) -> GlobalContextGraphInput | None:
+) -> GraphBucketingInputs | None:
     if bucketing_strategy != "graph" or not text_summaries:
         return None
 
-    graph_input = await load_global_context_graph_input(
+    return await load_graph_bucketing_inputs(
         dataset_id,
         [summary.id for summary in text_summaries],
     )
-    validate_graph_rebuild_input(graph_input)
-    return graph_input
 
 
 async def reset_context_index_for_rebuild(
-    context_input: GlobalContextIndexInput,
+    context_input: GlobalContextIndexUpdateData,
     text_summaries: list[SummaryNode],
     unified_engine: Any,
 ) -> None:
@@ -132,7 +137,7 @@ def select_new_context_index_items(
     return [summary for summary in text_summaries if not summary.global_context_bucket_id]
 
 
-def validate_existing_buckets_can_be_extended(
+def validate_existing_buckets_for_strategy(
     bucketing_strategy: BucketingStrategyName,
     existing_buckets: list[SummaryNode],
 ) -> None:
@@ -143,6 +148,106 @@ def validate_existing_buckets_can_be_extended(
     validate_vector_buckets_can_be_extended(existing_buckets)
 
 
+async def load_update_scope(
+    data: Any,
+    bucketing_strategy: BucketingStrategyName,
+    ctx: PipelineContext | None,
+) -> UpdateScope:
+    dataset_id = dataset_id_from_context(ctx)
+    validate_graph_dataset_context(bucketing_strategy, dataset_id)
+
+    context_input = await load_context_index_input(data, dataset_id, ctx)
+    text_summaries = await select_text_summaries_for_strategy(
+        bucketing_strategy,
+        dataset_id,
+        context_input.text_summaries,
+    )
+    return UpdateScope(dataset_id, context_input, text_summaries)
+
+
+async def prepare_existing_context_index(
+    scope: UpdateScope,
+    rebuild: bool,
+    bucketing_strategy: BucketingStrategyName,
+) -> tuple[Any | None, GraphBucketingInputs | None]:
+    if not rebuild:
+        validate_existing_buckets_for_strategy(
+            bucketing_strategy,
+            scope.context_input.buckets,
+        )
+        return None, None
+
+    graph_bucketing_inputs = await load_graph_bucketing_data_if_needed(
+        bucketing_strategy,
+        scope.dataset_id,
+        scope.text_summaries,
+    )
+    unified_engine = await get_unified_engine()
+    await reset_context_index_for_rebuild(
+        scope.context_input,
+        scope.text_summaries,
+        unified_engine,
+    )
+    return unified_engine, graph_bucketing_inputs
+
+
+async def ensure_graph_bucketing_inputs(
+    bucketing_strategy: BucketingStrategyName,
+    dataset_id: str,
+    text_summaries: list[SummaryNode],
+    graph_bucketing_inputs: GraphBucketingInputs | None,
+) -> GraphBucketingInputs | None:
+    if bucketing_strategy != "graph":
+        return None
+    if graph_bucketing_inputs is not None:
+        return graph_bucketing_inputs
+    return await load_graph_bucketing_data_if_needed(
+        bucketing_strategy,
+        dataset_id,
+        text_summaries,
+    )
+
+
+def unpack_graph_bucketing_inputs(
+    graph_bucketing_inputs: GraphBucketingInputs | None,
+) -> tuple[dict[str, set[str]], dict[str, float]]:
+    if graph_bucketing_inputs is None:
+        return {}, {}
+    return graph_bucketing_inputs
+
+
+async def build_and_persist_context_index(
+    scope: UpdateScope,
+    new_summaries: list[SummaryNode],
+    unified_engine: Any,
+    max_bucket_size: int,
+    placement_distance_threshold: float,
+    bucketing_strategy: BucketingStrategyName,
+    min_overlap: float,
+    graph_bucketing_inputs: GraphBucketingInputs | None,
+    ctx: PipelineContext | None,
+) -> list[GlobalContextSummary]:
+    entities_by_summary_id, idf_weights = unpack_graph_bucketing_inputs(graph_bucketing_inputs)
+    context_datapoints, assignments = await build_context_index(
+        new_text_summaries=new_summaries,
+        text_summaries_all=scope.text_summaries,
+        buckets_by_level=group_buckets_by_level(scope.context_input.buckets),
+        existing_root=scope.context_input.root,
+        dataset_id=scope.dataset_id,
+        vector_engine=unified_engine.vector,
+        max_bucket_size=max_bucket_size,
+        placement_distance_threshold=placement_distance_threshold,
+        bucketing_strategy=bucketing_strategy,
+        min_overlap=min_overlap,
+        entities_by_summary_id=entities_by_summary_id,
+        idf_weights=idf_weights,
+        ctx=ctx,
+    )
+
+    await persist_context_index_edges(assignments, unified_engine)
+    return context_datapoints
+
+
 @task_summary("Updated {n} global context index node(s)")
 async def update_global_context_index(
     data: Any = None,
@@ -150,7 +255,7 @@ async def update_global_context_index(
     max_bucket_size: int = 20,
     placement_distance_threshold: float = 0.5,
     bucketing_strategy: BucketingStrategyName = "vector",
-    min_overlap: float = 0.1,
+    min_overlap: float = 0.05,
     ctx: PipelineContext | None = None,
 ) -> list[GlobalContextSummary]:
     """
@@ -171,72 +276,37 @@ async def update_global_context_index(
         bucketing_strategy,
         min_overlap,
     )
-    dataset_id = dataset_id_from_context(ctx)
-    if bucketing_strategy == "graph" and not dataset_id:
-        raise ValueError('bucketing_strategy="graph" requires a dataset context.')
-
-    context_input = await load_context_index_input(data, dataset_id, ctx)
-    text_summaries = [summary for summary in context_input.text_summaries if summary.text]
-    text_summaries = await filter_text_summaries_for_strategy(
+    scope = await load_update_scope(data, bucketing_strategy, ctx)
+    unified_engine, graph_bucketing_inputs = await prepare_existing_context_index(
+        scope,
+        rebuild,
         bucketing_strategy,
-        dataset_id,
-        text_summaries,
     )
 
-    unified_engine = None
-    graph_input = None
-
-    if rebuild:
-        graph_input = await load_validated_graph_input(
-            bucketing_strategy,
-            dataset_id,
-            text_summaries,
-        )
-        unified_engine = await get_unified_engine()
-        await reset_context_index_for_rebuild(context_input, text_summaries, unified_engine)
-    else:
-        validate_existing_buckets_can_be_extended(bucketing_strategy, context_input.buckets)
-
-    if not text_summaries:
+    if not scope.text_summaries:
         return []
 
-    if unified_engine is None:
-        unified_engine = await get_unified_engine()
-
-    new_summaries = select_new_context_index_items(text_summaries, rebuild)
-
+    new_summaries = select_new_context_index_items(scope.text_summaries, rebuild)
     if not new_summaries:
         logger.info("No new TextSummary nodes to place in global context index.")
         return []
 
-    entities_by_summary_id = context_input.entities_by_summary_id
-    idf_weights: dict[str, float] = {}
-
-    if bucketing_strategy == "graph":
-        graph_input = graph_input or await load_validated_graph_input(
-            bucketing_strategy,
-            dataset_id,
-            text_summaries,
-        )
-        entities_by_summary_id = graph_input.entities_by_summary_id
-        idf_weights = graph_input.idf_weights
-
-    context_datapoints, assignments = await build_context_index(
-        new_text_summaries=new_summaries,
-        text_summaries_all=text_summaries,
-        buckets_by_level=group_buckets_by_level(context_input.buckets),
-        existing_root=context_input.root,
-        dataset_id=dataset_id,
-        vector_engine=unified_engine.vector,
-        max_bucket_size=max_bucket_size,
-        placement_distance_threshold=placement_distance_threshold,
-        bucketing_strategy=bucketing_strategy,
-        min_overlap=min_overlap,
-        entities_by_summary_id=entities_by_summary_id,
-        idf_weights=idf_weights,
-        ctx=ctx,
+    graph_bucketing_inputs = await ensure_graph_bucketing_inputs(
+        bucketing_strategy,
+        scope.dataset_id,
+        scope.text_summaries,
+        graph_bucketing_inputs,
     )
+    unified_engine = unified_engine or await get_unified_engine()
 
-    await persist_context_index_edges(assignments, unified_engine)
-
-    return context_datapoints
+    return await build_and_persist_context_index(
+        scope,
+        new_summaries,
+        unified_engine,
+        max_bucket_size,
+        placement_distance_threshold,
+        bucketing_strategy,
+        min_overlap,
+        graph_bucketing_inputs,
+        ctx,
+    )

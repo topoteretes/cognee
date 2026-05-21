@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .bucket_assignment import create_bucket_id
-from .idf import entities_weight, weighted_jaccard
-from .models import BucketAssignment, SummaryNode
+from ..common import (
+    create_bucket_node,
+    mark_bucket_for_persistence,
+    record_bucket_assignment,
+)
+from .scoring import entities_weight, weighted_jaccard
+from ...ids import create_bucket_id
+from ...models import BucketAssignment, SummaryNode
 
 
 def rebuild_graph_buckets_for_level(
@@ -47,7 +52,7 @@ def rebuild_graph_buckets_for_level(
             max_bucket_size,
             min_overlap,
         )
-        _add_bucket(
+        _add_entity_bucket(
             child_ids,
             entities_by_summary_id,
             dataset_id,
@@ -57,14 +62,12 @@ def rebuild_graph_buckets_for_level(
         )
 
     for child_ids in _chunk_ids(sorted(summary.id for summary in misc_summaries), max_bucket_size):
-        _add_bucket(
+        _add_misc_bucket(
             child_ids,
-            entities_by_summary_id,
             dataset_id,
             level,
             buckets_to_persist,
             assignments,
-            force_misc=True,
         )
 
     return buckets_to_persist, assignments
@@ -295,27 +298,23 @@ def _place_misc_summary(
 ) -> None:
     bucket = _first_available_misc_bucket(misc_bucket_ids, buckets_by_id, max_bucket_size)
     if bucket is None:
-        bucket = _create_new_graph_bucket(
+        bucket = _create_new_misc_bucket(
             summary,
-            entities_by_summary_id,
             dataset_id,
             level,
             buckets_by_id,
             buckets_to_persist,
             assignments,
-            force_misc=True,
         )
         misc_bucket_ids.append(bucket.id)
         misc_bucket_ids.sort()
         return
 
-    _assign_summary_to_graph_bucket(
+    _assign_summary_to_misc_bucket(
         summary,
         bucket,
-        set(),
         buckets_to_persist,
         assignments,
-        force_misc=True,
     )
 
 
@@ -339,17 +338,35 @@ def _create_new_graph_bucket(
     buckets_by_id: dict[str, SummaryNode],
     buckets_to_persist: dict[str, SummaryNode],
     assignments: list[BucketAssignment],
-    *,
-    force_misc: bool = False,
 ) -> SummaryNode:
-    _add_bucket(
+    _add_entity_bucket(
         [summary.id],
         entities_by_summary_id,
         dataset_id,
         level,
         buckets_to_persist,
         assignments,
-        force_misc=force_misc,
+    )
+    bucket_id = str(create_bucket_id(dataset_id, level, [summary.id]))
+    bucket = buckets_to_persist[bucket_id]
+    buckets_by_id[bucket.id] = bucket
+    return bucket
+
+
+def _create_new_misc_bucket(
+    summary: SummaryNode,
+    dataset_id: str,
+    level: int,
+    buckets_by_id: dict[str, SummaryNode],
+    buckets_to_persist: dict[str, SummaryNode],
+    assignments: list[BucketAssignment],
+) -> SummaryNode:
+    _add_misc_bucket(
+        [summary.id],
+        dataset_id,
+        level,
+        buckets_to_persist,
+        assignments,
     )
     bucket_id = str(create_bucket_id(dataset_id, level, [summary.id]))
     bucket = buckets_to_persist[bucket_id]
@@ -363,17 +380,25 @@ def _assign_summary_to_graph_bucket(
     summary_entity_ids: set[str],
     buckets_to_persist: dict[str, SummaryNode],
     assignments: list[BucketAssignment],
-    *,
-    force_misc: bool = False,
 ) -> None:
     bucket.child_ids.add(summary.id)
-    if force_misc:
-        bucket.graph_bucket_entity_ids = set()
-    elif bucket.graph_bucket_entity_ids is not None:
+    if bucket.graph_bucket_entity_ids is not None:
         bucket.graph_bucket_entity_ids.update(summary_entity_ids)
 
-    buckets_to_persist[bucket.id] = bucket
-    assignments.append(BucketAssignment(summary_id=summary.id, bucket_id=bucket.id))
+    mark_bucket_for_persistence(buckets_to_persist, bucket)
+    record_bucket_assignment(assignments, summary.id, bucket.id)
+
+
+def _assign_summary_to_misc_bucket(
+    summary: SummaryNode,
+    bucket: SummaryNode,
+    buckets_to_persist: dict[str, SummaryNode],
+    assignments: list[BucketAssignment],
+) -> None:
+    bucket.child_ids.add(summary.id)
+    bucket.graph_bucket_entity_ids = set()
+    mark_bucket_for_persistence(buckets_to_persist, bucket)
+    record_bucket_assignment(assignments, summary.id, bucket.id)
 
 
 def _sort_entity_seeds(
@@ -452,34 +477,58 @@ def _choose_best_candidate(
     return best_id
 
 
-def _add_bucket(
+def _add_entity_bucket(
     child_ids: list[str],
     entities_by_summary_id: Mapping[str, set[str]],
     dataset_id: str,
     level: int,
     buckets_to_persist: dict[str, SummaryNode],
     assignments: list[BucketAssignment],
-    *,
-    force_misc: bool = False,
 ) -> None:
-    bucket_id = str(create_bucket_id(dataset_id, level, child_ids))
-    bucket = SummaryNode(
-        id=bucket_id,
-        text="",
-        type="GlobalContextSummary",
-        level=level,
-        is_root=False,
-        dataset_id=dataset_id,
-        child_ids=set(child_ids),
-        graph_bucket_entity_ids=(
-            set() if force_misc else _union_entities(child_ids, entities_by_summary_id)
-        ),
+    _add_bucket_with_entities(
+        child_ids,
+        _union_entities(child_ids, entities_by_summary_id),
+        dataset_id,
+        level,
+        buckets_to_persist,
+        assignments,
     )
 
-    buckets_to_persist[bucket.id] = bucket
-    assignments.extend(
-        BucketAssignment(summary_id=child_id, bucket_id=bucket.id) for child_id in child_ids
+
+def _add_misc_bucket(
+    child_ids: list[str],
+    dataset_id: str,
+    level: int,
+    buckets_to_persist: dict[str, SummaryNode],
+    assignments: list[BucketAssignment],
+) -> None:
+    _add_bucket_with_entities(
+        child_ids,
+        set(),
+        dataset_id,
+        level,
+        buckets_to_persist,
+        assignments,
     )
+
+
+def _add_bucket_with_entities(
+    child_ids: list[str],
+    graph_bucket_entity_ids: set[str],
+    dataset_id: str,
+    level: int,
+    buckets_to_persist: dict[str, SummaryNode],
+    assignments: list[BucketAssignment],
+) -> None:
+    bucket = create_bucket_node(
+        child_ids,
+        dataset_id,
+        level,
+        graph_bucket_entity_ids=graph_bucket_entity_ids,
+    )
+    mark_bucket_for_persistence(buckets_to_persist, bucket)
+    for child_id in child_ids:
+        record_bucket_assignment(assignments, child_id, bucket.id)
 
 
 def _union_entities(

@@ -16,7 +16,7 @@ def get_global_context_index_memify_tasks(
     placement_distance_threshold: float = 0.5,
     rebuild: bool = False,
     bucketing_strategy: BucketingStrategyName = "vector",
-    min_overlap: float = 0.1,
+    min_overlap: float = 0.05,
 ):
     """
     Build the task pair for the explicit global context index pipeline.
@@ -51,7 +51,7 @@ async def global_context_index_pipeline(
     placement_distance_threshold: float = 0.5,
     rebuild: bool = False,
     bucketing_strategy: BucketingStrategyName = "vector",
-    min_overlap: float = 0.1,
+    min_overlap: float = 0.05,
 ):
     """
     Build or update the global context index for a dataset.

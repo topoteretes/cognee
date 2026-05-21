@@ -13,9 +13,8 @@ from cognee.modules.graph.methods.get_global_context_graph_inputs import (
     load_dataset_graph_entity_input,
     load_summary_entities_for_dataset,
 )
-from cognee.tasks.memify.global_context_index.graph_providers import (
-    GlobalContextGraphInput,
-    load_global_context_graph_input,
+from cognee.tasks.memify.global_context_index.bucketing.graph.inputs import (
+    load_graph_bucketing_inputs,
 )
 
 
@@ -163,7 +162,7 @@ async def test_combined_graph_entity_input_loads_rows_once_for_entities_and_coun
 
 
 @pytest.mark.asyncio
-async def test_global_context_graph_input_provider_computes_idf_weights(monkeypatch):
+async def test_graph_bucketing_input_provider_computes_idf_weights(monkeypatch):
     dataset_id = uuid4()
     summary_id = uuid4()
     entity_id = uuid4()
@@ -184,20 +183,21 @@ async def test_global_context_graph_input_provider_computes_idf_weights(monkeypa
         )
 
     monkeypatch.setattr(
-        "cognee.tasks.memify.global_context_index.graph_providers."
+        "cognee.tasks.memify.global_context_index.bucketing.graph.inputs."
         "load_dataset_graph_entity_input",
         load_graph_entity_input,
     )
 
-    graph_input = await load_global_context_graph_input(dataset_id, [summary_id])
+    entities_by_summary_id, idf_weights = await load_graph_bucketing_inputs(
+        dataset_id, [summary_id]
+    )
 
-    assert isinstance(graph_input, GlobalContextGraphInput)
-    assert graph_input.entities_by_summary_id == {str(summary_id): {str(entity_id)}}
-    assert graph_input.idf_weights[str(entity_id)] == pytest.approx(1.3862943611)
+    assert entities_by_summary_id == {str(summary_id): {str(entity_id)}}
+    assert idf_weights[str(entity_id)] == pytest.approx(1.3862943611)
 
 
 @pytest.mark.asyncio
-async def test_global_context_graph_input_provider_omits_none_session(monkeypatch):
+async def test_graph_bucketing_input_provider_omits_none_session(monkeypatch):
     dataset_id = uuid4()
     calls = []
 
@@ -215,14 +215,41 @@ async def test_global_context_graph_input_provider_omits_none_session(monkeypatc
         )
 
     monkeypatch.setattr(
-        "cognee.tasks.memify.global_context_index.graph_providers."
+        "cognee.tasks.memify.global_context_index.bucketing.graph.inputs."
         "load_dataset_graph_entity_input",
         load_graph_entity_input,
     )
 
-    await load_global_context_graph_input(dataset_id, [])
+    await load_graph_bucketing_inputs(dataset_id, [])
 
     assert calls == [((dataset_id, []), {})]
+
+
+@pytest.mark.asyncio
+async def test_graph_bucketing_input_provider_rejects_missing_made_from(monkeypatch):
+    dataset_id = uuid4()
+    summary_id = uuid4()
+
+    async def load_graph_entity_input(dataset_id, expected_summary_ids, session=None):
+        return DatasetGraphEntityInput(
+            summary_entities=SummaryEntityLoadResult(
+                entities_by_summary_id={str(summary_id): set()},
+                summarized_chunk_count=0,
+                summary_ids_with_made_from=set(),
+                missing_made_from_summary_ids={str(summary_id)},
+                entity_link_count=0,
+            ),
+            entity_counts=DatasetEntityCounts(chunk_count=0, entity_chunk_counts={}),
+        )
+
+    monkeypatch.setattr(
+        "cognee.tasks.memify.global_context_index.bucketing.graph.inputs."
+        "load_dataset_graph_entity_input",
+        load_graph_entity_input,
+    )
+
+    with pytest.raises(ValueError, match="made_from"):
+        await load_graph_bucketing_inputs(dataset_id, [summary_id])
 
 
 def test_summary_chunk_query_joins_through_slug_and_scopes_dataset():

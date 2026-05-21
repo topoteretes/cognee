@@ -1,12 +1,12 @@
 import pytest
 
-from cognee.tasks.memify.global_context_index.bucket_assignment import create_bucket_id
-from cognee.tasks.memify.global_context_index.graph_bucketing import (
+from cognee.tasks.memify.global_context_index.bucketing.graph.placement import (
     place_graph_summaries_incrementally,
     rebuild_graph_buckets_for_level,
     validate_graph_buckets_can_be_extended,
     validate_vector_buckets_can_be_extended,
 )
+from cognee.tasks.memify.global_context_index.ids import create_bucket_id
 from cognee.tasks.memify.global_context_index.models import SummaryNode
 
 
@@ -91,7 +91,7 @@ def test_graph_rebuild_groups_by_weighted_overlap_and_populates_entity_state():
 
     assert _bucket_child_sets(buckets) == [{"s1", "s2"}, {"s3", "s4"}]
     assert _bucket_entity_sets(buckets) == [{"alice", "project-x"}, {"bob"}]
-    assert {(assignment.summary_id, assignment.bucket_id) for assignment in assignments} == {
+    assert {(assignment.child_id, assignment.parent_id) for assignment in assignments} == {
         (child_id, bucket.id) for bucket in buckets.values() for child_id in bucket.child_ids
     }
 
@@ -286,7 +286,7 @@ def test_graph_incremental_places_summary_into_matching_existing_bucket():
     assert buckets == {"bucket-alice": existing_bucket}
     assert existing_bucket.child_ids == {"s1", "s2"}
     assert existing_bucket.graph_bucket_entity_ids == {"alice"}
-    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("s2", "bucket-alice")
     ]
 
@@ -306,7 +306,7 @@ def test_graph_incremental_creates_new_bucket_when_overlap_is_below_threshold():
     assert set(buckets) == {new_bucket_id}
     assert buckets[new_bucket_id].child_ids == {"s2"}
     assert buckets[new_bucket_id].graph_bucket_entity_ids == {"common"}
-    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("s2", new_bucket_id)
     ]
     assert existing_bucket.child_ids == {"s1"}
@@ -327,7 +327,7 @@ def test_graph_incremental_reuses_misc_bucket_for_no_effective_entity_summary():
     assert buckets == {"misc-bucket": misc_bucket}
     assert misc_bucket.child_ids == {"s1", "s2"}
     assert misc_bucket.graph_bucket_entity_ids == set()
-    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("s2", "misc-bucket")
     ]
 
@@ -345,7 +345,7 @@ def test_graph_incremental_updates_index_after_creating_bucket():
     assert set(buckets) == {bucket_id}
     assert buckets[bucket_id].child_ids == {"s1", "s2"}
     assert buckets[bucket_id].graph_bucket_entity_ids == {"alice"}
-    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("s1", bucket_id),
         ("s2", bucket_id),
     ]
@@ -368,7 +368,7 @@ def test_graph_incremental_tie_breaks_by_bucket_size_then_id():
         max_bucket_size=3,
     )
 
-    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("new", "bucket-b")
     ]
 
@@ -389,7 +389,7 @@ def test_graph_incremental_tie_breaks_equal_size_by_bucket_id():
         max_bucket_size=2,
     )
 
-    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("new", "bucket-a")
     ]
 
@@ -408,7 +408,7 @@ def test_graph_incremental_normalizes_misc_bucket_before_placement():
     assert buckets == {"bucket-promoted": bucket}
     assert bucket.child_ids == {"s1", "s2"}
     assert bucket.graph_bucket_entity_ids == {"alice"}
-    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("s2", "bucket-promoted")
     ]
 
@@ -428,6 +428,6 @@ def test_graph_incremental_demotes_zero_weight_bucket_before_misc_reuse():
     assert buckets == {"bucket-demoted": bucket}
     assert bucket.child_ids == {"s1", "s2"}
     assert bucket.graph_bucket_entity_ids == set()
-    assert [(assignment.summary_id, assignment.bucket_id) for assignment in assignments] == [
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("s2", "bucket-demoted")
     ]

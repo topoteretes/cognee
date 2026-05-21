@@ -7,7 +7,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.tasks.summarization.models import GlobalContextSummary
 
-from .bucket_assignment import create_root_summary_id
+from .ids import create_root_summary_id
 from .models import GlobalContextSummaryContent, SummaryNode
 
 

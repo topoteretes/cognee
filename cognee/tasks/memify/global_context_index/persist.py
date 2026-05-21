@@ -54,12 +54,12 @@ def build_context_index_edges(assignments: list[BucketAssignment]) -> list:
     for assignment in assignments:
         edges.append(
             (
-                assignment.summary_id,
-                assignment.bucket_id,
+                assignment.child_id,
+                assignment.parent_id,
                 SUMMARIZED_IN,
                 {
-                    "source_node_id": assignment.summary_id,
-                    "target_node_id": assignment.bucket_id,
+                    "source_node_id": assignment.child_id,
+                    "target_node_id": assignment.parent_id,
                     "relationship_name": SUMMARIZED_IN,
                     "updated_at": updated_at,
                 },
