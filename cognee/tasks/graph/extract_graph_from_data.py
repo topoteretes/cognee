@@ -160,7 +160,11 @@ async def extract_graph_from_data(
 
     calculate_chunk_graphs = kwargs.get("calculate_chunk_graphs")
     if callable(calculate_chunk_graphs):
-        extracted = calculate_chunk_graphs(non_dlt_chunks, graph_model, custom_prompt, **kwargs)
+        callback_kwargs = dict(kwargs)
+        callback_kwargs.setdefault("ctx", ctx)
+        extracted = calculate_chunk_graphs(
+            non_dlt_chunks, graph_model, custom_prompt, **callback_kwargs
+        )
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
         chunk_graphs = await asyncio.gather(
