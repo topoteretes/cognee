@@ -90,8 +90,7 @@ class AccumulatingEmbeddingEngine:
             vectors = await self._inner.embed_text(text)
             if len(vectors) != len(text):
                 raise RuntimeError(
-                    f"Embedding engine returned {len(vectors)} vectors "
-                    f"for {len(text)} inputs."
+                    f"Embedding engine returned {len(vectors)} vectors for {len(text)} inputs."
                 )
             return vectors
 
