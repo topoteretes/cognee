@@ -135,6 +135,15 @@ _telemetry_session_lock_loop: asyncio.AbstractEventLoop | None = None
 
 
 async def _get_telemetry_session() -> aiohttp.ClientSession:
+    """Return a process-wide aiohttp.ClientSession for telemetry, creating it lazily.
+
+    The session is bound to the asyncio loop it was created on. If the running
+    loop changes (e.g. across tests or `asyncio.run` boundaries) or the session
+    has been closed, a fresh session is built. Concurrent callers are
+    serialized by an `asyncio.Lock` that is itself re-created when the loop
+    changes, because `asyncio.Lock` captures its loop on construction. Intended
+    for use only from inside a running event loop.
+    """
     global _telemetry_session, _telemetry_session_loop
     global _telemetry_session_lock, _telemetry_session_lock_loop
 
