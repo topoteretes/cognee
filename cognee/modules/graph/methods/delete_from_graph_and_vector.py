@@ -8,6 +8,10 @@ from cognee.modules.graph.legacy.mark_ledger_as_deleted import (
 )
 from cognee.modules.graph.models import Node, Edge
 from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("delete_from_graph_and_vector")
 
 
 async def delete_from_graph_and_vector(
@@ -35,6 +39,19 @@ async def delete_from_graph_and_vector(
         if node.slug not in seen_node_slugs:
             seen_node_slugs.add(node.slug)
             unique_nodes.append(node)
+
+    # Capture NodeSet names before their ledger/graph rows are deleted so
+    # we can strip these tags from any surviving shared DataPoint afterwards.
+    # When a dataset is deleted in single-tenant mode its uniquely-owned
+    # NodeSet nodes are in `unique_nodes`; shared entities tagged with
+    # those names are not. The detag pass in `remove_belongs_to_set_tags`
+    # keeps the stored `belongs_to_set` arrays consistent with the graph
+    # after the hard delete.
+    removed_nodeset_tags = {
+        node.label for node in unique_nodes if node.type == "NodeSet" and node.label
+    }
+
+    graph_engine = None
 
     # Delete from graph DB
     if unique_nodes:
@@ -83,6 +100,52 @@ async def delete_from_graph_and_vector(
             except Exception:
                 # Triplet collection might not exist if triplet embedding was never enabled
                 pass
+
+    # Clean up orphaned EdgeType nodes from the graph.
+    # EdgeType nodes are created by index_graph_edges for each unique
+    # relationship_name. When edges are deleted, check if any edges of
+    # that type remain in the graph. If not, remove the EdgeType node.
+    if non_legacy_edges:
+        deleted_rel_names = {edge.relationship_name for edge in unique_edges}
+
+        try:
+            if not graph_engine:
+                graph_engine = await get_graph_engine()
+            _, remaining_edges = await graph_engine.get_graph_data()
+            remaining_rel_names = {edge[2] for edge in remaining_edges}
+
+            orphaned_edge_type_ids = [
+                str(generate_edge_id(edge_id=rel_name))
+                for rel_name in deleted_rel_names
+                if rel_name not in remaining_rel_names
+            ]
+
+            if orphaned_edge_type_ids:
+                await graph_engine.delete_nodes(orphaned_edge_type_ids)
+                logger.info(
+                    "Deleted %d orphaned EdgeType node(s)",
+                    len(orphaned_edge_type_ids),
+                )
+        except Exception as e:
+            logger.warning("EdgeType cleanup failed (non-fatal): %s", e)
+
+    # Strip now-orphaned NodeSet tags from surviving rows/nodes so shared
+    # entities stop advertising membership in a dataset that no longer
+    # exists. Runs after the hard-delete pass so freshly-deleted rows
+    # aren't touched redundantly.
+    if removed_nodeset_tags:
+        tags_to_remove = sorted(removed_nodeset_tags)
+        try:
+            if not graph_engine:
+                graph_engine = await get_graph_engine()
+            await graph_engine.remove_belongs_to_set_tags(tags_to_remove)
+        except Exception as e:
+            logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", e)
+
+        try:
+            await vector_engine.remove_belongs_to_set_tags(tags_to_remove)
+        except Exception as e:
+            logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", e)
 
     # Mark ledger entries as deleted
     await mark_ledger_nodes_as_deleted([node.slug for node in non_legacy_nodes])

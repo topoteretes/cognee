@@ -1,2 +1,5 @@
 # ignore jupyter notebooks in the language bar on github
 notebooks/** linguist-vendored
+
+# Ensure shell scripts always use LF line endings (fixes Docker on Windows)
+*.sh text eol=lf

@@ -3,7 +3,11 @@ from sqlalchemy.exc import OperationalError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+from cognee.infrastructure.databases.graph.get_graph_engine import (
+    _create_graph_engine,
+    get_graph_engine,
+)
+from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.utils import (
     get_graph_dataset_database_handler,
@@ -67,6 +71,12 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
         await vector_engine.prune()
     elif vector and backend_access_control_enabled():
         await prune_vector_databases()
+
+    if graph:
+        _create_graph_engine.cache_clear()
+
+    if vector:
+        _create_vector_engine.cache_clear()
 
     if metadata:
         db_engine = get_relational_engine()

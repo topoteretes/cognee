@@ -184,17 +184,37 @@ class SessionParameterValidationError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
-class SharedKuzuLockRequiresRedisError(CogneeConfigurationError):
+class SharedLadybugLockRequiresRedisError(CogneeConfigurationError):
     """
-    Raised when shared Kuzu locking is requested without configuring the Redis backend.
+    Raised when shared Ladybug locking is requested without configuring the Redis backend.
     """
 
     def __init__(
         self,
         message: str = (
-            "Shared Kuzu lock requires Redis cache backend. Configure Redis to enable shared Kuzu locking."
+            "Shared Ladybug lock requires Redis cache backend. Configure Redis to enable shared Ladybug locking."
         ),
-        name: str = "SharedKuzuLockRequiresRedisError",
+        name: str = "SharedLadybugLockRequiresRedisError",
         status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
+
+
+SharedKuzuLockRequiresRedisError = SharedLadybugLockRequiresRedisError
+
+
+class DatabaseCredentialsError(CogneeConfigurationError):
+    """
+    Raised when database credentials are incomplete or invalid.
+
+    This error indicates that required authentication parameters (e.g., username
+    or password) are missing or malformed for a database connection.
+    """
+
+    def __init__(
+        self,
+        message: str = "Database credentials are incomplete or invalid. Please check your configuration.",
+        name: str = "DatabaseCredentialsError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)

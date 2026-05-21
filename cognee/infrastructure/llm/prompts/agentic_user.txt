@@ -1,0 +1,9 @@
+Question: `{{ question }}`
+
+Current context (memory, skills, tools, and any prior tool results):
+{{ context }}
+
+Emit exactly one valid JSON object matching AgentStep.
+Rules:
+- Set exactly one of `tool_call` or `final_answer`.
+- Do not wrap JSON in Markdown or code fences.

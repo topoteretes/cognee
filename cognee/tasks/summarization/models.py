@@ -1,4 +1,6 @@
-from typing import Union
+from __future__ import annotations
+
+from typing import Union, Optional
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart
@@ -16,6 +18,22 @@ class TextSummary(DataPoint):
 
     text: str
     made_from: DocumentChunk
+    summarized_in: Optional["GlobalContextSummary"] = None
+    global_context_bucket_id: Optional[str] = None
+    metadata: dict = {"index_fields": ["text"]}
+    importance_weight: Optional[float] = 0.5
+
+
+class GlobalContextSummary(DataPoint):
+    """
+    Summarizes a global context index bucket or dataset root.
+    """
+
+    text: str
+    dataset_id: str
+    level: int
+    is_root: bool = False
+    summarized_in: Optional["GlobalContextSummary"] = None
     metadata: dict = {"index_fields": ["text"]}
 
 

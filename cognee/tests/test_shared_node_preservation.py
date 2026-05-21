@@ -331,10 +331,11 @@ async def test_delete_permission_checks_delete_not_read():
 
     await set_database_global_context_variables(dataset_y.id, dataset_y.owner_id)
     from cognee.tasks.storage import add_data_points
+    from cognee.modules.pipelines.models import PipelineContext
 
     await add_data_points(
         [org_y],
-        context={"user": owner_user, "dataset": dataset_y, "data": data_y},
+        ctx=PipelineContext(user=owner_user, dataset=dataset_y, data_item=data_y),
     )
 
     # Verify data exists

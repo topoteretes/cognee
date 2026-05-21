@@ -1,6 +1,7 @@
+from cognee.shared.logging_utils import get_logger
+
 from .LoaderEngine import LoaderEngine
 from .supported_loaders import supported_loaders
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

@@ -27,7 +27,7 @@ Processing Pipeline:
 4. **Entity Extraction**: Identifies key concepts, people, places, organizations
 5. **Relationship Detection**: Discovers connections between entities
 6. **Graph Construction**: Builds semantic knowledge graph with embeddings
-7. **Content Summarization**: Creates hierarchical summaries for navigation
+7. **Content Summarization**: Creates text summaries for navigation
 
 After successful cognify processing, use `cognee search` to query the knowledge graph.
     """
@@ -91,6 +91,10 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             # Run the async cognify function
             async def run_cognify():
                 try:
+                    from cognee.cli.user_resolution import resolve_cli_user
+
+                    user = await resolve_cli_user(getattr(args, "user_id", None))
+
                     # Import chunker classes here
                     from cognee.modules.chunking.TextChunker import TextChunker
 
@@ -112,6 +116,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
 
                     result = await cognee.cognify(
                         datasets=datasets,
+                        user=user,
                         chunker=chunker_class,
                         chunk_size=args.chunk_size,
                         ontology_file_path=args.ontology_file,

@@ -179,6 +179,7 @@ async def test_init_custom_params():
         node_name=["node1"],
         wide_search_top_k=200,
         triplet_distance_penalty=5.0,
+        feedback_influence=0.2,
     )
 
     assert retriever.top_k == 10
@@ -189,6 +190,7 @@ async def test_init_custom_params():
     assert retriever.node_name == ["node1"]
     assert retriever.wide_search_top_k == 200
     assert retriever.triplet_distance_penalty == 5.0
+    assert retriever.feedback_influence == 0.2
 
 
 @pytest.mark.asyncio
@@ -197,6 +199,21 @@ async def test_init_none_top_k():
     retriever = GraphCompletionRetriever(top_k=None)
 
     assert retriever.top_k == 5  # None defaults to 5
+
+
+@pytest.mark.asyncio
+async def test_get_triplets_passes_feedback_influence_to_brute_force_search():
+    """Test that feedback_influence is forwarded to brute_force_triplet_search."""
+    retriever = GraphCompletionRetriever(top_k=5, feedback_influence=0.3)
+
+    with patch(
+        "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
+        return_value=[],
+    ) as mock_search:
+        await retriever.get_triplets("test query")
+
+    call_kwargs = mock_search.call_args.kwargs
+    assert call_kwargs["feedback_influence"] == 0.3
 
 
 @pytest.mark.asyncio

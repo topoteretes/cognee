@@ -15,27 +15,42 @@ async def main():
     # Clean up test directories before starting
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_remote_kuzu")
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_remote_ladybug")
         ).resolve()
     )
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_remote_kuzu")
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_remote_ladybug")
         ).resolve()
     )
 
     try:
-        # Set Kuzu as the graph database provider
-        cognee.config.set_graph_database_provider("kuzu")
+        # Set remote Ladybug as the graph database provider
+        cognee.config.set_graph_database_provider("ladybug-remote")
         cognee.config.data_root_directory(data_directory_path)
         cognee.config.system_root_directory(cognee_directory_path)
 
-        # Configure remote Kuzu database using environment variables
-        os.environ["KUZU_HOST"] = os.getenv("KUZU_HOST", "localhost")
-        os.environ["KUZU_PORT"] = os.getenv("KUZU_PORT", "8000")
-        os.environ["KUZU_USERNAME"] = os.getenv("KUZU_USERNAME", "kuzu")
-        os.environ["KUZU_PASSWORD"] = os.getenv("KUZU_PASSWORD", "kuzu")
-        os.environ["KUZU_DATABASE"] = os.getenv("KUZU_DATABASE", "cognee_test")
+        # Configure remote Ladybug database using environment variables
+        host = os.getenv("LADYBUG_HOST", "localhost")
+        port = os.getenv("LADYBUG_PORT", "8000")
+        graph_database_url = os.getenv("GRAPH_DATABASE_URL", f"http://{host}:{port}")
+        graph_database_username = os.getenv(
+            "GRAPH_DATABASE_USERNAME", os.getenv("LADYBUG_USERNAME", "ladybug")
+        )
+        graph_database_password = os.getenv(
+            "GRAPH_DATABASE_PASSWORD", os.getenv("LADYBUG_PASSWORD", "ladybug")
+        )
+        os.environ["GRAPH_DATABASE_URL"] = graph_database_url
+        os.environ["GRAPH_DATABASE_USERNAME"] = graph_database_username
+        os.environ["GRAPH_DATABASE_PASSWORD"] = graph_database_password
+
+        from cognee.infrastructure.databases.graph.config import get_graph_config
+
+        graph_config = get_graph_config()
+        graph_config.graph_database_provider = "ladybug-remote"
+        graph_config.graph_database_url = graph_database_url
+        graph_config.graph_database_username = graph_database_username
+        graph_config.graph_database_password = graph_database_password
 
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
@@ -100,7 +115,7 @@ async def main():
 
         graph_engine = await get_graph_engine()
         nodes, edges = await graph_engine.get_graph_data()
-        assert len(nodes) == 0 and len(edges) == 0, "Remote Kuzu graph database is not empty"
+        assert len(nodes) == 0 and len(edges) == 0, "Remote Ladybug graph database is not empty"
 
     finally:
         # Ensure cleanup even if tests fail

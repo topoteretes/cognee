@@ -1,4 +1,5 @@
-from typing import List, Any, Optional
+from typing import Any
+
 import tiktoken
 
 from ..tokenizer_interface import TokenizerInterface
@@ -12,19 +13,19 @@ class TikTokenTokenizer(TokenizerInterface):
 
     def __init__(
         self,
-        model: Optional[str] = None,
+        model: str | None = None,
         max_completion_tokens: int = 8191,
-    ):
+    ) -> None:
         self.model = model
         self.max_completion_tokens = max_completion_tokens
         # Initialize TikToken for GPT based on model
         if model:
-            self.tokenizer = tiktoken.encoding_for_model(self.model)
+            self.tokenizer = tiktoken.encoding_for_model(model)
         else:
             # Use default if model not provided
             self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    def extract_tokens(self, text: str) -> List[Any]:
+    def extract_tokens(self, text: str) -> list[Any]:
         """
         Extract tokens from the given text.
 
@@ -42,7 +43,7 @@ class TikTokenTokenizer(TokenizerInterface):
         token_ids = self.tokenizer.encode(text)
         return token_ids
 
-    def decode_token_list(self, tokens: List[Any]) -> List[Any]:
+    def decode_token_list(self, tokens: list[Any]) -> list[Any]:
         """
         Decode a list of token IDs back into their corresponding text representations.
 
@@ -60,7 +61,7 @@ class TikTokenTokenizer(TokenizerInterface):
             tokens = [tokens]
         return [self.tokenizer.decode(i) for i in tokens]
 
-    def decode_single_token(self, token: int):
+    def decode_single_token(self, token: int) -> str:
         """
         Decode a single token ID into its corresponding text representation.
 

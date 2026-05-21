@@ -7,7 +7,16 @@ import cognee
 from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.modules.data.methods.delete_dataset import delete_dataset
 from cognee.modules.data.methods.get_dataset import get_dataset
+from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.users.methods import get_default_user
+
+
+async def get_dataset_database(dataset_id: UUID, user_id: UUID):
+    dataset_databases = await get_dataset_databases()
+    for dataset_database in dataset_databases:
+        if dataset_database.dataset_id == dataset_id and dataset_database.owner_id == user_id:
+            return dataset_database
+    raise AssertionError(f"Dataset database not found for dataset {dataset_id}.")
 
 
 async def main():
@@ -46,19 +55,21 @@ async def main():
     user = await get_default_user()
 
     for val in ret_val:
-        dataset_id = str(val)
-        vector_db_path = os.path.join(
-            cognee_directory_path, "databases", str(user.id), dataset_id + ".lance.db"
-        )
+        dataset_id = UUID(str(val))
+        dataset_database = await get_dataset_database(dataset_id, user.id)
         graph_db_path = os.path.join(
-            cognee_directory_path, "databases", str(user.id), dataset_id + ".pkl"
+            cognee_directory_path,
+            "databases",
+            str(user.id),
+            dataset_database.graph_database_name,
         )
+        vector_db_path = dataset_database.vector_database_url
 
         # Check if databases are properly created and exist before deletion
         assert os.path.exists(graph_db_path), "Graph database file not found."
         assert os.path.exists(vector_db_path), "Vector database file not found."
 
-        dataset = await get_dataset(user_id=user.id, dataset_id=UUID(dataset_id))
+        dataset = await get_dataset(user_id=user.id, dataset_id=dataset_id)
         await delete_dataset(dataset)
 
         # Confirm databases have been deleted

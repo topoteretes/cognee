@@ -1,24 +1,21 @@
 "use client";
 
-import classNames from "classnames";
-import { RefObject, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
-import { forceCollide, forceManyBody } from "d3-force-3d";
 import dynamic from "next/dynamic";
+import classNames from "classnames";
+import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
+import { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
 import { GraphControlsAPI } from "./GraphControls";
 import getColorForNodeType from "./getColorForNodeType";
 
-// Dynamically import ForceGraph to prevent SSR issues
+
 const ForceGraph = dynamic(() => import("react-force-graph-2d"), {
-  ssr: false,
-  loading: () => <div className="w-full h-full flex items-center justify-center">Loading graph...</div>
+  ssr: false, // disables SSR (important if the lib touches `window`)
 });
 
-import type { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
-
 interface GraphVisuzaliationProps {
-  ref: RefObject<GraphVisualizationAPI>;
+  ref: MutableRefObject<GraphVisualizationAPI>;
   data?: GraphData<NodeObject, LinkObject>;
-  graphControls: RefObject<GraphControlsAPI>;
+  graphControls: MutableRefObject<GraphControlsAPI>;
   className?: string;
 }
 
@@ -205,68 +202,82 @@ export default function GraphVisualization({ ref, data, graphControls, className
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function handleDagError(loopNodeIds: (string | number)[]) {}
 
-  const graphRef = useRef<ForceGraphMethods>(null);
+  // @ts-expect-error nothing to define
+  const graphRef = useRef<ForceGraphMethods>();
 
   useEffect(() => {
-    if (data && graphRef.current) {
-      // add collision force
-      graphRef.current.d3Force("collision", forceCollide(nodeSize * 1.5));
-      graphRef.current.d3Force("charge", forceManyBody().strength(-10).distanceMin(10).distanceMax(50));
+    async function startAnimation() {
+      // @ts-expect-error d3-force-3d has no types
+      const { forceCollide, forceManyBody } = await import("d3-force-3d");
+
+      if (typeof window !== "undefined" && data && graphRef.current) {
+        // add collision force
+        graphRef.current.d3Force("collision", forceCollide(nodeSize * 1.5));
+        graphRef.current.d3Force("charge", forceManyBody().strength(-10).distanceMin(10).distanceMax(50));
+      }
     }
+    startAnimation();
   }, [data, graphRef]);
 
   const [graphShape, setGraphShape] = useState<string>();
 
-  const zoomToFit: ForceGraphMethods["zoomToFit"] = (
-    durationMs?: number,
-    padding?: number,
-    nodeFilter?: (node: NodeObject) => boolean
-  ) => {
-    if (!graphRef.current) {
-      console.warn("GraphVisualization: graphRef not ready yet");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return undefined as any;
-    }
-
-    return graphRef.current.zoomToFit?.(durationMs, padding, nodeFilter);
-  };
-
   useImperativeHandle(ref, () => ({
-    zoomToFit,
-    setGraphShape,
+    zoomToFit: graphRef.current?.zoomToFit,
+    setGraphShape: setGraphShape,
   }));
-
 
   return (
     <div ref={containerRef} className={classNames("w-full h-full", className)} id="graph-container">
-      <ForceGraph
-        ref={graphRef as RefObject<ForceGraphMethods>}
-        width={dimensions.width}
-        height={dimensions.height}
-        dagMode={graphShape as unknown as undefined}
-        dagLevelDistance={data ? 300 : 100}
-        onDagError={handleDagError}
-        graphData={data || {
-          nodes: [{ id: 1, label: "Add" }, { id: 2, label: "Cognify" }, { id: 3, label: "Search" }],
-          links: [{ source: 1, target: 2, label: "but don't forget to" }, { source: 2, target: 3, label: "and after that you can" }],
-        }}
+      {(data && typeof window !== "undefined") ? (
+        <ForceGraph
+          ref={graphRef}
+          width={dimensions.width}
+          height={dimensions.height}
+          dagMode={graphShape as unknown as undefined}
+          dagLevelDistance={300}
+          onDagError={handleDagError}
+          graphData={data}
 
-        nodeLabel="label"
-        nodeRelSize={data ? nodeSize : 20}
-        nodeCanvasObject={data ? renderNode : renderInitialNode}
-        nodeCanvasObjectMode={() => data ? "replace" : "after"}
-        nodeAutoColorBy={data ? undefined : "type"}
+          nodeLabel="label"
+          nodeRelSize={nodeSize}
+          nodeCanvasObject={renderNode}
+          nodeCanvasObjectMode={() => "replace"}
 
-        linkLabel="label"
-        linkCanvasObject={renderLink}
-        linkCanvasObjectMode={() => "after"}
-        linkDirectionalArrowLength={3.5}
-        linkDirectionalArrowRelPos={1}
+          linkLabel="label"
+          linkCanvasObject={renderLink}
+          linkCanvasObjectMode={() => "after"}
+          linkDirectionalArrowLength={3.5}
+          linkDirectionalArrowRelPos={1}
 
-        onNodeClick={handleNodeClick}
-        onBackgroundClick={handleBackgroundClick}
-        d3VelocityDecay={data ? 0.3 : undefined}
-      />
+          onNodeClick={handleNodeClick}
+          onBackgroundClick={handleBackgroundClick}
+          d3VelocityDecay={0.3}
+        />
+      ) : (
+        <ForceGraph
+          ref={graphRef}
+          width={dimensions.width}
+          height={dimensions.height}
+          dagMode={graphShape as unknown as undefined}
+          dagLevelDistance={100}
+          graphData={{
+            nodes: [{ id: 1, label: "Add" }, { id: 2, label: "Cognify" }, { id: 3, label: "Search" }],
+            links: [{ source: 1, target: 2, label: "but don't forget to" }, { source: 2, target: 3, label: "and after that you can" }],
+          }}
+
+          nodeLabel="label"
+          nodeRelSize={20}
+          nodeCanvasObject={renderInitialNode}
+          nodeCanvasObjectMode={() => "after"}
+          nodeAutoColorBy="type"
+
+          linkLabel="label"
+          linkCanvasObject={renderLink}
+          linkCanvasObjectMode={() => "after"}
+          linkDirectionalArrowLength={3.5}
+          linkDirectionalArrowRelPos={1}
+        />
+      )}
     </div>
   );
 }

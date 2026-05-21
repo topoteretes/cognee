@@ -8,6 +8,11 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.global_context import (
+    format_global_context_prelude,
+    load_root_text,
+    search_top_global_context_summaries,
+)
 from cognee.modules.retrieval.utils.used_graph_elements import (
     is_edge_list,
     extract_from_edges,
@@ -42,10 +47,16 @@ class GraphCompletionRetriever(BaseRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 3.5,
+        triplet_distance_penalty: Optional[float] = 6.5,
+        feedback_influence: float = 0.0,
         session_id: Optional[str] = None,
         response_model: Type = str,
+        neighborhood_depth: Optional[int] = None,
+        neighborhood_seed_top_k: Optional[int] = 10,
+        include_global_context_index: bool = False,
+        global_context_index_top_k: int = 3,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
@@ -55,11 +66,17 @@ class GraphCompletionRetriever(BaseRetriever):
         self.wide_search_top_k = wide_search_top_k
         self.node_type = node_type
         self.node_name = node_name
+        self.node_name_filter_operator = node_name_filter_operator
         self.triplet_distance_penalty = triplet_distance_penalty
+        self.feedback_influence = feedback_influence
         # session_id (Optional[str]): Identifier for managing conversation history.
         self.session_id = session_id
         # response_model (Type): The Pydantic model or type for the expected response.
         self.response_model = response_model
+        self.neighborhood_depth = neighborhood_depth
+        self.neighborhood_seed_top_k = neighborhood_seed_top_k
+        self.include_global_context_index = include_global_context_index
+        self.global_context_index_top_k = global_context_index_top_k
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -161,10 +178,34 @@ class GraphCompletionRetriever(BaseRetriever):
             collections=collections or None,
             node_type=self.node_type,
             node_name=self.node_name,
+            node_name_filter_operator=self.node_name_filter_operator,
             wide_search_top_k=self.wide_search_top_k,
             triplet_distance_penalty=self.triplet_distance_penalty,
+            feedback_influence=self.feedback_influence,
             unified_engine=unified_engine,
+            neighborhood_depth=self.neighborhood_depth,
+            neighborhood_seed_top_k=self.neighborhood_seed_top_k,
         )
+
+    async def get_triplets_batch(
+        self,
+        queries: List[str],
+    ) -> List[List[Edge]]:
+        """
+        Retrieves triplets for a list of queries, using single-query mode when
+        possible to enable ID-filtered graph projection.
+
+        When there is only one query, delegates to single-query mode (query=)
+        which computes relevant node IDs and filters the graph projection.
+        For multiple queries, uses batch mode (query_batch=).
+
+        Returns:
+            List[List[Edge]]: One list of edges per query.
+        """
+        if len(queries) == 1:
+            triplets = await self.get_triplets(query=queries[0])
+            return [triplets]
+        return await self.get_triplets(query_batch=queries)
 
     async def get_context_from_objects(
         self,
@@ -201,11 +242,34 @@ class GraphCompletionRetriever(BaseRetriever):
                 *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
             )
 
-        if not triplets:
+        graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
+
+        if not self.include_global_context_index:
+            if not triplets:
+                logger.warning("Empty context was provided to the completion")
+                return ""
+            return graph_context
+
+        prelude = await self._build_global_context_prelude(query)
+        if not prelude and not graph_context:
             logger.warning("Empty context was provided to the completion")
             return ""
+        if not prelude:
+            return graph_context
+        if not graph_context:
+            return prelude
+        return f"{prelude}\n\n{graph_context}"
 
-        return await self.resolve_edges_to_text(triplets)
+    async def _build_global_context_prelude(self, query: Optional[str]) -> str:
+        if not query:
+            return ""
+        if getattr(self, "_unified_engine", None) is None:
+            self._unified_engine = await get_unified_engine()
+        root_text = await load_root_text()
+        top_summaries = await search_top_global_context_summaries(
+            query, self.global_context_index_top_k, self._unified_engine.vector
+        )
+        return format_global_context_prelude(root_text, top_summaries)
 
     def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""
@@ -277,6 +341,7 @@ class GraphCompletionRetriever(BaseRetriever):
                 response_model=self.response_model,
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
+                max_context_chars=getattr(self, "max_context_chars", None),
             )
             return [completion]
         return await self._generate_completion_without_session(query, query_batch, context)

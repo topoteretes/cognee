@@ -66,5 +66,5 @@ async def test_index_graph_edges_initialization_error():
             "get_vector_engine": lambda: AsyncMock(),
         },
     ):
-        with pytest.raises(RuntimeError, match="Initialization error"):
+        with pytest.raises(RuntimeError, match="Graph edge indexing error"):
             await index_graph_edges()

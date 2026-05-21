@@ -175,7 +175,7 @@ class TestCogneeTrace:
                 "end_time_ns": 1200000000,
                 "duration_ms": 100.0,
                 "status": "OK",
-                "attributes": {"cognee.db.system": "kuzu"},
+                "attributes": {"cognee.db.system": "ladybug"},
             },
         ]
 

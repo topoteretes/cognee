@@ -23,9 +23,9 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.graph import extract_graph_from_data
+from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.summarization import summarize_text
+from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
@@ -85,7 +85,7 @@ async def cognify(
         3. **Entity Extraction**: Identifies key concepts, people, places, organizations
         4. **Relationship Detection**: Discovers connections between entities
         5. **Graph Construction**: Builds semantic knowledge graph with embeddings
-        6. **Content Summarization**: Creates hierarchical summaries for navigation
+        6. **Content Summarization**: Creates text summaries for navigation
 
     Graph Model Customization:
         The `graph_model` parameter allows custom knowledge structures:
@@ -196,6 +196,19 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    # Route to remote instance if connected via serve()
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.cognify(
+            datasets,
+            chunk_size=chunk_size,
+            chunks_per_batch=chunks_per_batch,
+            custom_prompt=custom_prompt,
+            run_in_background=run_in_background,
+        )
+
     with new_span("cognee.api.cognify") as span:
         span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")
         if datasets is not None:
@@ -301,29 +314,31 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         )
 
     default_tasks = [
+        # EXTRACT: classify raw Data items into typed Document objects
         Task(classify_documents),
+        # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
-        ),  # Extract text chunks based on the document type.
+        ),
+        # COGNIFY: LLM-extract entities and relationships into a knowledge graph
+        # COGNIFY: LLM-summarize each chunk for retrieval
         Task(
-            extract_graph_from_data,
+            extract_graph_and_summarize,
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
-        ),  # Generate knowledge graphs from the document chunks.
-        Task(
-            summarize_text,
-            task_config={"batch_size": chunks_per_batch},
         ),
+        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
             add_data_points,
             embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
         ),
+        Task(extract_dlt_fk_edges),
     ]
 
     return default_tasks
@@ -358,14 +373,19 @@ async def get_temporal_tasks(
         chunks_per_batch = configured if configured is not None else 10
 
     temporal_tasks = [
+        # EXTRACT: classify raw Data items into typed Document objects
         Task(classify_documents),
+        # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
         ),
+        # COGNIFY: extract temporal events and timestamps from chunks
         Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
+        # COGNIFY: build knowledge graph from extracted events
         Task(extract_knowledge_graph_from_events),
+        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
     ]
 

@@ -5,9 +5,11 @@ from web pages using BeautifulSoup or Playwright for JavaScript-rendered pages. 
 supports robots.txt handling, rate limiting, and custom extraction rules.
 """
 
-from typing import Union, Dict, Any, Optional, List
 from dataclasses import dataclass
+from typing import Any
+
 from bs4 import BeautifulSoup
+
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
 
@@ -26,9 +28,9 @@ class ExtractionRule:
         join_with: String to join multiple extracted elements.
     """
 
-    selector: Optional[str] = None
-    xpath: Optional[str] = None
-    attr: Optional[str] = None
+    selector: str | None = None
+    xpath: str | None = None
+    attr: str | None = None
     all: bool = False
     join_with: str = " "
 
@@ -50,23 +52,21 @@ class BeautifulSoupLoader(LoaderInterface):
         robots_cache_ttl: Time-to-live for robots.txt cache in seconds.
     """
 
+    loader_name = "beautiful_soup_loader"
+
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return ["html"]
 
     @property
-    def supported_mime_types(self) -> List[str]:
+    def supported_mime_types(self) -> list[str]:
         return ["text/html", "text/plain"]
-
-    @property
-    def loader_name(self) -> str:
-        return "beautiful_soup_loader"
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
         can = extension in self.supported_extensions and mime_type in self.supported_mime_types
         return can
 
-    def _get_default_extraction_rules(self):
+    def _get_default_extraction_rules(self) -> dict[str, Any]:
         # Comprehensive default extraction rules for common HTML content
         return {
             # Meta information
@@ -153,10 +153,10 @@ class BeautifulSoupLoader(LoaderInterface):
     async def load(
         self,
         file_path: str,
-        extraction_rules: dict[str, Any] = None,
+        extraction_rules: dict[str, Any] | None = None,
         join_all_matches: bool = False,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> str:
         """Load an HTML file, extract content, and save to storage.
 
         Args:
@@ -174,8 +174,8 @@ class BeautifulSoupLoader(LoaderInterface):
 
         logger.info(f"Processing HTML file: {file_path}")
 
-        from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
         from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+        from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 
         with open(file_path, "rb") as f:
             file_metadata = await get_file_metadata(f)
@@ -185,7 +185,7 @@ class BeautifulSoupLoader(LoaderInterface):
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
         # Normalize extraction rules
-        normalized_rules: List[ExtractionRule] = []
+        normalized_rules: list[ExtractionRule] = []
         for _, rule in extraction_rules.items():
             r = self._normalize_rule(rule)
             if join_all_matches:
@@ -218,6 +218,9 @@ class BeautifulSoupLoader(LoaderInterface):
         if not full_content:
             logger.warning(f"No content extracted from HTML file: {file_path}")
 
+        if not kwargs.get("persist", True):
+            return full_content
+
         # Store the extracted content
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
@@ -228,7 +231,7 @@ class BeautifulSoupLoader(LoaderInterface):
         logger.info(f"Extracted {len(full_content)} characters from HTML")
         return full_file_path
 
-    def _normalize_rule(self, rule: Union[str, Dict[str, Any]]) -> ExtractionRule:
+    def _normalize_rule(self, rule: str | dict[str, Any]) -> ExtractionRule:
         """Normalize an extraction rule to an ExtractionRule dataclass.
 
         Args:
@@ -252,7 +255,7 @@ class BeautifulSoupLoader(LoaderInterface):
             )
         raise ValueError(f"Invalid extraction rule: {rule}")
 
-    def _extract_from_html(self, html: str, rule: ExtractionRule) -> str:
+    def _extract_from_html(self, html: bytes, rule: ExtractionRule) -> str:
         """Extract content from HTML using BeautifulSoup or lxml XPath.
 
         Args:
@@ -269,7 +272,7 @@ class BeautifulSoupLoader(LoaderInterface):
 
         if rule.xpath:
             try:
-                from lxml import html as lxml_html
+                from lxml import html as lxml_html  # ty:ignore[unresolved-import]
             except ImportError:
                 raise RuntimeError(
                     "XPath requested but lxml is not available. Install lxml or use CSS selectors."
@@ -294,7 +297,7 @@ class BeautifulSoupLoader(LoaderInterface):
                 if rule.attr:
                     val = el.get(rule.attr)
                     if val:
-                        pieces.append(val.strip())
+                        pieces.append(val.strip())  # ty:ignore[unresolved-attribute]
                 else:
                     text = el.get_text(strip=True)
                     if text:
@@ -306,5 +309,5 @@ class BeautifulSoupLoader(LoaderInterface):
                 return ""
             if rule.attr:
                 val = el.get(rule.attr)
-                return (val or "").strip()
+                return (val or "").strip()  # ty:ignore[unresolved-attribute]
             return el.get_text(strip=True)

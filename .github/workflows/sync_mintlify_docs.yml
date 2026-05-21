@@ -1,0 +1,169 @@
+name: automation | Sync Mintlify Docs
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-mintlify-docs:
+    if: ${{ github.event_name != 'release' || github.event.release.prerelease == false }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out core repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Normalize release metadata so the sync script can run unchanged for
+      # published releases, manual dispatches, and branch-push preview runs.
+      # This step always produces a body file plus synthetic tag/url/date
+      # values when the event is not an actual GitHub release.
+      - name: Prepare release body file
+        id: release_meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_PUBLISHED_AT: ${{ github.event.release.published_at }}
+          REPOSITORY: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          BODY_FILE="$(mktemp)"
+          if [ "${EVENT_NAME}" = "release" ]; then
+            TAG="${RELEASE_TAG}"
+            RELEASE_LINK="${RELEASE_URL}"
+            PUBLISHED_AT="${RELEASE_PUBLISHED_AT}"
+            DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${RELEASE_TAG}"
+            printf "%s" "${RELEASE_BODY}" > "${BODY_FILE}"
+          else
+            TAG="test-sync-${REF_NAME}-${COMMIT_SHA::7}"
+            RELEASE_LINK="${SERVER_URL}/${REPOSITORY}/commit/${COMMIT_SHA}"
+            PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            DOCS_BRANCH_NAME="${REF_NAME}"
+            printf "%s\n\n- Source commit: \`%s\`\n- Workflow event: \`%s\`\n- Commit URL: %s\n" \
+              "Automated docs sync test run from branch \`${REF_NAME}\`." \
+              "${COMMIT_SHA}" \
+              "${EVENT_NAME}" \
+              "${RELEASE_LINK}" > "${BODY_FILE}"
+          fi
+
+          SAFE_DOCS_BRANCH_NAME="${DOCS_BRANCH_NAME// /-}"
+
+          echo "body_file=${BODY_FILE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "release_url=${RELEASE_LINK}" >> "$GITHUB_OUTPUT"
+          echo "published_at=${PUBLISHED_AT}" >> "$GITHUB_OUTPUT"
+          echo "docs_branch_name=${SAFE_DOCS_BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Check out docs repository
+        uses: actions/checkout@v6
+        with:
+          repository: topoteretes/cognee-docs
+          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          ref: main
+          path: docs-repo
+
+      - name: Sync OpenAPI and changelog
+        run: |
+          uv run python tools/sync_release_docs.py \
+            --docs-repo "${GITHUB_WORKSPACE}/docs-repo" \
+            --tag "${{ steps.release_meta.outputs.tag }}" \
+            --release-url "${{ steps.release_meta.outputs.release_url }}" \
+            --published-at "${{ steps.release_meta.outputs.published_at }}" \
+            --release-body-file "${{ steps.release_meta.outputs.body_file }}"
+
+      - name: Commit docs changes
+        id: commit_docs
+        working-directory: docs-repo
+        run: |
+          BRANCH_NAME="${{ steps.release_meta.outputs.docs_branch_name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${BRANCH_NAME}"
+          git add cognee_openapi_spec.json changelog.mdx
+          if git diff --cached --quiet; then
+            echo "changes_made=false" >> "$GITHUB_OUTPUT"
+            echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "docs: sync ${{ steps.release_meta.outputs.tag }}"
+          echo "changes_made=true" >> "$GITHUB_OUTPUT"
+          echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Push docs branch
+        if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}
+        working-directory: docs-repo
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+        run: |
+          git push --force-with-lease origin "${{ steps.commit_docs.outputs.branch_name }}"
+
+      - name: Create or update docs pull request
+        if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          RELEASE_URL: ${{ steps.release_meta.outputs.release_url }}
+          TARGET_REPO: topoteretes/cognee-docs
+          HEAD_BRANCH: ${{ steps.commit_docs.outputs.branch_name }}
+        run: |
+          if [ "${EVENT_NAME}" = "release" ]; then
+            PR_TITLE="docs: sync release ${RELEASE_TAG}"
+            PR_BODY=$(cat <<EOF
+          Automated sync for release \`${RELEASE_TAG}\`.
+
+          Source release: ${RELEASE_URL}
+          EOF
+            )
+          else
+            PR_TITLE="test(docs): preview sync for ${HEAD_BRANCH}"
+            PR_BODY=$(cat <<EOF
+          Automated preview sync from branch \`${HEAD_BRANCH}\`.
+
+          Source commit/revision: ${RELEASE_URL}
+          EOF
+            )
+          fi
+
+          HEAD_REF="topoteretes:${HEAD_BRANCH}"
+
+          EXISTING_PR_NUMBER="$(gh pr list \
+            --repo "${TARGET_REPO}" \
+            --head "${HEAD_REF}" \
+            --base main \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "${EXISTING_PR_NUMBER}" ]; then
+            gh pr edit "${EXISTING_PR_NUMBER}" \
+              --repo "${TARGET_REPO}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}"
+          else
+            gh pr create \
+              --repo "${TARGET_REPO}" \
+              --base main \
+              --head "${HEAD_REF}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}"
+          fi

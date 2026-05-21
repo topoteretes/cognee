@@ -23,14 +23,17 @@ async def main():
 
     converter = DocumentConverter()
 
+    # Test ingestion of DoclingDocument with various file types
+
     result = converter.convert(file_path_artificial)
     await cognee.add(result.document)
 
     result = converter.convert(file_path_png)
     await cognee.add(result.document)
 
-    result = converter.convert(file_path_pptx)
-    await cognee.add(result.document)
+    # Test docling loader
+
+    await cognee.add(file_path_pptx)
 
     await cognee.cognify()
 

@@ -38,6 +38,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Installing separately from its dependencies allows optimal layer caching
 COPY ./cognee /app/cognee
 COPY ./distributed /app/distributed
+COPY ./cognee_db_workers /app/cognee_db_workers
+# Compatibility shim that re-exports ladybug under the legacy `kuzu`
+# module name. Listed in [tool.hatch.build.targets.wheel] packages, and
+# imported at module load by alembic/versions/b9274c27a25a_kuzu_11_migration.py.
+COPY ./kuzu /app/kuzu
 RUN --mount=type=cache,target=/root/.cache/uv \
 uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --extra chromadb --frozen --no-dev --no-editable
 
@@ -45,6 +50,7 @@ FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y \
     libpq5 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -53,7 +59,8 @@ COPY --from=uv /app /app
 # COPY --from=uv /app/.venv /app/.venv
 # COPY --from=uv /root/.local /root/.local
 
-RUN chmod +x /app/entrypoint.sh
+# Strip Windows carriage returns (fixes "no such file" on Windows Docker)
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"

@@ -145,9 +145,10 @@ async def main(mock_create_structured_output: AsyncMock):
 
     graph_engine = await get_graph_engine()
     initial_nodes, initial_edges = await graph_engine.get_graph_data()
-    assert len(initial_nodes) == 15 and len(initial_edges) == 19, (
-        "Number of nodes and edges is not correct."
-    )
+    # 15 data nodes + EdgeType nodes from index_graph_edges (one per unique relationship_name)
+    data_nodes = [n for n in initial_nodes if n[1].get("type") != "EdgeType"]
+    assert len(data_nodes) == 15, f"Expected 15 data nodes, got {len(data_nodes)}"
+    assert len(initial_edges) == 19, f"Expected 19 edges, got {len(initial_edges)}"
 
     initial_nodes_by_vector_collection = {}
 
@@ -165,7 +166,10 @@ async def main(mock_create_structured_output: AsyncMock):
     await datasets.empty_dataset(johns_dataset_id, default_user)  # type: ignore
 
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) == 9 and len(edges) == 10, "Nodes and edges are not deleted."
+    remaining_data_nodes = [n for n in nodes if n[1].get("type") != "EdgeType"]
+    assert len(remaining_data_nodes) == 9 and len(edges) == 10, (
+        f"Expected 9 data nodes and 10 edges after first delete, got {len(remaining_data_nodes)} and {len(edges)}"
+    )
     assert not any(
         node[1]["name"] == "john" or node[1]["name"] == "food for hungry"
         for node in nodes

@@ -29,7 +29,9 @@ async def main():
     await cognee.cognify()
     print("Knowledge graph created.")
 
-    graph_visualization_path = path.join(path.dirname(__file__), ".artifacts/web_url_example.html")
+    graph_visualization_path = path.join(
+        path.dirname(__file__), ".artifacts", "web_url_example.html"
+    )
     await cognee.visualize_graph(graph_visualization_path)
 
 

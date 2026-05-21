@@ -1,0 +1,8 @@
+diff --git a/user_names.py b/user_names.py
+--- a/user_names.py
++++ b/user_names.py
+@@
+ def get_user_name(user):
+-    if user is None:
+-        return "Unknown"
+     return user.name.strip()

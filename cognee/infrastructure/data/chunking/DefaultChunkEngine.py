@@ -1,9 +1,11 @@
 """Chunking strategies for splitting text into smaller parts."""
 
 from __future__ import annotations
-import re
-from cognee.shared.data_models import ChunkStrategy
 
+import re
+from collections.abc import Iterable
+
+from cognee.shared.data_models import ChunkStrategy
 
 # /Users/vasa/Projects/cognee/cognee/infrastructure/data/chunking/DefaultChunkEngine.py
 
@@ -13,7 +15,12 @@ class DefaultChunkEngine:
     Manage the process of chunking data based on specified strategies.
     """
 
-    def __init__(self, chunk_strategy=None, chunk_size=None, chunk_overlap=None):
+    def __init__(
+        self,
+        chunk_strategy: ChunkStrategy,
+        chunk_size: int,
+        chunk_overlap: int,
+    ) -> None:
         self.chunk_strategy = chunk_strategy
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -37,11 +44,11 @@ class DefaultChunkEngine:
 
     def chunk_data(
         self,
-        chunk_strategy=None,
-        source_data=None,
-        chunk_size=None,
-        chunk_overlap=None,
-    ):
+        chunk_strategy: ChunkStrategy,
+        source_data: Iterable[str],
+        chunk_size: int,
+        chunk_overlap: int,
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data based on the specified strategy.
 
@@ -72,11 +79,13 @@ class DefaultChunkEngine:
                 source_data, chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
             )
         else:
-            chunked_data, chunk_number = "Invalid chunk strategy.", [0, "Invalid chunk strategy."]
+            chunked_data, chunk_number = ["Invalid chunk strategy."], [0]
 
         return chunked_data, chunk_number
 
-    def chunk_data_exact(self, data_chunks, chunk_size, chunk_overlap):
+    def chunk_data_exact(
+        self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data exactly by specified sizes and overlaps.
 
@@ -102,7 +111,9 @@ class DefaultChunkEngine:
             numbered_chunks.append(numbered_chunk)
         return chunks, numbered_chunks
 
-    def chunk_by_sentence(self, data_chunks, chunk_size, chunk_overlap):
+    def chunk_by_sentence(
+        self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data into sentences based on specified sizes and overlaps.
 
@@ -141,7 +152,9 @@ class DefaultChunkEngine:
             numbered_chunks.append(numbered_chunk)
         return sentence_chunks, numbered_chunks
 
-    def chunk_data_by_paragraph(self, data_chunks, chunk_size, chunk_overlap, bound=0.75):
+    def chunk_data_by_paragraph(
+        self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int, bound: float = 0.75
+    ) -> tuple[list[str], list[int]]:
         """
         Chunk data based on paragraphs while considering overlaps and boundaries.
 

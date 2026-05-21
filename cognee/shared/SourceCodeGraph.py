@@ -1,4 +1,4 @@
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from cognee.infrastructure.engine import DataPoint
 
@@ -7,8 +7,8 @@ class Variable(DataPoint):
     id: str
     name: str
     description: str
-    is_static: Optional[bool] = False
-    default_value: Optional[str] = None
+    is_static: bool | None = False
+    default_value: str | None = None
     data_type: str
 
     metadata: dict = {"index_fields": ["name"]}
@@ -26,9 +26,9 @@ class Class(DataPoint):
     id: str
     name: str
     description: str
-    constructor_parameters: List[Variable]
-    extended_from_class: Optional["Class"] = None
-    has_methods: List["Function"]
+    constructor_parameters: list[Variable]
+    extended_from_class: "Class | None" = None
+    has_methods: list["Function"]
 
     metadata: dict = {"index_fields": ["name"]}
 
@@ -38,8 +38,8 @@ class ClassInstance(DataPoint):
     name: str
     description: str
     from_class: Class
-    instantiated_by: Union["Function"]
-    instantiation_arguments: List[Variable]
+    instantiated_by: "Function"
+    instantiation_arguments: list[Variable]
 
     metadata: dict = {"index_fields": ["name"]}
 
@@ -48,18 +48,18 @@ class Function(DataPoint):
     id: str
     name: str
     description: str
-    parameters: List[Variable]
+    parameters: list[Variable]
     return_type: str
-    is_static: Optional[bool] = False
+    is_static: bool | None = False
 
     metadata: dict = {"index_fields": ["name"]}
 
 
 class FunctionCall(DataPoint):
     id: str
-    called_by: Union[Function, Literal["main"]]
+    called_by: Function | Literal["main"]
     function_called: Function
-    function_arguments: List[Any]
+    function_arguments: list[Any]
     metadata: dict = {"index_fields": []}
 
 
@@ -68,7 +68,7 @@ class Expression(DataPoint):
     name: str
     description: str
     expression: str
-    members: List[Union[Variable, Function, Operator, "Expression"]]
+    members: list[Variable | Function | Operator | "Expression"]
     metadata: dict = {"index_fields": ["name"]}
 
 
@@ -77,17 +77,7 @@ class SourceCodeGraph(DataPoint):
     name: str
     description: str
     language: str
-    nodes: List[
-        Union[
-            Class,
-            ClassInstance,
-            Function,
-            FunctionCall,
-            Variable,
-            Operator,
-            Expression,
-        ]
-    ]
+    nodes: list[Class | ClassInstance | Function | FunctionCall | Variable | Operator | Expression]
     metadata: dict = {"index_fields": ["name"]}
 
 

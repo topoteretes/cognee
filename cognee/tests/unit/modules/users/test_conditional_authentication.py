@@ -111,20 +111,92 @@ class TestConditionalAuthenticationIntegration:
 class TestConditionalAuthenticationEnvironmentVariables:
     """Test environment variable handling."""
 
+    def _reimport(self):
+        module_name = "cognee.modules.users.methods.get_authenticated_user"
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+        import importlib
+
+        return importlib.import_module(module_name)
+
+    def _reimport_flag(self):
+        return self._reimport().REQUIRE_AUTHENTICATION
+
     def test_require_authentication_true(self):
         """Test that REQUIRE_AUTHENTICATION=true is parsed correctly when imported."""
-        with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "true"}):
-            # Remove module from cache to force fresh import
-            module_name = "cognee.modules.users.methods.get_authenticated_user"
-            if module_name in sys.modules:
-                del sys.modules[module_name]
+        with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "true"}, clear=False):
+            assert self._reimport_flag() is True
 
-            # Import after patching environment - module will see REQUIRE_AUTHENTICATION=true
-            from cognee.modules.users.methods.get_authenticated_user import (
-                REQUIRE_AUTHENTICATION,
-            )
+    def test_access_control_false_disables_auth_when_require_auth_unset(self):
+        """ENABLE_BACKEND_ACCESS_CONTROL=false alone should disable auth (issue #2808)."""
+        env = {k: v for k, v in os.environ.items() if k != "REQUIRE_AUTHENTICATION"}
+        env["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
+        with patch.dict(os.environ, env, clear=True):
+            assert self._reimport_flag() is False
 
-            assert REQUIRE_AUTHENTICATION
+    def test_explicit_require_auth_overrides_access_control(self):
+        """REQUIRE_AUTHENTICATION=true wins even if ENABLE_BACKEND_ACCESS_CONTROL=false."""
+        with patch.dict(
+            os.environ,
+            {
+                "REQUIRE_AUTHENTICATION": "true",
+                "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+            },
+            clear=False,
+        ):
+            assert self._reimport_flag() is True
+
+    def test_explicit_require_auth_false_with_no_access_control_disables_auth(self):
+        """REQUIRE_AUTHENTICATION=false + ENABLE_BACKEND_ACCESS_CONTROL=false: auth off."""
+        with patch.dict(
+            os.environ,
+            {
+                "REQUIRE_AUTHENTICATION": "false",
+                "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+            },
+            clear=False,
+        ):
+            assert self._reimport_flag() is False
+
+    def test_both_unset_defaults_to_require_auth(self):
+        """With neither var set, default is to require authentication."""
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("REQUIRE_AUTHENTICATION", "ENABLE_BACKEND_ACCESS_CONTROL")
+        }
+        with patch.dict(os.environ, env, clear=True):
+            mod = self._reimport()
+            assert mod.REQUIRE_AUTHENTICATION is True
+            assert mod.ENABLE_BACKEND_ACCESS_CONTROL is True
+
+    def test_multi_tenant_with_no_auth_is_coerced_to_require_auth(self):
+        """REQUIRE_AUTHENTICATION=false + ENABLE_BACKEND_ACCESS_CONTROL=true is unsafe
+        and should be coerced to auth-on with a warning."""
+        with patch.dict(
+            os.environ,
+            {
+                "REQUIRE_AUTHENTICATION": "false",
+                "ENABLE_BACKEND_ACCESS_CONTROL": "true",
+            },
+            clear=False,
+        ):
+            mod = self._reimport()
+            assert mod.REQUIRE_AUTHENTICATION is True
+            assert mod.ENABLE_BACKEND_ACCESS_CONTROL is True
+
+    def test_empty_string_treated_as_unset(self):
+        """REQUIRE_AUTHENTICATION='' (e.g. `docker -e REQUIRE_AUTHENTICATION`) should
+        be treated as unset so it inherits from access control."""
+        with patch.dict(
+            os.environ,
+            {
+                "REQUIRE_AUTHENTICATION": "",
+                "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+            },
+            clear=False,
+        ):
+            assert self._reimport_flag() is False
 
 
 class TestConditionalAuthenticationEdgeCases:

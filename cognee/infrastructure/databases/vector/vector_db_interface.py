@@ -89,6 +89,7 @@ class VectorDBInterface(Protocol):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -154,6 +155,28 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
+    async def remove_belongs_to_set_tags(
+        self,
+        tags: List[str],
+        node_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Remove the given tag names from every `belongs_to_set` array in the
+        adapter's vector collections and delete rows whose `belongs_to_set`
+        becomes empty as a result. Keeps the stored tags consistent with
+        the graph after a dataset or NodeSet is removed.
+
+        When `node_ids` is provided, the detag is scoped to rows whose id
+        is in the list — used to reconcile shared rows that lose one
+        dataset's anchor while other datasets still own them. Rows
+        emptied by a scoped detag are still deleted, mirroring the
+        unscoped path.
+
+        Default no-op; adapters that need to clean up stale NodeSet tags
+        on dataset deletion override this.
+        """
+        return None
+
     @abstractmethod
     async def prune(self):
         """
@@ -179,6 +202,13 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     # Optional methods that may be implemented by adapters
+    async def run_migrations(self):
+        """
+        Run adapter-specific vector storage migrations.
+        Default implementation is a no-op.
+        """
+        return None
+
     async def get_connection(self):
         """
         Get a connection to the vector database.

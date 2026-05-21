@@ -1,7 +1,5 @@
 .data
 .env
-.env.example
-cognee/cognee_skills/.env.example
 .local.env
 .prod.env
 cognee/.data/
@@ -44,6 +42,10 @@ share/python-wheels/
 .python-version
 cognee-mcp/.python-version
 MANIFEST
+
+# cognee-mcp app bundle (built by `npm run build` under cognee-mcp/apps-src/).
+# Generated artifact — see cognee-mcp/README.md for the build step.
+cognee-mcp/src/app_bundles/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -207,5 +209,5 @@ SWE-bench_testsample/
 
 deployment/helm/values-local.yml
 
-# cognee skills generated artifacts
-cognee/skills/graph.html
+# Performance test results
+cognee/tests/performance/results

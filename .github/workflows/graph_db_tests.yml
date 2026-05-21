@@ -12,6 +12,11 @@ on:
         type: string
         default: "all"
         description: "Which vector databases to test (comma-separated list or 'all')"
+      python-version:
+        required: false
+        type: string
+        default: "3.11.x"
+        description: "Python version to use for testing"
       ci-image:
         required: false
         type: string
@@ -65,6 +70,107 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v
+
+  run-postgres-tests:
+    name: Postgres Graph Tests
+    runs-on: ubuntu-22.04
+    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres') }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+          extra-dependencies: postgres
+
+      - name: Run Postgres Adapter Unit Tests
+        env:
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+        run: uv run pytest cognee/tests/e2e/postgres/test_postgres_adapter.py -v
+
+      - name: Run Postgres Graph E2E Test
+        env:
+          ENV: 'dev'
+          GRAPH_DATABASE_PROVIDER: "postgres"
+          GRAPH_DATABASE_URL: "postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db"
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/e2e/postgres/test_graphdb_postgres.py
+
+      - name: Run Postgres Hybrid Adapter Tests
+        env:
+          ENV: 'dev'
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run pytest cognee/tests/e2e/postgres/test_postgres_hybrid_adapter.py -v
+
+      - name: Run Postgres Hybrid E2E Test
+        env:
+          ENV: 'dev'
+          USE_UNIFIED_PROVIDER: "pghybrid"
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/e2e/postgres/test_pghybrid.py
 
   run-neo4j-tests:
     name: Neo4j Tests

@@ -1,0 +1,40 @@
+R01. Carrier coverage must include the package shipping range.
+R02. The carrier and selected mode must support the package weight; the package weight must be less than or equal to both the carrier maximum supported weight and the mode maximum recommended weight.
+R03. Perishable packages require temperature-controlled transport.
+R04. Hazardous packages require hazardous-material certification.
+R05. Intercontinental deliveries can only use the flight or shipment transport modes.
+R06. Fragile packages cannot be assigned to shipment.
+R07. Express packages cannot use shipment.
+R08. Packages already delivered do not need a new transport assignment.
+R09. Retailer and user regions affect both delivery time and transport price.
+R10. Region distance is 0 when the origin region and destination region are the same. Otherwise it is computed as abs(origin distance score - destination distance score) + 1, with an additional network penalty of 2 when crossing between US and non-US regions.
+R11. Estimated delivery days formula: retailer processing days + shipping-range distance score + region distance + mode transit days + carrier base delay days.
+R12. Weekend-enabled users receive a one-day delivery-time reduction when the carrier operates on weekends.
+R13. User tier priority bonus reduces estimated delivery days.
+R14. Express packages assigned to flight or truck receive a one-day delivery-time reduction, while economy packages assigned to shipment or freight rail incur a one-day delivery-time increase.
+R15. Estimated delivery time is bounded to a minimum of one day.
+R16. Base transport price formula: handling fee + (region distance x 3.0) + (weight kg x 0.08) + (shipping-range score x 2.5) + mode cost score + max(0, 6 - carrier reliability score) x 0.5.
+R17. Estimated transport price has a minimum floor of 4.0 after rounding to two decimals.
+R18. Route construction includes the retailer origin warehouse when available and each post office recorded in the package route.
+R19. Route construction starts with the retailer, preserves the recorded post-office order without duplicates, and ends with the user.
+R20. User tier and package priority influence the transport scoring model.
+R21. Transport scoring formula: (estimated delivery days x combined speed weight) + estimated transport price + (mode cost score x package cost weight) - (carrier reliability score x 0.5).
+R22. If no valid transport option exists, the computed outcome is infinite delivery time unless the package has already been received, in which case the outcome is 0.0.
+R23. Selection reasoning may describe transport modes in terms of package priority, with faster modes presented as a better fit for express deliveries and slower modes presented as a better fit for economy deliveries.
+R24. Shipping-range distance scores are fixed as follows: domestic = 0, regional = 2, intercontinental = 6.
+R25. Region distance scores are fixed as follows: US North = 4, US South = 0, US East = 3, US West = 1, US Central = 2, Germany = 2, France = 2, Netherlands = 1, Spain = 0, Italy = 1, Poland = 3.
+R26. Carrier base delay days are carrier-specific values that add directly to the estimated delivery days formula.
+R27. Carrier reliability scores are carrier-specific values that reduce transport scoring by 0.5 per point and increase transport price through the term max(0, 6 - carrier reliability score) x 0.5.
+R28. Mode cost scores are fixed as follows: flight = 5, shipment = 1, freight rail = 2, truck = 3.
+R29. Mode transit days are fixed as follows: flight = 1, shipment = 7, freight rail = 4, truck = 3.
+R30. Domestic deliveries are valid only when the retailer region and user region are the same, and the carrier region must also match that route region.
+R31. Regional deliveries are valid only when the retailer region and user region belong to the same network type, meaning both US regions or both non-US regions, and the carrier region must belong to that same network type as the retailer.
+R32. Selected carrier is chosen from the valid carrier and mode combinations only; each candidate is evaluated across every carrier and every mode that the carrier supports, and the option with the lowest transport score is selected.
+R33. If a package is already delivered, selected carrier is empty because no new transport option is assigned. If no valid carrier-mode option exists for a package that is not yet received, selected carrier is also empty.
+R34. Delivery priority values are fixed as follows: economy has speed weight 1 and cost weight 3, standard has speed weight 2 and cost weight 2, express has speed weight 3 and cost weight 1.
+R35. User tier values are fixed as follows: standard has priority bonus 0 and speed weight 1, business has priority bonus 1 and speed weight 2, enterprise has priority bonus 2 and speed weight 3.
+R36. Package category facts are fixed as follows: standard requires no special handling, fragile is flagged as fragile, perishable requires temperature control, hazardous requires hazardous-material certification.
+R37. Mode maximum recommended package weights are fixed as follows: flight = 500.0 kg, shipment = 20000.0 kg, freight rail = 12000.0 kg, truck = 8000.0 kg.
+R38. Selected carrier scoring combines package priority and user tier through combined speed weight = package priority speed weight + user tier speed weight, while package cost weight comes directly from the delivery priority.
+R39. When multiple valid carrier-mode options have the same lowest score, the first one encountered during evaluation is selected.
+R40. Estimated transport price then adds 8.0 for express deliveries or subtracts 1.5 for economy deliveries.

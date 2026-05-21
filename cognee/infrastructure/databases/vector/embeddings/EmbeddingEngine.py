@@ -22,7 +22,7 @@ class EmbeddingEngine(Protocol):
             - list[list[float]]: A list of lists, where each sublist contains the encoded
               representation of the corresponding text input.
         """
-        raise NotImplementedError()
+        raise NotImplementedError("Subclasses must implement embed_text()")
 
     def get_vector_size(self) -> int:
         """
@@ -33,7 +33,7 @@ class EmbeddingEngine(Protocol):
 
             - int: An integer representing the number of dimensions in the embedding vector.
         """
-        raise NotImplementedError()
+        raise NotImplementedError("Subclasses must implement get_vector_size()")
 
     def get_batch_size(self) -> int:
         """
@@ -42,4 +42,4 @@ class EmbeddingEngine(Protocol):
         Returns:
 
         """
-        raise NotImplementedError()
+        raise NotImplementedError("Subclasses must implement get_batch_size()")

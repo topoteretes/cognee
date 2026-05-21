@@ -164,7 +164,7 @@ Configuration changes will affect how cognee processes and stores data.
                 "llm_api_key": ("set_llm_api_key", ""),
                 "llm_endpoint": ("set_llm_endpoint", ""),
                 # Database configuration
-                "graph_database_provider": ("set_graph_database_provider", "kuzu"),
+                "graph_database_provider": ("set_graph_database_provider", "ladybug"),
                 "vector_db_provider": ("set_vector_db_provider", "lancedb"),
                 "vector_db_url": ("set_vector_db_url", ""),
                 "vector_db_key": ("set_vector_db_key", ""),

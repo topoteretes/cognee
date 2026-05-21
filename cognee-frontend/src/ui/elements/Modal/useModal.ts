@@ -24,23 +24,33 @@ export default function useModal<ModalState extends object, ConfirmActionEvent =
   }, [closeModalInternal]);
 
   const confirmAction = useCallback((event?: ConfirmActionEvent) => {
-    if (confirmCallback) {
+    if (confirmCallback && !isActionLoading) {
       setLoading(true);
 
-      const maybePromise = confirmCallback(modalState as ModalState, event);
+      try {
+        const maybePromise = confirmCallback(modalState as ModalState, event);
 
-      if (maybePromise instanceof Promise) {
-        return maybePromise
-          .finally(closeModal)
-          .finally(() => setLoading(false));
-      } else {
-        closeModal();
-        return maybePromise; // Not a promise.
+        if (maybePromise instanceof Promise) {
+          return maybePromise
+            .finally(closeModal)
+            .finally(() => {
+              setTimeout(() => {
+                setLoading(false)
+              }, 100);
+            });
+        } else {
+          closeModal();
+          setLoading(false);
+          return maybePromise; // Not a promise.
+        }
+      } catch {
+        setLoading(false);
       }
     }
-  }, [closeModal, confirmCallback, modalState]);
+  }, [closeModal, confirmCallback, isActionLoading, modalState]);
 
   return {
+    modalState,
     isModalOpen,
     openModal,
     closeModal,

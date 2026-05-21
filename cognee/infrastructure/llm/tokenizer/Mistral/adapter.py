@@ -1,4 +1,4 @@
-from typing import List, Any
+from typing import Any
 
 from ..tokenizer_interface import TokenizerInterface
 
@@ -29,11 +29,13 @@ class MistralTokenizer(TokenizerInterface):
         self.max_completion_tokens = max_completion_tokens
 
         # Import here to make it an optional dependency
-        from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+        from mistral_common.tokens.tokenizers.mistral import (  # ty:ignore[unresolved-import]
+            MistralTokenizer,
+        )
 
         self.tokenizer = MistralTokenizer.from_model(model)
 
-    def extract_tokens(self, text: str) -> List[Any]:
+    def extract_tokens(self, text: str) -> list[Any]:
         """
         Extracts tokens from the given text using the tokenizer model.
 
@@ -47,9 +49,13 @@ class MistralTokenizer(TokenizerInterface):
 
             - List[Any]: A list of extracted tokens.
         """
-        from mistral_common.protocol.instruct.request import ChatCompletionRequest
-        from mistral_common.protocol.instruct.messages import UserMessage
-        from mistral_common.tokens.tokenizers.base import Tokenized
+        from mistral_common.protocol.instruct.messages import (  # ty:ignore[unresolved-import]
+            UserMessage,
+        )
+        from mistral_common.protocol.instruct.request import (  # ty:ignore[unresolved-import]
+            ChatCompletionRequest,
+        )
+        from mistral_common.tokens.tokenizers.base import Tokenized  # ty:ignore[unresolved-import]
 
         encoding: Tokenized = self.tokenizer.encode_chat_completion(
             ChatCompletionRequest(
@@ -75,7 +81,7 @@ class MistralTokenizer(TokenizerInterface):
         """
         return len(self.extract_tokens(text))
 
-    def decode_single_token(self, encoding: int):
+    def decode_single_token(self, token: int) -> str:
         """
         Attempt to decode a single token, although this functionality is not implemented and
         raises NotImplementedError.

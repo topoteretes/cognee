@@ -1,0 +1,9 @@
+# Daytona is now an SDK-based cloud sandbox platform.
+# See daytona_sandbox.py for the Python integration.
+#
+# For devcontainer-based dev environments (Codespaces, VS Code, etc.),
+# use .devcontainer/devcontainer.json at the repo root.
+#
+# CLI quick start:
+#   brew install daytonaio/cli/daytona
+#   daytona create

@@ -1,10 +1,11 @@
 from fastapi.responses import JSONResponse
-from fastapi import File, UploadFile, Depends, Form
-from typing import Optional
+from fastapi import File, UploadFile as UF, Depends, Form, status
+from typing import Optional, Annotated
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from typing import List
 from uuid import UUID
+from pydantic import WithJsonSchema
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
@@ -13,6 +14,11 @@ from cognee import __version__ as cognee_version
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
 )
+from cognee.api.DTO import ErrorResponse
+
+# NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
+#       Once issue is resolved on Swagger side it can be removed.
+UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 logger = get_logger()
 
@@ -20,7 +26,15 @@ logger = get_logger()
 def get_update_router() -> APIRouter:
     router = APIRouter()
 
-    @router.patch("", response_model=None)
+    @router.patch(
+        "",
+        response_model=None,
+        responses={
+            403: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
     async def update(
         data_id: UUID,
         dataset_id: UUID,
@@ -82,11 +96,30 @@ def get_update_router() -> APIRouter:
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in update_run.values()):
-                return JSONResponse(status_code=420, content=jsonable_encoder(update_run))
+                first_err = next(
+                    (v for v in update_run.values() if isinstance(v, PipelineRunErrored)), None
+                )
+                detail = getattr(first_err, "error", None) if first_err else None
+                if not detail:
+                    detail = str(first_err) if first_err else "Pipeline run errored"
+
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content=ErrorResponse(
+                        error="Pipeline run errored",
+                        detail=detail,
+                    ).model_dump(),
+                )
             return update_run
 
         except Exception as error:
-            logger.error(f"Error during deletion by data_id: {str(error)}")
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.exception("Update failed")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    detail=str(error),
+                ).model_dump(),
+            )
 
     return router

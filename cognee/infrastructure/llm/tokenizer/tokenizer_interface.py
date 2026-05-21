@@ -1,5 +1,5 @@
-from typing import List, Protocol, Any
 from abc import abstractmethod
+from typing import Any, Protocol
 
 
 class TokenizerInterface(Protocol):
@@ -9,7 +9,7 @@ class TokenizerInterface(Protocol):
     """
 
     @abstractmethod
-    def extract_tokens(self, text: str) -> List[Any]:
+    def extract_tokens(self, text: str) -> list[Any]:
         """
         Extract tokens from the given text.
 

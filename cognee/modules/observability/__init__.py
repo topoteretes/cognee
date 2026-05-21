@@ -27,6 +27,18 @@ from .tracing import (
     COGNEE_PIPELINE_NAME,
     COGNEE_RESULT_SUMMARY,
     COGNEE_RESULT_COUNT,
+    # V2 attributes
+    COGNEE_DATASET_NAME,
+    COGNEE_SESSION_ID,
+    COGNEE_SESSION_ENTRY_COUNT,
+    COGNEE_DATA_SIZE_BYTES,
+    COGNEE_DATA_ITEM_COUNT,
+    COGNEE_OPERATION_MODE,
+    COGNEE_RECALL_SCOPE,
+    COGNEE_RECALL_SOURCE,
+    COGNEE_FORGET_TARGET,
+    COGNEE_IMPROVE_STAGES,
+    COGNEE_GRAPH_EDGES_SYNCED,
 )
 
 
@@ -61,7 +73,8 @@ def new_span(name: str):
     """Context manager that creates an OTEL span if tracing is enabled, or yields None."""
     if is_tracing_enabled():
         tracer = get_tracer()
-        with tracer.start_as_current_span(name) as span:
-            yield span
-    else:
-        yield _NullSpan()
+        if tracer is not None:
+            with tracer.start_as_current_span(name) as span:
+                yield span
+                return
+    yield _NullSpan()

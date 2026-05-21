@@ -8,13 +8,11 @@ import socketserver
 import ssl
 from datetime import datetime, timezone
 from threading import Thread
-from typing import Any, Dict, List, Union
+from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import aiohttp
 
-from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -24,6 +22,9 @@ proxy_url = "https://test.prometh.ai"
 
 # Timeout for telemetry HTTP request; short to avoid blocking if proxy is unreachable
 TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5"))
+_TELEMETRY_API_KEY_TRACKING_SALT_ENV = "TELEMETRY_API_KEY_TRACKING_SALT"
+_DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT = b"cognee.telemetry.api-key-tracking.v1"
+_TELEMETRY_API_KEY_TRACKING_ITERATIONS = 100_000
 
 
 def create_secure_ssl_context() -> ssl.SSLContext:
@@ -37,31 +38,70 @@ def create_secure_ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
-def get_anonymous_id():
-    """Creates or reads a anonymous user id"""
-    tracking_id = os.getenv("TRACKING_ID", None)
+_PERSISTENT_ID_DIR = pathlib.Path.home() / ".cognee"
+_PERSISTENT_ID_FILE = _PERSISTENT_ID_DIR / ".persistent_id"
 
+# Original anonymous ID location (project root) — kept for backward compat
+_ANON_ID_DIR = pathlib.Path(__file__).parent.parent.parent.resolve()
+_ANON_ID_FILE = _ANON_ID_DIR / ".anon_id"
+
+
+def get_anonymous_id() -> str:
+    """Get or create the original anonymous ID (project-root based).
+
+    Stored in the project root as .anon_id. This is the original ID
+    that existing telemetry events reference. Kept unchanged for
+    backward compatibility with historical analytics data.
+
+    Can be overridden with TRACKING_ID env var.
+    """
+    tracking_id = os.getenv("TRACKING_ID", None)
     if tracking_id:
         return tracking_id
 
-    home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
-
     try:
-        if not os.path.isdir(home_dir):
-            os.makedirs(home_dir, exist_ok=True)
-        anonymous_id_file = os.path.join(home_dir, ".anon_id")
-        if not os.path.isfile(anonymous_id_file):
+        if not os.path.isdir(str(_ANON_ID_DIR)):
+            os.makedirs(str(_ANON_ID_DIR), exist_ok=True)
+        if not _ANON_ID_FILE.is_file():
             anonymous_id = str(uuid4())
-            with open(anonymous_id_file, "w", encoding="utf-8") as f:
-                f.write(anonymous_id)
+            _ANON_ID_FILE.write_text(anonymous_id, encoding="utf-8")
         else:
-            with open(anonymous_id_file, "r", encoding="utf-8") as f:
-                anonymous_id = f.read()
+            anonymous_id = _ANON_ID_FILE.read_text(encoding="utf-8").strip()
     except Exception as e:
-        # In case of read-only filesystem or other issues
         logger.warning("Could not create or read anonymous id file: %s", e)
         return "unknown-anonymous-id"
     return anonymous_id
+
+
+def get_persistent_id() -> str:
+    """Get or create a persistent machine-level ID.
+
+    Stored in ~/.cognee/.persistent_id — a user-level directory that
+    survives:
+    - cognee.forget(everything=True) (data/DB deletion)
+    - pip reinstalls / virtualenv recreation
+    - git re-clones
+    - Cognee User recreation (new user_id after delete)
+
+    This is the stable identity for correlating telemetry across
+    user_id changes. The anonymous_id (project-root) may change on
+    reinstall; the persistent_id does not.
+    """
+    try:
+        if _PERSISTENT_ID_FILE.is_file():
+            return _PERSISTENT_ID_FILE.read_text(encoding="utf-8").strip()
+
+        # Seed from anonymous_id if it exists (ties the two together)
+        persistent_id = get_anonymous_id()
+        if persistent_id == "unknown-anonymous-id":
+            persistent_id = str(uuid4())
+
+        _PERSISTENT_ID_DIR.mkdir(parents=True, exist_ok=True)
+        _PERSISTENT_ID_FILE.write_text(persistent_id, encoding="utf-8")
+        return persistent_id
+    except Exception as e:
+        logger.warning("Could not create or read persistent id file: %s", e)
+        return get_anonymous_id()
 
 
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
@@ -96,7 +136,59 @@ async def _send_telemetry_request(payload: dict) -> None:
         logger.debug("Telemetry request failed: %s", e)
 
 
-def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = {}):
+def _get_api_key_tracking_id() -> str:
+    """Return a stable pseudonymous analytics ID derived from the full LLM API key.
+
+    The raw key and visible key fragments are never included in telemetry. The
+    derived ID is stable across machines for the same key so analytics can group
+    agent/user activity, while avoiding the previous last-characters fingerprint.
+
+    TELEMETRY_API_KEY_TRACKING_SALT can be set by deployments that want their own
+    namespace. A default public namespace keeps tracking stable for local installs.
+    """
+    import hashlib
+
+    key = os.getenv("LLM_API_KEY", "")
+    if not key:
+        return ""
+
+    configured_salt = os.getenv(_TELEMETRY_API_KEY_TRACKING_SALT_ENV)
+    salt = (
+        configured_salt.encode("utf-8")
+        if configured_salt
+        else _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT
+    )
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        key.encode("utf-8"),
+        salt,
+        _TELEMETRY_API_KEY_TRACKING_ITERATIONS,
+        dklen=16,
+    )
+    return f"ak_{derived.hex()}"
+
+
+def _get_api_key_fingerprint() -> str:
+    """Backward-compatible alias for the API-key telemetry tracking ID."""
+    return _get_api_key_tracking_id()
+
+
+def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: dict | None = None):
+    """Send a product telemetry event.
+
+    Three identity layers are sent with every event:
+
+    - **anonymous_id**: Original project-root ID (.anon_id). May change
+      on reinstall. Kept for backward compatibility with historical data.
+    - **persistent_id**: Stable machine-level ID (~/.cognee/.persistent_id).
+      Survives data deletion, reinstalls, user recreation. Use this to
+      correlate a single machine across all user_id changes.
+    - **user_id**: Transient Cognee User UUID from the database. Changes
+      when the user is deleted and recreated via forget(everything=True).
+    - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
+      LLM API key when configured. Use this to group activity by key without
+      sending the key or visible key fragments.
+    """
     if additional_properties is None:
         additional_properties = {}
     if os.getenv("TELEMETRY_DISABLED"):
@@ -108,27 +200,32 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=["url"]
     )
+    anonymous_id = str(get_anonymous_id())
+    persistent_id = str(get_persistent_id())
+    api_key_tracking_id = _get_api_key_tracking_id()
     current_time = datetime.now(timezone.utc)
     payload = {
-        "anonymous_id": str(get_anonymous_id()),
+        "anonymous_id": anonymous_id,
         "event_name": event_name,
         "user_properties": {
             "user_id": str(user_id),
+            "persistent_id": persistent_id,
+            "api_key_tracking_id": api_key_tracking_id,
+            "api_key_hash": api_key_tracking_id,
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
             "user_id": str(user_id),
+            "anonymous_id": anonymous_id,
+            "persistent_id": persistent_id,
+            "api_key_tracking_id": api_key_tracking_id,
+            "api_key_hash": api_key_tracking_id,
             **additional_properties,
         },
     }
 
-    # Fire-and-forget async task — no threads, no blocking
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_send_telemetry_request(payload))
-    except RuntimeError:
-        # No running event loop (e.g. called from sync context) — skip silently
-        logger.debug("No running event loop for telemetry, skipping")
+    loop = asyncio.get_running_loop()
+    loop.create_task(_send_telemetry_request(payload))
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

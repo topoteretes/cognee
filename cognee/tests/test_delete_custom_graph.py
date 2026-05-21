@@ -71,22 +71,24 @@ async def main():
 
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
+    from cognee.modules.pipelines.models import PipelineContext
+
     await add_data_points(
         [person1],
-        context={
-            "user": user,
-            "dataset": dataset,
-            "data": data1,
-        },
+        ctx=PipelineContext(
+            user=user,
+            dataset=dataset,
+            data_item=data1,
+        ),
     )
 
     await add_data_points(
         [person2],
-        context={
-            "user": user,
-            "dataset": dataset,
-            "data": data2,
-        },
+        ctx=PipelineContext(
+            user=user,
+            dataset=dataset,
+            data_item=data2,
+        ),
     )
 
     from cognee.infrastructure.databases.graph import get_graph_engine
@@ -95,9 +97,10 @@ async def main():
 
     nodes, edges = await graph_engine.get_graph_data()
 
-    # Initial check
-    assert len(nodes) == 4 and len(edges) == 3, (
-        "Nodes and edges are not correctly added to the graph."
+    # Initial check — filter out EdgeType nodes created by index_graph_edges
+    data_nodes = [n for n in nodes if n[1].get("type") != "EdgeType"]
+    assert len(data_nodes) == 4 and len(edges) == 3, (
+        f"Expected 4 data nodes and 3 edges, got {len(data_nodes)} and {len(edges)}"
     )
 
     nodes_by_id = {node[0]: node[1] for node in nodes}
@@ -130,7 +133,10 @@ async def main():
     await datasets.delete_data(dataset.id, data1.id, user)
 
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) == 2 and len(edges) == 1, "Nodes and edges are not deleted properly."
+    remaining_data_nodes = [n for n in nodes if n[1].get("type") != "EdgeType"]
+    assert len(remaining_data_nodes) == 2 and len(edges) == 1, (
+        f"Expected 2 data nodes and 1 edge after delete, got {len(remaining_data_nodes)} and {len(edges)}"
+    )
 
     nodes_by_id = {node[0]: node[1] for node in nodes}
 

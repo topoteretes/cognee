@@ -1,14 +1,17 @@
 import os
 from functools import lru_cache
 
-import dlt
-from typing import Union
+try:
+    import dlt
+except ImportError:
+    dlt = None
+from typing import Optional, Any
 
 from cognee.infrastructure.databases.relational import get_relational_config
 
 
 @lru_cache
-def get_dlt_destination() -> Union[type[dlt.destinations.sqlalchemy], None]:
+def get_dlt_destination(dlt_db_name: str) -> Optional[Any]:
     """
     Handle the propagation of the cognee database configuration to the dlt library.
 
@@ -31,7 +34,7 @@ def get_dlt_destination() -> Union[type[dlt.destinations.sqlalchemy], None]:
         # The database is found  by combining the path location and the database name
         destination = dlt.destinations.sqlalchemy(
             credentials={
-                "database": os.path.join(relational_config.db_path, relational_config.db_name),
+                "database": os.path.join(relational_config.db_path, dlt_db_name),
                 "drivername": relational_config.db_provider,
             },
         )
@@ -43,7 +46,7 @@ def get_dlt_destination() -> Union[type[dlt.destinations.sqlalchemy], None]:
                 "port": relational_config.db_port,
                 "username": relational_config.db_username,
                 "password": relational_config.db_password,
-                "database": relational_config.db_name,
+                "database": dlt_db_name,
                 "drivername": "postgresql",
             },
         )

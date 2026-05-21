@@ -1,3 +1,6 @@
+from typing import Optional
+from uuid import UUID
+
 from fastapi_users.exceptions import UserAlreadyExists
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -13,6 +16,7 @@ async def create_user(
     is_active: bool = True,
     is_verified: bool = False,
     auto_login: bool = False,
+    parent_user_id: Optional[UUID] = None,
 ):
     try:
         relational_engine = get_relational_engine()
@@ -27,6 +31,7 @@ async def create_user(
                             is_superuser=is_superuser,
                             is_active=is_active,
                             is_verified=is_verified,
+                            parent_user_id=parent_user_id,
                         )
                     )
 
