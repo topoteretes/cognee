@@ -82,7 +82,6 @@ def get_remember_router() -> APIRouter:
         from cognee.api.v1.remember import remember as cognee_remember
 
         try:
-            print(content_type, type(content_type))
             result = await cognee_remember(
                 data,
                 dataset_name=datasetName,
