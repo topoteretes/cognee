@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from cognee.api.DTO import OutDTO
@@ -35,10 +34,9 @@ def get_agents_router() -> APIRouter:
     async def create_agent_endpoint(
         name: str,
         user: User = Depends(get_authenticated_user),
-        password: Optional[str] = None,
     ) -> AgentWithApiKeyDTO:
         try:
-            agent_user, api_key = await create_agent(name, user, password)
+            agent_user, api_key = await create_agent(name, user)
         except UserAlreadyExists:
             raise HTTPException(
                 status_code=409,
