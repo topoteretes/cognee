@@ -63,9 +63,17 @@ class GeneratedSubclassRelation(BaseModel):
     parent_type: str
 
 
+class GeneratedCanonicalTypeRelation(BaseModel):
+    source_type: str
+    relationship_type: str
+    target_type: str
+    description: str = ""
+
+
 class GeneratedLowLevelCanonicalOntology(BaseModel):
     types: list[GeneratedCanonicalType] = Field(default_factory=list)
     subclass_of: list[GeneratedSubclassRelation] = Field(default_factory=list)
+    type_relations: list[GeneratedCanonicalTypeRelation] = Field(default_factory=list)
 
 
 class LowLevelCanonicalStructure(DataPoint):
@@ -165,7 +173,9 @@ def _canonical_ontology_json(ontology: GeneratedLowLevelCanonicalOntology | None
 
 def _canonical_ontology_text(ontology: GeneratedLowLevelCanonicalOntology | None) -> str:
     ontology = _normalize_canonical_ontology(ontology) if ontology is not None else None
-    if ontology is None or (not ontology.types and not ontology.subclass_of):
+    if ontology is None or (
+        not ontology.types and not ontology.subclass_of and not ontology.type_relations
+    ):
         return ""
 
     type_descriptions = []
@@ -178,11 +188,17 @@ def _canonical_ontology_text(ontology: GeneratedLowLevelCanonicalOntology | None
         f"{relation.child_type} subclass_of {relation.parent_type}"
         for relation in ontology.subclass_of
     ]
+    type_relations = [
+        f"{relation.source_type} {relation.relationship_type} {relation.target_type}"
+        for relation in ontology.type_relations
+    ]
     sections = []
     if type_descriptions:
         sections.append("Canonical types:\n" + "\n".join(type_descriptions))
     if links:
         sections.append("Canonical hierarchy:\n" + "\n".join(links))
+    if type_relations:
+        sections.append("Canonical type relationships:\n" + "\n".join(type_relations))
     return "\n\n".join(sections)
 
 
@@ -256,11 +272,13 @@ def _format_canonical_ontology_context(
 Dataset canonical type ontology context:
 {formatted}
 
-Use this hierarchy as guidance only:
+Use this ontology context as guidance only:
 - Prefer concrete generated classes for extraction output.
 - Reuse canonical type names when they fit the source text.
 - Use subclass_of relationships to understand generalization, e.g. Candidate
   subclass_of Person or CarModel subclass_of Product.
+- Use other type relationships to understand valid semantic connections between
+  types, e.g. Person works_at Organization or Product has_metric Metric.
 - Do not collapse a concrete generated class into a parent class just because a
   parent exists.
 """
@@ -293,7 +311,31 @@ Extraction rules:
 
 
 _FORBIDDEN_LOW_LEVEL_CLASS_NAMES = {"Summary"}
-_FORBIDDEN_CANONICAL_TYPE_NAMES = {"AutoEntity"}
+_FORBIDDEN_CANONICAL_SUBCLASS_TYPES = {
+    "AutoEntity",
+    "DataPoint",
+    "Entity",
+    "Thing",
+    "Item",
+    "Object",
+    "Record",
+    "Model",
+    "ListModel",
+    "Schema",
+    "Structure",
+    "List",
+    "Field",
+    "Attribute",
+    "Value",
+    "Text",
+    "Content",
+    "Information",
+    "Data",
+    "Detail",
+    "Details",
+    "Section",
+}
+_FORBIDDEN_CANONICAL_TYPE_NAMES = set(_FORBIDDEN_CANONICAL_SUBCLASS_TYPES)
 _FORBIDDEN_CANONICAL_PARENT_TYPES = {
     "AutoEntity",
     "Document",
@@ -303,6 +345,15 @@ _FORBIDDEN_CANONICAL_PARENT_TYPES = {
     "Object",
     "Record",
     "DataPoint",
+}
+_FORBIDDEN_CANONICAL_RELATION_NAMES = {
+    "related_to",
+    "associated_with",
+    "connected_to",
+    "linked_to",
+    "has",
+    "contains",
+    "includes",
 }
 
 
@@ -471,14 +522,21 @@ def _normalize_canonical_ontology(
             )
 
     normalized_edges: set[tuple[str, str]] = set()
+    normalized_type_relations: dict[tuple[str, str, str], str] = {}
     for relation in ontology.subclass_of:
         child_type = _pascal_case(relation.child_type)
         parent_type = _pascal_case(relation.parent_type)
         if not child_type or not parent_type or child_type == parent_type:
             continue
+        if child_type in _FORBIDDEN_CANONICAL_SUBCLASS_TYPES:
+            logger.info(
+                "AUTO_LOW_LEVEL_CANONICAL rejected synthetic subclass_of child: %s -> %s",
+                child_type,
+                parent_type,
+            )
+            continue
         if (
-            child_type in _FORBIDDEN_CANONICAL_TYPE_NAMES
-            or parent_type in _FORBIDDEN_CANONICAL_TYPE_NAMES
+            parent_type in _FORBIDDEN_CANONICAL_TYPE_NAMES
             or parent_type in _FORBIDDEN_CANONICAL_PARENT_TYPES
         ):
             logger.info(
@@ -507,11 +565,58 @@ def _normalize_canonical_ontology(
                 ),
             )
 
+    for relation in ontology.type_relations:
+        source_type = _pascal_case(relation.source_type)
+        target_type = _pascal_case(relation.target_type)
+        relationship_type = _safe_field_name(relation.relationship_type)
+        if (
+            not source_type
+            or not target_type
+            or source_type == target_type
+            or not relationship_type
+            or relationship_type in _FORBIDDEN_CANONICAL_RELATION_NAMES
+        ):
+            continue
+        if (
+            source_type in _FORBIDDEN_CANONICAL_TYPE_NAMES
+            or target_type in _FORBIDDEN_CANONICAL_TYPE_NAMES
+        ):
+            logger.info(
+                "AUTO_LOW_LEVEL_CANONICAL rejected synthetic type relation: %s -[%s]-> %s",
+                source_type,
+                relationship_type,
+                target_type,
+            )
+            continue
+
+        relation_key = (source_type, relationship_type, target_type)
+        normalized_type_relations.setdefault(relation_key, relation.description.strip())
+        for type_name in (source_type, target_type):
+            types_by_name.setdefault(
+                type_name,
+                GeneratedCanonicalType(
+                    name=type_name,
+                    source_schema_id=source_schema_id,
+                    dataset_id=dataset_id,
+                ),
+            )
+
     return GeneratedLowLevelCanonicalOntology(
         types=sorted(types_by_name.values(), key=lambda type_spec: type_spec.name),
         subclass_of=[
             GeneratedSubclassRelation(child_type=child_type, parent_type=parent_type)
             for child_type, parent_type in sorted(normalized_edges)
+        ],
+        type_relations=[
+            GeneratedCanonicalTypeRelation(
+                source_type=source_type,
+                relationship_type=relationship_type,
+                target_type=target_type,
+                description=description,
+            )
+            for (source_type, relationship_type, target_type), description in sorted(
+                normalized_type_relations.items()
+            )
         ],
     )
 
@@ -550,6 +655,7 @@ def _merge_canonical_ontologies(
         )
         merged.types.extend(normalized.types)
         merged.subclass_of.extend(normalized.subclass_of)
+        merged.type_relations.extend(normalized.type_relations)
     return _normalize_canonical_ontology(
         merged,
         dataset_id=dataset_id,
@@ -672,6 +778,7 @@ Return JSON containing:
 - canonical types to reuse or add
 - aliases for near-duplicate names
 - subclass_of links between canonical type names
+- type_relations for real semantic relationships between canonical type names
 
 Rules:
 - Type names must be PascalCase singular nouns.
@@ -687,7 +794,25 @@ Rules:
 - Add subclass_of only when the child is genuinely a more specific kind of the
   parent. Examples: Candidate subclass_of Person, CarModel subclass_of Product,
   Metric subclass_of Measurement.
+- A subclass_of edge is valid only when every instance of the child type is also
+  an instance of the parent type. If that is not clearly true, omit the edge.
+- Do not create subclass_of edges from co-occurrence, containment, document
+  sections, ownership, membership, roles, or source schema shape.
+- Do not turn extraction artifacts into ontology types. Names like ListModel,
+  Schema, Structure, Field, Attribute, Value, Text, Content, Information, Data,
+  Detail, Section, or other container/helper names are not real semantic child
+  types and must not receive subclass_of links.
 - Do not create self-links, duplicate links, or cycles.
+- Use type_relations for real domain-level connections that are not subclass
+  relationships, such as Person works_at Organization, Organization produces
+  Product, Product has_metric Metric, Project uses Capability, or Role requires
+  Certification.
+- type_relations.relationship_type must be a specific snake_case verb phrase.
+  Avoid vague relation names like related_to, associated_with, connected_to,
+  linked_to, has, contains, or includes.
+- Only create a type relation when the schema itself supports a stable
+  relationship between categories. Do not infer type relations from accidental
+  co-occurrence or from list/container/helper classes.
 - Do not invent domain facts; infer only from the schema names and descriptions.
 """,
         response_model=GeneratedLowLevelCanonicalOntology,
@@ -826,8 +951,34 @@ _NoIndexEntityType = create_model(
 )
 
 
-def _build_entity_type_datapoint(class_name: str) -> EntityType:
-    return _NoIndexEntityType(
+def _safe_type_relation_field_name(value: str) -> str:
+    field_name = _safe_field_name(value)
+    if field_name in EntityType.model_fields or field_name == "subclass_of":
+        field_name = f"{field_name}_relation"
+    return field_name
+
+
+def _build_entity_type_model(type_relation_field_names: set[str]) -> type[EntityType]:
+    relation_fields = {
+        field_name: (Any, None)
+        for field_name in type_relation_field_names
+        if field_name and field_name not in EntityType.model_fields
+    }
+    return create_model(
+        "EntityType",
+        __base__=EntityType,
+        __module__=__name__,
+        subclass_of=(Any, None),
+        **relation_fields,
+        metadata=(dict, {"index_fields": []}),
+    )
+
+
+def _build_entity_type_datapoint(
+    class_name: str,
+    entity_type_model: type[EntityType] = _NoIndexEntityType,
+) -> EntityType:
+    return entity_type_model(
         id=uuid5(NAMESPACE_OID, f"EntityType:{class_name}"),
         name=class_name,
         description=class_name,
@@ -856,8 +1007,16 @@ def instantiate_low_level_datapoints(
     datapoints: list[DataPoint] = []
     type_names = {class_spec.class_name for class_spec in model.classes}
     type_names.update(type_spec.name for type_spec in ontology.types)
+    type_names.update(relation.source_type for relation in ontology.type_relations)
+    type_names.update(relation.target_type for relation in ontology.type_relations)
+    entity_type_model = _build_entity_type_model(
+        {
+            _safe_type_relation_field_name(relation.relationship_type)
+            for relation in ontology.type_relations
+        }
+    )
     type_datapoints = {
-        type_name: _build_entity_type_datapoint(type_name)
+        type_name: _build_entity_type_datapoint(type_name, entity_type_model)
         for type_name in type_names
     }
 
@@ -880,6 +1039,30 @@ def instantiate_low_level_datapoints(
                 DataPointEdge(relationship_type="subclass_of", edge_text="subclass_of"),
                 [parent_type],
             )
+
+    for relation in ontology.type_relations:
+        source_type = type_datapoints.get(relation.source_type)
+        target_type = type_datapoints.get(relation.target_type)
+        if source_type is None or target_type is None:
+            continue
+
+        relation_field_name = _safe_type_relation_field_name(relation.relationship_type)
+        edge_metadata = DataPointEdge(
+            relationship_type=relation.relationship_type,
+            edge_text=relation.description or relation.relationship_type,
+        )
+        existing = getattr(source_type, relation_field_name, None)
+        if (
+            isinstance(existing, tuple)
+            and len(existing) == 2
+            and isinstance(existing[0], DataPointEdge)
+            and existing[0].relationship_type == relation.relationship_type
+            and isinstance(existing[1], list)
+        ):
+            if all(target.id != target_type.id for target in existing[1]):
+                existing[1].append(target_type)
+        else:
+            setattr(source_type, relation_field_name, (edge_metadata, [target_type]))
 
     for class_spec in model.classes:
         container_name = _container_field_name(class_spec.class_name)
@@ -936,6 +1119,12 @@ def instantiate_low_level_datapoints(
             continue
         seen_hierarchy_root_ids.add(child_type.id)
         hierarchy_roots.append(child_type)
+    for relation in ontology.type_relations:
+        source_type = type_datapoints.get(relation.source_type)
+        if source_type is None or source_type.id in seen_hierarchy_root_ids:
+            continue
+        seen_hierarchy_root_ids.add(source_type.id)
+        hierarchy_roots.append(source_type)
 
     return [*datapoints, *hierarchy_roots]
 

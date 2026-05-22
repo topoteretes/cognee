@@ -6,6 +6,7 @@ import pytest
 from cognee.modules.graph.utils import get_graph_from_model
 from cognee.tasks.graph.auto_low_level_ontology import (
     AutoLowLevelCanonicalOntology,
+    GeneratedCanonicalTypeRelation,
     GeneratedCanonicalType,
     GeneratedLowLevelDataPointClass,
     GeneratedLowLevelDataPointModel,
@@ -223,6 +224,49 @@ def test_canonical_ontology_normalization_rejects_generic_sink_parents():
     ]
 
 
+def test_canonical_ontology_normalization_keeps_real_type_relations_only():
+    ontology = GeneratedLowLevelCanonicalOntology(
+        types=[
+            GeneratedCanonicalType(name="Person"),
+            GeneratedCanonicalType(name="Organization"),
+            GeneratedCanonicalType(name="ListModel"),
+            GeneratedCanonicalType(name="Project"),
+        ],
+        subclass_of=[
+            GeneratedSubclassRelation(child_type="ListModel", parent_type="Project")
+        ],
+        type_relations=[
+            GeneratedCanonicalTypeRelation(
+                source_type="Person",
+                relationship_type="works at",
+                target_type="Organization",
+            ),
+            GeneratedCanonicalTypeRelation(
+                source_type="ListModel",
+                relationship_type="describes",
+                target_type="Project",
+            ),
+            GeneratedCanonicalTypeRelation(
+                source_type="Person",
+                relationship_type="related_to",
+                target_type="Project",
+            ),
+        ],
+    )
+
+    normalized = _normalize_canonical_ontology(ontology)
+
+    assert "ListModel" not in [type_spec.name for type_spec in normalized.types]
+    assert normalized.subclass_of == []
+    assert normalized.type_relations == [
+        GeneratedCanonicalTypeRelation(
+            source_type="Person",
+            relationship_type="works_at",
+            target_type="Organization",
+        )
+    ]
+
+
 @pytest.mark.asyncio
 async def test_canonical_ontology_creates_subclass_edges_between_entity_types():
     generated_model = GeneratedLowLevelDataPointModel(
@@ -272,6 +316,58 @@ async def test_canonical_ontology_creates_subclass_edges_between_entity_types():
 
 
 @pytest.mark.asyncio
+async def test_canonical_ontology_creates_semantic_type_relation_edges():
+    generated_model = GeneratedLowLevelDataPointModel(
+        classes=[
+            GeneratedLowLevelDataPointClass(
+                class_name="Person",
+                scalar_fields=[
+                    GeneratedLowLevelField(name="name"),
+                    GeneratedLowLevelField(name="text"),
+                ],
+            )
+        ]
+    )
+    ontology = GeneratedLowLevelCanonicalOntology(
+        types=[
+            GeneratedCanonicalType(name="Person"),
+            GeneratedCanonicalType(name="Organization"),
+        ],
+        type_relations=[
+            GeneratedCanonicalTypeRelation(
+                source_type="Person",
+                relationship_type="works_at",
+                target_type="Organization",
+            )
+        ],
+    )
+    extraction_model, _ = build_low_level_extraction_model(generated_model)
+    extraction = extraction_model(
+        person_items=[
+            {
+                "local_id": "person_1",
+                "name": "Ada",
+                "text": "Ada works at Acme.",
+            }
+        ],
+        relationships=[],
+    )
+
+    datapoints = instantiate_low_level_datapoints(extraction, generated_model, ontology=ontology)
+    type_relation_root = next(
+        datapoint
+        for datapoint in datapoints
+        if datapoint.type == "EntityType" and datapoint.name == "Person"
+    )
+    nodes, edges = await get_graph_from_model(type_relation_root)
+
+    assert ("works_at", "works_at") in [
+        (edge[2], edge[3]["relationship_name"]) for edge in edges
+    ]
+    assert any(node.type == "EntityType" and node.name == "Organization" for node in nodes)
+
+
+@pytest.mark.asyncio
 async def test_low_level_generation_receives_canonical_ontology_context(monkeypatch):
     captured = {}
     generated_model = GeneratedLowLevelDataPointModel(
@@ -303,12 +399,20 @@ async def test_low_level_generation_receives_canonical_ontology_context(monkeypa
                 subclass_of=[
                     GeneratedSubclassRelation(child_type="Candidate", parent_type="Person")
                 ],
+                type_relations=[
+                    GeneratedCanonicalTypeRelation(
+                        source_type="Candidate",
+                        relationship_type="applies_to",
+                        target_type="Role",
+                    )
+                ],
             )
         ],
     )
 
     assert "Dataset canonical type ontology context" in captured["system_prompt"]
     assert "Candidate subclass_of Person" in captured["system_prompt"]
+    assert "Candidate applies_to Role" in captured["system_prompt"]
 
 
 @pytest.mark.asyncio
