@@ -267,6 +267,29 @@ def test_canonical_ontology_normalization_keeps_real_type_relations_only():
     ]
 
 
+def test_canonical_ontology_normalization_converts_is_a_type_relation_to_subclass():
+    ontology = GeneratedLowLevelCanonicalOntology(
+        types=[
+            GeneratedCanonicalType(name="MidsizeSedan"),
+            GeneratedCanonicalType(name="Vehicle"),
+        ],
+        type_relations=[
+            GeneratedCanonicalTypeRelation(
+                source_type="MidsizeSedan",
+                relationship_type="is_a",
+                target_type="Vehicle",
+            )
+        ],
+    )
+
+    normalized = _normalize_canonical_ontology(ontology)
+
+    assert normalized.subclass_of == [
+        GeneratedSubclassRelation(child_type="MidsizeSedan", parent_type="Vehicle")
+    ]
+    assert normalized.type_relations == []
+
+
 @pytest.mark.asyncio
 async def test_canonical_ontology_creates_subclass_edges_between_entity_types():
     generated_model = GeneratedLowLevelDataPointModel(
@@ -325,7 +348,7 @@ async def test_canonical_ontology_creates_semantic_type_relation_edges():
                     GeneratedLowLevelField(name="name"),
                     GeneratedLowLevelField(name="text"),
                 ],
-            )
+            ),
         ]
     )
     ontology = GeneratedLowLevelCanonicalOntology(

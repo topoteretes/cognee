@@ -355,6 +355,7 @@ _FORBIDDEN_CANONICAL_RELATION_NAMES = {
     "contains",
     "includes",
 }
+_SUBCLASS_RELATION_ALIASES = {"is_a", "isa", "is_kind_of", "kind_of", "type_of"}
 
 
 def _normalize_low_level_model(
@@ -486,6 +487,46 @@ def _normalize_canonical_ontology(
 ) -> GeneratedLowLevelCanonicalOntology:
     types_by_name: dict[str, GeneratedCanonicalType] = {}
 
+    def add_subclass_edge(child_type: str, parent_type: str) -> None:
+        if not child_type or not parent_type or child_type == parent_type:
+            return
+        if child_type in _FORBIDDEN_CANONICAL_SUBCLASS_TYPES:
+            logger.info(
+                "AUTO_LOW_LEVEL_CANONICAL rejected synthetic subclass_of child: %s -> %s",
+                child_type,
+                parent_type,
+            )
+            return
+        if (
+            parent_type in _FORBIDDEN_CANONICAL_TYPE_NAMES
+            or parent_type in _FORBIDDEN_CANONICAL_PARENT_TYPES
+        ):
+            logger.info(
+                "AUTO_LOW_LEVEL_CANONICAL rejected generic subclass_of edge: %s -> %s",
+                child_type,
+                parent_type,
+            )
+            return
+        if (child_type, parent_type) in normalized_edges:
+            return
+        if _would_create_cycle(normalized_edges, child_type, parent_type):
+            logger.info(
+                "AUTO_LOW_LEVEL_CANONICAL rejected cyclic subclass_of edge: %s -> %s",
+                child_type,
+                parent_type,
+            )
+            return
+        normalized_edges.add((child_type, parent_type))
+        for type_name in (child_type, parent_type):
+            types_by_name.setdefault(
+                type_name,
+                GeneratedCanonicalType(
+                    name=type_name,
+                    source_schema_id=source_schema_id,
+                    dataset_id=dataset_id,
+                ),
+            )
+
     for type_spec in ontology.types:
         type_name = _pascal_case(type_spec.name)
         if not type_name:
@@ -524,51 +565,15 @@ def _normalize_canonical_ontology(
     normalized_edges: set[tuple[str, str]] = set()
     normalized_type_relations: dict[tuple[str, str, str], str] = {}
     for relation in ontology.subclass_of:
-        child_type = _pascal_case(relation.child_type)
-        parent_type = _pascal_case(relation.parent_type)
-        if not child_type or not parent_type or child_type == parent_type:
-            continue
-        if child_type in _FORBIDDEN_CANONICAL_SUBCLASS_TYPES:
-            logger.info(
-                "AUTO_LOW_LEVEL_CANONICAL rejected synthetic subclass_of child: %s -> %s",
-                child_type,
-                parent_type,
-            )
-            continue
-        if (
-            parent_type in _FORBIDDEN_CANONICAL_TYPE_NAMES
-            or parent_type in _FORBIDDEN_CANONICAL_PARENT_TYPES
-        ):
-            logger.info(
-                "AUTO_LOW_LEVEL_CANONICAL rejected generic subclass_of edge: %s -> %s",
-                child_type,
-                parent_type,
-            )
-            continue
-        if (child_type, parent_type) in normalized_edges:
-            continue
-        if _would_create_cycle(normalized_edges, child_type, parent_type):
-            logger.info(
-                "AUTO_LOW_LEVEL_CANONICAL rejected cyclic subclass_of edge: %s -> %s",
-                child_type,
-                parent_type,
-            )
-            continue
-        normalized_edges.add((child_type, parent_type))
-        for type_name in (child_type, parent_type):
-            types_by_name.setdefault(
-                type_name,
-                GeneratedCanonicalType(
-                    name=type_name,
-                    source_schema_id=source_schema_id,
-                    dataset_id=dataset_id,
-                ),
-            )
+        add_subclass_edge(_pascal_case(relation.child_type), _pascal_case(relation.parent_type))
 
     for relation in ontology.type_relations:
         source_type = _pascal_case(relation.source_type)
         target_type = _pascal_case(relation.target_type)
         relationship_type = _safe_field_name(relation.relationship_type)
+        if relationship_type in _SUBCLASS_RELATION_ALIASES:
+            add_subclass_edge(source_type, target_type)
+            continue
         if (
             not source_type
             or not target_type
@@ -778,7 +783,8 @@ Return JSON containing:
 - canonical types to reuse or add
 - aliases for near-duplicate names
 - subclass_of links between canonical type names
-- type_relations for real semantic relationships between canonical type names
+- type_relations for general ontology-level semantic relationships between
+  canonical type names
 
 Rules:
 - Type names must be PascalCase singular nouns.
@@ -794,6 +800,9 @@ Rules:
 - Add subclass_of only when the child is genuinely a more specific kind of the
   parent. Examples: Candidate subclass_of Person, CarModel subclass_of Product,
   Metric subclass_of Measurement.
+- When one canonical EntityType is a more specific kind of another EntityType,
+  always put that relationship in subclass_of. Do not emit it as a type_relation
+  named is_a, isa, kind_of, or type_of.
 - A subclass_of edge is valid only when every instance of the child type is also
   an instance of the parent type. If that is not clearly true, omit the edge.
 - Do not create subclass_of edges from co-occurrence, containment, document
@@ -803,10 +812,13 @@ Rules:
   Detail, Section, or other container/helper names are not real semantic child
   types and must not receive subclass_of links.
 - Do not create self-links, duplicate links, or cycles.
-- Use type_relations for real domain-level connections that are not subclass
-  relationships, such as Person works_at Organization, Organization produces
-  Product, Product has_metric Metric, Project uses Capability, or Role requires
-  Certification.
+- Use type_relations for general reusable ontology-level connections between
+  entity types that are not subclass relationships, such as Person works_at
+  Organization, Organization produces Product, Product has_metric Metric,
+  Project uses Capability, or Role requires Certification.
+- type_relations connect type categories, not individual entity instances. They
+  should describe a relationship that can generally hold between those two
+  canonical types across the dataset ontology.
 - type_relations.relationship_type must be a specific snake_case verb phrase.
   Avoid vague relation names like related_to, associated_with, connected_to,
   linked_to, has, contains, or includes.
@@ -991,12 +1003,11 @@ def instantiate_low_level_datapoints(
     ontology: GeneratedLowLevelCanonicalOntology | None = None,
 ) -> list[DataPoint]:
     model = _normalize_low_level_model(model)
-    ontology = _merge_canonical_ontologies(
-        [
-            _ontology_from_generated_model(model),
-            ontology or GeneratedLowLevelCanonicalOntology(),
-        ]
-    )
+    ontology_parts = [
+        _ontology_from_generated_model(model),
+        ontology or GeneratedLowLevelCanonicalOntology(),
+    ]
+    ontology = _merge_canonical_ontologies(ontology_parts)
     datapoint_models = build_low_level_datapoint_models(model)
     allowed_relations = {
         (class_spec.class_name, relation.name): relation.target_class
