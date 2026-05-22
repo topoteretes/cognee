@@ -1,7 +1,7 @@
 """change node label and type to text
 
 Revision ID: 760ef4f08ef0
-Revises: 6ee94db7381f
+Revises: 24f5d4f64d0d
 Create Date: 2026-05-21 15:00:00.000000
 
 """
