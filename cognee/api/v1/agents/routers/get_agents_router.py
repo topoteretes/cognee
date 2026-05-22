@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 
 from cognee.api.DTO import OutDTO
@@ -13,6 +14,7 @@ from fastapi_users.exceptions import UserAlreadyExists
 class AgentDTO(OutDTO):
     agent_id: UUID
     agent_email: str
+    api_key_label: Optional[str] = None
 
 
 class AgentWithApiKeyDTO(OutDTO):
@@ -65,8 +67,9 @@ def get_agents_router() -> APIRouter:
         agents = await list_agents(user.id)
         return [
             AgentDTO(
-                agent_id=agent.id,
-                agent_email=_display_email(agent.email),
+                agent_id=agent.user.id,
+                agent_email=_display_email(agent.user.email),
+                api_key_label=agent.api_key_label,
             )
             for agent in agents
         ]

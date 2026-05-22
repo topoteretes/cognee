@@ -97,8 +97,13 @@ class TestAgentEndpoints:
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert resp.status_code == 200
-        agent_ids = {a["agentId"] for a in resp.json()}
+        agents = resp.json()
+        agent_ids = {a["agentId"] for a in agents}
         assert agent["agentId"] in agent_ids
+
+        matched = next(a for a in agents if a["agentId"] == agent["agentId"])
+        assert matched["apiKeyLabel"] is not None
+        assert matched["apiKeyLabel"].endswith("****")
 
     def test_duplicate_agent_returns_409(self, client, owner_token, agent):
         resp = client.post(
