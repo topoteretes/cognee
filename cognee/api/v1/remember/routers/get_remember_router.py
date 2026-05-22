@@ -39,6 +39,7 @@ def get_remember_router() -> APIRouter:
         chunks_per_batch: Optional[int] = Form(default=36),
         ontology_key: Optional[List[str]] = Form(
             default=None,
+            examples=[[]],
             description="Reference to one or more previously uploaded ontologies",
         ),
         content_type: Optional[str] = Form(default=None, examples=[""]),
@@ -89,7 +90,7 @@ def get_remember_router() -> APIRouter:
 
         try:
             config_to_use = None
-            if ontology_key:
+            if ontology_key and ontology_key != [""]:
                 ontology_service = OntologyService()
                 ontology_contents = ontology_service.get_ontology_contents(ontology_key, user)
 
