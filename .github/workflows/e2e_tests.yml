@@ -1437,6 +1437,29 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/api/test_backend_auth.py
 
+  run_agent_endpoint_tests:
+    name: Agent Endpoint Tests
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Agent Endpoint Tests
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/api/test_agent_endpoints.py -v
+
   backwards-compatibility-sqlite:
     name: Backwards compatibility — SQLite + LanceDB + Kuzu
     runs-on: ubuntu-22.04

@@ -1,7 +1,8 @@
-from cognee.modules.users.methods.create_user import create_user
-from cognee.modules.users.api_key.create_api_key import create_api_key
-from cognee.modules.users.models.User import User
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.api_key.create_api_key import create_api_key
+from cognee.modules.users.methods import create_user
+from cognee.modules.users.models.User import User
+from sqlalchemy import update
 
 
 async def create_agent(name: str, parent_user: User) -> tuple[User, str]:
@@ -14,19 +15,14 @@ async def create_agent(name: str, parent_user: User) -> tuple[User, str]:
         parent_user_id=parent_user.id,
     )
 
-    # Lock the password — "!" is not a valid hash so pwdlib raises
-    # UnknownHashError on verify, which UserManager.authenticate catches.
-    relational_engine = get_relational_engine()
-    async with relational_engine.get_async_session() as session:
-        agent_user.hashed_password = "!"
-        session.add(agent_user)
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        values = {"hashed_password": "!"}
+        if parent_user.tenant_id is not None:
+            values["tenant_id"] = parent_user.tenant_id
+        await session.execute(update(User).where(User.id == agent_user.id).values(**values))
         await session.commit()
 
-    if parent_user.tenant_id is not None:
-        async with relational_engine.get_async_session() as session:
-            agent_user.tenant_id = parent_user.tenant_id
-            session.add(agent_user)
-            await session.commit()
-
     agent_api_key = await create_api_key(agent_user, sanitized_name)
+
     return agent_user, agent_api_key.api_key
