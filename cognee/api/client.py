@@ -46,6 +46,7 @@ from cognee.api.v1.users.routers import (
     get_user_id_by_email_router,
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
+from cognee.api.v1.agents.routers import get_agents_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
@@ -298,6 +299,8 @@ app.include_router(
     prefix="/health",
     tags=["health"],
 )
+
+app.include_router(get_agents_router(), prefix="/api/v1/agents", tags=["agents"])
 
 # Activity / observability
 app.include_router(
