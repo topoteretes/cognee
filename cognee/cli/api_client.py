@@ -342,7 +342,8 @@ class CogneeApiClient:
 
     def forget(
         self,
-        dataset: Optional[str] = None,
+        dataset_name: Optional[str] = None,
+        dataset_id: Optional[str] = None,
         data_id: Optional[str] = None,
         everything: bool = False,
         memory_only: bool = False,
@@ -351,8 +352,10 @@ class CogneeApiClient:
             "everything": everything,
             "memory_only": memory_only,
         }
-        if dataset is not None:
-            payload["dataset"] = str(dataset)
+        if dataset_name is not None:
+            payload["dataset_name"] = str(dataset_name)
+        if dataset_id is not None:
+            payload["dataset_id"] = str(dataset_id)
         if data_id is not None:
             payload["data_id"] = str(data_id)
         r = self._get_client().post(self._url("/api/v1/forget"), json=payload)

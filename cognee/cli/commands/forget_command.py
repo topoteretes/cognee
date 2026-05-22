@@ -15,18 +15,22 @@ class ForgetCommand(SupportsCliCommand):
     description = """
 Remove data from the knowledge graph.
 
-Use --everything to delete all user data, --dataset to delete a dataset,
-or --dataset with --data-id to delete a single item.
+Use --everything to delete all user data, --dataset-name/--dataset-id
+to delete a dataset, or dataset + --data-id to delete a single item.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
-            "--dataset",
-            help="Dataset name or UUID to delete",
+            "--dataset-name",
+            help="Dataset name to delete",
+        )
+        parser.add_argument(
+            "--dataset-id",
+            help="Dataset UUID to delete",
         )
         parser.add_argument(
             "--data-id",
-            help="UUID of a specific data item to delete (requires --dataset)",
+            help="UUID of a specific data item to delete (requires dataset-name or dataset-id)",
         )
         parser.add_argument(
             "--everything",
@@ -40,24 +44,25 @@ or --dataset with --data-id to delete a single item.
             import cognee
 
             data_id = UUID(args.data_id) if args.data_id else None
+            dataset_id = UUID(args.dataset_id) if args.dataset_id else None
+            dataset_name = args.dataset_name
 
-            # Try parsing dataset as UUID, fall back to string name
-            dataset = args.dataset
-            if dataset:
-                try:
-                    dataset = UUID(dataset)
-                except ValueError:
-                    pass
+            if dataset_name and dataset_id:
+                fmt.error("Provide either --dataset-name or --dataset-id, not both.")
+                return
 
-            if not args.everything and not dataset and not data_id:
-                fmt.error("Specify --dataset, --data-id with --dataset, or --everything.")
+            if not args.everything and not dataset_name and not dataset_id and not data_id:
+                fmt.error(
+                    "Specify --dataset-name or --dataset-id, --data-id with dataset, or --everything."
+                )
                 return
 
             async def run_forget():
                 try:
                     return await cognee.forget(
                         data_id=data_id,
-                        dataset=dataset,
+                        dataset_name=dataset_name,
+                        dataset_id=dataset_id,
                         everything=args.everything,
                     )
                 except Exception as e:

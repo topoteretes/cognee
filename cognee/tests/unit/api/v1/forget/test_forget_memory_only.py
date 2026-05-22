@@ -308,7 +308,7 @@ async def test_forget_memory_only_without_dataset_raises(monkeypatch):
             forget_module, "set_database_global_context_variables", return_value=_NoOpAsyncContext()
         ),
     ):
-        with pytest.raises(ValueError, match="memory_only requires dataset"):
+        with pytest.raises(ValueError, match="memory_only requires dataset_name or dataset_id"):
             await forget_module.forget(memory_only=True)
 
 
@@ -333,7 +333,7 @@ async def test_forget_routes_to_dataset_memory(monkeypatch):
             forget_module, "set_database_global_context_variables", return_value=_NoOpAsyncContext()
         ),
     ):
-        result = await forget_module.forget(dataset="my-dataset", memory_only=True)
+        result = await forget_module.forget(dataset_name="my-dataset", memory_only=True)
 
     assert result["status"] == "success"
     mock_forget_dataset_memory.assert_awaited_once_with("my-dataset", USER)
@@ -361,7 +361,7 @@ async def test_forget_routes_to_data_memory(monkeypatch):
         ),
     ):
         result = await forget_module.forget(
-            dataset="my-dataset", data_id=DATA_ID_A, memory_only=True
+            dataset_name="my-dataset", data_id=DATA_ID_A, memory_only=True
         )
 
     assert result["status"] == "success"
@@ -402,7 +402,7 @@ async def test_forget_telemetry_target_labels(monkeypatch):
             forget_module, "set_database_global_context_variables", return_value=_NoOpAsyncContext()
         ),
     ):
-        await forget_module.forget(dataset="ds", memory_only=True)
-        await forget_module.forget(dataset="ds", data_id=DATA_ID_A, memory_only=True)
+        await forget_module.forget(dataset_name="ds", memory_only=True)
+        await forget_module.forget(dataset_name="ds", data_id=DATA_ID_A, memory_only=True)
 
     assert captured_targets == ["dataset_memory_only", "data_item_memory_only"]
