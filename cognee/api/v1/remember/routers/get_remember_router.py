@@ -41,7 +41,7 @@ def get_remember_router() -> APIRouter:
             default=None,
             description="Reference to one or more previously uploaded ontologies",
         ),
-        content_type: Optional[str] = Form(default=None),
+        content_type: Optional[str] = Form(default=None, examples=[""]),
         user: User = Depends(get_authenticated_user),
     ):
         """
