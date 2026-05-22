@@ -10,7 +10,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.memify.global_context_index.constants import SUMMARIZED_IN
 from cognee.tasks.memify.global_context_index.load import (
-    extract_context_index_input_from_graph,
+    extract_context_index_input,
 )
 from cognee.tasks.memify.global_context_index.models import (
     GlobalContextIndexInput,
@@ -28,6 +28,7 @@ from cognee.tasks.summarization.models import GlobalContextSummary
 update_global_context_index_module = import_module(
     "cognee.tasks.memify.global_context_index.update"
 )
+load_module = import_module("cognee.tasks.memify.global_context_index.load")
 summary_generation_module = import_module("cognee.tasks.memify.global_context_index.summarize")
 
 
@@ -106,7 +107,6 @@ def test_ensure_global_context_storage_context_adds_stable_data_item_id():
 def test_global_context_index_package_exports_pipeline_tasks():
     package_module = import_module("cognee.tasks.memify.global_context_index")
     update_module = import_module("cognee.tasks.memify.global_context_index.update")
-    load_module = import_module("cognee.tasks.memify.global_context_index.load")
 
     assert package_module.update_global_context_index is update_module.update_global_context_index
     assert (
@@ -116,6 +116,65 @@ def test_global_context_index_package_exports_pipeline_tasks():
     assert GlobalContextIndexInput is GlobalContextIndexUpdateData
 
 
+@pytest.mark.asyncio
+async def test_extract_global_context_index_input_loads_graph_only_for_missing_data(monkeypatch):
+    graph = CogneeGraph()
+    child = _text_summary_graph_node()
+    graph.add_node(child)
+    get_fragment_mock = AsyncMock(return_value=graph)
+    monkeypatch.setattr(load_module, "get_context_index_memory_fragment", get_fragment_mock)
+
+    result = await load_module.extract_global_context_index_input(None)
+
+    assert [summary.id for summary in result.text_summaries] == [child.id]
+    get_fragment_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_extract_global_context_index_input_loads_graph_for_empty_dict_sentinel(
+    monkeypatch,
+):
+    graph = CogneeGraph()
+    child = _text_summary_graph_node()
+    graph.add_node(child)
+    get_fragment_mock = AsyncMock(return_value=graph)
+    monkeypatch.setattr(load_module, "get_context_index_memory_fragment", get_fragment_mock)
+
+    result = await load_module.extract_global_context_index_input({})
+
+    assert [summary.id for summary in result.text_summaries] == [child.id]
+    get_fragment_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_extract_global_context_index_input_loads_graph_for_pipeline_sentinel(
+    monkeypatch,
+):
+    graph = CogneeGraph()
+    child = _text_summary_graph_node()
+    graph.add_node(child)
+    get_fragment_mock = AsyncMock(return_value=graph)
+    monkeypatch.setattr(load_module, "get_context_index_memory_fragment", get_fragment_mock)
+
+    result = await load_module.extract_global_context_index_input([{}])
+
+    assert [summary.id for summary in result.text_summaries] == [child.id]
+    get_fragment_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_extract_global_context_index_input_rejects_direct_input_data(monkeypatch):
+    get_fragment_mock = AsyncMock(side_effect=AssertionError("should not load graph"))
+    monkeypatch.setattr(load_module, "get_context_index_memory_fragment", get_fragment_mock)
+
+    with pytest.raises(TypeError, match="expected None"):
+        await load_module.extract_global_context_index_input(
+            GlobalContextIndexInput(text_summaries=[], buckets=[])
+        )
+
+    get_fragment_mock.assert_not_awaited()
+
+
 def _graph_input(
     entities_by_summary_id: dict[str, set[str]],
     idf_weights: dict[str, float],
@@ -123,7 +182,7 @@ def _graph_input(
     return entities_by_summary_id, idf_weights
 
 
-def test_extract_context_index_input_from_graph_uses_summary_edges_for_assignment():
+def test_extract_context_index_input_uses_summary_edges_for_assignment():
     dataset_id = str(uuid4())
     child = _text_summary_graph_node()
     bucket = _global_context_summary_graph_node(dataset_id)
@@ -132,7 +191,7 @@ def test_extract_context_index_input_from_graph_uses_summary_edges_for_assignmen
     graph.add_node(bucket)
     _add_summarized_in_edge(graph, child, bucket)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     assert [summary.id for summary in summary_input.text_summaries] == [child.id]
     assert len(summary_input.buckets) == 1
@@ -141,7 +200,7 @@ def test_extract_context_index_input_from_graph_uses_summary_edges_for_assignmen
     assert summary_input.text_summaries[0].global_context_bucket_id == bucket.id
 
 
-def test_extract_context_index_input_from_graph_ignores_text_summary_bucket_marker():
+def test_extract_context_index_input_ignores_text_summary_bucket_marker():
     dataset_id = str(uuid4())
     bucket_id = str(uuid4())
     child = _text_summary_graph_node(bucket_id=bucket_id)
@@ -150,13 +209,13 @@ def test_extract_context_index_input_from_graph_ignores_text_summary_bucket_mark
     graph.add_node(child)
     graph.add_node(bucket)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     assert summary_input.text_summaries[0].global_context_bucket_id is None
     assert summary_input.buckets[0].child_ids == set()
 
 
-def test_extract_context_index_input_from_graph_ignores_text_summary_to_root_edge():
+def test_extract_context_index_input_ignores_text_summary_to_root_edge():
     dataset_id = str(uuid4())
     child = _text_summary_graph_node()
     root = _global_context_summary_graph_node(dataset_id, is_root=True)
@@ -165,14 +224,14 @@ def test_extract_context_index_input_from_graph_ignores_text_summary_to_root_edg
     graph.add_node(root)
     _add_summarized_in_edge(graph, child, root)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     assert summary_input.root is not None
     assert summary_input.root.child_ids == set()
     assert summary_input.text_summaries[0].global_context_bucket_id is None
 
 
-def test_extract_context_index_input_from_graph_ignores_stale_edge_to_missing_parent():
+def test_extract_context_index_input_ignores_stale_edge_to_missing_parent():
     dataset_id = str(uuid4())
     child = _text_summary_graph_node()
     missing_parent = _global_context_summary_graph_node(dataset_id)
@@ -180,12 +239,12 @@ def test_extract_context_index_input_from_graph_ignores_stale_edge_to_missing_pa
     graph.add_node(child)
     _add_summarized_in_edge(graph, child, missing_parent)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     assert summary_input.text_summaries[0].global_context_bucket_id is None
 
 
-def test_extract_context_index_input_from_graph_ignores_bucket_marker_without_edge():
+def test_extract_context_index_input_ignores_bucket_marker_without_edge():
     dataset_id = str(uuid4())
     parent = _global_context_summary_graph_node(dataset_id, level=1)
     child = _global_context_summary_graph_node(dataset_id, level=0, bucket_id=parent.id)
@@ -193,14 +252,14 @@ def test_extract_context_index_input_from_graph_ignores_bucket_marker_without_ed
     graph.add_node(parent)
     graph.add_node(child)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     buckets_by_id = {bucket.id: bucket for bucket in summary_input.buckets}
     assert buckets_by_id[child.id].global_context_bucket_id is None
     assert buckets_by_id[parent.id].child_ids == set()
 
 
-def test_extract_context_index_input_from_graph_uses_adjacent_bucket_edge():
+def test_extract_context_index_input_uses_adjacent_bucket_edge():
     dataset_id = str(uuid4())
     child = _global_context_summary_graph_node(dataset_id, level=0)
     parent = _global_context_summary_graph_node(dataset_id, level=1)
@@ -209,14 +268,14 @@ def test_extract_context_index_input_from_graph_uses_adjacent_bucket_edge():
     graph.add_node(parent)
     _add_summarized_in_edge(graph, child, parent)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     buckets_by_id = {bucket.id: bucket for bucket in summary_input.buckets}
     assert buckets_by_id[child.id].global_context_bucket_id == parent.id
     assert buckets_by_id[parent.id].child_ids == {child.id}
 
 
-def test_extract_context_index_input_from_graph_uses_bucket_to_root_edge():
+def test_extract_context_index_input_uses_bucket_to_root_edge():
     dataset_id = str(uuid4())
     child = _global_context_summary_graph_node(dataset_id, level=0)
     root = _global_context_summary_graph_node(dataset_id, is_root=True)
@@ -225,14 +284,14 @@ def test_extract_context_index_input_from_graph_uses_bucket_to_root_edge():
     graph.add_node(root)
     _add_summarized_in_edge(graph, child, root)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     assert summary_input.root is not None
     assert summary_input.buckets[0].global_context_bucket_id == root.id
     assert summary_input.root.child_ids == {child.id}
 
 
-def test_extract_context_index_input_from_graph_ignores_non_adjacent_bucket_edge():
+def test_extract_context_index_input_ignores_non_adjacent_bucket_edge():
     dataset_id = str(uuid4())
     child = _global_context_summary_graph_node(dataset_id, level=0)
     parent = _global_context_summary_graph_node(dataset_id, level=2)
@@ -241,14 +300,14 @@ def test_extract_context_index_input_from_graph_ignores_non_adjacent_bucket_edge
     graph.add_node(parent)
     _add_summarized_in_edge(graph, child, parent)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     buckets_by_id = {bucket.id: bucket for bucket in summary_input.buckets}
     assert buckets_by_id[child.id].global_context_bucket_id is None
     assert buckets_by_id[parent.id].child_ids == set()
 
 
-def test_extract_context_index_input_from_graph_filters_buckets_by_dataset_id():
+def test_extract_context_index_input_filters_buckets_by_dataset_id():
     dataset_id = str(uuid4())
     dataset_name = "dataset-name"
     child = Node(str(uuid4()), {"type": "TextSummary", "text": "Chunk summary"})
@@ -277,14 +336,14 @@ def test_extract_context_index_input_from_graph_filters_buckets_by_dataset_id():
     graph.add_node(matching_bucket)
     graph.add_node(other_bucket)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
-    summary_input_from_name = extract_context_index_input_from_graph(graph, dataset_name)
+    summary_input = extract_context_index_input(graph, dataset_id)
+    summary_input_from_name = extract_context_index_input(graph, dataset_name)
 
     assert [bucket.id for bucket in summary_input.buckets] == [matching_bucket.id]
     assert summary_input_from_name.buckets == []
 
 
-def test_extract_context_index_input_from_graph_rehydrates_graph_bucket_entity_state():
+def test_extract_context_index_input_rehydrates_graph_bucket_entity_state():
     dataset_id = str(uuid4())
     missing_state = _global_context_summary_graph_node(dataset_id, node_id="missing-state")
     null_state = _global_context_summary_graph_node(
@@ -316,7 +375,7 @@ def test_extract_context_index_input_from_graph_rehydrates_graph_bucket_entity_s
     for node in [missing_state, null_state, empty_state, populated_state, upper_level]:
         graph.add_node(node)
 
-    summary_input = extract_context_index_input_from_graph(graph, dataset_id)
+    summary_input = extract_context_index_input(graph, dataset_id)
 
     buckets_by_id = {bucket.id: bucket for bucket in summary_input.buckets}
     assert buckets_by_id["missing-state"].graph_bucket_entity_ids is None
@@ -423,7 +482,7 @@ async def test_update_global_context_index_rejects_invalid_config_before_io(
     get_unified_engine_mock = AsyncMock()
     monkeypatch.setattr(
         update_global_context_index_module,
-        "load_context_index_input",
+        "load_context_index_input_from_graph",
         load_summary_input_mock,
     )
     monkeypatch.setattr(
@@ -448,7 +507,7 @@ async def test_update_global_context_index_rejects_graph_without_dataset_before_
     get_unified_engine_mock = AsyncMock()
     monkeypatch.setattr(
         update_global_context_index_module,
-        "load_context_index_input",
+        "load_context_index_input_from_graph",
         load_summary_input_mock,
     )
     monkeypatch.setattr(

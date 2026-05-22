@@ -21,7 +21,7 @@ from .bucketing.graph.placement import (
 )
 from .build import build_context_index, group_buckets_by_level
 from .bucketing_strategy import BucketingStrategyName
-from .load import dataset_id_from_context, load_context_index_input
+from .load import dataset_id_from_context, load_context_index_input_from_graph
 from .models import GlobalContextIndexUpdateData, SummaryNode
 from .persist import delete_context_index_nodes, persist_context_index_edges
 
@@ -158,7 +158,14 @@ async def load_update_scope(
     dataset_id = dataset_id_from_context(ctx)
     validate_graph_dataset_context(bucketing_strategy, dataset_id)
 
-    context_input = await load_context_index_input(data, dataset_id, ctx)
+    context_input = data
+    if context_input is None or context_input == {}:
+        context_input = await load_context_index_input_from_graph(ctx)
+    if not isinstance(context_input, GlobalContextIndexUpdateData):
+        raise TypeError(
+            "update_global_context_index expected GlobalContextIndexUpdateData, None, or {}."
+        )
+
     text_summaries = await select_text_summaries_for_strategy(
         bucketing_strategy,
         dataset_id,
