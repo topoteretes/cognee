@@ -348,19 +348,6 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Cognee API server")
-    parser.add_argument(
-        "--agent-mode",
-        action="store_true",
-        help="Enable agent mode: server shuts down when no agents are active",
-    )
-    args = parser.parse_args()
-
-    if args.agent_mode:
-        os.environ["COGNEE_AGENT_MODE"] = "true"
-
     logger = setup_logging()
 
     start_api_server(

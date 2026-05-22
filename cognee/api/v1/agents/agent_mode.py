@@ -1,3 +1,22 @@
+"""Agent mode: automatic server shutdown when no agents are active.
+
+When COGNEE_AGENT_MODE=true, the server tracks how many agents have
+registered via the /register endpoint. A background watchdog thread
+starts on the first registration and checks every 60 seconds whether
+any agents remain. If the count drops to zero the watchdog sends
+SIGTERM, shutting the server down gracefully.
+
+This is designed for ephemeral deployments where an external
+orchestrator spins up a Cognee server for one or more agents. Each
+agent calls /register on connect and /unregister when done. Once all
+agents finish, the server tears itself down automatically instead of
+idling.
+
+The watchdog does NOT start until at least one agent registers, so a
+server launched with COGNEE_AGENT_MODE=true will stay alive
+indefinitely while waiting for its first agent.
+"""
+
 import os
 import signal
 import threading

@@ -90,7 +90,7 @@ def get_agents_router() -> APIRouter:
         if not is_agent_mode_enabled():
             raise HTTPException(
                 status_code=400,
-                detail="Agent mode is not enabled. Start the server with --agent-mode.",
+                detail="Agent mode is not enabled. Set COGNEE_AGENT_MODE=true.",
             )
         count = register_agent()
         return AgentModeDTO(active_agents=count)
@@ -102,7 +102,7 @@ def get_agents_router() -> APIRouter:
         if not is_agent_mode_enabled():
             raise HTTPException(
                 status_code=400,
-                detail="Agent mode is not enabled. Start the server with --agent-mode.",
+                detail="Agent mode is not enabled. Set COGNEE_AGENT_MODE=true.",
             )
         count = unregister_agent()
         return AgentModeDTO(active_agents=count)
