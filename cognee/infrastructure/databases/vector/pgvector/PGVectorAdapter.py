@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func, text
 from sqlalchemy import exc
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 from sqlalchemy.engine import make_url
@@ -204,7 +204,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             )
 
     @retry(
-        retry=retry_if_exception_type(DeadlockDetectedError),
+        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
