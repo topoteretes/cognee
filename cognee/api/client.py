@@ -48,6 +48,7 @@ from cognee.api.v1.users.routers import (
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
+from cognee.api.v1.agents.routers import get_agents_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
@@ -313,6 +314,8 @@ app.include_router(
     tags=["sessions"],
 )
 
+app.include_router(get_agents_router(), prefix="/api/v1/agents", tags=["agents"])
+
 app.include_router(get_remember_router(), prefix="/api/v1/remember", tags=["remember"])
 app.include_router(get_recall_router(), prefix="/api/v1/recall", tags=["recall"])
 app.include_router(get_improve_router(), prefix="/api/v1/improve", tags=["improve"])
@@ -345,6 +348,19 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Cognee API server")
+    parser.add_argument(
+        "--agent-mode",
+        action="store_true",
+        help="Enable agent mode: server shuts down when no agents are active",
+    )
+    args = parser.parse_args()
+
+    if args.agent_mode:
+        os.environ["COGNEE_AGENT_MODE"] = "true"
+
     logger = setup_logging()
 
     start_api_server(
