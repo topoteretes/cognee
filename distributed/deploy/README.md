@@ -14,6 +14,8 @@
 
 All platforms require setting `LLM_API_KEY` as a minimum.
 
+If you want to deploy Cognee on Coolify, see [Coolify setup](./coolify.md).
+
 ---
 
 ## Modal (Serverless)
