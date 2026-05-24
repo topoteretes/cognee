@@ -34,17 +34,28 @@ async def _direct_str_completion(text_input: str, system_prompt: str, **kwargs: 
     """
     llm_config = get_llm_config()
     merged_kwargs = _normalize_llm_kwargs({**(llm_config.llm_args or {}), **kwargs})
-    resp = await litellm.acompletion(
-        model=llm_config.llm_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text_input},
-        ],
-        api_key=llm_config.llm_api_key,
-        api_base=llm_config.llm_endpoint,
-        api_version=llm_config.llm_api_version,
-        **merged_kwargs,
-    )
+
+    model = llm_config.llm_model
+    if model.startswith("hosted_vllm/"):
+        model = "openai/" + model.removeprefix("hosted_vllm/")
+        extra_body = dict(merged_kwargs.get("extra_body", {}) or {})
+        extra_body["strict"] = False
+        merged_kwargs["extra_body"] = extra_body
+
+    from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+
+    async with llm_rate_limiter_context_manager():
+        resp = await litellm.acompletion(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text_input},
+            ],
+            api_key=llm_config.llm_api_key,
+            api_base=llm_config.llm_endpoint,
+            api_version=llm_config.llm_api_version,
+            **merged_kwargs,
+        )
     return resp.choices[0].message.content or ""
 
 
