@@ -464,6 +464,14 @@ class CogneeClient:
         """
         if self.use_api:
             if session_id:
+                if custom_prompt:
+                    logger.warning(
+                        "remember: custom_prompt is not supported with session_id in API mode "
+                        "(the /remember/entry endpoint does not forward custom_prompt)"
+                    )
+                    raise ValueError(
+                        "custom_prompt is not supported when session_id is provided in API mode"
+                    )
                 # Session mode: POST a JSON QAEntry so the backend receives
                 # real text, not a multipart-file placeholder that triggers
                 # the _SESSION_PLACEHOLDER_PREFIXES skip in _add_to_session.
