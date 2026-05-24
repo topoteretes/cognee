@@ -1,9 +1,13 @@
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
+import litellm
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_llm_config
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
+    _normalize_llm_kwargs,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
@@ -19,6 +23,29 @@ def _inject_agent_memory(text_input: str) -> str:
         return text_input
 
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
+
+
+async def _direct_str_completion(text_input: str, system_prompt: str, **kwargs: Any) -> str:
+    """Call litellm directly for plain-text completions, bypassing instructor.
+
+    Instructor wraps the call in JSON/tool-call schemas that local
+    llama.cpp-compatible servers don't honour, causing repeated
+    InstructorRetryException and tenacity retry sleeps.
+    """
+    llm_config = get_llm_config()
+    merged_kwargs = _normalize_llm_kwargs({**(llm_config.llm_args or {}), **kwargs})
+    resp = await litellm.acompletion(
+        model=llm_config.llm_model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text_input},
+        ],
+        api_key=llm_config.llm_api_key,
+        api_base=llm_config.llm_endpoint,
+        api_version=llm_config.llm_api_version,
+        **merged_kwargs,
+    )
+    return resp.choices[0].message.content or ""
 
 
 async def _record_session_usage_after(
@@ -63,6 +90,16 @@ class LLMGateway:
         **kwargs: Any,
     ) -> Coroutine[Any, Any, T]:
         text_input = _inject_agent_memory(text_input)
+
+        # response_model=str is a plain-text completion — instructor adds
+        # JSON/tool-call schemas that local servers don't honour, causing
+        # repeated InstructorRetryException. Call litellm directly instead.
+        if response_model is str:
+            return _record_session_usage_after(
+                _direct_str_completion(text_input, system_prompt, **kwargs),
+                text_input=text_input,
+            )
+
         llm_config = get_llm_config()
         if llm_config.structured_output_framework.upper() == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
