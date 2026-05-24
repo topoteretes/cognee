@@ -463,11 +463,32 @@ class CogneeClient:
         Without session_id: full add + cognify pipeline (permanent).
         """
         if self.use_api:
+            if session_id:
+                # Session mode: POST a JSON QAEntry so the backend receives
+                # real text, not a multipart-file placeholder that triggers
+                # the _SESSION_PLACEHOLDER_PREFIXES skip in _add_to_session.
+                endpoint = f"{self.api_url}/api/v1/remember/entry"
+                payload = {
+                    "entry": {
+                        "type": "qa",
+                        "question": "",
+                        "answer": str(data),
+                        "context": "",
+                    },
+                    "dataset_name": dataset_name,
+                    "session_id": session_id,
+                }
+                response = await self.client.post(
+                    endpoint,
+                    json=payload,
+                    headers=self._get_headers(),
+                )
+                response.raise_for_status()
+                return response.json()
+
             endpoint = f"{self.api_url}/api/v1/remember"
             files = self._text_upload(data)
             form_data = {"datasetName": dataset_name}
-            if session_id:
-                form_data["session_id"] = session_id
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             response = await self.client.post(
