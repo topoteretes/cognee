@@ -12,6 +12,9 @@ from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_re
 UPSERT_BATCH_SIZE = 1000
 
 
+# When ``session`` is passed by the caller this function does NOT commit —
+# the caller is responsible for committing. When no session is provided,
+# ``@with_async_session`` opens one and commits it.
 @with_async_session
 async def upsert_nodes(
     nodes: List[DataPoint],
@@ -29,7 +32,6 @@ async def upsert_nodes(
         - nodes (list): A list of nodes to be added to the graph.
     """
     if not nodes:
-        await session.commit()
         return
 
     node_rows = [
@@ -60,5 +62,3 @@ async def upsert_nodes(
             insert(Node).values(node_batch).on_conflict_do_nothing(index_elements=["id"])
         )
         await session.execute(upsert_statement)
-
-    await session.commit()
