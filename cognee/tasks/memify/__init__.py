@@ -10,6 +10,7 @@ from .extract_subgraph import extract_subgraph
 from .extract_subgraph_chunks import extract_subgraph_chunks
 from .cognify_agent_trace_feedback import cognify_agent_trace_feedback
 from .cognify_session import cognify_session
+from .save_session_as_data import save_session_as_data
 from .extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
 from .extract_user_sessions import extract_user_sessions
 from .extract_feedback_qas import extract_feedback_qas

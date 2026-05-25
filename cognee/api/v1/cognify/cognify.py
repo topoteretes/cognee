@@ -282,7 +282,7 @@ async def cognify(
         return result
 
 
-async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
+async def get_cognify_processing_tasks(
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
@@ -292,6 +292,14 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch: int = None,
     **kwargs,
 ) -> list[Task]:
+    """Return the per-document pipeline stages used by cognify.
+
+    Stages take ``Data`` rows as input and produce a populated knowledge
+    graph. Exported so custom pipelines (e.g. ``persist_sessions_in_knowledge_graph``)
+    can splice them in after their own preprocessing stages without nesting
+    a ``cognee.cognify()`` call — nested cognify runs race at the dataset
+    level when multiple invocations target the same dataset.
+    """
     if config is None:
         ontology_config = get_ontology_env_config()
         if (
@@ -320,7 +328,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     # Cognify default: each stage runs FixedWorkers(50). The two LLM-heavy
     # stages override with AdaptiveWorkers — their concurrency tunes itself
     # based on observed throughput / throttling / utilization.
-    default_tasks = [
+    return [
         Task(classify_documents, workers=FixedWorkers(50)),
         Task(
             extract_chunks_from_documents,
@@ -350,7 +358,27 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         Task(extract_dlt_fk_edges, workers=FixedWorkers(50)),
     ]
 
-    return default_tasks
+
+async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
+    user: User = None,
+    graph_model: BaseModel = KnowledgeGraph,
+    chunker=TextChunker,
+    chunk_size: int = None,
+    config: Config = None,
+    custom_prompt: Optional[str] = None,
+    chunks_per_batch: int = None,
+    **kwargs,
+) -> list[Task]:
+    return await get_cognify_processing_tasks(
+        user=user,
+        graph_model=graph_model,
+        chunker=chunker,
+        chunk_size=chunk_size,
+        config=config,
+        custom_prompt=custom_prompt,
+        chunks_per_batch=chunks_per_batch,
+        **kwargs,
+    )
 
 
 async def get_temporal_tasks(
