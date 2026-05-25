@@ -57,9 +57,21 @@ async def run_tasks_single(
     head_payload = _NO_DATA if data is None else data
     serial_tasks = [_pin_to_single_worker(t) for t in tasks]
 
+    # When the caller built ``ctx`` with a ``data_item`` already set (e.g. the
+    # distributed/Modal path wraps a single ``Data`` row in a list to satisfy
+    # the first task's signature), pass the original item as ``origin`` so
+    # ``run_worker_pipeline``'s per-call ``dataclasses.replace(shared_ctx,
+    # data_item=origin)`` keeps ``ctx.data_item`` pointed at the original item
+    # — not the wrapper list, which downstream tasks like ``add_data_points``
+    # would then try to dereference as ``data_item.id``.
+    if ctx is not None and ctx.data_item is not None:
+        data_iterable: list = [(head_payload, ctx.data_item)]
+    else:
+        data_iterable = [head_payload]
+
     async for envelope in run_worker_pipeline(
         tasks=serial_tasks,
-        data_iterable=[head_payload],
+        data_iterable=data_iterable,
         user=user,
         ctx=ctx,
         data_per_batch=1,
