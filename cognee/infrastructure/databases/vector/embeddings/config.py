@@ -137,6 +137,8 @@ class EmbeddingConfig(BaseSettings):
             "embedding_api_version": self.embedding_api_version,
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
+            "accumulate_embedding_calls": self.accumulate_embedding_calls,
+            "accumulate_embedding_timeout_ms": self.accumulate_embedding_timeout_ms,
         }
 
 

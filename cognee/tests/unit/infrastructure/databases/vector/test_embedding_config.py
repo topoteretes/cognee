@@ -80,6 +80,21 @@ def test_config_honors_explicit_dimensions(monkeypatch):
     assert cfg.embedding_dimensions == 384
 
 
+def test_to_dict_includes_accumulation_settings(monkeypatch):
+    # CodeRabbit caught this regression on #2881: to_dict() must serialize the
+    # new accumulate_* fields, otherwise downstream config consumers silently
+    # drop the coalescing behavior.
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(
+        _env_file=None,
+        accumulate_embedding_calls=True,
+        accumulate_embedding_timeout_ms=250,
+    )
+    serialized = cfg.to_dict()
+    assert serialized["accumulate_embedding_calls"] is True
+    assert serialized["accumulate_embedding_timeout_ms"] == 250
+
+
 def test_config_falls_back_when_unresolvable(monkeypatch):
     # Unknown model + unset dimensions falls back to 3072 with a warning,
     # so existing setups don't crash at import time.
