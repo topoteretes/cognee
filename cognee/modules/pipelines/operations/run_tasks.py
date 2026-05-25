@@ -331,11 +331,16 @@ async def run_tasks(
             for (_, ref), (item, did) in zip(pipeline_inputs, to_process):
                 state = origin_state[id(ref)]
                 if state["error"] is not None:
+                    # Detailed exception is preserved in logs (above) and in
+                    # ``item_failures`` on PipelineRunFailedError. The yielded
+                    # payload is intentionally sanitized so per-item results
+                    # never expose internal paths, upstream payloads, or other
+                    # potentially sensitive content from arbitrary exceptions.
                     results.append(
                         {
                             "run_info": PipelineRunErrored(
                                 pipeline_run_id=pipeline_run_id,
-                                payload=repr(state["error"]),
+                                payload="Data item could not be processed.",
                                 dataset_id=dataset.id,
                                 dataset_name=dataset.name,
                             ),

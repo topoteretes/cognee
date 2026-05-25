@@ -123,20 +123,30 @@ class TaskSpec:
 
         All other kwargs are passed to the underlying function at execution time.
         """
-        # Distinct sentinel so callers can pass `workers=None` / `timeout=None`
-        # to explicitly clear the TaskSpec-level default, instead of having
-        # None silently mean "kwarg not passed".
+        # ``batch_size`` and ``enriches`` use ``None`` as the "not passed"
+        # sentinel: ``_resolve_stage_configs`` later does
+        # ``int(next_cfg.get("batch_size", 1))``, so letting an explicit
+        # ``batch_size=None`` flow into ``task_config`` would turn a harmless
+        # explicit-None into a runtime failure at pipeline setup.
+        # ``workers`` and ``timeout`` use a distinct ``_UNSET`` sentinel so
+        # callers *can* pass an explicit ``None`` to clear a TaskSpec-level
+        # default — those fields tolerate ``None`` downstream.
         _UNSET = _UNSET_SENTINEL
-        batch_size = kwargs.pop("batch_size", _UNSET)
-        enriches = kwargs.pop("enriches", _UNSET)
+        batch_size = kwargs.pop("batch_size", None)
+        enriches = kwargs.pop("enriches", None)
         workers = kwargs.pop("workers", _UNSET)
         timeout = kwargs.pop("timeout", _UNSET)
 
-        if any(v is not _UNSET for v in (batch_size, enriches, workers, timeout)):
+        if (
+            batch_size is not None
+            or enriches is not None
+            or workers is not _UNSET
+            or timeout is not _UNSET
+        ):
             overrides: dict = {}
-            if batch_size is not _UNSET:
+            if batch_size is not None:
                 overrides["batch_size"] = batch_size
-            if enriches is not _UNSET:
+            if enriches is not None:
                 overrides["enriches"] = enriches
             if workers is not _UNSET:
                 overrides["workers"] = workers

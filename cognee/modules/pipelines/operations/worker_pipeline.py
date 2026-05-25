@@ -7,7 +7,8 @@ upstream queue, invoke ``task.execute``, and push to the downstream queue.
 Public API (configured per ``Task``):
 
 - ``workers=<WorkerStrategy>`` -- sizing policy for the task's worker pool.
-  Defaults to ``FixedWorkers(20)`` when omitted. Two strategies ship:
+  Defaults to ``FixedWorkers(1)`` when omitted (preserves input order). Two
+  strategies ship:
 
   - ``FixedWorkers(num_workers)`` -- static pool of ``num_workers`` workers.
   - ``AdaptiveWorkers(initial_workers, max_workers, step, tick_seconds,
@@ -20,14 +21,14 @@ Public API (configured per ``Task``):
   controller (so it shrinks the pool) AND fails the item via the standard
   ``_ErroredItem`` envelope path -- there is no automatic retry.
 
-Ordering contract: **tasks must be order-independent.** Any stage with more
-than one worker (the default ``FixedWorkers(20)``, larger ``FixedWorkers(n)``,
-or ``AdaptiveWorkers``) processes items concurrently and may push them to the
-downstream queue in completion order rather than input order. If a single
-upstream invocation yields ``x.1, x.2, x.3`` from one input, a multi-worker
-downstream stage can interleave those with yields from other inputs and may
-process them in any order. For end-to-end order preservation every stage in
-the pipeline must explicitly opt in to ``FixedWorkers(1)``. Per-item failures
+Ordering contract: the framework default is ``FixedWorkers(1)``, which
+preserves input order. Any stage that opts into more than one worker
+(``FixedWorkers(n>1)`` or ``AdaptiveWorkers``) processes items concurrently
+and may push them to the downstream queue in completion order rather than
+input order. If a single upstream invocation yields ``x.1, x.2, x.3`` from
+one input, a multi-worker downstream stage can interleave those with yields
+from other inputs and may process them in any order. Pipelines that mix in
+any multi-worker stage must therefore be **order-independent** end-to-end. Per-item failures
 are wrapped in ``_ErroredItem`` envelopes and flow through the pipeline so
 one bad item does not abort its siblings.
 
@@ -748,12 +749,12 @@ class AdaptiveWorkers(WorkerStrategy):
     throughput_improvement_ratio: float = 1.05
 
 
-# Framework default: 20 workers per stage. Matches the dev-era per-item
-# parallelism (the old gather+Semaphore(data_per_batch=20) runner ran up to
-# 20 items concurrently end-to-end). Tasks are expected to be order-
-# independent; callers that need end-to-end input order must explicitly
-# set ``workers=FixedWorkers(1)`` on every stage.
-_DEFAULT_STRATEGY = FixedWorkers(num_workers=20)
+# Framework default: 1 worker per stage. Preserves the input order contract
+# of the pre-worker-pipeline executor, where each task was invoked once per
+# item in turn. Stages that are safe to run concurrently must opt in
+# explicitly via ``workers=FixedWorkers(n)`` or ``workers=AdaptiveWorkers(...)``
+# in their task config.
+_DEFAULT_STRATEGY = FixedWorkers(num_workers=1)
 
 
 # ---------------------------------------------------------------------------
