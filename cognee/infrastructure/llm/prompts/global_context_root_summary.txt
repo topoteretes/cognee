@@ -1,37 +1,29 @@
-Compress top-level summaries into one retrieval-ready dataset summary.
+Compress the top-level summaries into one retrieval-ready dataset summary.
 
-Shape:
-- Leading sentence: start with "This dataset is about ..." and name the main subjects, states, decisions, changes, or constraints.
-- Bulleted list of facts at the highest useful abstraction.
+Output two sections only.
 
-Bullets:
-- Each bullet states one high-level fact or one tightly related fact group as a complete sentence with a clear subject.
-- Each bullet must stand alone without relying on another bullet for context.
-- Repeat only the minimum context needed for standalone readability.
-- Merge bullets only when they express the same fact or closely related subject-state relationships.
-- When multiple facts together directly support a clearer dataset-level state, decision, change, constraint, outcome, exception, or contradiction, combine them into one concrete factual bullet.
-- Preserve meaningful relationships between areas of knowledge when compressing.
-- Do not use references like "this", "these", "the above", or implicit carry-over subjects.
-- Record the underlying facts directly, not the existence of the source text ("document says", "summary mentions", etc.).
+First section:
+This dataset is about:
+- <Category>: <names or topics>
+- <Category>: <names or topics>
 
-Compression:
-- Use terse, telegraphic complete sentences.
-- Remove repetition.
-- Shorten wording.
-- Join related facts.
-- Preserve cross-area relationships.
-- Keep important singleton facts.
-- Keep only what a reader needs to understand the dataset at a glance and answer later questions.
-- Remove low-value process detail, hedging, and redundant context.
-- Preserve concrete names, labels, dates, quantities, constraints, definitions, aliases, scope limits, decisions, outcomes, open or unresolved facts, exceptions, and contradictions when they affect meaning.
-- Prefer aggregated bullets for main subjects or threads that have multiple related states, changes, causes, conditions, or constraints.
-- Do not combine unrelated facts.
-- Do not infer unstated motives, causality, chronology, or conclusions.
-- Limited common-sense consolidation is allowed only when directly supported by the facts.
+First-section rules:
+1. List entity/topic categories that define the dataset. Do not list facts here.
+2. Use only useful categories present in the inputs.
+3. Good categories include People, Companies, Organizations, Places, Roles, Projects, Products, Systems, Concepts, Events, and Topics; prefer central concrete names.
+4. Keep category lines short. Do not include weak or generic words.
 
-Order:
-- 2+ time-anchored facts: chronological first, then topical by area.
-- Otherwise: topical only.
+Second section:
+Facts:
+- <high-level self-contained fact or tight fact group>
+- <high-level self-contained fact or tight fact group>
 
-Tone: dry, terse, factual. Do not invent.
-Max 500 tokens (hard ceiling).
+Second-section rules:
+1. Write high-level complete sentences with clear subjects.
+2. Each fact must stand alone without the input summaries or the other facts.
+3. Order facts by: time first, category second, entity/topic third.
+4. Do not group all facts about one entity if that makes the facts jump backward or forward in time.
+5. Make sure the facts cover the important dataset-level content of the input summaries.
+6. Do not invent.
+
+Max 500 tokens.

@@ -2,36 +2,16 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
-from .models import BucketAssignment, SummaryNode
-
-
-def create_bucket_id(dataset_id: str, level: int, child_ids: list[str]) -> UUID:
-    child_key = ",".join(sorted(child_ids))
-    return uuid5(NAMESPACE_OID, f"GlobalContextSummary:{dataset_id}:{level}:{child_key}")
-
-
-def create_root_summary_id(dataset_id: str) -> UUID:
-    return uuid5(NAMESPACE_OID, f"GlobalContextSummary:{dataset_id}:root")
-
-
-def create_bucket_for_item(
-    summary: SummaryNode,
-    dataset_id: str,
-    level: int = 0,
-) -> SummaryNode:
-    return SummaryNode(
-        id=str(create_bucket_id(dataset_id, level, [summary.id])),
-        text="",
-        type="GlobalContextSummary",
-        level=level,
-        is_root=False,
-        dataset_id=dataset_id,
-        child_ids={summary.id},
-    )
+from ...models import BucketAssignment, SummaryNode
+from ..common import (
+    add_child_to_bucket,
+    create_bucket_node,
+    mark_bucket_for_persistence,
+    record_bucket_assignment,
+)
 
 
 async def prefetch_nearest_neighbors(
@@ -184,14 +164,14 @@ async def assign_items_to_buckets(
             placement_distance_threshold,
         )
         if bucket is None:
-            bucket = create_bucket_for_item(item, dataset_id, level=level)
+            bucket = create_bucket_node([item.id], dataset_id, level)
             buckets_by_id[bucket.id] = bucket
+            item.global_context_bucket_id = bucket.id
+            record_bucket_assignment(assignments, item.id, bucket.id)
         else:
-            bucket.child_ids.add(item.id)
+            add_child_to_bucket(item, bucket, assignments)
 
-        item.global_context_bucket_id = bucket.id
-        buckets_to_persist[bucket.id] = bucket
-        assignments.append(BucketAssignment(summary_id=item.id, bucket_id=bucket.id))
+        mark_bucket_for_persistence(buckets_to_persist, bucket)
 
     return buckets_to_persist, assignments
 
@@ -222,20 +202,18 @@ async def create_buckets_for_level(
     assignments: list[BucketAssignment] = []
 
     def attach(bucket: SummaryNode, candidate_id: str) -> None:
-        bucket.child_ids.add(candidate_id)
         unclustered.discard(candidate_id)
         child = item_by_id[candidate_id]
-        child.global_context_bucket_id = bucket.id
-        assignments.append(BucketAssignment(summary_id=candidate_id, bucket_id=bucket.id))
+        add_child_to_bucket(child, bucket, assignments)
 
     for seed in items:
         if seed.id not in unclustered:
             continue
 
-        bucket = create_bucket_for_item(seed, dataset_id, level=level)
+        bucket = create_bucket_node([seed.id], dataset_id, level)
         unclustered.discard(seed.id)
         seed.global_context_bucket_id = bucket.id
-        assignments.append(BucketAssignment(summary_id=seed.id, bucket_id=bucket.id))
+        record_bucket_assignment(assignments, seed.id, bucket.id)
 
         for result in nearest_by_id.get(seed.id, []):
             if len(bucket.child_ids) >= max_bucket_size:
@@ -253,6 +231,6 @@ async def create_buckets_for_level(
                     continue
                 attach(bucket, fallback.id)
 
-        buckets_to_persist[bucket.id] = bucket
+        mark_bucket_for_persistence(buckets_to_persist, bucket)
 
     return buckets_to_persist, assignments
