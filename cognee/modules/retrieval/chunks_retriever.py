@@ -23,8 +23,12 @@ class ChunksRetriever(BaseRetriever):
     def __init__(
         self,
         top_k: Optional[int] = 5,
+        node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         self.top_k = top_k
+        self.node_name = node_name
+        self.node_name_filter_operator = node_name_filter_operator
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -96,7 +100,12 @@ class ChunksRetriever(BaseRetriever):
 
         try:
             found_chunks = await vector_engine.search(
-                "DocumentChunk_text", query, limit=self.top_k, include_payload=True
+                "DocumentChunk_text",
+                query,
+                limit=self.top_k,
+                include_payload=True,
+                node_name=self.node_name,
+                node_name_filter_operator=self.node_name_filter_operator,
             )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
 
