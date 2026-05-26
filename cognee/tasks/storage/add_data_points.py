@@ -77,7 +77,7 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    edges = ensure_default_edge_properties(edges)
+    edges = ensure_default_edge_properties(edges, nodes=nodes)
 
     unified = await get_unified_engine()
     graph_engine = unified.graph
@@ -120,7 +120,7 @@ async def add_data_points(
 
     if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
-        custom_edges = ensure_default_edge_properties(custom_edges)
+        custom_edges = ensure_default_edge_properties(custom_edges, nodes=nodes)
         if use_hybrid:
             await graph_engine.add_edges_with_vectors(custom_edges)
         else:

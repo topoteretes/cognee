@@ -5,10 +5,9 @@ from typing import Any
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
-from cognee.tasks.summarization.models import TextSummary
 
 from .constants import SUMMARIZED_IN, SUMMARY_GRAPH_NODE_TYPES
-from .models import GlobalContextIndexInput, SummaryNode
+from .models import GlobalContextIndexUpdateData, SummaryNode
 
 
 def dataset_id_from_context(ctx: PipelineContext | None) -> str:
@@ -33,10 +32,25 @@ def is_root_global_context_summary(attributes: dict[str, Any]) -> bool:
     return bool(is_root)
 
 
-def extract_context_index_input_from_graph(
+def graph_bucket_entity_ids_from_attributes(
+    attributes: dict[str, Any],
+    level: int | None,
+) -> set[str] | None:
+    if level != 0:
+        return None
+
+    raw_entity_ids = attributes.get("graph_bucket_entity_ids")
+    if raw_entity_ids is None:
+        return None
+    if isinstance(raw_entity_ids, (list, set, tuple)):
+        return {str(entity_id) for entity_id in raw_entity_ids}
+    return None
+
+
+def extract_context_index_input(
     memory_fragment: CogneeGraph,
     dataset_id: str,
-) -> GlobalContextIndexInput:
+) -> GlobalContextIndexUpdateData:
     text_summaries: list[SummaryNode] = []
     buckets: list[SummaryNode] = []
     root: SummaryNode | None = None
@@ -62,13 +76,15 @@ def extract_context_index_input_from_graph(
         if node_dataset_id is not None and str(node_dataset_id) != dataset_id:
             continue
 
+        level = global_context_summary_level(attributes)
         bucket_node = SummaryNode(
             id=str(node.id),
             text=str(attributes.get("text") or ""),
             type="GlobalContextSummary",
-            level=global_context_summary_level(attributes),
+            level=level,
             is_root=is_root_global_context_summary(attributes),
             dataset_id=str(node_dataset_id) if node_dataset_id is not None else dataset_id,
+            graph_bucket_entity_ids=graph_bucket_entity_ids_from_attributes(attributes, level),
         )
         if bucket_node.is_root:
             root = bucket_node
@@ -92,7 +108,7 @@ def extract_context_index_input_from_graph(
         text_summaries + buckets,
         buckets + ([root] if root is not None else []),
     )
-    return GlobalContextIndexInput(text_summaries=text_summaries, buckets=buckets, root=root)
+    return GlobalContextIndexUpdateData(text_summaries=text_summaries, buckets=buckets, root=root)
 
 
 def relationship_name(edge) -> str | None:
@@ -135,9 +151,14 @@ def rebuild_child_ids_from_parent_pointers(
 
 async def load_context_index_input_from_graph(
     ctx: PipelineContext | None,
-) -> GlobalContextIndexInput:
+) -> GlobalContextIndexUpdateData:
     dataset_id = dataset_id_from_context(ctx)
-    memory_fragment = await get_memory_fragment(
+    memory_fragment = await get_context_index_memory_fragment()
+    return extract_context_index_input(memory_fragment, dataset_id)
+
+
+async def get_context_index_memory_fragment() -> CogneeGraph:
+    return await get_memory_fragment(
         properties_to_project=[
             "id",
             "text",
@@ -145,31 +166,20 @@ async def load_context_index_input_from_graph(
             "dataset_id",
             "level",
             "is_root",
+            "graph_bucket_entity_ids",
             "importance_weight",
             "global_context_bucket_id",
         ],
         memory_fragment_filter=[{"type": SUMMARY_GRAPH_NODE_TYPES}],
     )
-    return extract_context_index_input_from_graph(memory_fragment, dataset_id)
 
 
-async def load_context_index_input(
-    data: Any,
-    dataset_id: str,
-    ctx: PipelineContext | None,
-) -> GlobalContextIndexInput:
-    if isinstance(data, GlobalContextIndexInput):
-        return data
-    if isinstance(data, CogneeGraph):
-        return extract_context_index_input_from_graph(data, dataset_id)
-    if isinstance(data, list) and len(data) == 1 and isinstance(data[0], CogneeGraph):
-        return extract_context_index_input_from_graph(data[0], dataset_id)
-    if isinstance(data, list) and all(isinstance(item, TextSummary) for item in data):
-        return GlobalContextIndexInput(
-            text_summaries=[
-                SummaryNode(id=str(summary.id), text=summary.text, type="TextSummary")
-                for summary in data
-            ],
-            buckets=[],
-        )
-    return await load_context_index_input_from_graph(ctx)
+async def extract_global_context_index_input(
+    data: Any = None,
+    ctx: PipelineContext | None = None,
+) -> GlobalContextIndexUpdateData:
+    if data is not None and data != {} and data != [{}]:
+        raise TypeError("extract_global_context_index_input expected None, {}, or [{}].")
+    dataset_id = dataset_id_from_context(ctx)
+    memory_fragment = await get_context_index_memory_fragment()
+    return extract_context_index_input(memory_fragment, dataset_id)
