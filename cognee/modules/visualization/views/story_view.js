@@ -58,7 +58,17 @@ links.forEach(function(l){
   degreeMap[t]=(degreeMap[t]||0)+1;
 });
 var maxDeg=Math.max(1,Math.max.apply(null,Object.values(degreeMap)));
-nodes.forEach(function(n){n._degree=degreeMap[n.id]||0;n._r=4+Math.sqrt(n._degree/maxDeg)*10});
+// Node radius blends degree (base size from connections) with
+// importance_weight (per-node hand-set or memify-set importance). Default
+// importance is 0.5 → factor 1.0 (no change). High importance (1.0) →
+// factor 1.5 (50% larger). Low importance (0.0) → factor 0.6 (smaller).
+nodes.forEach(function(n){
+  n._degree=degreeMap[n.id]||0;
+  var imp=(typeof n.importance_weight==="number")?n.importance_weight:0.5;
+  if(imp<0)imp=0;if(imp>1)imp=1;
+  var impFactor=0.6+imp*0.9;
+  n._r=(4+Math.sqrt(n._degree/maxDeg)*10)*impFactor;
+});
 
 // Pre-sort nodes by degree descending (for adaptive labels)
 var nodesByDegree=nodes.slice().sort(function(a,b){return b._degree-a._degree});
@@ -926,6 +936,39 @@ function showNodeInfo(n){
     html+=inspectorSection("provenance","Provenance",true,provBody);
   }
 
+  // Weights section: importance + feedback + ontology validity, plus a
+  // tiny inline bar so the values are scannable. Only shown when any
+  // weight or the ontology flag is set to something interesting
+  // (non-default-0.5 weight, or ontology_valid set).
+  function weightBar(value){
+    var pct=Math.max(0,Math.min(1,(typeof value==="number")?value:0.5));
+    var w=Math.round(pct*60);
+    return '<div style="display:inline-block;width:60px;height:5px;background:var(--border);'+
+      'border-radius:3px;vertical-align:middle;margin-right:6px;position:relative;">'+
+      '<div style="width:'+w+'px;height:5px;background:var(--accent);border-radius:3px;"></div></div>';
+  }
+  var hasImp=(typeof n.importance_weight==="number")&&Math.abs(n.importance_weight-0.5)>0.001;
+  var hasFb=(typeof n.feedback_weight==="number")&&Math.abs(n.feedback_weight-0.5)>0.001;
+  var hasOnto=n.ontology_valid===true||n.ontology_valid===false;
+  if(hasImp||hasFb||hasOnto){
+    var wBody="";
+    if(hasImp){
+      wBody+='<div class="panel-row"><span class="k">Importance</span><span class="v">'+
+        weightBar(n.importance_weight)+n.importance_weight.toFixed(2)+'</span></div>';
+    }
+    if(hasFb){
+      wBody+='<div class="panel-row"><span class="k">Feedback</span><span class="v">'+
+        weightBar(n.feedback_weight)+n.feedback_weight.toFixed(2)+'</span></div>';
+    }
+    if(hasOnto){
+      var ovColor=n.ontology_valid?'#0DFF00':'var(--text2)';
+      var ovLabel=n.ontology_valid?'ontology valid':'not in ontology';
+      wBody+='<div class="panel-row"><span class="k">Ontology</span>'+
+        '<span class="v" style="color:'+ovColor+';font-weight:500;">●  '+ovLabel+'</span></div>';
+    }
+    html+=inspectorSection("weights","Weights",true,wBody);
+  }
+
   // Relations section: counts grouped by relation
   var relCounts={};
   for(var rli=0;rli<links.length;rli++){
@@ -1648,6 +1691,17 @@ function draw(){
       if(!skipBorder){
         ctx.strokeStyle=_light ? "rgba(0,0,0,0.15)" : "rgba(244,244,244,0.2)";
         ctx.lineWidth=0.5;
+        ctx.stroke();
+      }
+
+      // Ontology-valid marker: bright outer ring so these nodes are
+      // identifiable at a glance — the previous gray-fill cue was too
+      // subtle to spot.
+      if(n.ontology_valid===true){
+        ctx.beginPath();
+        ctx.arc(n.x,n.y,r+2.2/scale,0,Math.PI*2);
+        ctx.strokeStyle=_light ? "rgba(13,180,40,0.85)" : "rgba(13,255,0,0.85)";
+        ctx.lineWidth=1.6/scale;
         ctx.stroke();
       }
       ctx.globalAlpha=1;
