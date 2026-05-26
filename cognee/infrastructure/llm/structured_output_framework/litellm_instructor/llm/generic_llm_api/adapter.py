@@ -288,7 +288,7 @@ class GenericAPIAdapter(LLMInterface):
         )
 
         if not response.choices or response.choices[0].message is None:
-            raise ValueError("LLM returned empty or filtered response")
+            raise ValueError("Transcription failed. No response received.")
         return TranscriptionReturnType(response.choices[0].message.content, response)
 
     @observe(as_type="transcribe_image")
