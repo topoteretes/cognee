@@ -1,11 +1,13 @@
+import json
 from uuid import UUID
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from fastapi import Form, File, UploadFile as UF, Depends, status
-from typing import List, Optional, Union, Literal, Annotated
+from typing import Any, List, Optional, Union, Literal, Annotated
 from pydantic import WithJsonSchema
 
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
@@ -20,6 +22,51 @@ logger = get_logger()
 # NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
 #       Once issue is resolved on Swagger side it can be removed.
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
+
+
+def _parse_external_metadata(
+    external_metadata: Optional[str],
+    data: Optional[List[UploadFile]],
+) -> Optional[Union[dict[str, Any], list[dict[str, Any]]]]:
+    if external_metadata is None:
+        return None
+
+    try:
+        parsed_metadata = json.loads(external_metadata)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"external_metadata must be valid JSON: {error.msg}") from error
+
+    if isinstance(parsed_metadata, dict):
+        return parsed_metadata
+
+    if isinstance(parsed_metadata, list):
+        if not all(isinstance(item, dict) for item in parsed_metadata):
+            raise ValueError("external_metadata array items must be JSON objects.")
+
+        if data is not None and len(parsed_metadata) != len(data):
+            raise ValueError(
+                "external_metadata array length must match the number of uploaded files."
+            )
+
+        return parsed_metadata
+
+    raise ValueError("external_metadata must be a JSON object or an array of JSON objects.")
+
+
+def _wrap_data_with_external_metadata(
+    data: Optional[List[UploadFile]],
+    external_metadata: Union[dict[str, Any], list[dict[str, Any]]],
+) -> Optional[List[DataItem]]:
+    if data is None:
+        return data
+
+    if isinstance(external_metadata, dict):
+        return [DataItem(data=data_item, external_metadata=external_metadata) for data_item in data]
+
+    return [
+        DataItem(data=data_item, external_metadata=item_external_metadata)
+        for data_item, item_external_metadata in zip(data, external_metadata)
+    ]
 
 
 def get_add_router() -> APIRouter:
@@ -42,6 +89,7 @@ def get_add_router() -> APIRouter:
         # Note: Literal is needed for Swagger use
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
+        external_metadata: Optional[str] = Form(default=None),
         run_in_background: Optional[bool] = Form(default=False),
         user: User = Depends(get_authenticated_user),
     ):
@@ -61,6 +109,8 @@ def get_add_router() -> APIRouter:
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
+        - **external_metadata** (Optional[str]): JSON object to attach to each uploaded item,
+          or a JSON array of objects matching the uploaded files order.
         - **run_in_background** (Optional[bool]): Run add pipeline asynchronously (default: False).
 
         Either datasetName or datasetId must be provided.
@@ -99,6 +149,20 @@ def get_add_router() -> APIRouter:
                     error="Either datasetId or datasetName must be provided.",
                 ).model_dump(),
             )
+
+        try:
+            parsed_external_metadata = _parse_external_metadata(external_metadata, data)
+        except ValueError as error:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponse(
+                    error="Invalid external_metadata.",
+                    detail=str(error),
+                ).model_dump(),
+            )
+
+        if parsed_external_metadata is not None:
+            data = _wrap_data_with_external_metadata(data, parsed_external_metadata)
 
         try:
             add_run = await cognee_add(

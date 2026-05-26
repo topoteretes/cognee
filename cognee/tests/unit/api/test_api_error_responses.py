@@ -7,6 +7,7 @@ Tests cover:
 """
 
 import importlib
+import json
 from types import SimpleNamespace
 from uuid import uuid4
 from unittest.mock import AsyncMock
@@ -17,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.modules.pipelines.models import PipelineRunErrored, PipelineRunCompleted
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.api.v1.add.routers.get_add_router import get_add_router
@@ -121,6 +123,85 @@ class TestAddEndpoint:
         body = resp.json()
         assert body["status"] == "completed"
         assert body["dataset_name"] == "test_dataset"
+
+    def test_add_passes_external_metadata_object(self, client):
+        import cognee.api.v1.add as add_pkg
+
+        completed = _make_completed()
+        add_pkg.add = AsyncMock(return_value=completed)
+        metadata = {"source": "crm", "author": "Ada"}
+
+        resp = client.post(
+            "/add",
+            data={"datasetName": "test_dataset", "external_metadata": json.dumps(metadata)},
+            files={"data": ("test.txt", b"Cognee is an AI memory platform.", "text/plain")},
+        )
+
+        assert resp.status_code == 200
+        add_pkg.add.assert_awaited_once()
+        data_arg = add_pkg.add.await_args.args[0]
+        assert len(data_arg) == 1
+        assert isinstance(data_arg[0], DataItem)
+        assert data_arg[0].external_metadata == metadata
+        assert data_arg[0].data.filename == "test.txt"
+
+    def test_add_passes_external_metadata_array_by_file(self, client):
+        import cognee.api.v1.add as add_pkg
+
+        completed = _make_completed()
+        add_pkg.add = AsyncMock(return_value=completed)
+        metadata = [{"source": "crm"}, {"source": "support"}]
+
+        resp = client.post(
+            "/add",
+            data={"datasetName": "test_dataset", "external_metadata": json.dumps(metadata)},
+            files=[
+                ("data", ("first.txt", b"first", "text/plain")),
+                ("data", ("second.txt", b"second", "text/plain")),
+            ],
+        )
+
+        assert resp.status_code == 200
+        add_pkg.add.assert_awaited_once()
+        data_arg = add_pkg.add.await_args.args[0]
+        assert [item.external_metadata for item in data_arg] == metadata
+        assert [item.data.filename for item in data_arg] == ["first.txt", "second.txt"]
+
+    def test_add_rejects_invalid_external_metadata_json(self, client):
+        import cognee.api.v1.add as add_pkg
+
+        add_pkg.add = AsyncMock(return_value=_make_completed())
+
+        resp = client.post(
+            "/add",
+            data={"datasetName": "test_dataset", "external_metadata": "{"},
+            files={"data": ("test.txt", b"hello", "text/plain")},
+        )
+
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "Invalid external_metadata."
+        add_pkg.add.assert_not_awaited()
+
+    def test_add_rejects_external_metadata_array_length_mismatch(self, client):
+        import cognee.api.v1.add as add_pkg
+
+        add_pkg.add = AsyncMock(return_value=_make_completed())
+
+        resp = client.post(
+            "/add",
+            data={
+                "datasetName": "test_dataset",
+                "external_metadata": json.dumps([{"source": "crm"}]),
+            },
+            files=[
+                ("data", ("first.txt", b"first", "text/plain")),
+                ("data", ("second.txt", b"second", "text/plain")),
+            ],
+        )
+
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "Invalid external_metadata."
+        add_pkg.add.assert_not_awaited()
 
     def test_add_internal_error_returns_500(self, client):
         import cognee.api.v1.add as add_pkg
