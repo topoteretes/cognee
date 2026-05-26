@@ -55,7 +55,12 @@ class VectorConfig(BaseSettings):
     @pydantic.model_validator(mode="after")
     def parse_vector_pool_args(self):
         if self.vector_pool_args and isinstance(self.vector_pool_args, str):
-            parsed = json.loads(self.vector_pool_args)
+            try:
+                parsed = json.loads(self.vector_pool_args)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"VECTOR_POOL_ARGS must be valid JSON: {e.msg} (line {e.lineno}, column {e.colno})"
+                ) from e
             if isinstance(parsed, dict):
                 # Stored as sorted tuple for hashability (cache key compatibility).
                 self.vector_pool_args = tuple(sorted(parsed.items()))
