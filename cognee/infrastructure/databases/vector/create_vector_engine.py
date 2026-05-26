@@ -6,6 +6,9 @@ from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("VectorEngine")
 
 
 def _get_create_vector_engine_optional_defaults() -> dict:
@@ -109,6 +112,44 @@ def create_vector_engine(
     )
 
 
+def evict_vector_engine(**kwargs) -> bool:
+    """Evict a cached vector engine entry created via ``create_vector_engine``.
+
+    Mirrors ``create_vector_engine``'s normalization so the cache key
+    matches. Returns True if the entry existed.
+    """
+    normalized = _normalize_optional_create_vector_engine_params(kwargs)
+    return _create_vector_engine.cache_evict(
+        kwargs.get("vector_db_provider", ""),
+        kwargs.get("vector_db_url", ""),
+        kwargs.get("vector_db_name", ""),
+        normalized["vector_db_port"],
+        normalized["vector_db_key"],
+        normalized["vector_dataset_database_handler"],
+        normalized["vector_db_username"],
+        normalized["vector_db_password"],
+        normalized["vector_db_host"],
+        normalized["vector_db_subprocess_enabled"],
+    )
+
+
+def is_vector_engine_cached(**kwargs) -> bool:
+    """Check whether a vector engine entry exists in the cache without creating."""
+    normalized = _normalize_optional_create_vector_engine_params(kwargs)
+    return _create_vector_engine.cache_contains(
+        kwargs.get("vector_db_provider", ""),
+        kwargs.get("vector_db_url", ""),
+        kwargs.get("vector_db_name", ""),
+        normalized["vector_db_port"],
+        normalized["vector_db_key"],
+        normalized["vector_dataset_database_handler"],
+        normalized["vector_db_username"],
+        normalized["vector_db_password"],
+        normalized["vector_db_host"],
+        normalized["vector_db_subprocess_enabled"],
+    )
+
+
 @closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_vector_engine(
     vector_db_provider: str,
@@ -164,6 +205,11 @@ def _create_vector_engine(
         from cognee.context_global_variables import backend_access_control_enabled
 
         if backend_access_control_enabled():
+            if not (
+                vector_db_host and vector_db_port and vector_db_username and vector_db_password
+            ):
+                raise EnvironmentError("Missing required pgvector credentials.")
+
             connection_string: str = (
                 f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
                 f"@{vector_db_host}:{vector_db_port}/{vector_db_name}"
@@ -182,6 +228,13 @@ def _create_vector_engine(
                 )
             else:
                 from cognee.infrastructure.databases.relational import get_relational_config
+
+                logger.warning(
+                    "PGVector credentials are not fully configured; "
+                    "falling back to the relational database configuration. "
+                    "Set VECTOR_DB_HOST/PORT/USERNAME/PASSWORD/NAME explicitly "
+                    "to avoid this fallback."
+                )
 
                 # Get configuration for postgres database
                 relational_config = get_relational_config()

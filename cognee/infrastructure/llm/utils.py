@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import litellm
 
@@ -112,9 +113,10 @@ async def test_llm_connection() -> None:
         raise e
 
 
-async def test_embedding_connection() -> None:
+async def test_embedding_connection() -> int:
     """
     Test the connection to the embedding engine by embedding a sample text.
+    Returns detected embedding vector dimensions from the test response.
 
     Handles exceptions that may occur during the operation, logs the error, and re-raises
     the exception if the connection to the embedding handler cannot be established.
@@ -125,10 +127,16 @@ async def test_embedding_connection() -> None:
         from cognee.infrastructure.databases.vector import get_vector_engine
 
         logger.info("Testing connection to Embedding endpoint...")
-        await asyncio.wait_for(
-            get_vector_engine().embedding_engine.embed_text(["test"]),
+        vector_engine = get_vector_engine()
+        embedding_vectors = await asyncio.wait_for(
+            vector_engine.embedding_engine.embed_text(["test"]),
             timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
         )
+
+        if not embedding_vectors or not embedding_vectors[0]:
+            raise ValueError("Embedding test did not return a valid vector.")
+
+        return len(embedding_vectors[0])
     except asyncio.TimeoutError:
         msg = (
             f"Embedding connection test timed out after {CONNECTION_TEST_TIMEOUT_SECONDS}s. "
@@ -141,3 +149,34 @@ async def test_embedding_connection() -> None:
         logger.error(e)
         logger.error("Connection to Embedding handler could not be established.")
         raise e
+
+
+def determine_embedding_dimensions(detected_dimensions: int) -> None:
+    """
+    Apply embedding-dimension policy using a single already-produced test vector size.
+
+    Rules:
+    - If EMBEDDING_DIMENSIONS is explicitly provided by the user, keep it as source of truth.
+    - Otherwise, sync config and active embedding engine dimensions to detected size.
+    """
+    configured_dimensions_raw = os.getenv("EMBEDDING_DIMENSIONS")
+    if configured_dimensions_raw is not None and configured_dimensions_raw.strip():
+        return
+
+    # NOTE: Imports inside function to avoid circular imports.
+    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+
+    embedding_config = get_embedding_config()
+    if embedding_config.embedding_dimensions != detected_dimensions:
+        embedding_config.embedding_dimensions = detected_dimensions
+
+        # Keep active engine in sync in this process.
+        embedding_engine = get_vector_engine().embedding_engine
+        if hasattr(embedding_engine, "dimensions"):
+            embedding_engine.dimensions = detected_dimensions
+
+        logger.info(
+            "Auto-detected embedding dimensions from connection test: %s",
+            detected_dimensions,
+        )

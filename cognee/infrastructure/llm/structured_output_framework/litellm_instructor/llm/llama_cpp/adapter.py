@@ -15,6 +15,9 @@ from tenacity import (
     stop_after_delay,
     wait_exponential_jitter,
 )
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
 
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
@@ -144,7 +147,7 @@ class LlamaCppAPIAdapter(LLMInterface):
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def acreate_structured_output(
@@ -198,3 +201,9 @@ class LlamaCppAPIAdapter(LLMInterface):
                 response = await asyncio.to_thread(_call_sync)
 
         return response
+
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
+        raise NotImplementedError
+
+    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
+        raise NotImplementedError

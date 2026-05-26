@@ -32,6 +32,10 @@ if get_llm_config().llm_provider.lower() == "gemini":
         source_node_id: str
         target_node_id: str
         relationship_name: str
+        description: str | None = Field(
+            None,
+            description="Concrete one-sentence fact expressed by this edge, using endpoint names.",
+        )
 
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""
@@ -61,6 +65,10 @@ else:
         source_node_id: str
         target_node_id: str
         relationship_name: str
+        description: str | None = Field(
+            None,
+            description="Concrete one-sentence fact expressed by this edge, using endpoint names.",
+        )
 
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""
@@ -260,10 +268,16 @@ class DefaultContentPrediction(BaseModel):
 
 
 class SummarizedContent(BaseModel):
-    """Class for a single class label summary and description."""
+    """Bulleted memory record produced by chunk summarization."""
 
-    summary: str
-    description: str
+    summary: str = Field(
+        ...,
+        description=(
+            "One leading sentence stating what the input is about, "
+            "followed by a bulleted list of self-contained facts."
+        ),
+    )
+    description: str = Field("", description="Unused; kept for backwards compatibility.")
 
 
 class SummarizedFunction(BaseModel):

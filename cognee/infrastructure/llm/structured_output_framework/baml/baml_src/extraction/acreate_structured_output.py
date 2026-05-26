@@ -30,7 +30,8 @@ T = TypeVar("T", bound="BaseModel | str")
 @retry(
     stop=stop_after_delay(128),
     wait=wait_exponential_jitter(8, 128),
-    before_sleep=before_sleep_log(logger, logging.DEBUG),
+    retry=retry_if_not_exception_type(asyncio.CancelledError),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
 async def acreate_structured_output(

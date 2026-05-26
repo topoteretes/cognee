@@ -22,6 +22,7 @@ from cognee_db_workers.harness import (
     Response,
     SubprocessSession,
     SubprocessTransportError,
+    _describe_exitcode,
     run_worker_loop,
     spawn_without_main,
 )
@@ -107,6 +108,34 @@ def _stillborn_worker(req_q, resp_q):
     # Exits immediately without emitting the ready sentinel. Used to simulate
     # a respawn factory that keeps handing back dead workers.
     return
+
+
+def _clean_exit_no_ready_worker(req_q, resp_q):
+    # Simulates the Docker-PID-1 watchdog bug signature: the worker exits
+    # cleanly (exitcode=0) before placing READY on the queue. The parent
+    # would have hung for the full init timeout with no useful diagnostic
+    # in the old code.
+    import os as _os
+
+    _os._exit(0)
+
+
+def _put_error_then_die_worker(req_q, resp_q):
+    # Queues an error Response and exits immediately, racing the
+    # ``Queue`` feeder thread's flush against process death. Exercises
+    # the post-death drain path in ``wait_for_ready``.
+    resp_q.put(Response(error="init-side boom"))
+
+
+def _signal_killed_worker(req_q, resp_q):
+    # Send ourselves SIGTERM before READY to exercise the signal-decoding
+    # path in ``_describe_exitcode``. We use SIGTERM rather than SIGKILL so
+    # the negative exitcode is portable (SIGKILL=-9 on Linux but the test
+    # body inspects whichever signal name appears — see assertions below).
+    import os as _os
+    import signal as _signal
+
+    _os.kill(_os.getpid(), _signal.SIGTERM)
 
 
 def _wait_for_worker_exit(session, timeout: float = 5.0) -> None:
@@ -261,6 +290,143 @@ def test_init_failure_propagates():
     with pytest.raises(RuntimeError, match="init failed"):
         session.wait_for_ready()
     assert session._closed is True
+
+
+def test_init_clean_exit_before_ready_surfaces_diagnostics():
+    """Regression guard for the Docker-PID-1 watchdog bug: a worker that
+    exits cleanly (exitcode=0) before emitting READY must surface a
+    specific error within seconds, with ``exitcode=0`` embedded in the
+    message so the cause is visible from a single log line.
+
+    The old code hung for the full init timeout with the unhelpful
+    message ``"Subprocess init timed out after 60.0s"`` — see PR #2830.
+    """
+    ctx = mp.get_context("spawn")
+    req_q = ctx.Queue()
+    resp_q = ctx.Queue()
+    proc = ctx.Process(target=_clean_exit_no_ready_worker, args=(req_q, resp_q), daemon=True)
+    with spawn_without_main():
+        proc.start()
+    # Use a generous init_timeout so a failure here is the fast-path
+    # "exited before ready" error, not the timeout error. The bugfix is
+    # specifically that we DON'T wait the full timeout.
+    session = SubprocessSession(proc, req_q, resp_q, init_timeout=30.0)
+    started = time.monotonic()
+    with pytest.raises(SubprocessTransportError, match="exited before signalling ready") as excinfo:
+        session.wait_for_ready()
+    elapsed = time.monotonic() - started
+    assert elapsed < 5.0, f"fast-fail path took too long: {elapsed:.2f}s"
+    msg = str(excinfo.value)
+    assert "exitcode=0" in msg, f"expected exitcode=0 in diagnostics, got: {msg}"
+    assert "alive=False" in msg, f"expected alive=False in diagnostics, got: {msg}"
+    assert session._closed is True
+
+
+def test_init_drain_recovers_late_error_response():
+    """When the worker queues an error Response and immediately exits, the
+    producer-side feeder thread may not have pushed the pickled bytes onto
+    the pipe before the process dies. ``wait_for_ready`` must poll briefly
+    after observing death so the error isn't swallowed.
+
+    Without the drain, this test would surface the generic "exited before
+    signalling ready" message and lose the worker's actual error text.
+    """
+    ctx = mp.get_context("spawn")
+    req_q = ctx.Queue()
+    resp_q = ctx.Queue()
+    proc = ctx.Process(target=_put_error_then_die_worker, args=(req_q, resp_q), daemon=True)
+    with spawn_without_main():
+        proc.start()
+    session = SubprocessSession(proc, req_q, resp_q, init_timeout=10.0)
+    with pytest.raises(SubprocessTransportError, match="init failed") as excinfo:
+        session.wait_for_ready()
+    assert "init-side boom" in str(excinfo.value), (
+        f"worker-side error text was dropped by the death race: {excinfo.value}"
+    )
+    assert session._closed is True
+
+
+def test_pdeathsig_arms_and_skips_polling_watchdog_on_linux():
+    """On Linux, ``set_pdeathsig`` arms the kernel parent-death signal and
+    ``run_worker_loop`` skips the polling watchdog. Regression guard against
+    a re-introduction of the Docker-PID-1 bug, where the polling watchdog's
+    ``current_ppid == 1`` heuristic killed workers in containers where the
+    legitimate parent is pid 1.
+    """
+    import sys
+
+    from cognee_db_workers import harness as _harness
+
+    if sys.platform != "linux":
+        pytest.skip("pdeathsig is Linux-only")
+
+    assert _harness.set_pdeathsig() is True, (
+        "pdeathsig should arm successfully on Linux — if this fails, the polling "
+        "watchdog will run and re-expose the PID-1 bug"
+    )
+
+    # Verify that ``run_worker_loop`` only starts the polling watchdog when
+    # pdeathsig fails. We inspect the call sites directly rather than spawning
+    # a child + introspecting threads, which is fragile.
+    import inspect
+
+    src = inspect.getsource(_harness.run_worker_loop)
+    assert "if not set_pdeathsig():" in src, (
+        "run_worker_loop must gate the polling watchdog behind pdeathsig success — "
+        "otherwise the PID-1 race in the polling watchdog can fire in Linux containers"
+    )
+
+
+def test_describe_exitcode_decodes_signals():
+    """Negative exitcodes are decoded into signal names with a short hint
+    so production failure modes (OOM kills, segfaults) are readable in one
+    log line. Unknown / non-negative codes pass through unchanged.
+    """
+    import signal as _signal
+
+    # Round-trip the most common signals. Use the live ``signal.Signals``
+    # enum rather than hard-coded numbers so the test is portable across
+    # platforms where signal numbering differs.
+    sigterm = _describe_exitcode(-int(_signal.SIGTERM))
+    assert "SIGTERM" in sigterm and str(-int(_signal.SIGTERM)) in sigterm
+
+    if hasattr(_signal, "SIGKILL"):
+        sigkill = _describe_exitcode(-int(_signal.SIGKILL))
+        assert "SIGKILL" in sigkill
+        assert "OOM" in sigkill, (
+            "SIGKILL should be annotated with the most common cause in production"
+        )
+
+    # Non-signal cases pass through as plain strings.
+    assert _describe_exitcode(None) == "None"
+    assert _describe_exitcode(0) == "0"
+    assert _describe_exitcode(1) == "1"
+    # An out-of-range negative code (no matching ``signal.Signals`` member)
+    # must NOT raise and must NOT pretend to know what it is.
+    assert _describe_exitcode(-999) == "-999"
+
+
+def test_init_signal_killed_worker_surfaces_signal_name():
+    """End-to-end: a worker that dies to SIGTERM before READY surfaces
+    ``exitcode=-15 (SIGTERM …)`` in the error message. Regression guard
+    against the signal-decoding pipeline (faulthandler + ``_describe_exitcode``)
+    silently coming undone.
+    """
+    import signal as _signal
+
+    ctx = mp.get_context("spawn")
+    req_q = ctx.Queue()
+    resp_q = ctx.Queue()
+    proc = ctx.Process(target=_signal_killed_worker, args=(req_q, resp_q), daemon=True)
+    with spawn_without_main():
+        proc.start()
+    session = SubprocessSession(proc, req_q, resp_q, init_timeout=10.0)
+    with pytest.raises(SubprocessTransportError, match="exited before signalling ready") as excinfo:
+        session.wait_for_ready()
+    msg = str(excinfo.value)
+    expected_code = -int(_signal.SIGTERM)
+    assert f"exitcode={expected_code}" in msg, msg
+    assert "SIGTERM" in msg, f"signal name not decoded into diagnostic: {msg}"
 
 
 def test_call_timeout_on_hung_worker():

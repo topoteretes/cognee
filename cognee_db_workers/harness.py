@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import ctypes.util
 import itertools
 import os
 import pickle
@@ -153,32 +154,95 @@ class HandleRegistry:
         return self._handles.pop(hid, None)
 
 
-def set_pdeathsig() -> None:
+# Annotations for the most common SIGKILL/SIGTERM/SIGSEGV/SIGABRT scenarios.
+# Keeps the diagnostic message immediately actionable instead of requiring
+# the reader to know what each signal usually means in production. Kept
+# small on purpose — only the signals we actually want to flag with extra
+# context get an entry; everything else falls back to just the signal name.
+_SIGNAL_HINTS: Dict[str, str] = {
+    "SIGKILL": "likely OOM kill or `docker kill`",
+    "SIGSEGV": "native crash — check faulthandler dump in worker stderr",
+    "SIGABRT": "abort/assert in native code",
+    "SIGTERM": "external termination (parent shutdown or platform stop)",
+    "SIGBUS": "bad memory access in native code",
+    "SIGFPE": "arithmetic error in native code",
+}
+
+
+def _describe_exitcode(exitcode: Optional[int]) -> str:
+    """Render an exitcode for human consumption.
+
+    ``None`` and non-negative codes pass through unchanged; negative codes
+    are decoded into the signal that killed the worker (``-9`` → ``SIGKILL``)
+    with a short hint about the typical cause in production. POSIX exit
+    semantics: ``multiprocessing.Process.exitcode`` is the negated signal
+    number when the child died from an uncaught signal.
+    """
+    if exitcode is None or exitcode >= 0:
+        return str(exitcode)
+    try:
+        sig = signal.Signals(-exitcode)
+    except (ValueError, AttributeError):
+        return str(exitcode)
+    hint = _SIGNAL_HINTS.get(sig.name)
+    if hint:
+        return f"{exitcode} ({sig.name} — {hint})"
+    return f"{exitcode} ({sig.name})"
+
+
+def set_pdeathsig() -> bool:
     """Linux only: ask the kernel to SIGTERM this process when the parent dies.
+
+    Returns ``True`` when the signal was successfully armed, ``False`` on any
+    other platform or if the prctl call failed. Callers use the return value
+    to decide whether the portable polling watchdog is still needed.
+
+    Resolves libc via ``ctypes.util.find_library`` rather than hard-coding
+    ``libc.so.6`` so musl-based distros (Alpine) and other non-glibc Linuxes
+    still arm pdeathsig instead of silently falling through to the polling
+    watchdog — which would re-expose the Docker-PID-1 hang this module was
+    built to prevent.
 
     No-op on other platforms. Complements ``daemon=True`` which is bypassed on
     abnormal parent termination.
     """
     if sys.platform != "linux":
-        return
+        return False
     try:
         PR_SET_PDEATHSIG = 1
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-        libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+        # ``find_library`` returns the SONAME of the system libc (e.g.
+        # ``libc.so.6`` on glibc, ``libc.musl-x86_64.so.1`` on Alpine).
+        # Passing ``None`` to ``CDLL`` opens the main program's symbol table
+        # which on Linux includes the dynamic linker's libc symbols — used as
+        # a last-ditch fallback if ``find_library`` returns nothing (rare).
+        libc_name = ctypes.util.find_library("c")
+        libc = ctypes.CDLL(libc_name, use_errno=True) if libc_name else ctypes.CDLL(None)
+        rc = libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+        return rc == 0
     except Exception:
-        pass
+        return False
 
 
 def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
-    """Portable fallback for platforms without ``pdeathsig`` (macOS, Windows).
+    """Portable fallback when ``set_pdeathsig`` is unavailable or failed.
+
+    Used on macOS, Windows, and on Linux configurations where the prctl call
+    in ``set_pdeathsig`` did not succeed (no libc found, sandboxed prctl,
+    etc.). The call site in ``run_worker_loop`` gates this watchdog behind
+    ``set_pdeathsig()`` returning ``False`` so a successfully-armed kernel
+    signal isn't shadowed by a redundant polling thread.
 
     Starts a daemon thread that polls ``os.getppid()``. When the original
-    parent dies the child is reparented (to init/launchd, typically pid 1),
-    so a ppid change is a reliable signal. The watchdog then terminates the
-    worker with ``os._exit`` to avoid orphaned DB processes holding file locks.
+    parent dies the child is reparented (typically to launchd/init), so a
+    ppid change is a reliable signal. The watchdog then terminates the worker
+    with ``os._exit`` to avoid orphaned DB processes holding file locks.
 
-    Redundant on Linux (``set_pdeathsig`` covers it) but cheap enough to run
-    everywhere as defense-in-depth.
+    Only checks for ``current_ppid != original_ppid``. An earlier version
+    also exited when ``current_ppid == 1`` as a heuristic for "reparented to
+    init" — but in container deployments the legitimate parent is frequently
+    pid 1 (cognee running as the container's entrypoint), which made the
+    watchdog kill workers on their very first poll. The ppid-change check
+    alone covers reparenting correctly in all cases.
     """
     import threading
 
@@ -193,7 +257,7 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
                 current_ppid = os.getppid()
             except Exception:
                 return
-            if current_ppid != original_ppid or current_ppid == 1:
+            if current_ppid != original_ppid:
                 # Parent is gone; exit fast without running atexit handlers
                 # (those may try to use resources owned by the dead parent).
                 os._exit(0)
@@ -266,6 +330,33 @@ class spawn_without_main:
 Dispatcher = Callable[[HandleRegistry, Request], Any]
 
 
+def _enable_faulthandler() -> None:
+    """Install Python's ``faulthandler`` so a native crash inside the worker
+    (Kuzu / LanceDB C++) dumps the Python traceback that triggered it to
+    stderr before the process dies. Without this, segfaults surface to the
+    parent as a bare ``exitcode=-11`` with no context about which query or
+    handler was on the stack.
+
+    Set ``SUBPROCESS_FAULTHANDLER_DISABLED=1`` to opt out (e.g. when running
+    under a debugger that wants to handle SIGSEGV itself).
+    """
+    if os.environ.get("SUBPROCESS_FAULTHANDLER_DISABLED") == "1":
+        return
+    try:
+        import faulthandler
+
+        # ``sys.__stderr__`` is the real fd 2 the worker inherited from the
+        # parent. ``sys.stderr`` may have been wrapped by an embedding host;
+        # the underlying file descriptor is what container log collectors
+        # capture, so prefer it.
+        faulthandler.enable(file=sys.__stderr__ or sys.stderr, all_threads=True)
+    except Exception:
+        # Best-effort: if faulthandler can't be enabled (no usable stderr,
+        # etc.) we just lose this diagnostic. Don't crash the worker over a
+        # debugging aid.
+        pass
+
+
 def run_worker_loop(
     dispatch: Dict[int, Dispatcher],
     req_q,
@@ -275,8 +366,15 @@ def run_worker_loop(
     """Serialize all requests on a single event loop. Handlers may be sync or
     return a coroutine; coroutines are awaited on the worker's asyncio loop.
     """
-    set_pdeathsig()
-    start_parent_liveness_watchdog()
+    _enable_faulthandler()
+    # pdeathsig is the authoritative parent-death signal on Linux. Only fall
+    # back to the portable polling watchdog when the kernel hook is
+    # unavailable (macOS, Windows) or failed to arm — that watchdog has no
+    # way to distinguish "legitimate parent happens to be pid 1" from
+    # "reparented to init", so we avoid running it whenever pdeathsig has
+    # us covered.
+    if not set_pdeathsig():
+        start_parent_liveness_watchdog()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -465,22 +563,125 @@ class SubprocessSession:
     def touch(self) -> None:
         self._last_accessed_at = time.time()
 
-    def wait_for_ready(self) -> None:
+    def _init_diagnostics(self) -> str:
+        """Compact ``pid=… exitcode=… alive=…`` summary of the worker process,
+        included in init-failure messages so callers can tell a silent
+        ``os._exit(0)`` apart from a timeout where the child is still
+        running.
+
+        Negative exit codes are decoded into the killing signal's name
+        (``exitcode=-9 (SIGKILL — likely OOM/docker kill)``) so the most
+        common production failure shapes don't require POSIX trivia to
+        read the log line.
+        """
         try:
-            resp = self._resp_q.get(timeout=self._init_timeout)
-        except std_queue.Empty:
-            self._terminate()
-            self._closed = True
-            raise SubprocessTransportError(f"Subprocess init timed out after {self._init_timeout}s")
+            pid = self._proc.pid
+        except Exception:
+            pid = None
+        try:
+            exitcode = self._proc.exitcode
+        except Exception:
+            exitcode = None
+        try:
+            alive = self._proc.is_alive()
+        except Exception:
+            alive = None
+        return f"pid={pid} exitcode={_describe_exitcode(exitcode)} alive={alive}"
+
+    def _init_failure_message(self, reason: str) -> str:
+        return f"Subprocess init {reason} after {self._init_timeout}s ({self._init_diagnostics()})"
+
+    # Total time we'll wait for the producer-side feeder thread's bytes to
+    # cross the pipe after the worker exits. Long enough to absorb scheduler
+    # jitter under load; short enough that an empty queue resolves to the
+    # "exited before signalling ready" message quickly.
+    _POST_DEATH_DRAIN_TIMEOUT = 0.5
+    _POST_DEATH_DRAIN_POLL = 0.02
+
+    def _drain_response_after_death(self) -> Optional[Response]:
+        """Try to read a Response that the worker queued just before exiting.
+
+        See the caller's comment for the race this addresses: the producer's
+        feeder thread may not have pushed pickled bytes onto the pipe before
+        the worker exited, so ``get_nowait()`` immediately after observing
+        ``is_alive() == False`` can return ``Empty`` even when data is in
+        flight. Poll for a short bounded window so legitimate worker-side
+        errors aren't lost.
+
+        ``multiprocessing.Queue`` can also raise ``EOFError`` / ``OSError``
+        when the underlying pipe is closed or corrupted (e.g. the worker
+        died mid-``put``). We treat those the same as "no message recovered"
+        and fall through to the caller's diagnostic path — surfacing a raw
+        pipe error here would mask the much more useful "exited before
+        signalling ready" message with ``pid=… exitcode=…`` context.
+        """
+        deadline = time.monotonic() + self._POST_DEATH_DRAIN_TIMEOUT
+        while True:
+            try:
+                return self._resp_q.get_nowait()
+            except std_queue.Empty:
+                if time.monotonic() >= deadline:
+                    return None
+                time.sleep(self._POST_DEATH_DRAIN_POLL)
+            except (EOFError, OSError):
+                # Pipe closed/corrupted — no salvageable response.
+                return None
+
+    def wait_for_ready(self) -> None:
+        # Poll the response queue in short slices so we notice if the child
+        # dies before producing a READY sentinel. A single blocking ``get``
+        # with the full init timeout hides that case entirely: the caller
+        # learns nothing beyond "60s elapsed" even when the child exited 50ms
+        # in. By interleaving ``is_alive()`` checks we can fail fast and
+        # surface the worker's pid / exitcode in the error message.
+        deadline = time.monotonic() + self._init_timeout
+        poll_interval = min(0.5, self._init_timeout) if self._init_timeout > 0 else 0.5
+        resp = None
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._terminate()
+                self._closed = True
+                raise SubprocessTransportError(self._init_failure_message("timed out"))
+            try:
+                resp = self._resp_q.get(timeout=min(poll_interval, remaining))
+                break
+            except std_queue.Empty:
+                if not self._proc.is_alive():
+                    # Drain anything the child managed to queue before dying
+                    # (a Response with .error is common when init raised).
+                    #
+                    # ``multiprocessing.Queue`` uses a background feeder
+                    # thread in the producer to push pickled bytes from an
+                    # in-memory buffer onto the pipe — those bytes may not
+                    # have crossed yet when the worker exits, so a single
+                    # ``get_nowait()`` races the flush and would drop the
+                    # error the child intended to send. Poll for a short
+                    # bounded window (sub-second) before giving up. We
+                    # cannot use ``proc.join()`` to force a flush: the
+                    # feeder thread lives in the *worker* process and is
+                    # already gone once the worker has exited.
+                    drained = self._drain_response_after_death()
+                    if drained is not None:
+                        resp = drained
+                        break
+                    self._terminate()
+                    self._closed = True
+                    raise SubprocessTransportError(
+                        self._init_failure_message("exited before signalling ready")
+                    )
         if resp.error:
             self._terminate()
             self._closed = True
-            raise SubprocessTransportError(f"Subprocess init failed:\n{resp.error}")
+            raise SubprocessTransportError(
+                f"Subprocess init failed ({self._init_diagnostics()}):\n{resp.error}"
+            )
         if resp.result != _READY_SENTINEL:
             self._terminate()
             self._closed = True
             raise SubprocessTransportError(
-                f"Unexpected subprocess startup response: {resp.result!r}"
+                f"Unexpected subprocess startup response "
+                f"({self._init_diagnostics()}): {resp.result!r}"
             )
         # Only register in ``_all_sessions`` after the worker is actually
         # ready. Doing this in ``__init__`` exposed the session to

@@ -1,0 +1,997 @@
+{
+  "memories": [
+    {
+      "title": "First Day at University",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m0_narrator", "name": "Narrator", "type": "Person", "description": "The person recalling their first day at university"},
+          {"id": "m0_university_of_belgrade", "name": "University of Belgrade", "type": "Organization", "description": "University where the narrator enrolled"},
+          {"id": "m0_cs_program", "name": "Computer Science Program", "type": "Concept", "description": "Academic program the narrator chose to study"},
+          {"id": "m0_professor", "name": "Professor", "type": "Person", "description": "Lecturer who gave an inspiring opening lecture"}
+        ],
+        "edges": [
+          {"source_node_id": "m0_narrator", "target_node_id": "m0_university_of_belgrade", "relationship_name": "enrolled_at"},
+          {"source_node_id": "m0_narrator", "target_node_id": "m0_cs_program", "relationship_name": "studied"},
+          {"source_node_id": "m0_professor", "target_node_id": "m0_university_of_belgrade", "relationship_name": "works_at"}
+        ]
+      },
+      "summary": {
+        "summary": "A recollection of the narrator's first day at the University of Belgrade.\n- Enrolled in the Computer Science program\n- Campus was bustling with new students\n- Professor gave an inspiring opening lecture about the future of computing\n- The experience shaped the next four years of the narrator's life",
+        "description": ""
+      }
+    },
+    {
+      "title": "Learning to Ride a Bicycle",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m1_narrator", "name": "Narrator", "type": "Person", "description": "The person recalling learning to ride a bicycle"},
+          {"id": "m1_grandfather", "name": "Grandfather", "type": "Person", "description": "The narrator's grandfather who taught them to ride"},
+          {"id": "m1_park", "name": "Neighborhood Park", "type": "Place", "description": "Park near the narrator's house where the lesson took place"},
+          {"id": "m1_bicycle", "name": "Bicycle", "type": "Object", "description": "The bicycle the narrator learned to ride"}
+        ],
+        "edges": [
+          {"source_node_id": "m1_grandfather", "target_node_id": "m1_narrator", "relationship_name": "taught"},
+          {"source_node_id": "m1_narrator", "target_node_id": "m1_bicycle", "relationship_name": "learned_to_ride"},
+          {"source_node_id": "m1_narrator", "target_node_id": "m1_park", "relationship_name": "practiced_at"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator recalls learning to ride a bicycle with their grandfather at age six.\n- Grandfather held the seat and ran alongside\n- The moment of riding independently brought pure joy\n- Crashed into a bush shortly after but it didn't diminish the experience",
+        "description": ""
+      }
+    },
+    {
+      "title": "The Solar Eclipse of 1999",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m2_narrator", "name": "Narrator", "type": "Person", "description": "The person who watched the solar eclipse"},
+          {"id": "m2_eclipse", "name": "Total Solar Eclipse of 1999", "type": "Event", "description": "Total solar eclipse visible from parts of Europe on August 11, 1999"},
+          {"id": "m2_father", "name": "Father", "type": "Person", "description": "The narrator's father who bought special viewing glasses"},
+          {"id": "m2_rooftop", "name": "Rooftop", "type": "Place", "description": "Location where the narrator watched the eclipse"}
+        ],
+        "edges": [
+          {"source_node_id": "m2_narrator", "target_node_id": "m2_eclipse", "relationship_name": "witnessed"},
+          {"source_node_id": "m2_father", "target_node_id": "m2_narrator", "relationship_name": "provided_glasses_to"},
+          {"source_node_id": "m2_narrator", "target_node_id": "m2_rooftop", "relationship_name": "watched_from"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator recalls witnessing the total solar eclipse of August 11, 1999.\n- Watched from the rooftop with special glasses bought by their father\n- The sky darkened in the middle of the day and birds went silent\n- The eclipse lasted only a couple of minutes but left a lasting impression",
+        "description": ""
+      }
+    },
+    {
+      "title": "Cooking Grandmother's Stew",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m3_narrator", "name": "Narrator", "type": "Person", "description": "The person who continues the family recipe tradition"},
+          {"id": "m3_grandmother", "name": "Grandmother", "type": "Person", "description": "The creator of the family beef stew recipe"},
+          {"id": "m3_beef_stew", "name": "Beef Stew Recipe", "type": "Concept", "description": "A family recipe passed down for three generations"},
+          {"id": "m3_cast_iron_pot", "name": "Cast-Iron Pot", "type": "Object", "description": "The cooking vessel used for the stew"}
+        ],
+        "edges": [
+          {"source_node_id": "m3_grandmother", "target_node_id": "m3_beef_stew", "relationship_name": "created"},
+          {"source_node_id": "m3_narrator", "target_node_id": "m3_beef_stew", "relationship_name": "continues_making"},
+          {"source_node_id": "m3_grandmother", "target_node_id": "m3_cast_iron_pot", "relationship_name": "cooked_with"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator preserves their grandmother's beef stew recipe passed down for three generations.\n- Secret ingredient is a splash of red wine vinegar added at the end\n- Always cooked in a cast-iron pot over low heat for at least four hours\n- The narrator still uses the exact recipe every winter",
+        "description": ""
+      }
+    },
+    {
+      "title": "First Programming Language",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m4_narrator", "name": "Narrator", "type": "Person", "description": "The person who wrote their first program at age twelve"},
+          {"id": "m4_basic", "name": "BASIC", "type": "Concept", "description": "The programming language used for the first program"},
+          {"id": "m4_commodore64", "name": "Commodore 64", "type": "Object", "description": "The home computer used to write the program"},
+          {"id": "m4_guessing_game", "name": "Number Guessing Game", "type": "Concept", "description": "A simple game that was the narrator's first program"}
+        ],
+        "edges": [
+          {"source_node_id": "m4_narrator", "target_node_id": "m4_basic", "relationship_name": "programmed_in"},
+          {"source_node_id": "m4_narrator", "target_node_id": "m4_commodore64", "relationship_name": "used"},
+          {"source_node_id": "m4_narrator", "target_node_id": "m4_guessing_game", "relationship_name": "created"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator recalls writing their first program in BASIC on a Commodore 64 at age twelve.\n- Created a simple number guessing game with 'Too high' and 'Too low' feedback\n- The sense of accomplishment when it ran without errors was addictive\n- This moment sparked a lifelong passion for programming",
+        "description": ""
+      }
+    },
+    {
+      "title": "Hiking in the Alps",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m5_narrator", "name": "Narrator", "type": "Person", "description": "The person who hiked the Tour du Mont Blanc"},
+          {"id": "m5_tmb", "name": "Tour du Mont Blanc", "type": "Place", "description": "A 170-kilometer hiking trail through France, Italy, and Switzerland"},
+          {"id": "m5_col_de_la_seigne", "name": "Col de la Seigne", "type": "Place", "description": "A mountain pass with breathtaking views along the trail"},
+          {"id": "m5_friends", "name": "Two Friends", "type": "Person", "description": "Companions who hiked with the narrator"}
+        ],
+        "edges": [
+          {"source_node_id": "m5_narrator", "target_node_id": "m5_tmb", "relationship_name": "hiked"},
+          {"source_node_id": "m5_friends", "target_node_id": "m5_tmb", "relationship_name": "hiked"},
+          {"source_node_id": "m5_narrator", "target_node_id": "m5_col_de_la_seigne", "relationship_name": "visited"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator hiked the Tour du Mont Blanc in the summer of 2015 with two friends.\n- The 170-kilometer trail passed through France, Italy, and Switzerland over eleven days\n- Views from Col de la Seigne were breathtaking\n- They carried all their gear and camped along the way",
+        "description": ""
+      }
+    },
+    {
+      "title": "Adopting a Cat",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m6_narrator", "name": "Narrator", "type": "Person", "description": "The person who adopted the cat"},
+          {"id": "m6_luna", "name": "Luna", "type": "Person", "description": "The adopted cat with a distinctive orange patch on her left ear"},
+          {"id": "m6_shelter", "name": "Local Shelter", "type": "Organization", "description": "The animal shelter where Luna was adopted from in 2020"}
+        ],
+        "edges": [
+          {"source_node_id": "m6_narrator", "target_node_id": "m6_luna", "relationship_name": "adopted"},
+          {"source_node_id": "m6_luna", "target_node_id": "m6_shelter", "relationship_name": "came_from"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator adopted a cat named Luna from a local shelter in 2020.\n- Luna was shy at first and hid under the couch for three days\n- She gradually warmed up and now sleeps on the narrator's keyboard\n- Luna has a distinctive orange patch on her left ear",
+        "description": ""
+      }
+    },
+    {
+      "title": "The Blackout of 2003",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m7_narrator", "name": "Narrator", "type": "Person", "description": "The person who experienced the blackout"},
+          {"id": "m7_blackout", "name": "Northeast Blackout of 2003", "type": "Event", "description": "Major power outage in August 2003 that lasted nearly two days"},
+          {"id": "m7_neighbors", "name": "Neighbors", "type": "Person", "description": "Community members who gathered during the blackout"},
+          {"id": "m7_street", "name": "Street Gathering", "type": "Event", "description": "Impromptu community gathering during the blackout"}
+        ],
+        "edges": [
+          {"source_node_id": "m7_narrator", "target_node_id": "m7_blackout", "relationship_name": "experienced"},
+          {"source_node_id": "m7_neighbors", "target_node_id": "m7_street", "relationship_name": "participated_in"},
+          {"source_node_id": "m7_blackout", "target_node_id": "m7_street", "relationship_name": "caused"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator experienced the Northeast blackout of August 2003 which lasted nearly two days.\n- Neighbors gathered on the street and shared food from their fridges\n- Someone played guitar and they sang songs by candlelight\n- It was a rare moment of community in an otherwise isolating city",
+        "description": ""
+      }
+    },
+    {
+      "title": "Learning to Swim",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m8_narrator", "name": "Narrator", "type": "Person", "description": "The person who learned to swim at age eight"},
+          {"id": "m8_mrs_petrovic", "name": "Mrs. Petrovic", "type": "Person", "description": "Patient but firm swimming instructor"},
+          {"id": "m8_municipal_pool", "name": "Municipal Pool", "type": "Place", "description": "The pool where swimming lessons took place"}
+        ],
+        "edges": [
+          {"source_node_id": "m8_mrs_petrovic", "target_node_id": "m8_narrator", "relationship_name": "taught"},
+          {"source_node_id": "m8_narrator", "target_node_id": "m8_municipal_pool", "relationship_name": "learned_at"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator learned to swim at the municipal pool at age eight under Mrs. Petrovic's instruction.\n- The instructor was patient but firm in her teaching approach\n- Had to practice floating on backs before anything else\n- Was terrified of the deep end for months before finally diving in",
+        "description": ""
+      }
+    },
+    {
+      "title": "First Job Interview",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m9_narrator", "name": "Narrator", "type": "Person", "description": "The person who attended their first job interview"},
+          {"id": "m9_consultancy", "name": "Software Consultancy", "type": "Organization", "description": "Small software company where the interview took place in 2010"},
+          {"id": "m9_merge_sort", "name": "Merge Sort", "type": "Concept", "description": "Sorting algorithm the narrator explained during the whiteboard exercise"},
+          {"id": "m9_interviewer", "name": "Interviewer", "type": "Person", "description": "Person who conducted the technical interview"}
+        ],
+        "edges": [
+          {"source_node_id": "m9_narrator", "target_node_id": "m9_consultancy", "relationship_name": "interviewed_at"},
+          {"source_node_id": "m9_interviewer", "target_node_id": "m9_narrator", "relationship_name": "interviewed"},
+          {"source_node_id": "m9_narrator", "target_node_id": "m9_merge_sort", "relationship_name": "explained"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator recalls their first real job interview at a small software consultancy in 2010.\n- Was so nervous they forgot their portfolio at home\n- Blanked on quicksort but successfully explained merge sort on the whiteboard\n- Received a job offer two days later",
+        "description": ""
+      }
+    },
+    {
+      "title": "Moving to a New City",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m10_narrator", "name": "Narrator", "type": "Person", "description": "The person who relocated to Berlin"},
+          {"id": "m10_berlin", "name": "Berlin", "type": "Place", "description": "City the narrator moved to in 2018"},
+          {"id": "m10_kreuzberg", "name": "Kreuzberg", "type": "Place", "description": "Berlin district that felt like home"},
+          {"id": "m10_coworking", "name": "Co-working Space", "type": "Place", "description": "Shared workspace where the narrator met new friends"}
+        ],
+        "edges": [
+          {"source_node_id": "m10_narrator", "target_node_id": "m10_berlin", "relationship_name": "moved_to"},
+          {"source_node_id": "m10_narrator", "target_node_id": "m10_coworking", "relationship_name": "joined"},
+          {"source_node_id": "m10_kreuzberg", "target_node_id": "m10_berlin", "relationship_name": "part_of"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator moved to Berlin in 2018 knowing nobody in the city.\n- The first month was lonely, spent exploring neighborhoods on foot\n- Found a co-working space where they met people who became close friends\n- The Kreuzberg district felt like home within six months",
+        "description": ""
+      }
+    },
+    {
+      "title": "Building a Treehouse",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m11_narrator", "name": "Narrator", "type": "Person", "description": "Ten-year-old who helped build the treehouse"},
+          {"id": "m11_father", "name": "Father", "type": "Person", "description": "The narrator's father who helped build the treehouse"},
+          {"id": "m11_treehouse", "name": "Treehouse", "type": "Object", "description": "Structure built in the oak tree with a rope ladder and window"},
+          {"id": "m11_oak_tree", "name": "Oak Tree", "type": "Object", "description": "Backyard tree where the treehouse was built"}
+        ],
+        "edges": [
+          {"source_node_id": "m11_narrator", "target_node_id": "m11_treehouse", "relationship_name": "built"},
+          {"source_node_id": "m11_father", "target_node_id": "m11_treehouse", "relationship_name": "built"},
+          {"source_node_id": "m11_treehouse", "target_node_id": "m11_oak_tree", "relationship_name": "located_in"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator and their father built a treehouse in the backyard oak tree when the narrator was ten.\n- Spent three weekends measuring, cutting, and nailing boards\n- Featured a rope ladder and a small window facing west\n- The narrator used it as a reading nook every summer until they moved",
+        "description": ""
+      }
+    },
+    {
+      "title": "Attending a Live Concert",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m12_narrator", "name": "Narrator", "type": "Person", "description": "The person attending their first live concert"},
+          {"id": "m12_radiohead", "name": "Radiohead", "type": "Organization", "description": "British rock band that performed at the festival"},
+          {"id": "m12_festival", "name": "Music Festival", "type": "Event", "description": "Festival in 2006 where Radiohead performed"},
+          {"id": "m12_karma_police", "name": "Karma Police", "type": "Concept", "description": "Radiohead song the crowd sang along to"}
+        ],
+        "edges": [
+          {"source_node_id": "m12_narrator", "target_node_id": "m12_festival", "relationship_name": "attended"},
+          {"source_node_id": "m12_radiohead", "target_node_id": "m12_festival", "relationship_name": "performed_at"},
+          {"source_node_id": "m12_radiohead", "target_node_id": "m12_karma_police", "relationship_name": "performed"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator's first live concert was Radiohead at a festival in 2006.\n- The band opened with 'There There' and the crowd erupted\n- Thousands of people sang along to 'Karma Police' in a transcendent moment\n- The narrator still has the wristband from that day",
+        "description": ""
+      }
+    },
+    {
+      "title": "Debugging a Production Outage",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m13_narrator", "name": "Narrator", "type": "Person", "description": "Engineer who debugged the production outage"},
+          {"id": "m13_database", "name": "Production Database", "type": "Concept", "description": "Database that went down due to misconfigured connection pool"},
+          {"id": "m13_connection_pool", "name": "Connection Pool Config", "type": "Concept", "description": "Configuration that was changed from 100 to 10 max connections"},
+          {"id": "m13_deployment", "name": "Recent Deployment", "type": "Event", "description": "Deployment that introduced the misconfiguration"}
+        ],
+        "edges": [
+          {"source_node_id": "m13_narrator", "target_node_id": "m13_database", "relationship_name": "debugged"},
+          {"source_node_id": "m13_deployment", "target_node_id": "m13_connection_pool", "relationship_name": "misconfigured"},
+          {"source_node_id": "m13_connection_pool", "target_node_id": "m13_database", "relationship_name": "caused_outage_of"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator debugged a production database outage at 3 AM in 2019.\n- A recent deployment had changed max connections from 100 to 10\n- Spent four hours tracing the issue through logs\n- The fix was a one-line config change but the investigation was grueling",
+        "description": ""
+      }
+    },
+    {
+      "title": "Visiting a Museum in Florence",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m14_narrator", "name": "Narrator", "type": "Person", "description": "The person who visited the museum in Florence"},
+          {"id": "m14_david", "name": "David", "type": "Object", "description": "Michelangelo's famous sculpture"},
+          {"id": "m14_michelangelo", "name": "Michelangelo", "type": "Person", "description": "Renaissance artist who created the David sculpture"},
+          {"id": "m14_galleria", "name": "Galleria dell'Accademia", "type": "Place", "description": "Museum in Florence housing the David sculpture"},
+          {"id": "m14_florence", "name": "Florence", "type": "Place", "description": "Italian city where the museum is located"}
+        ],
+        "edges": [
+          {"source_node_id": "m14_narrator", "target_node_id": "m14_galleria", "relationship_name": "visited"},
+          {"source_node_id": "m14_michelangelo", "target_node_id": "m14_david", "relationship_name": "created"},
+          {"source_node_id": "m14_david", "target_node_id": "m14_galleria", "relationship_name": "housed_in"},
+          {"source_node_id": "m14_galleria", "target_node_id": "m14_florence", "relationship_name": "located_in"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator visited the Galleria dell'Accademia in Florence to see Michelangelo's David.\n- No photograph prepares you for the scale and detail of the sculpture\n- Stood there for twenty minutes just looking at the hands\n- The museum was crowded but everything else faded away in that moment",
+        "description": ""
+      }
+    },
+    {
+      "title": "First Open Source Contribution",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m15_narrator", "name": "Narrator", "type": "Person", "description": "The person who made their first open source contribution"},
+          {"id": "m15_logging_library", "name": "Python Logging Library", "type": "Concept", "description": "Open source Python library where the bug was fixed"},
+          {"id": "m15_race_condition", "name": "Race Condition Bug", "type": "Concept", "description": "Bug in the file rotation handler that caused log file truncation"},
+          {"id": "m15_pull_request", "name": "Pull Request", "type": "Concept", "description": "Code contribution that took three rounds of review"}
+        ],
+        "edges": [
+          {"source_node_id": "m15_narrator", "target_node_id": "m15_logging_library", "relationship_name": "contributed_to"},
+          {"source_node_id": "m15_narrator", "target_node_id": "m15_race_condition", "relationship_name": "fixed"},
+          {"source_node_id": "m15_pull_request", "target_node_id": "m15_logging_library", "relationship_name": "merged_into"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator's first open source contribution was a bug fix to a Python logging library in 2014.\n- Fixed a race condition in the file rotation handler causing log file truncation\n- The pull request went through three rounds of review before being merged\n- Seeing their name in the changelog was incredibly satisfying",
+        "description": ""
+      }
+    },
+    {
+      "title": "Snow Day in School",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m16_narrator", "name": "Narrator", "type": "Person", "description": "The person who experienced the snow day"},
+          {"id": "m16_snowfall", "name": "January 1998 Snowfall", "type": "Event", "description": "The heaviest snowfall the narrator remembers, canceling school for three days"},
+          {"id": "m16_snow_fort", "name": "Snow Fort", "type": "Object", "description": "Enormous snow fort with tunnels and a watchtower built in the park"},
+          {"id": "m16_park", "name": "Park", "type": "Place", "description": "Location where the snow fort was built"}
+        ],
+        "edges": [
+          {"source_node_id": "m16_narrator", "target_node_id": "m16_snowfall", "relationship_name": "experienced"},
+          {"source_node_id": "m16_narrator", "target_node_id": "m16_snow_fort", "relationship_name": "built"},
+          {"source_node_id": "m16_snow_fort", "target_node_id": "m16_park", "relationship_name": "located_in"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator recalls the heaviest snowfall in January 1998 when school was canceled for three days.\n- Built an enormous snow fort in the park with tunnels and a watchtower\n- Hands were frozen but refused to go inside\n- The fort survived until February before collapsing",
+        "description": ""
+      }
+    },
+    {
+      "title": "Reading Lord of the Rings",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m17_narrator", "name": "Narrator", "type": "Person", "description": "Fourteen-year-old who read the entire trilogy in one week"},
+          {"id": "m17_lotr", "name": "Lord of the Rings", "type": "Concept", "description": "Fantasy novel trilogy by J.R.R. Tolkien"},
+          {"id": "m17_tolkien", "name": "J.R.R. Tolkien", "type": "Person", "description": "Author of the Lord of the Rings"},
+          {"id": "m17_middle_earth", "name": "Middle-earth", "type": "Place", "description": "Fictional setting of the Lord of the Rings"}
+        ],
+        "edges": [
+          {"source_node_id": "m17_narrator", "target_node_id": "m17_lotr", "relationship_name": "read"},
+          {"source_node_id": "m17_tolkien", "target_node_id": "m17_lotr", "relationship_name": "authored"},
+          {"source_node_id": "m17_lotr", "target_node_id": "m17_middle_earth", "relationship_name": "set_in"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator read the entire Lord of the Rings trilogy in one week during summer break at age fourteen.\n- Barely slept or ate, completely absorbed in Middle-earth\n- 'The Bridge of Khazad-dum' chapter gave them chills\n- First time a book made them cry, during the Grey Havens ending",
+        "description": ""
+      }
+    },
+    {
+      "title": "Learning to Cook Pasta",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m18_narrator", "name": "Narrator", "type": "Person", "description": "College student who learned pasta cooking techniques"},
+          {"id": "m18_roommate", "name": "Italian Roommate", "type": "Person", "description": "Italian college roommate who taught pasta cooking rules"},
+          {"id": "m18_pasta_technique", "name": "Pasta Cooking Technique", "type": "Concept", "description": "Rules about salting water, not breaking spaghetti, and saving pasta water"}
+        ],
+        "edges": [
+          {"source_node_id": "m18_roommate", "target_node_id": "m18_narrator", "relationship_name": "taught"},
+          {"source_node_id": "m18_roommate", "target_node_id": "m18_pasta_technique", "relationship_name": "shared"}
+        ]
+      },
+      "summary": {
+        "summary": "An Italian roommate in college taught the narrator essential pasta cooking rules.\n- Salt the pasta water generously so it tastes like the sea\n- Never break spaghetti\n- Always save some pasta water for the sauce\n- These simple rules transformed the narrator's cooking forever",
+        "description": ""
+      }
+    },
+    {
+      "title": "Winning a Hackathon",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m19_narrator", "name": "Narrator", "type": "Person", "description": "Team member who participated in the hackathon"},
+          {"id": "m19_hackathon", "name": "48-Hour Hackathon", "type": "Event", "description": "Hackathon in 2017 that the narrator's team won"},
+          {"id": "m19_translator", "name": "Sign Language Translator", "type": "Concept", "description": "Real-time translator for sign language using computer vision"},
+          {"id": "m19_cnn_model", "name": "CNN Model", "type": "Concept", "description": "Pre-trained convolutional neural network fine-tuned on ASL datasets"},
+          {"id": "m19_team", "name": "Team", "type": "Organization", "description": "Four-person team that won the hackathon"}
+        ],
+        "edges": [
+          {"source_node_id": "m19_team", "target_node_id": "m19_hackathon", "relationship_name": "won"},
+          {"source_node_id": "m19_team", "target_node_id": "m19_translator", "relationship_name": "built"},
+          {"source_node_id": "m19_translator", "target_node_id": "m19_cnn_model", "relationship_name": "used"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator's team won a 48-hour hackathon in 2017 by building a sign language translator.\n- Used computer vision with a pre-trained CNN model fine-tuned on ASL datasets\n- The demo translated basic signs with 85% accuracy\n- The four-person team split the prize equally",
+        "description": ""
+      }
+    },
+    {
+      "title": "A Flat Tire on a Road Trip",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m20_narrator", "name": "Narrator", "type": "Person", "description": "One of the travelers on the road trip"},
+          {"id": "m20_highway", "name": "Deserted Highway", "type": "Place", "description": "Stretch of highway where the flat tire occurred"},
+          {"id": "m20_truck_driver", "name": "Truck Driver", "type": "Person", "description": "Helpful stranger who stopped to assist with the tire change"},
+          {"id": "m20_beach", "name": "Beach", "type": "Place", "description": "Coastal destination of the road trip"}
+        ],
+        "edges": [
+          {"source_node_id": "m20_narrator", "target_node_id": "m20_highway", "relationship_name": "stranded_at"},
+          {"source_node_id": "m20_truck_driver", "target_node_id": "m20_narrator", "relationship_name": "helped"},
+          {"source_node_id": "m20_narrator", "target_node_id": "m20_beach", "relationship_name": "traveled_to"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator got a flat tire halfway through a road trip to the coast.\n- None of the travelers had changed a tire before and used the car manual\n- A truck driver stopped to help and corrected the jack position\n- They arrived at the beach two hours late",
+        "description": ""
+      }
+    },
+    {
+      "title": "Setting Up My First Server",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m21_narrator", "name": "Narrator", "type": "Person", "description": "The person who set up their first Linux server"},
+          {"id": "m21_debian_server", "name": "Debian Server", "type": "Concept", "description": "Linux server running Apache and MySQL set up in 2011"},
+          {"id": "m21_apache", "name": "Apache", "type": "Concept", "description": "Web server software running on the Debian box"},
+          {"id": "m21_website", "name": "Personal Website", "type": "Concept", "description": "Website that was accessible from the internet"}
+        ],
+        "edges": [
+          {"source_node_id": "m21_narrator", "target_node_id": "m21_debian_server", "relationship_name": "set_up"},
+          {"source_node_id": "m21_debian_server", "target_node_id": "m21_apache", "relationship_name": "ran"},
+          {"source_node_id": "m21_narrator", "target_node_id": "m21_website", "relationship_name": "hosted"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator set up their first Linux server in 2011, a Debian box running Apache and MySQL.\n- Spent an entire weekend configuring iptables rules and SSH keys\n- The thrill of seeing the website accessible from the internet was unmatched\n- The server was hacked within a week due to default port 22 configuration",
+        "description": ""
+      }
+    },
+    {
+      "title": "Planting a Garden",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m22_narrator", "name": "Narrator", "type": "Person", "description": "The person who started a balcony garden in 2021"},
+          {"id": "m22_garden", "name": "Balcony Garden", "type": "Place", "description": "Small vegetable garden on the narrator's balcony"},
+          {"id": "m22_tomatoes", "name": "Tomatoes", "type": "Object", "description": "Tomato plants that thrived in the garden"},
+          {"id": "m22_basil", "name": "Basil", "type": "Object", "description": "Basil plants that produced enough for weekly pesto"},
+          {"id": "m22_peppers", "name": "Peppers", "type": "Object", "description": "Pepper plants that struggled with insufficient sunlight"}
+        ],
+        "edges": [
+          {"source_node_id": "m22_narrator", "target_node_id": "m22_garden", "relationship_name": "created"},
+          {"source_node_id": "m22_narrator", "target_node_id": "m22_tomatoes", "relationship_name": "planted"},
+          {"source_node_id": "m22_narrator", "target_node_id": "m22_basil", "relationship_name": "planted"},
+          {"source_node_id": "m22_narrator", "target_node_id": "m22_peppers", "relationship_name": "planted"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator started a small vegetable garden on their balcony in spring 2021.\n- Planted tomatoes, basil, and peppers in large pots\n- Tomatoes thrived but peppers struggled with insufficient sunlight\n- By August, harvesting enough basil to make pesto every week\n- The garden became a meditative morning ritual",
+        "description": ""
+      }
+    },
+    {
+      "title": "Watching the World Cup Final",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m23_narrator", "name": "Narrator", "type": "Person", "description": "The person who watched the World Cup final"},
+          {"id": "m23_world_cup_final", "name": "2014 World Cup Final", "type": "Event", "description": "Final match between Germany and Argentina"},
+          {"id": "m23_germany", "name": "Germany", "type": "Organization", "description": "National football team that won the final"},
+          {"id": "m23_gotze", "name": "Mario Gotze", "type": "Person", "description": "Player who scored the winning goal in extra time"}
+        ],
+        "edges": [
+          {"source_node_id": "m23_narrator", "target_node_id": "m23_world_cup_final", "relationship_name": "watched"},
+          {"source_node_id": "m23_gotze", "target_node_id": "m23_world_cup_final", "relationship_name": "scored_in"},
+          {"source_node_id": "m23_gotze", "target_node_id": "m23_germany", "relationship_name": "played_for"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator watched the 2014 World Cup final between Germany and Argentina.\n- Gathered at a friend's apartment with snacks and drinks\n- Gotze scored in extra time causing half the room to erupt\n- The energy in the small living room was electric",
+        "description": ""
+      }
+    },
+    {
+      "title": "Power of a Mentor",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m24_narrator", "name": "Narrator", "type": "Person", "description": "The mentee who learned from David"},
+          {"id": "m24_david", "name": "David", "type": "Person", "description": "Senior engineer who mentored the narrator by reviewing code line by line"},
+          {"id": "m24_mentorship", "name": "Mentorship Approach", "type": "Concept", "description": "Teaching methodology of asking questions rather than providing answers"}
+        ],
+        "edges": [
+          {"source_node_id": "m24_david", "target_node_id": "m24_narrator", "relationship_name": "mentored"},
+          {"source_node_id": "m24_david", "target_node_id": "m24_mentorship", "relationship_name": "practiced"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator reflects on their first real mentor, a senior engineer named David.\n- David reviewed the narrator's code line by line\n- Never just told what was wrong but asked questions to lead to discovery\n- Taught that good mentorship develops thinking rather than providing answers",
+        "description": ""
+      }
+    },
+    {
+      "title": "A Thunderstorm at the Beach",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m25_narrator", "name": "Narrator", "type": "Person", "description": "The person at the beach during the thunderstorm"},
+          {"id": "m25_beach", "name": "Beach", "type": "Place", "description": "Coastal location where the storm arrived"},
+          {"id": "m25_thunderstorm", "name": "Thunderstorm", "type": "Event", "description": "Sudden storm that rolled in from the sea"},
+          {"id": "m25_car", "name": "Car", "type": "Object", "description": "Vehicle where the narrator sheltered and watched the storm"}
+        ],
+        "edges": [
+          {"source_node_id": "m25_narrator", "target_node_id": "m25_beach", "relationship_name": "was_at"},
+          {"source_node_id": "m25_thunderstorm", "target_node_id": "m25_beach", "relationship_name": "struck"},
+          {"source_node_id": "m25_narrator", "target_node_id": "m25_car", "relationship_name": "sheltered_in"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator experienced a sudden thunderstorm while at the beach.\n- The sky turned dark green and wind picked up in seconds\n- Ran to the car as lightning struck the water offshore\n- Watched the storm from inside the car, finding it both terrifying and beautiful",
+        "description": ""
+      }
+    },
+    {
+      "title": "Learning Git the Hard Way",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m26_narrator", "name": "Narrator", "type": "Person", "description": "The person who learned git through a painful mistake"},
+          {"id": "m26_git", "name": "Git", "type": "Concept", "description": "Version control system learned through trial and error"},
+          {"id": "m26_pro_git", "name": "Pro Git Book", "type": "Object", "description": "Book about git read cover to cover over a weekend"},
+          {"id": "m26_reflog", "name": "Git Reflog", "type": "Concept", "description": "Git feature that saved the narrator multiple times"}
+        ],
+        "edges": [
+          {"source_node_id": "m26_narrator", "target_node_id": "m26_git", "relationship_name": "learned"},
+          {"source_node_id": "m26_narrator", "target_node_id": "m26_pro_git", "relationship_name": "read"},
+          {"source_node_id": "m26_reflog", "target_node_id": "m26_narrator", "relationship_name": "saved"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator learned git the hard way by accidentally deleting a week's work with git reset --hard in 2013.\n- Spent a weekend reading the Pro Git book cover to cover\n- Understanding the reflog saved them multiple times afterward\n- Now teaches git workshops to junior developers",
+        "description": ""
+      }
+    },
+    {
+      "title": "Baking Bread During Lockdown",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m27_narrator", "name": "Narrator", "type": "Person", "description": "The person who started baking sourdough during lockdown"},
+          {"id": "m27_sourdough", "name": "Sourdough Bread", "type": "Concept", "description": "Type of bread the narrator learned to bake"},
+          {"id": "m27_starter", "name": "Clint Yeastwood", "type": "Object", "description": "The narrator's sourdough starter, named humorously"},
+          {"id": "m27_lockdown", "name": "2020 Lockdown", "type": "Event", "description": "COVID-19 lockdown period when the narrator started baking"}
+        ],
+        "edges": [
+          {"source_node_id": "m27_narrator", "target_node_id": "m27_sourdough", "relationship_name": "learned_to_bake"},
+          {"source_node_id": "m27_narrator", "target_node_id": "m27_starter", "relationship_name": "cultivated"},
+          {"source_node_id": "m27_lockdown", "target_node_id": "m27_narrator", "relationship_name": "inspired"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator started baking sourdough bread during the 2020 lockdown.\n- The sourdough starter took two weeks to become active\n- First loaf was dense and sour but improved by the fifth attempt\n- Named the starter 'Clint Yeastwood'\n- Eventually produced bread with a good crumb and crispy crust",
+        "description": ""
+      }
+    },
+    {
+      "title": "A Conversation with a Stranger",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m28_narrator", "name": "Narrator", "type": "Person", "description": "Traveler on a delayed train from Prague to Vienna"},
+          {"id": "m28_physicist", "name": "Retired Physicist", "type": "Person", "description": "Stranger who worked on particle accelerators in the 1980s"},
+          {"id": "m28_quantum_tunneling", "name": "Quantum Tunneling", "type": "Concept", "description": "Physics concept explained using a coffee cup metaphor"},
+          {"id": "m28_train", "name": "Prague to Vienna Train", "type": "Place", "description": "Delayed train where the conversation took place"}
+        ],
+        "edges": [
+          {"source_node_id": "m28_narrator", "target_node_id": "m28_physicist", "relationship_name": "conversed_with"},
+          {"source_node_id": "m28_physicist", "target_node_id": "m28_quantum_tunneling", "relationship_name": "explained"},
+          {"source_node_id": "m28_narrator", "target_node_id": "m28_train", "relationship_name": "traveled_on"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator had a three-hour conversation with a retired physicist on a delayed train from Prague to Vienna.\n- The physicist described his work on particle accelerators in the 1980s\n- Explained quantum tunneling using a memorable coffee cup metaphor\n- The conversation made the narrator reconsider assumptions about time and randomness",
+        "description": ""
+      }
+    },
+    {
+      "title": "Migrating a Monolith to Microservices",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m29_team", "name": "Engineering Team", "type": "Organization", "description": "Team that spent eight months on the migration"},
+          {"id": "m29_monolith", "name": "Monolithic Python Application", "type": "Concept", "description": "Legacy application that was migrated"},
+          {"id": "m29_microservices", "name": "Microservices Architecture", "type": "Concept", "description": "Target architecture for the migration"},
+          {"id": "m29_strangler_fig", "name": "Strangler Fig Pattern", "type": "Concept", "description": "Migration pattern used to gradually route traffic to new services"}
+        ],
+        "edges": [
+          {"source_node_id": "m29_team", "target_node_id": "m29_monolith", "relationship_name": "migrated"},
+          {"source_node_id": "m29_monolith", "target_node_id": "m29_microservices", "relationship_name": "migrated_to"},
+          {"source_node_id": "m29_team", "target_node_id": "m29_strangler_fig", "relationship_name": "applied"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator's team spent eight months in 2020 migrating a monolithic Python application to microservices.\n- Used the strangler fig pattern to gradually route traffic to new services\n- The hardest part was splitting the shared database\n- Latency improved by 40% but operational complexity tripled",
+        "description": ""
+      }
+    },
+    {
+      "title": "Childhood Pet Dog",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m30_narrator", "name": "Narrator", "type": "Person", "description": "The person who grew up with Rex"},
+          {"id": "m30_rex", "name": "Rex", "type": "Person", "description": "German Shepherd who lived with the family for thirteen years"},
+          {"id": "m30_family", "name": "Family", "type": "Organization", "description": "The narrator's family who owned Rex"}
+        ],
+        "edges": [
+          {"source_node_id": "m30_family", "target_node_id": "m30_rex", "relationship_name": "owned"},
+          {"source_node_id": "m30_rex", "target_node_id": "m30_narrator", "relationship_name": "waited_for_daily"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator recalls their family dog Rex, a German Shepherd who lived with them for thirteen years.\n- Rex waited at the door every day when the narrator came home from school\n- Once chased a deer through the woods and came back three hours later covered in mud\n- When Rex passed away, the house felt empty for months",
+        "description": ""
+      }
+    },
+    {
+      "title": "First Flight Experience",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m31_narrator", "name": "Narrator", "type": "Person", "description": "Sixteen-year-old experiencing their first flight"},
+          {"id": "m31_belgrade", "name": "Belgrade", "type": "Place", "description": "Departure city for the flight"},
+          {"id": "m31_london", "name": "London", "type": "Place", "description": "Destination city for the flight"},
+          {"id": "m31_flight", "name": "First Flight", "type": "Event", "description": "Two-hour flight from Belgrade to London"}
+        ],
+        "edges": [
+          {"source_node_id": "m31_narrator", "target_node_id": "m31_flight", "relationship_name": "experienced"},
+          {"source_node_id": "m31_flight", "target_node_id": "m31_belgrade", "relationship_name": "departed_from"},
+          {"source_node_id": "m31_flight", "target_node_id": "m31_london", "relationship_name": "arrived_at"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator's first airplane flight was from Belgrade to London at age sixteen.\n- Got a window seat and watched the clouds from above for the first time\n- The takeoff made their stomach drop but leveled off into a serene view\n- Pressed face against the window for the entire two-hour flight",
+        "description": ""
+      }
+    },
+    {
+      "title": "Learning a New Language",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m32_narrator", "name": "Narrator", "type": "Person", "description": "The person learning Japanese starting in 2019"},
+          {"id": "m32_japanese", "name": "Japanese Language", "type": "Concept", "description": "Language the narrator studied using apps and textbooks"},
+          {"id": "m32_tokyo", "name": "Tokyo", "type": "Place", "description": "City visited where the narrator used Japanese to order food"},
+          {"id": "m32_kanji", "name": "Kanji", "type": "Concept", "description": "Japanese writing system that felt endless to learn"}
+        ],
+        "edges": [
+          {"source_node_id": "m32_narrator", "target_node_id": "m32_japanese", "relationship_name": "studied"},
+          {"source_node_id": "m32_narrator", "target_node_id": "m32_tokyo", "relationship_name": "visited"},
+          {"source_node_id": "m32_kanji", "target_node_id": "m32_japanese", "relationship_name": "part_of"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator started learning Japanese in 2019 using apps and textbooks.\n- Hiragana took a week, katakana another week, but kanji felt endless\n- After two years, could hold basic conversations\n- Ordering food in Japanese for the first time in Tokyo made all study hours worth it",
+        "description": ""
+      }
+    },
+    {
+      "title": "A Broken Deployment Pipeline",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m33_narrator", "name": "Narrator", "type": "Person", "description": "Engineer who discovered the broken pipeline"},
+          {"id": "m33_cicd_pipeline", "name": "CI/CD Pipeline", "type": "Concept", "description": "Continuous integration pipeline that broke silently for two weeks"},
+          {"id": "m33_github_actions", "name": "GitHub Actions", "type": "Concept", "description": "CI/CD platform with the misconfigured workflow"},
+          {"id": "m33_canary_test", "name": "Canary Test", "type": "Concept", "description": "Intentionally failing test added to ensure the suite executes"}
+        ],
+        "edges": [
+          {"source_node_id": "m33_narrator", "target_node_id": "m33_cicd_pipeline", "relationship_name": "discovered_broken"},
+          {"source_node_id": "m33_cicd_pipeline", "target_node_id": "m33_github_actions", "relationship_name": "ran_on"},
+          {"source_node_id": "m33_narrator", "target_node_id": "m33_canary_test", "relationship_name": "implemented"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator discovered their CI/CD pipeline had been silently broken for two weeks in 2021.\n- Tests were passing but not actually running due to a misconfigured GitHub Actions workflow\n- Discovered when a clearly broken PR was merged to main\n- Added a canary test that intentionally fails to ensure the test suite actually executes",
+        "description": ""
+      }
+    },
+    {
+      "title": "The Neighborhood Bookstore",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m34_narrator", "name": "Narrator", "type": "Person", "description": "Customer of the neighborhood bookstore"},
+          {"id": "m34_bookstore", "name": "Neighborhood Bookstore", "type": "Place", "description": "Tiny bookstore on the narrator's street"},
+          {"id": "m34_elderly_couple", "name": "Elderly Couple", "type": "Person", "description": "Owners who knew every book by heart and could recommend titles"},
+          {"id": "m34_neighborhood", "name": "Neighborhood", "type": "Place", "description": "Community that felt the loss when the bookstore closed"}
+        ],
+        "edges": [
+          {"source_node_id": "m34_elderly_couple", "target_node_id": "m34_bookstore", "relationship_name": "operated"},
+          {"source_node_id": "m34_narrator", "target_node_id": "m34_bookstore", "relationship_name": "frequented"},
+          {"source_node_id": "m34_bookstore", "target_node_id": "m34_neighborhood", "relationship_name": "served"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator fondly remembers a tiny bookstore on their street run by an elderly couple.\n- The owners knew every book by heart and could recommend based on vague descriptions\n- The shop closed in 2019 when the couple retired\n- The whole neighborhood felt the loss",
+        "description": ""
+      }
+    },
+    {
+      "title": "Running My First Marathon",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m35_narrator", "name": "Narrator", "type": "Person", "description": "Person who ran their first marathon in 2016"},
+          {"id": "m35_vienna_marathon", "name": "Vienna Marathon", "type": "Event", "description": "Marathon event in Vienna where the narrator ran in 2016"},
+          {"id": "m35_vienna", "name": "Vienna", "type": "Place", "description": "City where the marathon took place"},
+          {"id": "m35_ringstrasse", "name": "Ringstrasse", "type": "Place", "description": "Vienna boulevard where crowds cheered the narrator on"}
+        ],
+        "edges": [
+          {"source_node_id": "m35_narrator", "target_node_id": "m35_vienna_marathon", "relationship_name": "participated_in"},
+          {"source_node_id": "m35_vienna_marathon", "target_node_id": "m35_vienna", "relationship_name": "held_in"},
+          {"source_node_id": "m35_narrator", "target_node_id": "m35_ringstrasse", "relationship_name": "ran_along"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator ran their first marathon in Vienna in 2016.\n- Training took five months with a gradual buildup from 5K to 42 kilometers\n- Hit the wall at kilometer 35 and considered stopping\n- The crowd cheering along the Ringstrasse pushed them through\n- Finished in 4 hours and 12 minutes",
+        "description": ""
+      }
+    },
+    {
+      "title": "Setting Up a Home Network",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m36_narrator", "name": "Narrator", "type": "Person", "description": "The person who set up an advanced home network"},
+          {"id": "m36_mesh_wifi", "name": "Mesh Wi-Fi Network", "type": "Concept", "description": "Home networking setup with VLANs and DNS-level ad blocking"},
+          {"id": "m36_pihole", "name": "Pi-hole", "type": "Concept", "description": "DNS-level ad blocking software"},
+          {"id": "m36_vlans", "name": "VLANs", "type": "Concept", "description": "Virtual LANs separating IoT devices from work machines"}
+        ],
+        "edges": [
+          {"source_node_id": "m36_narrator", "target_node_id": "m36_mesh_wifi", "relationship_name": "configured"},
+          {"source_node_id": "m36_narrator", "target_node_id": "m36_pihole", "relationship_name": "set_up"},
+          {"source_node_id": "m36_narrator", "target_node_id": "m36_vlans", "relationship_name": "configured"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator set up a mesh Wi-Fi network and learned more about networking than in any class.\n- Configured VLANs to separate IoT devices from work machines\n- Set up Pi-hole for DNS-level ad blocking\n- Ran Ethernet through the walls\n- Partner thought it was overcomplicated but the network has been rock-solid",
+        "description": ""
+      }
+    },
+    {
+      "title": "A Sunrise Over the Mountains",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m37_narrator", "name": "Narrator", "type": "Person", "description": "The person who hiked to see the sunrise"},
+          {"id": "m37_dolomites", "name": "Dolomites", "type": "Place", "description": "Mountain range in Italy where the sunrise was witnessed"},
+          {"id": "m37_summit", "name": "Mountain Summit", "type": "Place", "description": "Peak reached at sunrise after an early morning hike"},
+          {"id": "m37_sunrise", "name": "Sunrise", "type": "Event", "description": "Sunrise that turned rock faces orange and pink"}
+        ],
+        "edges": [
+          {"source_node_id": "m37_narrator", "target_node_id": "m37_summit", "relationship_name": "hiked_to"},
+          {"source_node_id": "m37_narrator", "target_node_id": "m37_sunrise", "relationship_name": "witnessed"},
+          {"source_node_id": "m37_summit", "target_node_id": "m37_dolomites", "relationship_name": "located_in"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator woke up at 4 AM to hike to a summit in the Dolomites to watch the sunrise.\n- The trail was dark and cold with only a headlamp to guide the way\n- The sun broke over the peaks turning rock faces orange and pink\n- Sat alone at the summit for thirty minutes not wanting to move",
+        "description": ""
+      }
+    },
+    {
+      "title": "Understanding Recursion",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m38_narrator", "name": "Narrator", "type": "Person", "description": "Student who had an epiphany about recursion"},
+          {"id": "m38_recursion", "name": "Recursion", "type": "Concept", "description": "Programming concept that clicked during a lecture"},
+          {"id": "m38_tower_of_hanoi", "name": "Tower of Hanoi", "type": "Concept", "description": "Classic problem used to demonstrate recursion"},
+          {"id": "m38_maze_solver", "name": "Recursive Maze Solver", "type": "Concept", "description": "Program the narrator wrote after understanding recursion"}
+        ],
+        "edges": [
+          {"source_node_id": "m38_narrator", "target_node_id": "m38_recursion", "relationship_name": "understood"},
+          {"source_node_id": "m38_tower_of_hanoi", "target_node_id": "m38_recursion", "relationship_name": "demonstrated"},
+          {"source_node_id": "m38_narrator", "target_node_id": "m38_maze_solver", "relationship_name": "implemented"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator describes the moment recursion clicked during a lecture on the Tower of Hanoi.\n- The professor showed how the solution was the same problem on a smaller scale\n- Went home and implemented it, then wrote a recursive maze solver that evening\n- First time an abstract concept felt physically intuitive",
+        "description": ""
+      }
+    },
+    {
+      "title": "Coffee Culture Discovery",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m39_narrator", "name": "Narrator", "type": "Person", "description": "The person who discovered specialty coffee"},
+          {"id": "m39_coffee_shop", "name": "Third-Wave Coffee Shop", "type": "Place", "description": "Specialty coffee shop visited in 2017"},
+          {"id": "m39_barista", "name": "Barista", "type": "Person", "description": "Coffee professional who explained processing methods"},
+          {"id": "m39_yirgacheffe", "name": "Ethiopian Yirgacheffe", "type": "Concept", "description": "Coffee variety with blueberry flavor notes"}
+        ],
+        "edges": [
+          {"source_node_id": "m39_narrator", "target_node_id": "m39_coffee_shop", "relationship_name": "visited"},
+          {"source_node_id": "m39_barista", "target_node_id": "m39_narrator", "relationship_name": "educated"},
+          {"source_node_id": "m39_narrator", "target_node_id": "m39_yirgacheffe", "relationship_name": "tasted"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator discovered specialty coffee at a third-wave coffee shop in 2017.\n- A barista explained the difference between washed and natural processing\n- Started with a pour-over of Ethiopian Yirgacheffe and tasted blueberries in coffee for the first time\n- Has been a coffee enthusiast since that cup",
+        "description": ""
+      }
+    },
+    {
+      "title": "A Power Outage During a Demo",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m40_narrator", "name": "Narrator", "type": "Person", "description": "The person presenting the demo when power went out"},
+          {"id": "m40_client", "name": "Client", "type": "Person", "description": "Client who was impressed by the quick recovery"},
+          {"id": "m40_demo", "name": "Dashboard Demo", "type": "Event", "description": "Client demonstration of a new dashboard in 2018"},
+          {"id": "m40_construction_crew", "name": "Construction Crew", "type": "Organization", "description": "Workers who cut a cable outside the building causing the outage"}
+        ],
+        "edges": [
+          {"source_node_id": "m40_narrator", "target_node_id": "m40_demo", "relationship_name": "presented"},
+          {"source_node_id": "m40_client", "target_node_id": "m40_demo", "relationship_name": "attended"},
+          {"source_node_id": "m40_construction_crew", "target_node_id": "m40_demo", "relationship_name": "disrupted"}
+        ]
+      },
+      "summary": {
+        "summary": "During a client demo in 2018, the office power went out while showing a new dashboard.\n- Switched to phone hotspot and continued the demo from laptop on battery\n- The client was impressed by the quick recovery\n- Later learned a construction crew had cut a cable outside the building",
+        "description": ""
+      }
+    },
+    {
+      "title": "Learning to Play Chess",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m41_narrator", "name": "Narrator", "type": "Person", "description": "The person who learned chess at age seven"},
+          {"id": "m41_uncle", "name": "Uncle", "type": "Person", "description": "Family member who taught chess and never let the narrator win"},
+          {"id": "m41_chess_club", "name": "School Chess Club", "type": "Organization", "description": "Club the narrator joined to improve at chess"},
+          {"id": "m41_tournament", "name": "Regional Tournament", "type": "Event", "description": "Competition where the narrator placed third"}
+        ],
+        "edges": [
+          {"source_node_id": "m41_uncle", "target_node_id": "m41_narrator", "relationship_name": "taught_chess"},
+          {"source_node_id": "m41_narrator", "target_node_id": "m41_chess_club", "relationship_name": "joined"},
+          {"source_node_id": "m41_narrator", "target_node_id": "m41_tournament", "relationship_name": "placed_third_in"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator's uncle taught them chess at age seven, never letting them win.\n- The strict approach frustrated at first but taught genuine improvement\n- Joined the school chess club and placed third in a regional tournament\n- Still plays online most evenings as a way to decompress",
+        "description": ""
+      }
+    },
+    {
+      "title": "First Time Using Docker",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m42_narrator", "name": "Narrator", "type": "Person", "description": "The developer who first used Docker in 2015"},
+          {"id": "m42_docker", "name": "Docker", "type": "Concept", "description": "Container platform that felt like magic to use"},
+          {"id": "m42_dockerfile", "name": "Dockerfile", "type": "Concept", "description": "Fifteen-line configuration for a Python app"},
+          {"id": "m42_team", "name": "Development Team", "type": "Organization", "description": "Team the narrator evangelized Docker to"}
+        ],
+        "edges": [
+          {"source_node_id": "m42_narrator", "target_node_id": "m42_docker", "relationship_name": "adopted"},
+          {"source_node_id": "m42_narrator", "target_node_id": "m42_dockerfile", "relationship_name": "wrote"},
+          {"source_node_id": "m42_narrator", "target_node_id": "m42_team", "relationship_name": "evangelized_docker_to"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator first used Docker in 2015 and found it transformative.\n- Went from 'it works on my machine' to reproducible environments in an afternoon\n- The Dockerfile for the Python app was fifteen lines and solved months of deployment headaches\n- Became the Docker evangelist on the team for the next year",
+        "description": ""
+      }
+    },
+    {
+      "title": "Volunteering at a Food Bank",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m43_narrator", "name": "Narrator", "type": "Person", "description": "Volunteer at the food bank every Saturday for six months"},
+          {"id": "m43_food_bank", "name": "Local Food Bank", "type": "Organization", "description": "Community organization where donations were sorted and packed"},
+          {"id": "m43_families", "name": "Families in Need", "type": "Person", "description": "Recipients of the packed food boxes"}
+        ],
+        "edges": [
+          {"source_node_id": "m43_narrator", "target_node_id": "m43_food_bank", "relationship_name": "volunteered_at"},
+          {"source_node_id": "m43_food_bank", "target_node_id": "m43_families", "relationship_name": "served"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator volunteered at a local food bank every Saturday for six months in 2019.\n- Sorted donations and packed boxes for families in need\n- Managing perishable items taught more about supply chain than any business course\n- The gratitude from recipients made the early mornings worthwhile",
+        "description": ""
+      }
+    },
+    {
+      "title": "Stargazing in the Countryside",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m44_narrator", "name": "Narrator", "type": "Person", "description": "The person stargazing during a camping trip"},
+          {"id": "m44_milky_way", "name": "Milky Way", "type": "Concept", "description": "Galaxy clearly visible for the first time far from city lights"},
+          {"id": "m44_friend", "name": "Friend", "type": "Person", "description": "Companion who pointed out constellations"},
+          {"id": "m44_constellations", "name": "Constellations", "type": "Concept", "description": "Star patterns including Orion, Cassiopeia, and the Big Dipper"}
+        ],
+        "edges": [
+          {"source_node_id": "m44_narrator", "target_node_id": "m44_milky_way", "relationship_name": "observed"},
+          {"source_node_id": "m44_friend", "target_node_id": "m44_constellations", "relationship_name": "pointed_out"},
+          {"source_node_id": "m44_narrator", "target_node_id": "m44_constellations", "relationship_name": "identified"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator saw the Milky Way clearly for the first time during a countryside camping trip.\n- Far from city lights, the sheer number of visible stars was overwhelming\n- A friend pointed out Orion, Cassiopeia, and the Big Dipper\n- Stayed up until 3 AM watching satellites and saw two shooting stars",
+        "description": ""
+      }
+    },
+    {
+      "title": "Refactoring Legacy Code",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m45_narrator", "name": "Narrator", "type": "Person", "description": "Engineer who spent three months refactoring legacy code"},
+          {"id": "m45_php_file", "name": "10,000-Line PHP File", "type": "Concept", "description": "Legacy code file accumulating features for eight years"},
+          {"id": "m45_char_tests", "name": "Characterization Tests", "type": "Concept", "description": "Tests written to lock down existing behavior before refactoring"},
+          {"id": "m45_team", "name": "Engineering Team", "type": "Organization", "description": "Team that could safely modify the code after refactoring"}
+        ],
+        "edges": [
+          {"source_node_id": "m45_narrator", "target_node_id": "m45_php_file", "relationship_name": "refactored"},
+          {"source_node_id": "m45_narrator", "target_node_id": "m45_char_tests", "relationship_name": "wrote"},
+          {"source_node_id": "m45_narrator", "target_node_id": "m45_team", "relationship_name": "enabled"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator spent three months refactoring a 10,000-line PHP file that had accumulated features for eight years.\n- First step was writing characterization tests to lock down existing behavior\n- Extracted classes one at a time, running the test suite after every change\n- The code ended up in twenty well-named files the team could safely modify",
+        "description": ""
+      }
+    },
+    {
+      "title": "A Rainy Day in Kyoto",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m46_narrator", "name": "Narrator", "type": "Person", "description": "Tourist who visited Kyoto's bamboo grove in the rain"},
+          {"id": "m46_kyoto", "name": "Kyoto", "type": "Place", "description": "Japanese city visited by the narrator"},
+          {"id": "m46_bamboo_grove", "name": "Bamboo Grove", "type": "Place", "description": "Famous bamboo forest in Kyoto visited in the rain"},
+          {"id": "m46_rain", "name": "Rain", "type": "Event", "description": "All-day rain that drove most tourists away"}
+        ],
+        "edges": [
+          {"source_node_id": "m46_narrator", "target_node_id": "m46_bamboo_grove", "relationship_name": "walked_through"},
+          {"source_node_id": "m46_bamboo_grove", "target_node_id": "m46_kyoto", "relationship_name": "located_in"},
+          {"source_node_id": "m46_rain", "target_node_id": "m46_bamboo_grove", "relationship_name": "enhanced"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator visited Kyoto's bamboo grove on a day when it rained the entire time.\n- Most tourists left but the narrator stayed and walked through almost alone\n- The sound of rain on bamboo leaves created a natural symphony\n- The green was more vivid in the wet light, making bad weather create the best memories",
+        "description": ""
+      }
+    },
+    {
+      "title": "Teaching Someone to Code",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m47_narrator", "name": "Narrator", "type": "Person", "description": "The person who taught their cousin Python"},
+          {"id": "m47_cousin", "name": "Younger Cousin", "type": "Person", "description": "Cousin who learned Python and is now studying computer science"},
+          {"id": "m47_python", "name": "Python", "type": "Concept", "description": "Programming language taught over the summer"},
+          {"id": "m47_text_adventure", "name": "Text Adventure Game", "type": "Concept", "description": "Simple game built together during the lessons"}
+        ],
+        "edges": [
+          {"source_node_id": "m47_narrator", "target_node_id": "m47_cousin", "relationship_name": "taught"},
+          {"source_node_id": "m47_narrator", "target_node_id": "m47_python", "relationship_name": "taught_using"},
+          {"source_node_id": "m47_cousin", "target_node_id": "m47_text_adventure", "relationship_name": "built"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator taught their younger cousin the basics of Python over a summer.\n- Started with variables and loops, then built a simple text adventure game together\n- Watching the cousin's face light up when code ran correctly was rewarding\n- The cousin is now studying computer science in university",
+        "description": ""
+      }
+    },
+    {
+      "title": "The Importance of Backups",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m48_narrator", "name": "Narrator", "type": "Person", "description": "The person who lost data due to a hard drive failure"},
+          {"id": "m48_hard_drive", "name": "Laptop Hard Drive", "type": "Object", "description": "Hard drive that failed in 2016 taking six months of projects"},
+          {"id": "m48_backup_system", "name": "Automated Backup System", "type": "Concept", "description": "External drive and cloud storage backup set up after the failure"},
+          {"id": "m48_projects", "name": "Personal Projects", "type": "Concept", "description": "Six months of work lost due to no backup"}
+        ],
+        "edges": [
+          {"source_node_id": "m48_hard_drive", "target_node_id": "m48_projects", "relationship_name": "destroyed"},
+          {"source_node_id": "m48_narrator", "target_node_id": "m48_backup_system", "relationship_name": "set_up"},
+          {"source_node_id": "m48_narrator", "target_node_id": "m48_projects", "relationship_name": "lost"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator learned the importance of backups when their laptop hard drive failed in 2016.\n- Lost six months of personal projects with no backup whatsoever\n- Set up automated backups to an external drive and cloud storage afterward\n- Adopted the rule: if it exists in only one place, it doesn't really exist",
+        "description": ""
+      }
+    },
+    {
+      "title": "Discovering Podcasts",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "m49_narrator", "name": "Narrator", "type": "Person", "description": "The person who discovered podcasts during their commute"},
+          {"id": "m49_podcasts", "name": "Podcasts", "type": "Concept", "description": "Audio medium discovered during daily commute in 2016"},
+          {"id": "m49_tech_history_series", "name": "Technology History Series", "type": "Concept", "description": "First podcast the narrator binged, covering the invention of the transistor"},
+          {"id": "m49_commute", "name": "Daily Commute", "type": "Event", "description": "Regular travel time transformed into a learning opportunity"}
+        ],
+        "edges": [
+          {"source_node_id": "m49_narrator", "target_node_id": "m49_podcasts", "relationship_name": "discovered"},
+          {"source_node_id": "m49_narrator", "target_node_id": "m49_tech_history_series", "relationship_name": "binged"},
+          {"source_node_id": "m49_podcasts", "target_node_id": "m49_commute", "relationship_name": "transformed"}
+        ]
+      },
+      "summary": {
+        "summary": "The narrator discovered podcasts during their daily commute in 2016.\n- First podcast binged was a technology history series covering the invention of the transistor\n- Listening transformed the commute from wasted time into a learning opportunity\n- Now listens to about ten hours of podcasts per week",
+        "description": ""
+      }
+    }
+  ]
+}
