@@ -101,6 +101,20 @@ async def test_add_edges_with_vectors_chunks_by_batch_size():
 
 
 @pytest.mark.asyncio
+async def test_add_edges_with_vectors_falls_back_from_blank_edge_text_to_relationship_name():
+    adapter = _make_fake_hybrid(batch_size=10)
+    edges = [
+        (str(uuid4()), str(uuid4()), "blank_rel", {"edge_text": "   "}),
+        (str(uuid4()), str(uuid4()), "none_rel", {"edge_text": None}),
+    ]
+
+    await adapter.add_edges_with_vectors(edges)
+
+    (texts,) = adapter._vector.embed_data.await_args.args
+    assert sorted(texts) == ["blank_rel", "none_rel"]
+
+
+@pytest.mark.asyncio
 async def test_add_nodes_with_vectors_batch_size_zero_falls_back_to_single_call():
     """get_batch_size()==0 must not crash on `range() arg 3 must not be zero`.
 

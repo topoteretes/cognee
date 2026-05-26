@@ -96,7 +96,7 @@ async def integrate_chunk_graphs(
             type(ontology_resolver).__name__ if ontology_resolver else "None"
         )
 
-    if graph_model is not KnowledgeGraph:
+    if not issubclass(graph_model, KnowledgeGraph):
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
 
@@ -170,7 +170,7 @@ async def extract_graph_from_data_with_entity_disambiguation_task(
     )
 
     # Note: Filter edges with missing source or target nodes
-    if graph_model == KnowledgeGraph:
+    if issubclass(graph_model, KnowledgeGraph):
         for graph in chunk_graphs:
             valid_node_ids = {node.id for node in graph.nodes}
             graph.edges = [

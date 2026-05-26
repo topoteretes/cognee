@@ -37,9 +37,10 @@ class RecallPayloadDTO(InDTO):
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
-    session_id: Optional[str] = Field(default=None)
+    session_id: Optional[str] = Field(default=None, examples=[None])
     scope: Optional[Union[str, list[str]]] = Field(
         default=None,
+        examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
             "'graph_context', 'all', or a list. Defaults to 'auto' (session "
