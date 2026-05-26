@@ -55,7 +55,7 @@ def create_embedding_engine(
     llm_provider,
     accumulate_embedding_calls: bool = False,
     accumulate_embedding_timeout_ms: int = 100,
-):
+) -> EmbeddingEngine:
     """
     Create and return an embedding engine based on the specified provider.
 
@@ -77,6 +77,10 @@ def create_embedding_engine(
           for specific providers.
         - llm_api_key: API key for the LLM service, to be used if embedding_api_key is not
           provided.
+        - accumulate_embedding_calls: Whether to enable coalescing of concurrent embed_text
+          calls into batched API requests (default: False).
+        - accumulate_embedding_timeout_ms: Maximum wait time in milliseconds before flushing
+          accumulated calls (default: 100).
 
     Returns:
     --------

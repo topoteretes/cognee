@@ -16,7 +16,7 @@ class FakeEngine:
         self.calls: list[list[str]] = []
         self.tokenizer = "fake-tokenizer"
 
-    async def embed_text(self, text):
+    async def embed_text(self, text) -> list[list[float]]:
         self.calls.append(list(text))
         return [[float(i)] * self._dimensions for i in range(len(text))]
 
@@ -29,6 +29,7 @@ class FakeEngine:
 
 @pytest.mark.asyncio
 async def test_concurrent_calls_are_coalesced_into_single_inner_call():
+    """Concurrent sub-batch-size calls coalesce into one inner embed_text; results split per caller."""
     inner = FakeEngine(batch_size=4)
     eng = AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=0.05)
 
@@ -73,6 +74,7 @@ async def test_full_batch_flushes_immediately_without_waiting_for_timeout():
 
 @pytest.mark.asyncio
 async def test_oversized_request_bypasses_queue():
+    """Requests with size >= batch_size bypass the queue and dispatch directly to inner engine."""
     inner = FakeEngine(batch_size=4)
     eng = AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=0.05)
 
@@ -84,6 +86,7 @@ async def test_oversized_request_bypasses_queue():
 
 @pytest.mark.asyncio
 async def test_overflow_flushes_existing_queue_before_new_request():
+    """When a new request would exceed capacity, existing queued items flush before the new request is queued."""
     inner = FakeEngine(batch_size=4)
     # Overflow flush is synchronous (happens before any timer is consulted),
     # so a short timeout is enough — and avoids waiting on the timer for the
@@ -106,6 +109,8 @@ async def test_overflow_flushes_existing_queue_before_new_request():
 
 @pytest.mark.asyncio
 async def test_inner_engine_error_propagates_to_every_waiter():
+    """Exceptions raised by inner.embed_text propagate to all waiting callers."""
+
     class FailingInner(FakeEngine):
         async def embed_text(self, text):
             raise RuntimeError("upstream failure")
@@ -136,6 +141,8 @@ async def test_oversized_bypass_validates_response_length():
 
 @pytest.mark.asyncio
 async def test_inner_vector_count_mismatch_fails_all_waiters():
+    """If inner returns wrong vector count, all waiters receive a RuntimeError."""
+
     class WrongCountInner(FakeEngine):
         async def embed_text(self, text):
             # Return one fewer vector than requested.
@@ -153,6 +160,7 @@ async def test_inner_vector_count_mismatch_fails_all_waiters():
 
 @pytest.mark.asyncio
 async def test_attribute_forwarding():
+    """Attributes not defined on AccumulatingEmbeddingEngine are forwarded to inner engine."""
     inner = FakeEngine(batch_size=4)
     eng = AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=0.05)
 
@@ -164,6 +172,7 @@ async def test_attribute_forwarding():
 
 @pytest.mark.asyncio
 async def test_empty_input_returns_empty_without_inner_call():
+    """Empty input returns empty list without calling inner.embed_text."""
     inner = FakeEngine(batch_size=4)
     eng = AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=0.05)
 
@@ -211,6 +220,8 @@ async def test_cancelled_waiters_skip_api_call():
 
 
 def test_rejects_inner_with_zero_batch_size():
+    """Constructor raises ValueError when inner engine has batch_size=0."""
+
     class NoBatchSize(FakeEngine):
         def get_batch_size(self) -> int:
             return 0
@@ -220,6 +231,7 @@ def test_rejects_inner_with_zero_batch_size():
 
 
 def test_rejects_non_positive_flush_timeout():
+    """Constructor raises ValueError when flush_timeout_seconds is non-positive."""
     inner = FakeEngine(batch_size=4)
     with pytest.raises(ValueError):
         AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=0)
