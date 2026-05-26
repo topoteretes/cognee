@@ -7,7 +7,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-os.environ["LLM_API_KEY"] = ""
+# If running without LLM_API_KEY set in the .env file, you can set it here
+# os.environ["LLM_API_KEY"] = ""
+
 # Notes: Nodesets cognee feature only works with Ladybug and Neo4j graph databases
 os.environ["GRAPH_DATABASE_PROVIDER"] = "ladybug"
 

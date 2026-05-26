@@ -20,8 +20,9 @@ human_agent_conversations = asset_paths["human_agent_conversations"]
 python_zen_principles = asset_paths["python_zen_principles"]
 ontology_path = asset_paths["ontology"]
 
-# Provide your OpenAI key here and configure ontology before importing Cognee.
-os.environ["LLM_API_KEY"] = "your_api_key"
+# Provide your OpenAI key here and configure ontology before importing Cognee,
+# in case you didn't set it via the .env file
+# os.environ["LLM_API_KEY"] = "your_api_key"
 os.environ["ONTOLOGY_FILE_PATH"] = ontology_path
 
 import cognee
