@@ -38,10 +38,12 @@ class BoundTask:
     """
 
     def __init__(self, inner_task: "Task", **kwargs):
+        """Initialize with a Task and pre-bound kwargs."""
         self.task = inner_task
         self.kwargs = kwargs
 
     def __repr__(self):
+        """Return a descriptive representation of the bound task."""
         name = self.task.executable.__name__
         params = ", ".join(f"{k}={v!r}" for k, v in self.kwargs.items())
         bs = self.task.task_config.get("batch_size", 1)
@@ -87,6 +89,7 @@ class TaskSpec:
         timeout: Optional[float] = None,
         **default_params,
     ):
+        """Initialize TaskSpec with function and configuration."""
         self._fn = fn
         self._batch_size = batch_size
         self._enriches = enriches
@@ -172,6 +175,7 @@ class TaskSpec:
         return self._fn(*args, **merged)
 
     def __repr__(self):
+        """Return a descriptive representation of the task spec."""
         bs = self._batch_size
         return f"TaskSpec({self.__name__}, batch_size={bs})"
 
@@ -211,6 +215,7 @@ def task(
     """
 
     def decorator(func):
+        """Wrap function as a TaskSpec."""
         return TaskSpec(
             func,
             batch_size=batch_size,
@@ -238,6 +243,7 @@ def task_summary(template: str):
     """
 
     def decorator(func):
+        """Attach summary template to function."""
         func.__task_summary__ = template
         return func
 
@@ -245,6 +251,11 @@ def task_summary(template: str):
 
 
 class Task:
+    """Represents a single operation in a pipeline that can be executed with various types.
+
+    Supports functions, coroutines, generators, and async generators, with automatic
+    batching of results based on configured batch size.
+    """
     executable: Union[
         Callable[..., Any],
         Callable[..., Coroutine[Any, Any, Any]],
@@ -270,6 +281,7 @@ class Task:
         timeout: Optional[float] = None,
         **kwargs,
     ):
+        """Initialize a Task with an executable and configuration."""
         self.executable = executable
         self.default_params = {"args": args, "kwargs": kwargs}
         self.enriches = enriches

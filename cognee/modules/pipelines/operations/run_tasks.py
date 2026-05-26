@@ -45,9 +45,12 @@ logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
 def override_run_tasks(new_gen):
+    """Decorator factory that conditionally routes pipeline execution between distributed and local modes."""
     def decorator(original_gen):
+        """Wraps the original generator to add distributed execution routing."""
         @wraps(original_gen)
         async def wrapper(*args, distributed=None, **kwargs):
+            """Routes execution based on COGNEE_DISTRIBUTED env var or explicit distributed parameter."""
             default_distributed_value = os.getenv("COGNEE_DISTRIBUTED", "False").lower() == "true"
             distributed = default_distributed_value if distributed is None else distributed
 
@@ -82,6 +85,7 @@ async def _resolve_data_id(data_item: Any, user: User) -> Any:
 
 
 async def _is_already_completed(data_id, pipeline_name: str, dataset_id) -> bool:
+    """Check if a data item has already been processed for this pipeline in incremental mode."""
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         data_point = (
@@ -97,6 +101,7 @@ async def _is_already_completed(data_id, pipeline_name: str, dataset_id) -> bool
 
 
 async def _mark_completed(data_id, pipeline_name: str, dataset_id) -> None:
+    """Mark a data item as completed for a pipeline in incremental mode."""
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         # SELECT ... FOR UPDATE so concurrent pipeline runs marking the same
@@ -139,12 +144,14 @@ async def _preflight(
     sem = asyncio.Semaphore(data_per_batch)
 
     async def _bounded_resolve(item):
+        """Resolve data_id with semaphore to limit concurrency."""
         async with sem:
             return await _resolve_data_id(item, user)
 
     data_ids = await asyncio.gather(*[_bounded_resolve(item) for item in data])
 
     async def _bounded_check(did):
+        """Check completion status with semaphore to limit concurrency."""
         async with sem:
             return await _is_already_completed(did, pipeline_name, dataset.id)
 
@@ -161,6 +168,7 @@ async def _preflight(
 
 
 def _pipeline_telemetry_props(pipeline_name: str, user: User) -> dict:
+    """Build telemetry properties dict with pipeline name, version, and tenant info."""
     return {
         "pipeline_name": str(pipeline_name),
         "cognee_version": cognee_version,

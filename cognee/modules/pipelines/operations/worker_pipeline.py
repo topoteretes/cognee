@@ -137,23 +137,28 @@ class InstrumentedQueue(asyncio.Queue):
     """
 
     def __init__(self, maxsize: int = 0, name: str = "queue"):
+        """Initialize queue with sampling instrumentation."""
         super().__init__(maxsize=maxsize)
         self.name = name
         self._samples: deque = deque(maxlen=_QUEUE_SAMPLE_RING_SIZE)
 
     @property
     def samples(self) -> deque:
+        """Return the ring buffer of recorded queue depth samples."""
         return self._samples
 
     def _record(self, op: str) -> None:
+        """Record a queue operation (push/pop) with timestamp and current depth."""
         loop = asyncio.get_running_loop()
         self._samples.append((loop.time(), op, self.qsize()))
 
     async def put(self, item):
+        """Put item in queue and record the operation."""
         await super().put(item)
         self._record("push")
 
     async def get(self):
+        """Get item from queue and record the operation."""
         item = await super().get()
         self._record("pop")
         return item
@@ -268,6 +273,7 @@ def _stamp_provenance(
 
 
 def _extract_node_set(args):
+    """Extract unique node IDs from task output for node-level provenance tracking."""
     for arg in args:
         if isinstance(arg, DataPoint) and arg.source_node_set is not None:
             return arg.source_node_set
@@ -279,6 +285,7 @@ def _extract_node_set(args):
 
 
 def _extract_content_hash(args):
+    """Extract content hash from Data items for provenance tracking."""
     from cognee.modules.data.models.Data import Data
 
     for arg in args:
@@ -296,6 +303,7 @@ def _extract_content_hash(args):
 
 
 def _build_result_summary(executable, task_name: str, count: int) -> str:
+    """Format task execution stats for the telemetry event log."""
     template = getattr(executable, "__task_summary__", None)
     if template:
         return template.format(n=count)
@@ -414,6 +422,7 @@ class _AdaptivePool:
         throughput_improvement_ratio: float = 1.05,
         underutilization_threshold: float = 0.5,
     ):
+        """Initialize adaptive pool with AIAD control parameters."""
         self.task_name = task_name
         self.target = max(min_workers, min(initial, max_workers))
         self.max_workers = max_workers
@@ -457,6 +466,7 @@ class _AdaptivePool:
 
     @asynccontextmanager
     async def permit(self):
+        """Acquire a permit from the semaphore and track busy worker count."""
         async with self._sem:
             self._busy_workers += 1
             try:
@@ -465,6 +475,7 @@ class _AdaptivePool:
                 self._busy_workers -= 1
 
     def report_throttling(self) -> None:
+        """Record a throttling exception for control-loop decision making."""
         self._throttle_events_in_window += 1
         self.total_throttle_events += 1
 
@@ -473,6 +484,7 @@ class _AdaptivePool:
         self._completed_in_window += 1
 
     async def _grow(self, delta: int) -> None:
+        """Increase target concurrency and release permits back to semaphore."""
         new_target = min(self.target + delta, self.max_workers)
         added = new_target - self.target
         if added <= 0:
@@ -483,6 +495,7 @@ class _AdaptivePool:
         self.total_grow_events += 1
 
     async def _shrink(self, delta: int) -> None:
+        """Decrease target concurrency and acquire permits from semaphore."""
         new_target = max(self.target - delta, self.min_workers)
         removed = self.target - new_target
         if removed <= 0:
@@ -502,7 +515,9 @@ class _AdaptivePool:
         self.total_shrink_events += 1
 
     def start_ticker(self, in_queue: "InstrumentedQueue") -> None:
+        """Start the background ticker task that adjusts concurrency."""
         async def _ticker():
+            """Periodically sample queue depth and adjust target workers."""
             loop = asyncio.get_running_loop()
             self._start_time = loop.time()
             try:
@@ -535,6 +550,7 @@ class _AdaptivePool:
                     queue_has_work = in_queue.qsize() > 0
 
                     def _log_change(direction: str, reason: str) -> None:
+                        """Log when target concurrency changes."""
                         logger.info(
                             f"[adaptive {self.task_name}] target {prev} → {self.target} "
                             f"({direction}: {reason}; "
@@ -543,6 +559,7 @@ class _AdaptivePool:
                         )
 
                     def _log_no_change(reason: str) -> None:
+                        """Log when target concurrency remains unchanged."""
                         logger.info(
                             f"[adaptive {self.task_name}] target {prev} unchanged "
                             f"({reason}; throughput={throughput:.2f}/s, "
@@ -671,6 +688,7 @@ class _AdaptivePool:
         self._tick_task = asyncio.create_task(_ticker())
 
     async def stop_ticker(self, persist: bool = True) -> None:
+        """Stop the ticker task and optionally persist the converged target."""
         self._stop.set()
         if self._tick_task is not None and not self._tick_task.done():
             try:
@@ -685,6 +703,7 @@ class _AdaptivePool:
             _ADAPTIVE_TARGET_REGISTRY[self.task_name] = self.target
 
     def stats(self) -> dict:
+        """Return telemetry-ready statistics dict about pool adaptation."""
         targets = [t for _, t in self._target_history] or [self.target]
         ths = self._throughput_history
         return {
@@ -768,6 +787,7 @@ _DEFAULT_STRATEGY = FixedWorkers(num_workers=1)
 # either the user-supplied strategy or ``AdaptiveWorkers()`` defaults.
 @dataclass
 class _StageConfig:
+    """Configuration for a single pipeline stage (task) including queue and worker settings."""
     queue_maxsize: int
     num_workers: int
     next_batch_size: int
@@ -781,6 +801,7 @@ class _StageConfig:
 
 
 def _resolve_stage_configs(tasks: list[Task], data_per_batch: int) -> list[_StageConfig]:
+    """Build stage configuration from task worker strategies and batch size settings."""
     configs: list[_StageConfig] = []
     # Single source of truth for adaptive defaults — used both when the user
     # supplies an ``AdaptiveWorkers`` (via the strategy instance) and when the
@@ -909,6 +930,7 @@ def _resolve_stage_configs(tasks: list[Task], data_per_batch: int) -> list[_Stag
 
 
 def _telemetry_props(task_name: str, user: Optional[User]) -> dict:
+    """Build telemetry properties dict with task name, version, and tenant info."""
     return {
         "task_name": task_name,
         "cognee_version": cognee_version,
@@ -917,6 +939,7 @@ def _telemetry_props(task_name: str, user: Optional[User]) -> dict:
 
 
 def _user_id(user: Optional[User]):
+    """Extract user ID for telemetry, with fallback for single-tenant mode."""
     return user.id if user is not None else None
 
 
@@ -998,6 +1021,7 @@ async def _run_worker(
                     input_content_hash = _extract_content_hash(args_for_execute)
 
                     async def _consume_execute():
+                        """Execute task and push results downstream with timeout handling."""
                         nonlocal result_count
                         # Scope per_call_timeout to fetching the next item from
                         # task.execute only — wrapping out_queue.put() would let
@@ -1105,6 +1129,7 @@ async def _run_worker(
 
 @asynccontextmanager
 async def _nullcontext():
+    """No-op async context manager when no adaptive pool is present."""
     yield
 
 
@@ -1123,6 +1148,7 @@ async def _run_stage(
     pool: Optional[_AdaptivePool] = None,
     per_call_timeout: Optional[float] = None,
 ):
+    """Execute a single pipeline stage with a pool of workers."""
     task_name = task.executable.__name__
     task_type = task.task_type
     if pool is not None:
@@ -1191,6 +1217,7 @@ async def _run_stage(
 
 
 async def _as_async_iterable(data_iterable) -> AsyncIterator:
+    """Convert either async or sync iterable into an async iterator."""
     if hasattr(data_iterable, "__aiter__"):
         async for item in data_iterable:
             yield item
@@ -1307,6 +1334,7 @@ async def run_worker_pipeline(
     # ``origin`` propagated to ctx.data_item (e.g. multi-item dataset runs
     # where the first task expects a list and origin is the raw item).
     async def _produce():
+        """Push input items into the first task's queue."""
         head_q = queues[0]
         seq = 0
         producer_cancelled = False
