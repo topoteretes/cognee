@@ -239,7 +239,12 @@ function computePipelineLayout(){
   // so the vertical span stays readable and auto-fit doesn't crush
   // everything to 0.05x zoom. Sub-column gap is kept tight (≤ 28px) so
   // each stage still reads as ONE cluster, not as multiple stages.
-  var laneSpacing=N>1000?28:N>300?34:N>120?40:52;
+  //
+  // Lane spacing has to clear the LARGEST possible importance-scaled
+  // node diameter so high-importance nodes (impFactor up to 1.5 → radius
+  // up to ~21px → diameter ~42px) don't overlap their neighbors. We add
+  // a 12px breathing margin on top of that floor.
+  var laneSpacing=N>1000?32:N>300?40:N>120?52:64;
   var MAX_ROWS_PER_SUBCOL=36;
   presentStages.forEach(function(stage){
     var colIdx=stageIndexMap[stage];
@@ -268,12 +273,14 @@ function computePipelineLayout(){
         node.x=node._targetX+jitter*Math.max(subGap,12)*0.3;
         node.y=node._targetY+jitter*laneSpacing;
       }
-      // Pin X so the column never gets violated by charge repulsion.
-      // Y stays free so connected nodes can pull each other vertically
-      // within the column. Cleared by applyLayoutMode on switch to
-      // Flow / Force / Organic layouts.
+      // Pin BOTH x and y in Story mode — the layout is meant to be a
+      // clean deterministic grid (one row per node within each stage
+      // column). Letting y float lets link forces pull connected nodes
+      // toward each other, which collapsed nodes onto neighbors. Fully
+      // pinned + sufficient laneSpacing = no overlap. Cleared by
+      // applyLayoutMode on switch to Flow / Force / Organic layouts.
       node.fx=node._targetX;
-      node.fy=null;
+      node.fy=node._targetY;
     });
   });
 }
@@ -682,14 +689,13 @@ function applyLayoutMode(restart){
   // "ranked" (by topological_rank) and "story" (by preprocessor.stage)
   // produce rankColumns and per-node _targetX/_targetY.
   if((layoutMode==="ranked"||layoutMode==="story")&&rankColumns.length>1){
-    // Pin X to the column target so dense stages (21 entities clustered
-    // in one column) can't be shoved sideways into adjacent columns by
-    // charge repulsion. Only Y is allowed to settle. Other layout modes
-    // need to unpin so nodes can flow freely; we clear fx/fy below.
+    // Pin both axes in Story mode (computePipelineLayout already did
+    // this but applyLayoutMode may be invoked after a flow-mode unpin,
+    // so re-pin here defensively). Other layouts must unpin.
     if(layoutMode==="story"){
       nodes.forEach(function(n){
-        n.fx=(typeof n._targetX==="number")?n._targetX:null;
-        n.fy=null; // Y still flows
+        if(typeof n._targetX==="number")n.fx=n._targetX;
+        if(typeof n._targetY==="number")n.fy=n._targetY;
       });
     }else{
       nodes.forEach(function(n){n.fx=null;n.fy=null});
