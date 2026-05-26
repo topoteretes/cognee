@@ -131,8 +131,9 @@ async def test_create_cognee_style_network_with_logo(tmp_path):
     assert "inspector-section-body" in html_output
     assert 'data-toggle="provenance"' in html_output or "provenance" in html_output
 
-    # Phase 1 polish: stage-tint palette, keyboard nav, URL hash sync.
-    assert "STAGE_TINT" in html_output
+    # Phase 1 polish: keyboard nav, URL hash sync.
+    # (Stage-tint palette was removed per user feedback — stages are
+    # delimited by the right-edge gridline + the stage-label pill only.)
     assert "selectByKey" in html_output
     assert "readHashState" in html_output
     assert "writeHash" in html_output

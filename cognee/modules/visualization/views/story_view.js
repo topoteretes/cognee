@@ -1310,24 +1310,10 @@ function updateFps(){
   }
 }
 
-// Stage-tint palette (Phase 1 polish). Subtle vertical bands behind each
-// Story column so the pipeline structure reads at a glance even when
-// nodes are too small to inspect. Hues chosen to harmonize with the
-// existing node-color palette (Entity=purple, Chunk=green, etc.).
-var STAGE_TINT={
-  document: "165,80,255",   // purple
-  chunk:    "13,255,0",     // green
-  entity:   "101,16,244",   // deep purple
-  type:     "213,194,255",  // lavender
-  summary:  "101,16,244",   // deep purple
-  context:  "0,194,255",    // cyan
-  schema:   "165,80,255",   // purple
-  other:    "120,120,120",  // grey
-};
 // Top-chrome reserved zone in screen-pixels. Tabs (32px), header (~40px),
 // theme toggle, search box all live in the first ~64px of the viewport.
-// Stage tints, column gridlines, and column labels must start below this
-// so they don't bleed into the chrome.
+// Column gridlines and column labels must start below this so they don't
+// bleed into the chrome.
 var TOP_CHROME_PAD=72;
 // Bottom-chrome zone for the floating controls bar.
 var BOT_CHROME_PAD=64;
@@ -1340,18 +1326,6 @@ function drawRankColumns(vp,_light){
   rankColumns.forEach(function(column,index){
     var half=rankColumnGap/2;
     if(column.x+half<vp.x1||column.x-half>vp.x2)return;
-
-    if(layoutMode==="story"&&column.stage){
-      // Story mode: tint each column by stage palette, clipped to the
-      // non-chrome band so the tint doesn't bleed behind the tab bar.
-      var rgb=STAGE_TINT[column.stage]||STAGE_TINT.other;
-      var bandAlpha=_light?0.07:0.10;
-      ctx.fillStyle="rgba("+rgb+","+bandAlpha+")";
-      ctx.fillRect(column.x-half,topY,rankColumnGap,botY-topY);
-    }else if(index%2===1){
-      ctx.fillStyle=_light ? "rgba(101,16,244,0.035)" : "rgba(165,80,255,0.055)";
-      ctx.fillRect(column.x-half,topY,rankColumnGap,botY-topY);
-    }
 
     // Stage separator: drawn on the RIGHT edge of each column except the
     // last, so it acts as a gutter between stages rather than cutting
