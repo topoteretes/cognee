@@ -701,7 +701,9 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
         node["degree"] = deg
         # log-scaled, capped — importance is a normalized 0..1 visual weight,
         # not a semantic score, so the renderer can size labels/halos cleanly.
-        node["importance"] = math.log1p(deg) / math.log1p(max(1, max(degree_counter.values() or [1])))
+        node["importance"] = math.log1p(deg) / math.log1p(
+            max(1, max(degree_counter.values() or [1]))
+        )
 
     # ── Nodes pass 3: label priority budget ────────────────────────────────
     importances = [n["importance"] for n in nodes]
@@ -727,9 +729,7 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
     # Stages present in the graph, in canonical left-to-right order
     present_stages = [s for s in STAGE_ORDER if any(n["stage"] == s for n in nodes)]
 
-    provenance_index = {
-        n["id"]: n["provenance"] for n in nodes if n.get("provenance")
-    }
+    provenance_index = {n["id"]: n["provenance"] for n in nodes if n.get("provenance")}
 
     return PreprocessedGraph(
         nodes=nodes,

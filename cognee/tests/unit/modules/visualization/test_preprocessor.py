@@ -175,7 +175,9 @@ def test_has_meaningful_topological_rank_flag():
 
 def test_structural_edges_classified_correctly():
     result = preprocess(_alice_like_graph())
-    by_relation = {(link["source"], link["target"], link["relation"]): link for link in result.links}
+    by_relation = {
+        (link["source"], link["target"], link["relation"]): link for link in result.links
+    }
 
     for key in [
         ("doc1", "c1", "contains"),
@@ -195,9 +197,7 @@ def test_bundle_key_collapses_structural_edges_into_groups():
 
     This proves the renderer can replace 5 lines with 2 ribbons."""
     result = preprocess(_alice_like_graph())
-    contains_bundles = {
-        k: v for k, v in result.bundles.items() if "|contains" in k
-    }
+    contains_bundles = {k: v for k, v in result.bundles.items() if "|contains" in k}
     assert len(contains_bundles) == 2
     counts = sorted(contains_bundles.values())
     assert counts == [2, 3]
@@ -274,7 +274,9 @@ def test_node_color_preserved_from_type_map():
     assert by_id["alice"]["color"] == "#6510F4"  # Entity
     assert by_id["person"]["color"] == "#D5C2FF"  # EntityType
     assert by_id["c1"]["color"] == "#0DFF00"  # DocumentChunk
-    assert by_id["doc1"]["color"] == "#A550FF"  # TextDocument (was default gray before Phase 1 polish)
+    assert (
+        by_id["doc1"]["color"] == "#A550FF"
+    )  # TextDocument (was default gray before Phase 1 polish)
 
 
 def test_ontology_valid_overrides_color():

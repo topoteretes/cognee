@@ -32,11 +32,7 @@ def _minimal_graph():
 
 
 def _render(tmp_path):
-    return asyncio.run(
-        cognee_network_visualization(
-            _minimal_graph(), str(tmp_path / "out.html")
-        )
-    )
+    return asyncio.run(cognee_network_visualization(_minimal_graph(), str(tmp_path / "out.html")))
 
 
 def test_orchestrator_returns_full_html(tmp_path):
