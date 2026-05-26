@@ -221,7 +221,11 @@ class OllamaAPIAdapter(LLMInterface):
         )  # ty:ignore[no-matching-overload]
 
         # Ensure response is valid before accessing .choices[0].message.content
-        if not hasattr(response, "choices") or not response.choices or response.choices[0].message is None:
+        if (
+            not hasattr(response, "choices")
+            or not response.choices
+            or response.choices[0].message is None
+        ):
             raise ValueError("Image transcription failed. No response received.")
 
         return response.choices[0].message.content
