@@ -15,6 +15,9 @@ on:
       - ".github/workflows/frontend_lockfile.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   frontend-lockfile:
     name: Frontend lockfile sync
