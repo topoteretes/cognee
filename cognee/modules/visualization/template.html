@@ -167,31 +167,29 @@ canvas:active{cursor:grabbing}
 </div>
 
 <div id="controls">
-  <button class="ctrl-btn active" data-layer="nodes">Nodes</button>
-  <button class="ctrl-btn active" data-layer="edges">Edges</button>
-  <button class="ctrl-btn active" data-layer="labels">Labels</button>
-  <button class="ctrl-btn" data-layer="heatmap">Heatmap</button>
-  <button class="ctrl-btn" data-layer="typeclouds">Type Clouds</button>
+  <button class="ctrl-btn active" data-labelbudget="key" title="Labels: landmark nodes + high-importance entities">Key</button>
+  <button class="ctrl-btn" data-labelbudget="all" title="Labels: every node">All</button>
+  <button class="ctrl-btn" data-labelbudget="off" title="Labels: hidden (hover to peek)">Off</button>
   <div class="ctrl-sep"></div>
-  <span style="font-size:10px;color:var(--text2);padding:6px 4px" title="How many labels to show">Labels:</span>
-  <button class="ctrl-btn active" data-labelbudget="key" title="Show labels only for landmark nodes and high-degree nodes">Key</button>
-  <button class="ctrl-btn" data-labelbudget="all" title="Show every label (legacy behavior)">All</button>
-  <button class="ctrl-btn" data-labelbudget="off" title="Hide labels except hovered node">Off</button>
-  <div class="ctrl-sep"></div>
-  <span style="font-size:10px;color:var(--text2);padding:6px 4px">Layout:</span>
-  <button class="ctrl-btn active" data-layout="story" title="Pipeline story: Document &rarr; Chunks &rarr; Entities &rarr; Types &rarr; Summaries">Story</button>
+  <button class="ctrl-btn active" data-layout="story" title="Pipeline story: Documents &rarr; Chunks &rarr; Entities &rarr; Types &rarr; Summaries">Story</button>
   <button class="ctrl-btn" data-layout="ranked" title="Left-to-right by topological rank">Flow</button>
   <button class="ctrl-btn" data-layout="organic" title="Organic force layout">Force</button>
   <div class="ctrl-sep"></div>
-  <span style="font-size:10px;color:var(--text2);padding:6px 4px">Color:</span>
-  <button class="ctrl-btn active" data-colorby="type">Type</button>
-  <button class="ctrl-btn" data-colorby="nodeset">Node Set</button>
-  <button class="ctrl-btn" data-colorby="user">User</button>
+  <button class="ctrl-btn active" data-colorby="type" title="Color by node type">Type</button>
+  <button class="ctrl-btn" data-colorby="nodeset" title="Color by source node set">Node set</button>
+  <button class="ctrl-btn" data-colorby="user" title="Color by source user">User</button>
   <div class="ctrl-sep"></div>
   <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out (-)">&#x2212;</button>
   <button class="ctrl-btn" id="btn-zoom-in" title="Zoom in (+)">+</button>
   <button class="ctrl-btn" id="btn-fit" title="Fit to view (F)">Fit</button>
 </div>
+<!-- Legacy data-layer buttons (Nodes/Edges/Labels/Heatmap/Type Clouds)
+     removed for simplicity. The label visibility is fully controlled by
+     the Key/All/Off budget above; node/edge visibility were never useful
+     toggles in practice; heatmap and type-cloud layers stay reachable
+     via the layers={} state object for power users / URL hash. -->
+<button data-layer="heatmap" hidden></button>
+<button data-layer="typeclouds" hidden></button>
 
 <div id="info-panel"></div>
 <div id="legend"></div>
