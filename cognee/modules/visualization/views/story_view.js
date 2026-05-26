@@ -268,6 +268,12 @@ function computePipelineLayout(){
         node.x=node._targetX+jitter*Math.max(subGap,12)*0.3;
         node.y=node._targetY+jitter*laneSpacing;
       }
+      // Pin X so the column never gets violated by charge repulsion.
+      // Y stays free so connected nodes can pull each other vertically
+      // within the column. Cleared by applyLayoutMode on switch to
+      // Flow / Force / Organic layouts.
+      node.fx=node._targetX;
+      node.fy=null;
     });
   });
 }
@@ -676,11 +682,26 @@ function applyLayoutMode(restart){
   // "ranked" (by topological_rank) and "story" (by preprocessor.stage)
   // produce rankColumns and per-node _targetX/_targetY.
   if((layoutMode==="ranked"||layoutMode==="story")&&rankColumns.length>1){
+    // Pin X to the column target so dense stages (21 entities clustered
+    // in one column) can't be shoved sideways into adjacent columns by
+    // charge repulsion. Only Y is allowed to settle. Other layout modes
+    // need to unpin so nodes can flow freely; we clear fx/fy below.
+    if(layoutMode==="story"){
+      nodes.forEach(function(n){
+        n.fx=(typeof n._targetX==="number")?n._targetX:null;
+        n.fy=null; // Y still flows
+      });
+    }else{
+      nodes.forEach(function(n){n.fx=null;n.fy=null});
+    }
     simulation.force("link").distance(linkDist).strength(0.2);
     simulation.force("charge").strength(repStr);
     simulation.force("x",d3.forceX(function(d){return d._targetX||0}).strength(0.22));
     simulation.force("y",d3.forceY(function(d){return d._targetY||0}).strength(0.08));
   }else{
+    // Organic / Force mode — clear any pinned coords from a previous
+    // Story-mode run so the simulation can move nodes anywhere.
+    nodes.forEach(function(n){n.fx=null;n.fy=null});
     // Force-mode semantic tuning (Phase 1 polish, Codex critique). Three
     // signals layered on top of the legacy organic layout:
     //  - Per-link strength: structural relations are LOOSER (entities can
