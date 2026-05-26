@@ -145,8 +145,9 @@ def get_activity_router() -> APIRouter:
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.users.models import User
         from cognee.modules.users.models.UserApiKey import UserApiKey
-        from cognee.modules.pipelines.models import PipelineRun
-        from sqlalchemy import select, func, case
+        from cognee.modules.data.models.Data import Data
+        from cognee.modules.search.models.Query import Query
+        from sqlalchemy import select, func
         from datetime import datetime, timedelta, timezone
 
         db_engine = get_relational_engine()
@@ -163,14 +164,43 @@ def get_activity_router() -> APIRouter:
             keys_result = await session.execute(keys_q)
             key_counts = {str(row.user_id): row.key_count for row in keys_result}
 
-            # Get latest pipeline run per user (approximate: via dataset ownership)
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-            recent_q = (
-                select(PipelineRun.dataset_id, func.count().label("run_count"))
-                .filter(PipelineRun.created_at > cutoff)
-                .group_by(PipelineRun.dataset_id)
+            # Get latest data ingestion per user
+            data_created_q = select(Data.owner_id, func.max(Data.created_at).label("ts")).group_by(
+                Data.owner_id
             )
-            await session.execute(recent_q)
+            data_created_result = await session.execute(data_created_q)
+            last_active_map = {
+                str(row.owner_id): row.ts for row in data_created_result if row.owner_id
+            }
+
+            # Get latest data access per user
+            data_accessed_q = (
+                select(Data.owner_id, func.max(Data.last_accessed).label("ts"))
+                .filter(Data.last_accessed.isnot(None))
+                .group_by(Data.owner_id)
+            )
+            data_accessed_result = await session.execute(data_accessed_q)
+            for row in data_accessed_result:
+                if not row.owner_id:
+                    continue
+                uid = str(row.owner_id)
+                if uid not in last_active_map or (row.ts and row.ts > last_active_map[uid]):
+                    last_active_map[uid] = row.ts
+
+            # Get latest search query per user
+            search_q = select(Query.user_id, func.max(Query.created_at).label("ts")).group_by(
+                Query.user_id
+            )
+            search_result = await session.execute(search_q)
+            for row in search_result:
+                if not row.user_id:
+                    continue
+                uid = str(row.user_id)
+                if uid not in last_active_map or (row.ts and row.ts > last_active_map[uid]):
+                    last_active_map[uid] = row.ts
+
+        now = datetime.now(timezone.utc)
+        live_cutoff = now - timedelta(minutes=30)
 
         agents = []
         for u in all_users:
@@ -179,17 +209,43 @@ def get_activity_router() -> APIRouter:
             is_default = email == "default_user@example.com"
 
             # Parse agent type from email
+            # Internal email format: "sanitized-name+{parent_user_id}@cognee.agent"
+            # The +{parent_user_id} suffix ensures uniqueness across users but
+            # must be stripped for display purposes.
+            # Legacy agents used "-" throughout, so we fall back to rsplit("-", 1)
+            # when no "+" is present and the suffix looks like a hex UUID fragment.
             if is_agent:
                 local_part = email.split("@")[0]
-                parts = local_part.rsplit("-", 1)
-                agent_type = parts[0].replace("-", " ").replace("_", " ") if parts else local_part
-                agent_short_id = parts[1] if len(parts) > 1 else ""
+                if "+" in local_part:
+                    # Current format: name+user_id
+                    display_name, agent_short_id = local_part.rsplit("+", 1)
+                elif "-" in local_part:
+                    # Legacy format: name-part-of-uuid — strip UUID suffix
+                    prefix, suffix = local_part.rsplit("-", 1)
+                    if len(suffix) >= 8 and all(c in "0123456789abcdef" for c in suffix):
+                        display_name, agent_short_id = prefix, suffix
+                    else:
+                        display_name, agent_short_id = local_part, ""
+                else:
+                    display_name, agent_short_id = local_part, ""
+                agent_type = display_name.replace("-", " ").replace("_", " ")
             else:
                 agent_type = "Human User" if is_default else email.split("@")[0]
                 agent_short_id = ""
 
             api_key_count = key_counts.get(str(u.id), 0)
-            has_recent = api_key_count > 0  # Simplified: has key = potentially active
+            last_active = last_active_map.get(str(u.id))
+
+            # Determine status based on actual activity
+            if last_active and last_active.tzinfo is None:
+                last_active = last_active.replace(tzinfo=timezone.utc)
+
+            if last_active and last_active > live_cutoff:
+                status = "LIVE"
+            elif last_active:
+                status = "INACTIVE"
+            else:
+                status = "NEVER_CONNECTED"
 
             agents.append(
                 {
@@ -199,11 +255,12 @@ def get_activity_router() -> APIRouter:
                     "agent_short_id": agent_short_id,
                     "is_agent": is_agent,
                     "is_default": is_default,
-                    "status": "LIVE" if has_recent else "INACTIVE",
+                    "status": status,
                     "api_key_count": api_key_count,
                     "created_at": u.created_at.isoformat()
                     if hasattr(u, "created_at") and u.created_at
                     else None,
+                    "last_active": last_active.isoformat() if last_active else None,
                 }
             )
 

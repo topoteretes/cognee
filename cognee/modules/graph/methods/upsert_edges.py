@@ -9,6 +9,8 @@ from cognee.modules.graph.models.Edge import Edge
 from cognee.infrastructure.databases.relational.with_async_session import with_async_session
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 
+UPSERT_BATCH_SIZE = 1000
+
 
 @with_async_session
 async def upsert_edges(
@@ -60,10 +62,15 @@ async def upsert_edges(
             }
         )
 
-    upsert_statement = (
-        insert(Edge).values(edges_to_add).on_conflict_do_nothing(index_elements=["id"])
-    )
+    if not edges_to_add:
+        await session.commit()
+        return
 
-    await session.execute(upsert_statement)
+    for start_index in range(0, len(edges_to_add), UPSERT_BATCH_SIZE):
+        edge_batch = edges_to_add[start_index : start_index + UPSERT_BATCH_SIZE]
+        upsert_statement = (
+            insert(Edge).values(edge_batch).on_conflict_do_nothing(index_elements=["id"])
+        )
+        await session.execute(upsert_statement)
 
     await session.commit()

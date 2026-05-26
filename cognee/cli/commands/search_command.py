@@ -36,7 +36,7 @@ Search Types & Use Cases:
     Best for: Finding specific passages, citations, exact content.
 
 **SUMMARIES**:
-    Pre-generated hierarchical summaries of content.
+    Pre-generated summaries of content.
     Best for: Quick overviews, document abstracts, topic summaries.
 
 **CODE**:

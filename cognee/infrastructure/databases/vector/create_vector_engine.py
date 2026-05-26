@@ -4,8 +4,7 @@ from numbers import Number
 
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
-
-from functools import lru_cache
+from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 
@@ -56,6 +55,7 @@ def create_vector_engine(
     vector_db_username: str = "",
     vector_db_password: str = "",
     vector_db_host: str = "",
+    vector_db_subprocess_enabled: bool = True,
 ):
     """
     Wrapper function to call create vector engine with caching.
@@ -69,6 +69,10 @@ def create_vector_engine(
     vector_db_username = normalized_optional_params["vector_db_username"]
     vector_db_password = normalized_optional_params["vector_db_password"]
     vector_db_host = normalized_optional_params["vector_db_host"]
+    # ``vector_db_subprocess_enabled`` also went through normalization;
+    # reassign so callers passing ``None`` see the function-default applied
+    # instead of having ``None`` flow into the cache key + factory.
+    vector_db_subprocess_enabled = normalized_optional_params["vector_db_subprocess_enabled"]
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
     unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
@@ -101,10 +105,49 @@ def create_vector_engine(
         vector_db_username,
         vector_db_password,
         vector_db_host,
+        vector_db_subprocess_enabled,
     )
 
 
-@lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
+def evict_vector_engine(**kwargs) -> bool:
+    """Evict a cached vector engine entry created via ``create_vector_engine``.
+
+    Mirrors ``create_vector_engine``'s normalization so the cache key
+    matches. Returns True if the entry existed.
+    """
+    normalized = _normalize_optional_create_vector_engine_params(kwargs)
+    return _create_vector_engine.cache_evict(
+        kwargs.get("vector_db_provider", ""),
+        kwargs.get("vector_db_url", ""),
+        kwargs.get("vector_db_name", ""),
+        normalized["vector_db_port"],
+        normalized["vector_db_key"],
+        normalized["vector_dataset_database_handler"],
+        normalized["vector_db_username"],
+        normalized["vector_db_password"],
+        normalized["vector_db_host"],
+        normalized["vector_db_subprocess_enabled"],
+    )
+
+
+def is_vector_engine_cached(**kwargs) -> bool:
+    """Check whether a vector engine entry exists in the cache without creating."""
+    normalized = _normalize_optional_create_vector_engine_params(kwargs)
+    return _create_vector_engine.cache_contains(
+        kwargs.get("vector_db_provider", ""),
+        kwargs.get("vector_db_url", ""),
+        kwargs.get("vector_db_name", ""),
+        normalized["vector_db_port"],
+        normalized["vector_db_key"],
+        normalized["vector_dataset_database_handler"],
+        normalized["vector_db_username"],
+        normalized["vector_db_password"],
+        normalized["vector_db_host"],
+        normalized["vector_db_subprocess_enabled"],
+    )
+
+
+@closing_lru_cache(maxsize=DATABASE_MAX_LRU_CACHE_SIZE)
 def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
@@ -115,6 +158,7 @@ def _create_vector_engine(
     vector_db_username: str,
     vector_db_password: str,
     vector_db_host: str,
+    vector_db_subprocess_enabled: bool,
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -252,6 +296,13 @@ def _create_vector_engine(
 
     elif vector_db_provider.lower() == "lancedb":
         from .lancedb.LanceDBAdapter import LanceDBAdapter
+
+        if vector_db_subprocess_enabled:
+            return LanceDBAdapter.create_subprocess(
+                url=vector_db_url,
+                api_key=vector_db_key,
+                embedding_engine=embedding_engine,
+            )
 
         return LanceDBAdapter(
             url=vector_db_url,

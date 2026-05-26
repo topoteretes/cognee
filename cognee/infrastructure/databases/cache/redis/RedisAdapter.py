@@ -225,39 +225,44 @@ class RedisAdapter(CacheDBInterface):
         """
         Acquire the Redis lock manually. Raises if acquisition fails. (Sync because of Ladybug)
         """
-        self.lock = self.sync_redis.lock(
+        lock = self.sync_redis.lock(
             name=self.lock_key,
             timeout=self.timeout,
             blocking_timeout=self.blocking_timeout,
+            thread_local=False,
         )
 
-        acquired = self.lock.acquire()
+        acquired = lock.acquire()
         if not acquired:
             raise RuntimeError(f"Could not acquire Redis lock: {self.lock_key}")
 
-        return self.lock
+        self.lock = lock
+        return lock
 
-    def release_lock(self):
+    def release_lock(self, lock=None):
         """
         Release the Redis lock manually, if held. (Sync because of Ladybug)
         """
-        if self.lock:
+        lock = lock or self.lock
+        if lock:
             try:
-                self.lock.release()
-                self.lock = None
+                lock.release()
             except redis.exceptions.LockError:
                 pass
+            finally:
+                if lock is self.lock:
+                    self.lock = None
 
     @contextmanager
     def hold_lock(self):
         """
         Context manager for acquiring and releasing the Redis lock automatically. (Sync because of Ladybug)
         """
-        self.acquire()
+        lock = self.acquire_lock()
         try:
             yield
         finally:
-            self.release()
+            self.release_lock(lock)
 
     async def create_qa_entry(
         self,

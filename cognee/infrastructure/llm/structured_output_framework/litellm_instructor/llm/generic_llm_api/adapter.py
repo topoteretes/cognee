@@ -121,7 +121,7 @@ class GenericAPIAdapter(LLMInterface):
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def acreate_structured_output(
@@ -240,7 +240,7 @@ class GenericAPIAdapter(LLMInterface):
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def create_transcript(self, input: str) -> TranscriptionReturnType:
@@ -296,7 +296,7 @@ class GenericAPIAdapter(LLMInterface):
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def transcribe_image(self, input: str) -> litellm.ModelResponse:

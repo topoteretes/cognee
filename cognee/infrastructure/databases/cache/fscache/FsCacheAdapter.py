@@ -182,7 +182,7 @@ class FSCacheAdapter(CacheDBInterface):
         logger.error(message)
         raise SharedLadybugLockRequiresRedisError()
 
-    def release_lock(self):
+    def release_lock(self, lock=None):
         """Lock release is not available for filesystem cache backend."""
         message = "Shared Ladybug lock requires Redis cache backend."
         logger.error(message)

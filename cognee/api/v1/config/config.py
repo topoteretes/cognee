@@ -15,6 +15,84 @@ from cognee.tasks.translation.config import get_translation_config
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 
 
+_BOOL_TRUE = {"true", "1", "yes", "on", "t", "y"}
+_BOOL_FALSE = {"false", "0", "no", "off", "f", "n", ""}
+
+
+def _coerce_bool(value, name: str) -> bool:
+    """Coerce ``value`` to ``bool``. Accepts bool, int, or a string of the
+    common truthy/falsy spellings. Used by setters that can be invoked from
+    the CLI (``cognee config set <key> <value>``), which always passes
+    strings.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _BOOL_TRUE:
+            return True
+        if normalized in _BOOL_FALSE:
+            return False
+    raise ValueError(f"{name} must be a bool or boolean-like string (true/false), got {value!r}")
+
+
+def _coerce_int(value, name: str, *, min_value: int | None = None) -> int:
+    """Coerce ``value`` to ``int``, optionally enforcing a minimum. Accepts
+    ints or strings of digits. Used by setters reachable via the CLI.
+    """
+    if isinstance(value, bool):
+        # ``bool`` is a subclass of ``int`` but semantically wrong here.
+        raise ValueError(f"{name} must be an integer, got bool {value!r}")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str):
+        try:
+            result = int(value)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer, got {value!r}") from exc
+    else:
+        raise ValueError(f"{name} must be an integer, got {type(value).__name__}")
+    if min_value is not None and result < min_value:
+        raise ValueError(f"{name} must be >= {min_value}, got {result}")
+    return result
+
+
+def _coerce_for_field(config_obj, key: str, value):
+    """Coerce ``value`` to the declared type of ``config_obj.<key>`` for the
+    common ``bool`` and ``int`` cases. Used by ``_update_config`` so bulk
+    setters (``set_graph_db_config(...)`` etc.) accept the same string
+    payloads the CLI-targeted single-key setters do — without this, a
+    payload like ``{"graph_database_subprocess_enabled": "true"}`` would
+    persist as the string ``"true"`` and break ``if subprocess_enabled:``
+    downstream.
+
+    Other annotated types pass through unchanged. Non-pydantic models also
+    pass through (``model_fields`` is missing).
+    """
+    import typing
+
+    fields = getattr(type(config_obj), "model_fields", None)
+    if fields is None:
+        return value
+    info = fields.get(key)
+    if info is None:
+        return value
+    annotation = info.annotation
+    # Unwrap ``Optional[X]`` / ``X | None``.
+    args = typing.get_args(annotation)
+    if args:
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            annotation = non_none[0]
+    if annotation is bool:
+        return _coerce_bool(value, key)
+    if annotation is int:
+        return _coerce_int(value, key)
+    return value
+
+
 class config:
     """
     Configuration namespace for Cognee's runtime settings.
@@ -138,6 +216,62 @@ class config:
         graph_config.graph_database_provider = graph_database_provider
 
     @staticmethod
+    def set_graph_database_subprocess_enabled(graph_database_subprocess_enabled):
+        """Enable the subprocess-backed graph DB adapter.
+
+        When enabled, the native Kuzu client runs in a dedicated worker
+        process so its memory and file-lock state are isolated from the main
+        cognee process. Required for long-running services that otherwise
+        accumulate native memory in the embedded Kuzu engine.
+
+        Accepts a ``bool`` or a truthy/falsy string (``"true"``/``"false"``,
+        ``"1"``/``"0"``, ``"yes"``/``"no"``) — the generic ``config.set()``
+        path is used by the CLI, which can only pass strings.
+        """
+        graph_config = get_graph_config()
+        graph_config.graph_database_subprocess_enabled = _coerce_bool(
+            graph_database_subprocess_enabled,
+            "graph_database_subprocess_enabled",
+        )
+
+    @staticmethod
+    def set_kuzu_num_threads(kuzu_num_threads):
+        """Set the maximum number of threads Kuzu uses per query.
+
+        ``0`` keeps Kuzu's internal default (one per CPU). Accepts ``int``
+        or a string of digits; the CLI path (``config set``) always passes
+        strings.
+        """
+        graph_config = get_graph_config()
+        graph_config.kuzu_num_threads = _coerce_int(
+            kuzu_num_threads, "kuzu_num_threads", min_value=0
+        )
+
+    @staticmethod
+    def set_kuzu_buffer_pool_size(kuzu_buffer_pool_size):
+        """Set the Kuzu buffer pool size in bytes.
+
+        Accepts ``int`` or a string of digits; the CLI path (``config set``)
+        always passes strings.
+        """
+        graph_config = get_graph_config()
+        graph_config.kuzu_buffer_pool_size = _coerce_int(
+            kuzu_buffer_pool_size, "kuzu_buffer_pool_size", min_value=1
+        )
+
+    @staticmethod
+    def set_kuzu_max_db_size(kuzu_max_db_size):
+        """Set the Kuzu maximum on-disk database size in bytes.
+
+        Accepts ``int`` or a string of digits; the CLI path (``config set``)
+        always passes strings. Defaults to 4 GB; raise this for large graphs.
+        """
+        graph_config = get_graph_config()
+        graph_config.kuzu_max_db_size = _coerce_int(
+            kuzu_max_db_size, "kuzu_max_db_size", min_value=1
+        )
+
+    @staticmethod
     def set_llm_provider(llm_provider: str):
         """Set the LLM provider.
 
@@ -208,7 +342,13 @@ class config:
         """
         for key, value in config_dict.items():
             if hasattr(config_obj, key):
-                object.__setattr__(config_obj, key, value)
+                # Coerce stringy values to the field's declared bool/int
+                # type so payloads coming from the CLI / generic dispatch
+                # land with the right runtime types — same contract as the
+                # single-key setters (``set_graph_database_subprocess_enabled``
+                # etc.) which accept ``"true"`` / ``"4"`` and parse them.
+                coerced = _coerce_for_field(config_obj, key, value)
+                object.__setattr__(config_obj, key, coerced)
             else:
                 raise InvalidConfigAttributeError(attribute=key)
 
@@ -395,6 +535,21 @@ class config:
         vector_db_config.vector_db_provider = vector_db_provider
 
     @staticmethod
+    def set_vector_db_subprocess_enabled(vector_db_subprocess_enabled):
+        """Enable the subprocess-backed vector DB adapter (LanceDB).
+
+        When enabled, the native LanceDB client runs in a dedicated worker
+        process so its memory and file state are isolated from the main
+        cognee process. Accepts a ``bool`` or a truthy/falsy string; the
+        generic ``config.set()`` path is used by the CLI which only passes
+        strings.
+        """
+        vector_db_config = get_vectordb_config()
+        vector_db_config.vector_db_subprocess_enabled = _coerce_bool(
+            vector_db_subprocess_enabled, "vector_db_subprocess_enabled"
+        )
+
+    @staticmethod
     def set_relational_db_config(config_dict: dict):
         """Update the relational database config with values from a dictionary.
 
@@ -534,7 +689,12 @@ class config:
             "embedding_endpoint": "set_embedding_endpoint",
             "embedding_api_key": "set_embedding_api_key",
             "graph_database_provider": "set_graph_database_provider",
+            "graph_database_subprocess_enabled": "set_graph_database_subprocess_enabled",
+            "kuzu_num_threads": "set_kuzu_num_threads",
+            "kuzu_buffer_pool_size": "set_kuzu_buffer_pool_size",
+            "kuzu_max_db_size": "set_kuzu_max_db_size",
             "vector_db_provider": "set_vector_db_provider",
+            "vector_db_subprocess_enabled": "set_vector_db_subprocess_enabled",
             "vector_db_url": "set_vector_db_url",
             "vector_db_key": "set_vector_db_key",
             "chunk_size": "set_chunk_size",

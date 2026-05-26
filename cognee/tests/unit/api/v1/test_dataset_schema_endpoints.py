@@ -135,3 +135,47 @@ def test_inferred_graph_schema_dto_requires_core_fields():
 
     with pytest.raises(ValidationError):
         InferredGraphSchemaDTO.model_validate({"type": "object", "properties": {}})
+
+
+def test_sample_text_short_input_unchanged():
+    """Short text should pass through unchanged."""
+    from cognee.api.v1.llm.routers.get_llm_router import _sample_text
+
+    short = "Hello world, this is a short text."
+    assert _sample_text(short) == short
+
+
+def test_sample_text_slightly_over_limit_uses_two_sections():
+    """Text between 1x and 2x the limit should use begin+end (no middle)."""
+    from cognee.api.v1.llm.routers.get_llm_router import _sample_text
+
+    # 150 chars with a 100-char limit → two-section strategy
+    text = "A" * 75 + "B" * 75
+    result = _sample_text(text, max_chars=100)
+
+    assert result.count("[...]") == 1  # only one separator
+    assert result.startswith("A")
+    assert result.endswith("B")
+    assert len(result) <= 100
+
+
+def test_sample_text_large_input_uses_three_sections():
+    """Text over 2x the limit should use begin/middle/end."""
+    from cognee.api.v1.llm.routers.get_llm_router import _sample_text
+
+    long_text = "A" * 5_000 + "B" * 5_000 + "C" * 5_000
+    result = _sample_text(long_text, max_chars=3_000)
+
+    assert result.count("[...]") == 2  # two separators
+    assert result.startswith("A")
+    assert result.endswith("C")
+    assert "B" in result
+    assert len(result) <= 3_000
+
+
+def test_sample_text_exact_boundary():
+    """Text exactly at the limit should not be sampled."""
+    from cognee.api.v1.llm.routers.get_llm_router import _sample_text
+
+    text = "X" * 100
+    assert _sample_text(text, max_chars=100) == text

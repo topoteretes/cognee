@@ -151,6 +151,10 @@ git push origin feature/your-feature-name
    - Fill in the PR template with details about your changes
    - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
 
+> **Reviewers are auto-routed.** Cognee uses a [`CODEOWNERS`](.github/CODEOWNERS)
+> file to request reviews automatically based on the directories your PR touches.
+> No manual ping required — the right person will get notified when you open the PR.
+
 ## 5. 📜 Developer Certificate of Origin (DCO)
 
 All contributions must be signed-off to indicate agreement with our DCO:

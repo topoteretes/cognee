@@ -292,6 +292,8 @@ class CogneeGraph(CogneeAbstractGraph):
                 f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
             )
 
+        except EntityNotFoundError:
+            raise
         except Exception:
             logger.error("Error during graph projection", exc_info=True)
             raise

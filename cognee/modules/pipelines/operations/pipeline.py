@@ -47,6 +47,8 @@ async def run_pipeline(
 
     user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
 
+    # TODO: If multiple datasets are provided, we currently run them sequentially to avoid overwhelming the system with too many concurrent pipeline runs.
+    #       In the future, we could consider adding concurrency here with proper resource management and limits.
     for dataset in authorized_datasets:
         async for run_info in run_pipeline_per_dataset(
             dataset=dataset,

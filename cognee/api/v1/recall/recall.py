@@ -5,10 +5,10 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -45,7 +45,6 @@ _MIN_WORD_LEN = 2
 class RecallKwargs(TypedDict, total=False):
     """Backward-compatible export for callers that import RecallKwargs."""
 
-    dataset_ids: list[UUID]
     system_prompt: str
     system_prompt_path: str
     node_name: list[str]
@@ -475,7 +474,7 @@ async def recall(
             return list(await _fetch_graph_context(session_id=session_id, user=user))
 
         async def _run_graph() -> list[RecallResponse]:
-            nonlocal user
+            nonlocal user, dataset_ids
 
             from cognee.modules.recall.methods.normalize_search_payload import (
                 normalize_search_payload,

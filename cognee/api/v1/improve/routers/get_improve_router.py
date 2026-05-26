@@ -26,6 +26,7 @@ class ImprovePayloadDTO(InDTO):
     dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
     node_name: Optional[List[str]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
+    build_global_context_index: Optional[bool] = Field(default=False)
     # Session IDs to bridge into the permanent graph. When set, improve
     # runs the full session pipeline (feedback weights + QA persist +
     # trace-step persist + graph→session sync) in addition to the
@@ -53,6 +54,7 @@ def get_improve_router() -> APIRouter:
         - **dataset_id** (Optional[UUID]): Dataset UUID.
         - **node_name** (Optional[List[str]]): Filter to specific named entities.
         - **run_in_background** (Optional[bool]): Run asynchronously (default: False).
+        - **build_global_context_index** (Optional[bool]): Build the global context index after enrichment (default: False).
 
         Either dataset_name or dataset_id must be provided.
 
@@ -85,6 +87,7 @@ def get_improve_router() -> APIRouter:
                 dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
                 node_name=payload.node_name,
                 session_ids=payload.session_ids,
+                build_global_context_index=payload.build_global_context_index,
                 user=user,
                 run_in_background=payload.run_in_background,
             )

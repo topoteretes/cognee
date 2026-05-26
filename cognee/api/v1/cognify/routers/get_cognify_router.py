@@ -46,6 +46,11 @@ class CognifyPayloadDTO(InDTO):
     custom_prompt: Optional[str] = Field(
         default="", description="Custom prompt for entity extraction and graph generation"
     )
+    chunk_size: Optional[int] = Field(
+        default=None,
+        description="Maximum tokens per chunk. Defaults to automatic model-based sizing.",
+        examples=[4096, 8192],
+    )
     ontology_key: Optional[List[str]] = Field(
         default=None,
         examples=[[]],
@@ -54,7 +59,12 @@ class CognifyPayloadDTO(InDTO):
     chunks_per_batch: Optional[int] = Field(
         default=None,
         description="Number of chunks to process per task batch in Cognify (overrides default).",
-        examples=[10, 20, 50, 100],
+        examples=[36, 50, 100],
+    )
+    data_per_batch: Optional[int] = Field(
+        default=20,
+        description="Maximum number of data items to process concurrently within a dataset.",
+        examples=[20, 30, 50],
     )
 
 
@@ -93,7 +103,10 @@ def get_cognify_router() -> APIRouter:
         - **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction and graph generation. If provided, this prompt will be used instead of the default prompts for knowledge graph extraction.
+        - **chunk_size** (Optional[int]): Maximum tokens per chunk. If omitted, Cognee chooses
+          a size from the configured LLM and embedding limits.
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
+        - **data_per_batch** (Optional[int]): Maximum number of data items to process concurrently within a dataset. Defaults to 20.
 
         ## Response
         - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
@@ -209,7 +222,9 @@ def get_cognify_router() -> APIRouter:
                 config=config_to_use,
                 run_in_background=payload.run_in_background,
                 custom_prompt=custom_prompt,
+                chunk_size=payload.chunk_size,
                 chunks_per_batch=payload.chunks_per_batch,
+                data_per_batch=payload.data_per_batch,
             )
 
             # Persist schema and prompt to DatasetConfiguration for first dataset

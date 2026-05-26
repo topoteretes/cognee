@@ -9,6 +9,13 @@ from cognee.base_config import get_base_config
 from cognee.root_dir import ensure_absolute_path
 from cognee.shared.data_models import KnowledgeGraph
 
+# Single source of truth for Kuzu defaults lives next to the adapter.
+# Imported here so config-side env Fields and the adapter agree.
+from cognee.infrastructure.databases.graph.kuzu.adapter import (
+    DEFAULT_KUZU_BUFFER_POOL_SIZE,
+    DEFAULT_KUZU_MAX_DB_SIZE,
+)
+
 
 class GraphConfig(BaseSettings):
     """
@@ -41,6 +48,7 @@ class GraphConfig(BaseSettings):
     graph_database_name: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
+    graph_database_host: str = ""
     graph_database_allow_anonymous: bool = False
     graph_database_port: int = 123
     graph_database_key: str = ""
@@ -49,6 +57,13 @@ class GraphConfig(BaseSettings):
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
     graph_dataset_database_handler: str = "ladybug"
+    graph_database_subprocess_enabled: bool = True
+
+    # Kuzu tuning. 0 means "use Kuzu's default" (one thread per CPU).
+    kuzu_num_threads: int = Field(0, env="KUZU_NUM_THREADS")
+    kuzu_buffer_pool_size: int = Field(DEFAULT_KUZU_BUFFER_POOL_SIZE, env="KUZU_BUFFER_POOL_SIZE")
+    kuzu_max_db_size: int = Field(DEFAULT_KUZU_MAX_DB_SIZE, env="KUZU_MAX_DB_SIZE")
+
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
@@ -61,6 +76,8 @@ class GraphConfig(BaseSettings):
         self.graph_dataset_database_handler = graph_dataset_database_handler
         if provider == "kuzu" and graph_dataset_database_handler == "ladybug":
             self.graph_dataset_database_handler = "kuzu"
+        if provider == "postgres" and graph_dataset_database_handler in ("ladybug", "postgres"):
+            self.graph_dataset_database_handler = "postgres_graph"
         base_config = get_base_config()
 
         databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
@@ -105,6 +122,7 @@ class GraphConfig(BaseSettings):
             "graph_database_url": self.graph_database_url,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
+            "graph_database_host": self.graph_database_host,
             "graph_database_allow_anonymous": self.graph_database_allow_anonymous,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
@@ -113,6 +131,10 @@ class GraphConfig(BaseSettings):
             "graph_topology": self.graph_topology,
             "model_config": self.model_config,
             "graph_dataset_database_handler": self.graph_dataset_database_handler,
+            "graph_database_subprocess_enabled": self.graph_database_subprocess_enabled,
+            "kuzu_num_threads": self.kuzu_num_threads,
+            "kuzu_buffer_pool_size": self.kuzu_buffer_pool_size,
+            "kuzu_max_db_size": self.kuzu_max_db_size,
         }
 
     def to_hashable_dict(self) -> dict:
@@ -134,11 +156,16 @@ class GraphConfig(BaseSettings):
             "graph_database_name": self.graph_database_name,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
+            "graph_database_host": self.graph_database_host,
             "graph_database_allow_anonymous": self.graph_database_allow_anonymous,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
             "graph_dataset_database_handler": self.graph_dataset_database_handler,
+            "graph_database_subprocess_enabled": self.graph_database_subprocess_enabled,
+            "kuzu_num_threads": self.kuzu_num_threads,
+            "kuzu_buffer_pool_size": self.kuzu_buffer_pool_size,
+            "kuzu_max_db_size": self.kuzu_max_db_size,
         }
 
 

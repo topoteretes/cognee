@@ -59,6 +59,12 @@ class CloudClient:
             form.add_field("run_in_background", "true")
         if kwargs.get("custom_prompt"):
             form.add_field("custom_prompt", kwargs["custom_prompt"])
+        if kwargs.get("chunk_size") is not None:
+            form.add_field("chunk_size", str(kwargs["chunk_size"]))
+        if kwargs.get("chunks_per_batch") is not None:
+            form.add_field("chunks_per_batch", str(kwargs["chunks_per_batch"]))
+        if kwargs.get("content_type") is not None:
+            form.add_field("content_type", str(kwargs["content_type"]))
 
         # Handle data — string or file-like objects
         if isinstance(data, str):
@@ -95,14 +101,12 @@ class CloudClient:
         entry,
         dataset_name: str = "main_dataset",
         session_id: Optional[str] = None,
+        skill_improvement: Optional[dict] = None,
     ) -> dict:
-        """POST /api/v1/remember/entry — store a typed MemoryEntry in session cache.
+        """POST /api/v1/remember/entry — store a typed MemoryEntry.
 
-        ``entry`` is a pydantic MemoryEntry (QAEntry / TraceEntry / FeedbackEntry).
+        ``entry`` is a pydantic MemoryEntry.
         """
-        if session_id is None:
-            raise ValueError("session_id is required for typed memory entries")
-
         session = await self._get_session()
 
         # Pydantic v2: model_dump preserves the discriminator field.
@@ -112,6 +116,7 @@ class CloudClient:
             "entry": entry_dump,
             "dataset_name": dataset_name,
             "session_id": session_id,
+            "skill_improvement": skill_improvement,
         }
 
         async with session.post(
@@ -228,6 +233,14 @@ class CloudClient:
             payload["datasets"] = (
                 [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
             )
+        if kwargs.get("run_in_background"):
+            payload["run_in_background"] = True
+        if kwargs.get("custom_prompt"):
+            payload["custom_prompt"] = kwargs["custom_prompt"]
+        if kwargs.get("chunk_size") is not None:
+            payload["chunk_size"] = kwargs["chunk_size"]
+        if kwargs.get("chunks_per_batch") is not None:
+            payload["chunks_per_batch"] = kwargs["chunks_per_batch"]
 
         async with session.post(
             f"{self.service_url}/api/v1/cognify",
@@ -248,6 +261,29 @@ class CloudClient:
             payload["searchType"] = st if isinstance(st, str) else st.value
         if kwargs.get("datasets"):
             payload["datasets"] = kwargs["datasets"]
+        if kwargs.get("dataset_ids"):
+            dataset_ids = kwargs["dataset_ids"]
+            if isinstance(dataset_ids, UUID):
+                dataset_ids = [dataset_ids]
+            payload["datasetIds"] = [str(dataset_id) for dataset_id in dataset_ids]
+        if kwargs.get("top_k") is not None:
+            payload["topK"] = kwargs["top_k"]
+        if kwargs.get("system_prompt"):
+            payload["systemPrompt"] = kwargs["system_prompt"]
+        if kwargs.get("node_name"):
+            payload["nodeName"] = kwargs["node_name"]
+        if kwargs.get("only_context") is not None:
+            payload["onlyContext"] = kwargs["only_context"]
+        if kwargs.get("verbose") is not None:
+            payload["verbose"] = kwargs["verbose"]
+        if kwargs.get("skills") is not None:
+            payload["skills"] = [
+                skill.name if hasattr(skill, "name") else str(skill) for skill in kwargs["skills"]
+            ]
+        if kwargs.get("tools") is not None:
+            payload["tools"] = kwargs["tools"]
+        if kwargs.get("max_iter") is not None:
+            payload["maxIter"] = kwargs["max_iter"]
 
         async with session.post(
             f"{self.service_url}/api/v1/search",

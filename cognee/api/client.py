@@ -98,6 +98,19 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Flush and close all cached database adapters so Ladybug can
+    # CHECKPOINT its WAL before the process exits.  Without this,
+    # a SIGTERM during an active WAL write leaves a half-written
+    # record on disk → "Corrupted wal file" on next startup.
+    logger.info("Shutting down: closing cached database engines")
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
+    from cognee.infrastructure.databases.vector.create_vector_engine import (
+        _create_vector_engine,
+    )
+
+    _create_graph_engine.cache_clear()
+    _create_vector_engine.cache_clear()
+
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 

@@ -60,7 +60,7 @@ class DatasetQueueSettings:
 
 def get_dataset_queue_settings() -> DatasetQueueSettings:
     """Return effective settings. Test mock seam."""
-    raw = os.getenv("DATASET_QUEUE_ENABLED", "").strip().lower()
+    raw = os.getenv("DATASET_QUEUE_ENABLED", "true").strip().lower()
     enabled = raw in TRUE_VALUES
 
     max_concurrent = os.getenv("DATASET_QUEUE_MAX_CONCURRENT", None)

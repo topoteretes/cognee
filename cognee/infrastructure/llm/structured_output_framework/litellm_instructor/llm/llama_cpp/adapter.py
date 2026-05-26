@@ -15,14 +15,20 @@ from tenacity import (
     stop_after_delay,
     wait_exponential_jitter,
 )
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
 
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
+from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
+
+observe = get_observe()
 
 
 class LlamaCppAPIAdapter(LLMInterface):
@@ -134,13 +140,14 @@ class LlamaCppAPIAdapter(LLMInterface):
             mode=instructor.Mode(self.instructor_mode),
         )
 
+    @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
         ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def acreate_structured_output(
@@ -194,3 +201,9 @@ class LlamaCppAPIAdapter(LLMInterface):
                 response = await asyncio.to_thread(_call_sync)
 
         return response
+
+    async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
+        raise NotImplementedError
+
+    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
+        raise NotImplementedError

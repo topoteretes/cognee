@@ -31,6 +31,20 @@ async def main():
 
     print(results)
 
+    datasets = await cognee.datasets.list_datasets()
+    dataset = next(d for d in datasets if d.name == dataset_name)
+    await cognee.datasets.empty_dataset(dataset_id=dataset.id)
+
+    graph_cache_size = _create_graph_engine.cache_info().currsize
+    vector_cache_size = _create_vector_engine.cache_info().currsize
+
+    assert graph_cache_size <= 2, (
+        f"Graph engine cache size too large after delete: {graph_cache_size}"
+    )
+    assert vector_cache_size <= 2, (
+        f"Vector engine cache size too large after delete: {vector_cache_size}"
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(main())

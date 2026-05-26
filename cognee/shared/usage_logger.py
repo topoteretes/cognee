@@ -103,6 +103,14 @@ def _get_param_defaults(func: Callable) -> dict[str, Any]:
         return {}
 
 
+def _get_callable_name(func: Callable) -> str:
+    """Return a stable display name for functions and callable objects."""
+    name = getattr(func, "__name__", None)
+    if isinstance(name, str):
+        return name
+    return func.__class__.__name__
+
+
 def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> str | None:
     """Extract user_id from function arguments if available."""
     try:
@@ -261,8 +269,11 @@ def log_usage(function_name: str | None = None, log_type: str = "function"):
         """
         if not inspect.iscoroutinefunction(func):
             raise UsageLoggerError(
-                f"@log_usage requires an async function. Got {func.__name__} which is not async."  # ty:ignore[unresolved-attribute]
+                f"@log_usage requires an async function. Got {_get_callable_name(func)} "
+                "which is not async."
             )
+
+        resolved_function_name = function_name or _get_callable_name(func)
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -311,7 +322,7 @@ def log_usage(function_name: str | None = None, log_type: str = "function"):
 
                 try:
                     await _log_usage_async(
-                        function_name=function_name or func.__name__,
+                        function_name=resolved_function_name,
                         log_type=log_type,
                         user_id=user_id,
                         parameters=parameters,
@@ -324,7 +335,7 @@ def log_usage(function_name: str | None = None, log_type: str = "function"):
                     )
                 except Exception as e:
                     logger.error(
-                        f"Failed to log usage for {function_name or func.__name__}: {str(e)}",
+                        f"Failed to log usage for {resolved_function_name}: {str(e)}",
                         exc_info=True,
                     )
 

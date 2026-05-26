@@ -7,7 +7,7 @@ from fastapi import Form, File, UploadFile as UF, Depends
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
-from cognee.memory import QAEntry, TraceEntry, FeedbackEntry
+from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
@@ -35,7 +35,9 @@ def get_remember_router() -> APIRouter:
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         run_in_background: Optional[bool] = Form(default=False),
         custom_prompt: Optional[str] = Form(default=""),
-        chunks_per_batch: Optional[int] = Form(default=10),
+        chunk_size: Optional[int] = Form(default=4096),
+        chunks_per_batch: Optional[int] = Form(default=36),
+        content_type: Optional[str] = Form(default=None),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -51,6 +53,8 @@ def get_remember_router() -> APIRouter:
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
+        - **chunk_size** (Optional[int]): Maximum tokens per chunk. Defaults to automatic
+          model-based sizing.
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
 
         Either datasetName or datasetId must be provided.
@@ -87,7 +91,9 @@ def get_remember_router() -> APIRouter:
                 node_set=node_set if node_set != [""] else None,
                 run_in_background=run_in_background or False,
                 custom_prompt=custom_prompt or None,
+                chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
+                content_type=content_type,
             )
 
             return jsonable_encoder(result.to_dict())
@@ -102,15 +108,17 @@ def get_remember_router() -> APIRouter:
         """JSON body for the typed-entry remember endpoint.
 
         ``entry`` is a discriminated union — set ``type`` to ``qa``,
-        ``trace``, or ``feedback`` and include the corresponding fields.
+        ``trace``, ``feedback``, or ``skill_run`` and include the
+        corresponding fields.
         """
 
         entry: Annotated[
-            Union[QAEntry, TraceEntry, FeedbackEntry],
+            Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry],
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
-        session_id: str
+        session_id: Optional[str] = None
+        skill_improvement: Optional[dict] = None
 
     @router.post("/entry", response_model=dict)
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
@@ -120,9 +128,10 @@ def get_remember_router() -> APIRouter:
     ):
         """Store a typed memory entry in the session cache.
 
-        Accepts a discriminated union of ``QAEntry``, ``TraceEntry``, or
-        ``FeedbackEntry`` and dispatches to the matching SessionManager
-        method. Always requires ``session_id``.
+        Accepts a discriminated union of ``QAEntry``, ``TraceEntry``,
+        ``FeedbackEntry``, or ``SkillRunEntry`` and dispatches to the
+        matching ``remember`` path. Session-backed entries require
+        ``session_id``; ``SkillRunEntry`` can persist with or without one.
 
         ## Response
         The returned ``RememberResult`` includes ``entry_type`` and
@@ -148,6 +157,7 @@ def get_remember_router() -> APIRouter:
                 dataset_name=payload.dataset_name,
                 session_id=payload.session_id,
                 user=user,
+                skill_improvement=payload.skill_improvement,
             )
             return jsonable_encoder(result.to_dict())
         except ValueError as error:
