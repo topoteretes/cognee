@@ -7,7 +7,6 @@ from cognee.infrastructure.databases.vector.exceptions.exceptions import Collect
 
 logger = get_logger("ChunksRetriever")
 
-
 class ChunksRetriever(BaseRetriever):
     """
     Handles document chunk-based searches by retrieving relevant chunks and generating
@@ -17,14 +16,30 @@ class ChunksRetriever(BaseRetriever):
 
     - get_context: Retrieves document chunks based on a query.
     - get_completion: Generates a completion using provided context or retrieves context if
-    not given.
+      not given.
     """
 
     def __init__(
         self,
         top_k: Optional[int] = 5,
+        node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
+        """
+        Initialise the ChunksRetriever.
+
+        Parameters
+        ----------
+        top_k: Optional[int]
+            Number of chunks to retrieve.
+        node_name: Optional[List[str]]
+            List of node names to filter chunks by (passed to the vector engine).
+        node_name_filter_operator: str
+            Logical operator used when combining multiple node_name filters (AND/OR).
+        """
         self.top_k = top_k
+        self.node_name = node_name
+        self.node_name_filter_operator = node_name_filter_operator
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -36,14 +51,12 @@ class ChunksRetriever(BaseRetriever):
 
         Parameters:
         -----------
-
             - query (str): The query string to be used for generating a completion.
             - retrieved_objects (Any): The retrieved objects to be used for generating a completion.
             - context (Any): The context to be used for generating a completion.
 
         Returns:
         --------
-
             - List[dict]: A list of payloads of found chunks.
         """
         # TODO: Do we want to generate a completion using LLM here?
@@ -59,13 +72,11 @@ class ChunksRetriever(BaseRetriever):
 
         Parameters:
         -----------
-
             - query (str): The query string used to search for relevant document chunks.
             - retrieved_objects (Any): The retrieved objects to be used for generating textual context.
 
         Returns:
         --------
-
             - str: A string containing the combined text of the retrieved chunks, or an
               empty string if none are found.
         """
@@ -95,8 +106,16 @@ class ChunksRetriever(BaseRetriever):
         vector_engine = unified.vector
 
         try:
+            search_kwargs: dict = {
+                "limit": self.top_k,
+                "include_payload": True,
+            }
+            if self.node_name:
+                search_kwargs["node_name"] = self.node_name
+                search_kwargs["node_name_filter_operator"] = self.node_name_filter_operator
+
             found_chunks = await vector_engine.search(
-                "DocumentChunk_text", query, limit=self.top_k, include_payload=True
+                "DocumentChunk_text", query, **search_kwargs
             )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
 
