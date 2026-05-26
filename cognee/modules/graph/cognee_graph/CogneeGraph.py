@@ -204,9 +204,17 @@ class CogneeGraph(CogneeAbstractGraph):
                 )
                 self.add_edge(edge)
             else:
-                raise EntityNotFoundError(
-                    message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                # Skip edges whose endpoints were not projected (e.g. filtered out
+                # by node_properties_to_project or label filters) instead of aborting
+                # the whole projection. Raising EntityNotFoundError here breaks
+                # retrieval on real-world graphs where partial filtering is the norm.
+                # See issue #2897. Same pattern as merged PR #2485.
+                logger.debug(
+                    "Skipping edge with unprojectable endpoints: %s -> %s",
+                    source_id,
+                    target_id,
                 )
+                continue
 
         # Final statistics
         projection_time = time.time() - start_time
@@ -282,9 +290,13 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                     self.add_edge(edge)
                 else:
-                    raise EntityNotFoundError(
-                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                    # See note at first call-site above and issue #2897.
+                    logger.debug(
+                        "Skipping edge with unprojectable endpoints: %s -> %s",
+                        source_id,
+                        target_id,
                     )
+                    continue
 
             # Final statistics
             projection_time = time.time() - start_time
@@ -372,9 +384,13 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                     self.add_edge(edge)
                 else:
-                    raise EntityNotFoundError(
-                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                    # See note at first call-site above and issue #2897.
+                    logger.debug(
+                        "Skipping edge with unprojectable endpoints: %s -> %s",
+                        source_id,
+                        target_id,
                     )
+                    continue
 
             projection_time = time.time() - start_time
             logger.info(
