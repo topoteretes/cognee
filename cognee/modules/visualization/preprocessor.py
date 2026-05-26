@@ -78,10 +78,11 @@ _STRUCTURAL_RELATIONS: frozenset = frozenset(
 # Default colors per node type — preserved verbatim from the original
 # monolith so existing test tokens continue to match.
 _TYPE_COLOR_MAP: Dict[str, str] = {
-    "Entity": "#6510F4",
-    "EntityType": "#A550FF",
+    "TextDocument": "#A550FF",
     "DocumentChunk": "#0DFF00",
-    "TextSummary": "#6510F4",
+    "Entity": "#6510F4",
+    "EntityType": "#D5C2FF",
+    "TextSummary": "#FFB454",
     "GlobalContextSummary": "#00C2FF",
     "TableRow": "#A550FF",
     "TableType": "#6510F4",

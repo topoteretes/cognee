@@ -456,32 +456,66 @@ statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N
 var legendEl=document.getElementById("legend");
 
 function updateLegend(){
-  var entries,counts,colorSource;
+  var entries,counts,colorSource,sectionLabel;
   if(colorByMode==="type"){
     counts=typeCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return colorByType[t]||typeColors[t]||"#DBD8D8"};
+    sectionLabel="Node type";
   }else if(colorByMode==="task"){
     counts=taskCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return taskColors[t]||"#DBD8D8"};
+    sectionLabel="Task";
   }else if(colorByMode==="pipeline"){
     counts=pipeCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return pipelineColors[t]||"#DBD8D8"};
+    sectionLabel="Pipeline";
   }else if(colorByMode==="nodeset"){
     counts=nodesetCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return nodesetColors[t]||"#DBD8D8"};
+    sectionLabel="Node set";
   }else{
     counts=userCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return userColors[t]||"#DBD8D8"};
+    sectionLabel="User";
   }
-  if(entries.length>12)entries=entries.slice(0,12);
-  legendEl.innerHTML=entries.map(function(t){
-    return '<div class="legend-item"><div class="legend-dot" style="background:'+colorSource(t)+'"></div>'+esc(t)+" ("+counts[t]+")</div>";
+  if(entries.length>8)entries=entries.slice(0,8);
+  var typeItems=entries.map(function(t){
+    return '<span class="legend-item"><span class="legend-dot" style="background:'+
+      colorSource(t)+'"></span>'+esc(t)+'</span>';
   }).join("");
+  // Ontology and importance sections — explain the encodings we layer
+  // on top of the color (green ring = ontology_valid, radius = importance).
+  // Always shown so users learn what the cues mean even on graphs
+  // that don't currently use them.
+  var ontologySection=
+    '<div class="legend-section">'+
+      '<span class="legend-title">Ontology</span>'+
+      '<span class="legend-item"><span class="legend-ring"></span>matched in OWL</span>'+
+    '</div>';
+  var importanceSection=
+    '<div class="legend-section">'+
+      '<span class="legend-title">Importance</span>'+
+      '<span class="legend-sizes">'+
+        '<span class="legend-dot" style="width:5px;height:5px"></span>'+
+        '<span class="legend-dot" style="width:8px;height:8px"></span>'+
+        '<span class="legend-dot" style="width:12px;height:12px"></span>'+
+      '</span>'+
+      '<span style="opacity:0.7">low → high</span>'+
+    '</div>';
+  legendEl.innerHTML=
+    '<div class="legend-section">'+
+      '<span class="legend-title">'+esc(sectionLabel)+'</span>'+
+      '<span class="legend-items">'+typeItems+'</span>'+
+    '</div>'+
+    '<span class="legend-sep"></span>'+
+    ontologySection+
+    '<span class="legend-sep"></span>'+
+    importanceSection;
 }
 updateLegend();
 

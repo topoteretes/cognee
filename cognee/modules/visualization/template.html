@@ -88,9 +88,30 @@ canvas:active{cursor:grabbing}
 .panel-row .k{color:var(--text2);flex-shrink:0}
 .panel-row .v{color:var(--text);text-align:right;word-break:break-word;max-width:200px}
 
-#legend{display:none}
-.legend-item{display:none}
-.legend-dot{display:none}
+/* ── Legend (Phase 1 polish) ─────────────────────────────────────
+   Bottom-left floating card explaining the encodings: node colors by
+   stage, the ontology-valid green ring, and the importance-weight node-
+   size scale. Populated by JS so only stages actually present in the
+   graph appear. */
+#legend{
+  position:fixed;bottom:20px;left:20px;z-index:90;
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+  padding:10px 14px;font-size:11px;line-height:1.5;color:var(--text2);
+  max-width:380px;
+  display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+}
+.legend-section{display:flex;align-items:center;gap:8px;}
+.legend-title{font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text2);opacity:0.75;margin-right:2px;}
+.legend-items{display:flex;gap:9px;align-items:center;flex-wrap:wrap;}
+.legend-item{display:inline-flex;align-items:center;gap:4px;color:var(--text);}
+.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.legend-ring{
+  display:inline-block;width:11px;height:11px;border-radius:50%;
+  background:var(--bg);border:2px solid #0DFF00;flex-shrink:0;
+}
+.legend-sizes{display:inline-flex;align-items:center;gap:4px;}
+.legend-sizes .legend-dot{background:var(--text);}
+.legend-sep{width:1px;height:18px;background:var(--border);}
 
 .empty-state{
   position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);

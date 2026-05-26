@@ -266,13 +266,15 @@ def test_handles_3tuple_edges_without_edge_info():
 
 
 def test_node_color_preserved_from_type_map():
-    """Existing string-token tests assert specific colors are present in
-    the rendered HTML. The preprocessor must preserve them."""
+    """The preprocessor's TYPE_COLOR_MAP drives node colors in both the
+    canvas and the legend swatches. Pin the canonical four so a color
+    palette change doesn't silently break the visual encoding."""
     result = preprocess(_alice_like_graph())
     by_id = {n["id"]: n for n in result.nodes}
     assert by_id["alice"]["color"] == "#6510F4"  # Entity
-    assert by_id["person"]["color"] == "#A550FF"  # EntityType
+    assert by_id["person"]["color"] == "#D5C2FF"  # EntityType
     assert by_id["c1"]["color"] == "#0DFF00"  # DocumentChunk
+    assert by_id["doc1"]["color"] == "#A550FF"  # TextDocument (was default gray before Phase 1 polish)
 
 
 def test_ontology_valid_overrides_color():
