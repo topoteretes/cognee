@@ -136,13 +136,16 @@ async def add_data_points(
             )
 
         if user and dataset and data_item:
-            await upsert_edges(
-                custom_edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=dataset.id,
-                data_id=data_item.id,
-            )
+            async with get_async_session() as session:
+                await upsert_edges(
+                    custom_edges,
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    dataset_id=dataset.id,
+                    data_id=data_item.id,
+                    session=session,
+                )
+                await session.commit()
 
         edges.extend(custom_edges)
 

@@ -4,6 +4,7 @@ from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
+from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 from cognee.modules.ingestion.exceptions import IngestionError
@@ -81,11 +82,10 @@ async def ingest_data(
 
         db_engine = get_relational_engine()
 
-        from sqlalchemy import select
-
-        # Pre-loop: compute data_id for every item and load all existing Data records
-        # in a single bulk query so the main loop needs no per-item DB sessions.
+        # Pre-loop: compute data_id for every item and cache intermediate results
+        # to avoid repeating expensive I/O in the main loop.
         data_point_ids = []
+        precomputed_items = {}
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
@@ -101,6 +101,11 @@ async def ingest_data(
                 data_id = item_data_id
 
             data_point_ids.append(data_id)
+            precomputed_items[id(data_item)] = {
+                "original_file_path": original_file_path,
+                "actual_file_path": actual_file_path,
+                "data_id": data_id,
+            }
 
         existing_data_map: dict = {}
         if data_point_ids:
@@ -122,10 +127,10 @@ async def ingest_data(
                 item_data_id = data_item.data_id
                 item_external_metadata = data_item.external_metadata
 
-            # Get file path of data item or create a file if it doesn't exist
-            original_file_path = await save_data_item_to_storage(underlying_data)
-            # Transform file path to be OS usable
-            actual_file_path = get_data_file_path(original_file_path)
+            # Retrieve cached intermediate results from pre-loop to avoid re-processing
+            cached = precomputed_items.get(id(data_item), {})
+            original_file_path = cached.get("original_file_path")
+            actual_file_path = cached.get("actual_file_path")
 
             # Store all input data as text files in Cognee data storage
             cognee_storage_file_path, loader_engine = await data_item_to_text_file(
@@ -136,24 +141,19 @@ async def ingest_data(
             if loader_engine is None:
                 raise IngestionError("Loader cannot be None")
 
+            # Use data_id computed in pre-loop
+            data_id = cached.get("data_id")
+
             # Find metadata from original file
             # Standard flow: extract metadata from both original and stored files
             async with open_data_file(original_file_path) as file:
                 classified_data = ingestion.classify(file)
-
-                # data_id is the hash of original file contents + owner id to avoid duplicate data
-                data_id = await ingestion.identify(classified_data, user)
                 original_file_metadata = classified_data.get_metadata()
 
             # Find metadata from Cognee data storage text file
             async with open_data_file(cognee_storage_file_path) as file:
                 classified_data = ingestion.classify(file)
                 storage_file_metadata = classified_data.get_metadata()
-
-            # If the DataItem carries a stable data_id (e.g. from DLT), use it
-            # instead of the content-hash-based ID.
-            if item_data_id is not None:
-                data_id = item_data_id
 
             data_point = existing_data_map.get(str(data_id))
 

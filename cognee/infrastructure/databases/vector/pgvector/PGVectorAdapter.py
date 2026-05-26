@@ -84,7 +84,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # 2. When access control is on, each dataset gets its own engine — use a small default
         #    to avoid connection fan-out (N datasets × pool_size).
         # 3. Otherwise inherit the relational pool config.
-        if vector_config.vector_pool_args:
+        if vector_config.vector_pool_args is not None:
             effective_pool_args = dict(vector_config.vector_pool_args)
         elif backend_access_control_enabled():
             effective_pool_args = _ACCESS_CONTROL_DEFAULT_POOL_ARGS
