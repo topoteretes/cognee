@@ -410,12 +410,18 @@ def run_worker_loop(
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     registry = HandleRegistry()
-    # ``SUBPROCESS_WORKER_MAX_INFLIGHT`` <= 0 would create a zero-permit
-    # semaphore that every ``async with sem`` deadlocks on. Clamp to at
-    # least 1 so a misconfigured env var degrades to serial dispatch
-    # rather than wedging the worker. Callers wanting "no cap" can pass
-    # a sufficiently large value explicitly.
-    max_inflight = max(1, _env_int("SUBPROCESS_WORKER_MAX_INFLIGHT", 16))
+    # ``SUBPROCESS_WORKER_MAX_INFLIGHT`` must be > 0. A zero or negative
+    # value would create a semaphore that deadlocks on every ``async with sem``.
+    # This is a load-bearing validation: silent degradation (clamping to 1) would
+    # hide configuration errors. Callers wanting "no cap" should pass a
+    # sufficiently large value explicitly (e.g., 10000).
+    max_inflight = _env_int("SUBPROCESS_WORKER_MAX_INFLIGHT", 16)
+    if max_inflight <= 0:
+        raise ValueError(
+            f"SUBPROCESS_WORKER_MAX_INFLIGHT must be > 0, got {max_inflight}. "
+            "This controls the worker's concurrent task semaphore; zero or negative "
+            "values would deadlock all async handlers."
+        )
     sem = asyncio.Semaphore(max_inflight)
 
     try:
