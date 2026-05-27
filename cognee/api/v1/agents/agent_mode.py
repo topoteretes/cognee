@@ -25,6 +25,10 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger(__name__)
 
 
+def set_agent_mode(enabled: bool) -> None:
+    os.environ["COGNEE_AGENT_MODE"] = str(enabled).lower()
+
+
 def is_agent_mode_enabled() -> bool:
     return os.getenv("COGNEE_AGENT_MODE", "false").lower() == "true"
 

@@ -348,7 +348,21 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
 
 if __name__ == "__main__":
-    from cognee.api.v1.agents.agent_mode import is_agent_mode_enabled
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Cognee API server")
+    parser.add_argument(
+        "--agent-mode",
+        action="store_true",
+        default=None,
+        help="Enable agent mode (overrides COGNEE_AGENT_MODE env var)",
+    )
+    args = parser.parse_args()
+
+    from cognee.api.v1.agents.agent_mode import is_agent_mode_enabled, set_agent_mode
+
+    if args.agent_mode:
+        set_agent_mode(True)
 
     default_port = 8011 if is_agent_mode_enabled() else 8000
 
