@@ -199,9 +199,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
                             )
-                            await connection.run_sync(
-                                self._metadata.reflect, only=[collection_name]
-                            )
+                    # Reflect AFTER the DDL transaction commits so
+                    # _metadata is never populated for a table that
+                    # might be rolled back.
+                    async with self.engine.begin() as connection:
+                        await connection.run_sync(self._metadata.reflect, only=[collection_name])
 
     @retry(
         retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
