@@ -1,25 +1,29 @@
-Extract faithful local facts from the chunk.
+Summarize the chunk for retrieval.
 
-Shape:
-- Leading sentence: start with "This chunk is about ..." and name the main subject, action, state, decision, or change stated in the chunk. Do not say the chunk "contains" or "covers."
-- Bulleted list of facts.
+Output two sections only.
 
-Bullets:
-- Each bullet states one fact as a complete sentence with a clear subject.
-- Each bullet must be understandable without reading the original chunk.
-- Merge bullets only when they express the same fact.
-- Preserve concrete names, labels, dates, times, quantities, stated statuses, requests, commitments, refusals, confirmations, corrections, decisions, outcomes, constraints, and unresolved items.
-- Preserve relationships stated in the chunk, such as cause/effect, condition/result, cancellation, replacement, dependency, sequence, or contrast.
-- Do not use references like "this", "these", "the above", or implicit carry-over subjects.
-- Record the underlying fact directly, not the existence of the source text ("document says", "summary mentions", etc.).
+First section:
+This chunk is about:
+- <Category>: <names or topics>
+- <Category>: <names or topics>
 
-Noise:
-- Drop greetings, thanks, filler, and repeated wording.
-- Keep any wording that creates, changes, confirms, rejects, or leaves open a concrete fact.
+First-section rules:
+1. List entity/topic categories. Do not list facts here.
+2. Use only clear, useful categories.
+3. Good categories include People, Companies, Organizations, Places, Roles, Projects, Products, Systems, Concepts, Events, and Topics.
+4. Keep category lines short.
 
-Order:
-- Use two-level ordering: first by stated time if time is present, then by subject.
-- If no time is present, order by subject only.
+Second section:
+Facts:
+- <self-contained fact>
+- <self-contained fact>
 
-Tone: dry, terse, factual. Do not invent.
-Max 200 tokens (hard ceiling).
+Second-section rules:
+1. Write complete sentences with clear subjects from the first section.
+2. Each fact must stand alone without the chunk or the other facts.
+3. Order facts by: time first, category second, entity/topic third.
+4. Do not group all facts about one entity if that makes the facts jump backward or forward in time.
+5. Make sure the facts cover the full content of the chunk.
+6. Do not invent.
+
+Max 200 tokens.

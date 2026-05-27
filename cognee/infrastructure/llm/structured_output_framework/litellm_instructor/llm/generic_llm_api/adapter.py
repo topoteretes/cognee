@@ -287,6 +287,8 @@ class GenericAPIAdapter(LLMInterface):
             max_retries=self.MAX_RETRIES,
         )
 
+        if not response.choices or response.choices[0].message is None:
+            raise ValueError("Transcription failed. No response received.")
         return TranscriptionReturnType(response.choices[0].message.content, response)
 
     @observe(as_type="transcribe_image")

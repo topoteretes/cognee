@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
 from cognee.tasks.storage.add_data_points import (
@@ -18,6 +20,16 @@ adp_module = sys.modules["cognee.tasks.storage.add_data_points"]
 class SimplePoint(DataPoint):
     text: str
     metadata: dict = {"index_fields": ["text"]}
+
+
+class NamedPoint(DataPoint):
+    name: str
+    metadata: dict = {"index_fields": ["name"]}
+
+
+class TitledPoint(DataPoint):
+    title: str
+    metadata: dict = {"index_fields": ["title"]}
 
 
 def _make_unified_mock():
@@ -64,8 +76,8 @@ async def test_add_data_points_indexes_nodes_and_edges(
     graph_engine.add_nodes.assert_awaited_once()
     mock_index_nodes.assert_awaited_once()
     assert graph_engine.add_edges.await_count == 2
-    expected_main_edges = ensure_default_edge_properties([edge1])
-    expected_custom_edges = ensure_default_edge_properties(custom_edges)
+    expected_main_edges = ensure_default_edge_properties([edge1], nodes=[dp1, dp2])
+    expected_custom_edges = ensure_default_edge_properties(custom_edges, nodes=[dp1, dp2])
     first_call_edges = graph_engine.add_edges.await_args_list[0].args[0]
     assert expected_main_edges[0] in first_call_edges
     assert expected_custom_edges[0] in first_call_edges
@@ -292,6 +304,79 @@ def test_create_triplets_skips_nodes_without_id():
     triplets = _create_triplets_from_graph([dp, node_no_id], [edge])
 
     assert len(triplets) == 0
+
+
+def test_ensure_default_edge_properties_preserves_existing_defaults():
+    edge = ("source", "target", "related_to", {"edge_object_id": "edge-id", "feedback_weight": 0.9})
+
+    result = ensure_default_edge_properties([edge])
+
+    properties = result[0][3]
+    assert properties["edge_object_id"] == "edge-id"
+    assert properties["feedback_weight"] == 0.9
+    assert properties["edge_text"] == "source related to target."
+
+
+@pytest.mark.parametrize(
+    "properties",
+    [{}, {"edge_text": None}, {"edge_text": ""}, {"edge_text": "   "}],
+)
+def test_ensure_default_edge_properties_falls_back_for_missing_or_blank_edge_text(properties):
+    source = NamedPoint(name="Alice")
+    target = NamedPoint(name="Acme")
+    edge = (str(source.id), str(target.id), "works_at", properties)
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "Alice works at Acme."
+
+
+def test_ensure_default_edge_properties_preserves_nonblank_edge_text():
+    edge = ("source", "target", "related_to", {"edge_text": "Alice works at Acme."})
+
+    result = ensure_default_edge_properties([edge])
+
+    assert result[0][3]["edge_text"] == "Alice works at Acme."
+
+
+def test_ensure_default_edge_properties_uses_id_labels_when_nodes_are_unavailable():
+    edge = ("source-node-id", "target-node-id", "related_to", {})
+
+    result = ensure_default_edge_properties([edge])
+
+    assert result[0][3]["edge_text"] == "source-n related to target-n."
+
+
+def test_ensure_default_edge_properties_prefers_title_when_name_is_unavailable():
+    source = TitledPoint(title="Source Title")
+    target = TitledPoint(title="Target Title")
+    edge = (str(source.id), str(target.id), "references", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "Source Title references Target Title."
+
+
+def test_ensure_default_edge_properties_uses_chunk_index_for_document_chunks():
+    document = Document(
+        name="Doc",
+        raw_data_location="memory",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+    chunk = DocumentChunk(
+        text="Chunk text",
+        chunk_size=10,
+        chunk_index=3,
+        cut_type="paragraph",
+        is_part_of=document,
+    )
+    entity = NamedPoint(name="Alice")
+    edge = (str(chunk.id), str(entity.id), "contains", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[chunk, entity])
+
+    assert result[0][3]["edge_text"] == "chunk 3 contains Alice."
 
 
 @pytest.mark.asyncio
