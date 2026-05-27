@@ -1,6 +1,7 @@
 name: automation | Draft Docs PRs For Current Day Dev Merges
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       lookback_days:
@@ -376,7 +377,7 @@ jobs:
             - It is better to produce a very small PR than a broad PR with speculative documentation updates.
 
             When done, print a short summary of what you changed and which existing documentation pages you updated.
-          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 20"
+          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 50"
 
       - name: Prepare docs PR content
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
@@ -508,8 +509,10 @@ jobs:
               --json number \
               --jq '.[0].number')"
           else
-            echo "Expected documentation changes for ${HEAD_BRANCH}, but no docs changes were committed and no open PR exists." >&2
-            exit 1
+            echo "Assessment expected documentation changes for ${HEAD_BRANCH}, but Claude made no docs edits and no open PR exists. Skipping PR creation."
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            echo "pr_url=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           PR_URL="$(gh pr view "${PR_NUMBER}" --repo "${TARGET_REPO}" --json url --jq '.url')"
