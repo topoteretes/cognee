@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+import hashlib
+import re
+from datetime import datetime, timezone
+from threading import RLock
+from typing import Iterable, Optional
+
+from cognee.modules.agents.models import (
+    AgentConnection,
+    AgentConnectionType,
+    AgentDatasetRef,
+    AgentMemoryMode,
+    AgentSource,
+    MemorySourceType,
+)
+
+_registered_agent_connections: dict[str, AgentConnection] = {}
+_registry_lock = RLock()
+
+
+def classify_memory_source_type(name: str | None) -> MemorySourceType:
+    normalized = (name or "").lower()
+    if "brain" in normalized:
+        return "company_brain"
+    if "wiki" in normalized:
+        return "knowledge_wiki"
+    if "project" in normalized:
+        return "project_dataset"
+    return "dataset"
+
+
+def derive_memory_mode(
+    *,
+    with_memory: bool = False,
+    with_session_memory: bool = False,
+    save_session_traces: bool = False,
+) -> AgentMemoryMode:
+    if with_memory and (with_session_memory or save_session_traces):
+        return "hybrid"
+    if with_memory:
+        return "cognee"
+    if with_session_memory or save_session_traces:
+        return "session"
+    return "none"
+
+
+def derive_connection_type(
+    *,
+    origin_function: str | None = None,
+    session_id: str | None = None,
+    source: str | None = None,
+) -> AgentConnectionType:
+    source_lower = (source or "").lower()
+    if source_lower in {"mcp", "api", "api_key", "serve", "workflow", "sdk"}:
+        if source_lower == "serve":
+            return "api"
+        if source_lower == "api_key":
+            return "api"
+        return source_lower  # type: ignore[return-value]
+
+    text = f"{origin_function or ''} {session_id or ''}".lower()
+    if "claude" in text or "claude_code" in text or text.startswith("cc_"):
+        return "claude_code"
+    if "mcp" in text:
+        return "mcp"
+    return "sdk" if origin_function else "unknown"
+
+
+def build_agent_connection_id(
+    *,
+    name: str | None = None,
+    origin_function: str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    dataset_id: str | None = None,
+    connection_type: str | None = None,
+) -> str:
+    identity = "|".join(
+        [
+            origin_function or name or "agent",
+            user_id or "",
+            session_id or "",
+            dataset_id or "",
+            connection_type or "",
+        ]
+    )
+    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
+    base = re.sub(r"[^a-zA-Z0-9_-]+", "-", origin_function or name or "agent").strip("-")
+    base = base[-48:] if len(base) > 48 else base
+    return f"{base or 'agent'}-{digest}"
+
+
+def _normalize_datasets(datasets: Iterable[AgentDatasetRef | dict] | None) -> list[AgentDatasetRef]:
+    normalized = []
+    for dataset in datasets or []:
+        if isinstance(dataset, AgentDatasetRef):
+            ref = dataset
+        else:
+            ref = AgentDatasetRef(**dataset)
+        if ref.type == "dataset":
+            ref = ref.model_copy(update={"type": classify_memory_source_type(ref.name)})
+        normalized.append(ref)
+    return normalized
+
+
+def register_agent_connection(
+    *,
+    name: str,
+    connection_type: AgentConnectionType = "unknown",
+    memory_mode: AgentMemoryMode = "unknown",
+    source: AgentSource = "api",
+    agent_id: Optional[str] = None,
+    origin_function: Optional[str] = None,
+    user_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    datasets: Iterable[AgentDatasetRef | dict] | None = None,
+    status: str = "active",
+    last_active_at: Optional[datetime] = None,
+    metadata: Optional[dict] = None,
+) -> AgentConnection:
+    dataset_refs = _normalize_datasets(datasets)
+    primary_dataset_id = next((dataset.id for dataset in dataset_refs if dataset.id), None)
+    resolved_agent_id = agent_id or build_agent_connection_id(
+        name=name,
+        origin_function=origin_function,
+        user_id=user_id,
+        session_id=session_id,
+        dataset_id=primary_dataset_id,
+        connection_type=connection_type,
+    )
+    connection = AgentConnection(
+        id=resolved_agent_id,
+        name=name,
+        type=connection_type,
+        memory_mode=memory_mode,
+        session_id=session_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        datasets=dataset_refs,
+        last_active_at=last_active_at or datetime.now(timezone.utc),
+        status=status if status in {"active", "inactive", "unknown"} else "unknown",
+        source=source,
+        origin_function=origin_function,
+        metadata=metadata or {},
+    )
+
+    with _registry_lock:
+        existing = _registered_agent_connections.get(connection.id)
+        if existing:
+            merged_metadata = {**existing.metadata, **connection.metadata}
+            connection = connection.model_copy(update={"metadata": merged_metadata})
+        _registered_agent_connections[connection.id] = connection
+
+    return connection
+
+
+def list_registered_agent_connections() -> list[AgentConnection]:
+    with _registry_lock:
+        return list(_registered_agent_connections.values())
+
+
+def clear_registered_agent_connections() -> None:
+    with _registry_lock:
+        _registered_agent_connections.clear()
