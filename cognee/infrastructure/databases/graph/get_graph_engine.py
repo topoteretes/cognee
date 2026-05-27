@@ -6,11 +6,14 @@ from numbers import Number
 
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
+from cognee.shared.logging_utils import get_logger
 
 from .kuzu.adapter import DEFAULT_KUZU_BUFFER_POOL_SIZE, DEFAULT_KUZU_MAX_DB_SIZE
 from .config import get_graph_context_config
 from .graph_db_interface import GraphDBInterface
 from .supported_databases import supported_databases
+
+logger = get_logger("GraphEngine")
 
 
 def _normalize_graph_database_provider(provider: str) -> str:
@@ -314,6 +317,14 @@ def _create_graph_engine(
         from cognee.context_global_variables import backend_access_control_enabled
 
         if backend_access_control_enabled():
+            if not (
+                graph_database_host
+                and graph_database_port
+                and graph_database_username
+                and graph_database_password
+            ):
+                raise EnvironmentError("Missing required Postgres graph credentials.")
+
             connection_string: str = (
                 f"postgresql+asyncpg://{graph_database_username}:{graph_database_password}"
                 f"@{graph_database_host}:{graph_database_port}/{graph_database_name}"
@@ -332,6 +343,13 @@ def _create_graph_engine(
                 )
             else:
                 from cognee.infrastructure.databases.relational import get_relational_config
+
+                logger.warning(
+                    "Postgres graph credentials are not fully configured; "
+                    "falling back to the relational database configuration. "
+                    "Set GRAPH_DATABASE_HOST/PORT/USERNAME/PASSWORD/NAME explicitly "
+                    "to avoid this fallback."
+                )
 
                 relational_config = get_relational_config()
                 db_username = relational_config.db_username

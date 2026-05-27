@@ -89,10 +89,11 @@ class OpenAIAdapter(GenericAPIAdapter):
             llm_args=llm_args,
         )
         self.llm_args: dict[str, Any] = llm_args or {}
+        explicit_instructor_mode = bool(instructor_mode)
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
         # TODO: With gpt5 series models OpenAI expects JSON_SCHEMA as a mode for structured outputs.
         #       Make sure all new gpt models will work with this mode as well.
-        if "gpt-5" in model:
+        if "gpt-5" in model or explicit_instructor_mode:
             self.aclient = instructor.from_litellm(
                 litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
             )

@@ -10,6 +10,7 @@ from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from cognee.modules.data.models import Data
+from cognee.infrastructure.databases.postgres.admin import create_pg_database_if_not_exists
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
 from cognee.tasks.ingestion.exceptions.exceptions import (
@@ -72,7 +73,13 @@ async def ingest_dlt_source(
     dlt_db_name = f"dlt_database_{dataset_name}"
 
     if relational_config.db_provider == "postgres":
-        await _create_pg_database(dlt_db_name)
+        await create_pg_database_if_not_exists(
+            db_name=dlt_db_name,
+            host=relational_config.db_host,
+            port=relational_config.db_port,
+            username=relational_config.db_username,
+            password=relational_config.db_password,
+        )
 
     destination = get_dlt_destination(dlt_db_name=dlt_db_name)
     if destination is None:
@@ -410,33 +417,6 @@ def _resolve_primary_key(
         return column_names[0]
 
     return "id"
-
-
-async def _create_pg_database(db_name):
-    relational_config = get_relational_config()
-    maintenance_db_name = "postgres"
-    maintenance_db_url = URL.create(
-        "postgresql+asyncpg",
-        username=relational_config.db_username,
-        password=relational_config.db_password,
-        host=relational_config.db_host,
-        port=int(relational_config.db_port),
-        database=maintenance_db_name,
-    )
-    maintenance_engine = create_async_engine(maintenance_db_url)
-
-    try:
-        connection = await maintenance_engine.connect()
-        connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-        exists_result = await connection.execute(
-            text("SELECT 1 FROM pg_database WHERE datname = :db_name"),
-            {"db_name": db_name},
-        )
-        if exists_result.scalar() is None:
-            await connection.execute(text(f'CREATE DATABASE "{db_name}";'))
-        await connection.close()
-    finally:
-        await maintenance_engine.dispose()
 
 
 def _to_safe_ident(s: str) -> str:

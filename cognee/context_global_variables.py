@@ -96,15 +96,6 @@ VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "pgvector", "falkor"]
 GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["ladybug", "kuzu", "falkor", "postgres"]
 
 
-def is_multi_user_support_possible():
-    graph_config = get_graph_context_config()
-    vector_config = get_vectordb_context_config()
-    return (
-        graph_config["graph_database_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
-        and vector_config["vector_db_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
-    )
-
-
 class DatabaseContextManager:
     """Dual-mode helper returned by :func:`set_database_global_context_variables`.
 
