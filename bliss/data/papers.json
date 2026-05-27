@@ -1,0 +1,22 @@
+[
+  {
+    "problem": "A",
+    "components": ["alpha"],
+    "text": "Title: \"Alpha alone solves Problem A\", content: Problem A is the task of learning a mapping from input data X_A to target output Y_A. Existing systems treat the full transformation as a monolithic block with no clear internal structure. We show that one module, alpha, carries the entire useful computation: ablating alpha collapses Y_A performance to chance, and attaching alpha to an otherwise random stack recovers nearly all measurable signal. We propose X_A → alpha → Y_A as the minimal architecture for Problem A. Across three standard splits, this design reaches 92% of the best published Y_A score while using a single trainable stage."
+  },
+  {
+    "problem": "A",
+    "components": ["alpha", "beta", "gamma"],
+    "text": "Title: \"Problem A needs alpha, beta, and gamma\", content: Problem A is the task of learning a mapping from input data X_A to target output Y_A. A common design places one module, alpha, directly before Y_A, but that layout leaves a large error gap on held-out data. We map a longer pipeline: alpha feeds beta, beta feeds gamma, and gamma emits the representation that is evaluated as Y_A. Removing beta or gamma drives Y_A accuracy to baseline even when alpha remains wired in. We propose X_A → alpha → beta → gamma → Y_A. The four-stage stack cuts validation error on Y_A by 35% relative to the single-alpha design and accounts for most of the remaining leaderboard margin."
+  },
+  {
+    "problem": "B",
+    "components": ["gamma"],
+    "text": "Title: \"Gamma alone solves Problem B\", content: Problem B is the task of transforming input X_B into output Y_B under strict latency budgets and under shift between training and deployment distributions. Published architectures disagree on which internal stage actually performs the X_B-to-Y_B computation. We isolate module gamma as the decisive stage: without gamma, Y_B scores revert to an untrained baseline; with gamma restored in an otherwise minimal graph, Y_B quality returns while X_B preprocessing stays fixed. We propose X_B → gamma → Y_B. Tuned gamma configurations raise Y_B F1 by 12 points on the public benchmark and match the best latency profile in the comparison set."
+  },
+  {
+    "problem": "B",
+    "components": ["gamma", "delta"],
+    "text": "Title: \"Gamma and delta solve Problem B\", content: Problem B is the task of transforming input X_B into output Y_B under strict latency budgets and under shift between training and deployment distributions. One open design question is how many stages are required between X_B and the scored output Y_B. We find that gamma builds an intermediate representation and that delta—not gamma—is the module whose output is evaluated as Y_B. Ablating delta erases Y_B accuracy while gamma activations stay unchanged. We propose X_B → gamma → delta → Y_B. On held-out X_B, this two-stage pipeline improves Y_B metrics over every single-stage alternative we tested and closes most of the gap to oracle labels."
+  }
+]
