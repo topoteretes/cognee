@@ -53,8 +53,8 @@ def create_embedding_engine(
     huggingface_tokenizer,
     llm_api_key,
     llm_provider,
-    accumulate_embedding_calls: bool = False,
-    accumulate_embedding_timeout_ms: int = 100,
+    accumulate_embedding_calls: bool = True,
+    accumulate_embedding_timeout_ms: int = 20,
 ) -> EmbeddingEngine:
     """
     Create and return an embedding engine based on the specified provider.

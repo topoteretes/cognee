@@ -86,8 +86,8 @@ class EmbeddingConfig(BaseSettings):
     # embedding_batch_size strings are pending or the oldest item has waited
     # accumulate_embedding_timeout_ms milliseconds. Helps when the cognify
     # pipeline emits many small (bs=1..3) requests.
-    accumulate_embedding_calls: bool = False
-    accumulate_embedding_timeout_ms: int = 100
+    accumulate_embedding_calls: bool = True
+    accumulate_embedding_timeout_ms: int = 20
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def model_post_init(self, __context) -> None:
