@@ -6,8 +6,8 @@ import asyncio
 
 from cognee.shared.logging_utils import ERROR, setup_logging
 
-from . import context_impl, memory_impl, nomemory_impl
-from .metrics import MetricsCollector, print_comparison
+from examples.demos.sales_benchmark import context_impl, memory_impl, nomemory_impl
+from examples.demos.sales_benchmark.metrics import MetricsCollector, print_comparison
 
 
 async def main() -> None:

@@ -21,9 +21,9 @@ from __future__ import annotations
 import cognee
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
-    resolve_authorized_user_dataset,
-)
+from cognee.modules.data.methods import create_authorized_dataset, get_datasets_by_name
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.permissions.methods import give_permission_on_dataset
 from cognee.tasks.memify.apply_feedback_weights import stream_update_weight
 from cognee.tasks.storage import add_data_points
 
@@ -124,16 +124,28 @@ def _build_trace_node(
 TRACE_DATASET_NAME = "sales_benchmark_traces"
 
 
+async def _prepare_memory_dataset():
+    """Create/reuse the trace dataset and ensure agent_memory can read and write it."""
+    user = await get_default_user()
+    datasets = await get_datasets_by_name(TRACE_DATASET_NAME, user.id)
+    dataset = datasets[0] if datasets else await create_authorized_dataset(TRACE_DATASET_NAME, user)
+
+    await give_permission_on_dataset(user, dataset.id, "read")
+    await give_permission_on_dataset(user, dataset.id, "write")
+    await set_database_global_context_variables(dataset.id, dataset.owner_id)
+    return user, dataset
+
+
 async def setup_memory() -> None:
     await setup_runtime()
+    await _prepare_memory_dataset()
 
 
 async def run_all_leads(collector: MetricsCollector) -> list:
     results = []
 
     # Ensure dataset context is set for add_data_points and search
-    _user, dataset = await resolve_authorized_user_dataset(dataset_name=TRACE_DATASET_NAME)
-    await set_database_global_context_variables(dataset.id, dataset.owner_id)
+    await _prepare_memory_dataset()
 
     for i, lead in enumerate(LEADS):
         print(f"\n--- Lead {lead.lead_id}: {lead.persona_tag} ---")
