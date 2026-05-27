@@ -72,7 +72,8 @@ def chunk_by_sentence(
                     break
 
         if maximum_size and (sentence_size + word_size > maximum_size):
-            yield (paragraph_id, sentence, sentence_size, word_type_state)
+            cut_type = "sentence_cut" if word_type_state == "word" else word_type_state
+            yield (paragraph_id, sentence, sentence_size, cut_type)
             sentence = word
             sentence_size = word_size
 
