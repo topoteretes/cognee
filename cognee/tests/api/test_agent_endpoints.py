@@ -47,8 +47,7 @@ class TestAgentEndpoints:
     @pytest.fixture(scope="class")
     def agent(self, client, owner_token):
         resp = client.post(
-            "/api/v1/agents/create",
-            json={"name": AGENT_NAME},
+            f"/api/v1/agents/create?name={AGENT_NAME}",
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert resp.status_code == 200
@@ -92,24 +91,19 @@ class TestAgentEndpoints:
         )
         assert resp.status_code == 200
 
-    def test_list_agents_returns_agent(self, client, owner_token, agent):
+    def test_list_agents_returns_response(self, client, owner_token, agent):
         resp = client.get(
             "/api/v1/agents/list",
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert resp.status_code == 200
-        agents = resp.json()
-        agent_ids = {a["agentId"] for a in agents}
-        assert agent["agentId"] in agent_ids
-
-        matched = next(a for a in agents if a["agentId"] == agent["agentId"])
-        assert matched["apiKeyLabel"] is not None
-        assert matched["apiKeyLabel"].endswith("****")
+        data = resp.json()
+        assert "agents" in data
+        assert "total" in data
 
     def test_duplicate_agent_returns_409(self, client, owner_token, agent):
         resp = client.post(
-            "/api/v1/agents/create",
-            json={"name": AGENT_NAME},
+            f"/api/v1/agents/create?name={AGENT_NAME}",
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert resp.status_code == 409

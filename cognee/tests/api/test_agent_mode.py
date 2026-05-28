@@ -11,16 +11,34 @@ with patch("dotenv.load_dotenv"):
     from fastapi.testclient import TestClient
 
 from cognee.api.v1.agents import agent_mode
+from cognee.modules.agents.models import RegisterAgentRequest
+from cognee.modules.users.models.User import User
 
 RUN_ID = uuid.uuid4().hex[:8]
 OWNER_EMAIL = f"agentmode-owner-{RUN_ID}@example.com"
 OWNER_PASSWORD = "ownerpass123!"
+
+REGISTER_BODY = {"name": "test-agent"}
+
+_DUMMY_USER = User(email="test@test.com", hashed_password="!")
+_DUMMY_REQUEST = RegisterAgentRequest(name="test-agent")
 
 
 def _reset_agent_mode():
     """Reset module-level globals between tests."""
     agent_mode._active_count = 0
     agent_mode._watchdog_started = False
+
+
+@pytest.fixture(autouse=True)
+def _patch_persistence(monkeypatch):
+    async def noop_persist(_user_id, _connection):
+        pass
+
+    monkeypatch.setattr(
+        "cognee.modules.agents.registry._persist_agent_connection",
+        noop_persist,
+    )
 
 
 class TestAgentMode:
@@ -55,37 +73,38 @@ class TestAgentMode:
     def test_register_increments_count(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
-        resp = client.post("/api/v1/agents/mode/register_use", headers=headers)
-        assert resp.status_code == 200
-        assert resp.json()["activeAgents"] == 1
+        resp = client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
+        assert resp.status_code == 201
+        assert agent_mode._active_count == 1
 
-        resp = client.post("/api/v1/agents/mode/register_use", headers=headers)
-        assert resp.status_code == 200
-        assert resp.json()["activeAgents"] == 2
+        resp = client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
+        assert resp.status_code == 201
+        assert agent_mode._active_count == 2
 
     def test_unregister_decrements_count(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
-        client.post("/api/v1/agents/mode/register_use", headers=headers)
-        client.post("/api/v1/agents/mode/register_use", headers=headers)
+        client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
+        client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
 
-        resp = client.post("/api/v1/agents/mode/unregister_use", headers=headers)
+        resp = client.post("/api/v1/agents/unregister", headers=headers)
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 1
 
     def test_unregister_does_not_go_below_zero(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
-        resp = client.post("/api/v1/agents/mode/unregister_use", headers=headers)
+        resp = client.post("/api/v1/agents/unregister", headers=headers)
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 0
 
-        resp = client.post("/api/v1/agents/mode/unregister_use", headers=headers)
+        resp = client.post("/api/v1/agents/unregister", headers=headers)
         assert resp.json()["activeAgents"] == 0
 
+    @pytest.mark.asyncio
     @patch.object(agent_mode, "_shutdown_server")
-    def test_watchdog_does_not_shutdown_with_active_agents(self, mock_shutdown):
-        agent_mode.register_agent_use()
+    async def test_watchdog_does_not_shutdown_with_active_agents(self, mock_shutdown):
+        await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
         agent_mode._watchdog()
         mock_shutdown.assert_not_called()
 
@@ -94,23 +113,19 @@ class TestAgentMode:
         agent_mode._watchdog()
         mock_shutdown.assert_called_once()
 
+    @pytest.mark.asyncio
     @patch.object(agent_mode, "_shutdown_server")
-    def test_watchdog_shuts_down_after_all_unregister(self, mock_shutdown):
-        agent_mode.register_agent_use()
-        agent_mode.register_agent_use()
-        agent_mode.unregister_agent_use()
-        agent_mode.unregister_agent_use()
+    async def test_watchdog_shuts_down_after_all_unregister(self, mock_shutdown):
+        await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
+        await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
+        agent_mode.unregister_agent()
+        agent_mode.unregister_agent()
 
         agent_mode._watchdog()
         mock_shutdown.assert_called_once()
 
-    def test_endpoints_reject_when_agent_mode_disabled(self, client, owner_token):
-        headers = {"Authorization": f"Bearer {owner_token}"}
-
+    @pytest.mark.asyncio
+    async def test_watchdog_does_not_start_when_agent_mode_disabled(self):
         with patch.dict(os.environ, {"COGNEE_AGENT_MODE": "false"}):
-            resp = client.post("/api/v1/agents/mode/register_use", headers=headers)
-            assert resp.status_code == 400
-            assert "COGNEE_AGENT_MODE" in resp.json()["detail"]
-
-            resp = client.post("/api/v1/agents/mode/unregister_use", headers=headers)
-            assert resp.status_code == 400
+            await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
+            assert not agent_mode._watchdog_started

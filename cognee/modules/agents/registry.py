@@ -14,6 +14,11 @@ from cognee.modules.agents.models import (
     AgentSource,
     MemorySourceType,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("agents.registry")
+
+AGENT_CONFIG_NAME = "agent_configuration"
 
 _registered_agent_connections: dict[str, AgentConnection] = {}
 _registry_lock = RLock()
@@ -104,7 +109,32 @@ def _normalize_datasets(datasets: Iterable[AgentDatasetRef | dict] | None) -> li
     return normalized
 
 
-def register_agent_connection(
+async def _persist_agent_connection(user_id: str, connection: AgentConnection) -> None:
+    from cognee.modules.users.methods.get_principal_configuration import (
+        get_principal_all_configuration,
+    )
+    from cognee.modules.users.methods.store_principal_configuration import (
+        store_principal_configuration,
+    )
+
+    all_configs = await get_principal_all_configuration(user_id)
+    existing_config = {}
+    for config in all_configs:
+        if config.get("name") == AGENT_CONFIG_NAME:
+            existing_config = config.get("configuration", {})
+            break
+
+    agents = existing_config.get("agents", {})
+    agents[connection.id] = connection.model_dump(mode="json")
+
+    await store_principal_configuration(
+        principal_id=user_id,
+        name=AGENT_CONFIG_NAME,
+        configuration={**existing_config, "agents": agents},
+    )
+
+
+async def register_agent_connection(
     *,
     name: str,
     connection_type: AgentConnectionType = "unknown",
@@ -153,12 +183,29 @@ def register_agent_connection(
             connection = connection.model_copy(update={"metadata": merged_metadata})
         _registered_agent_connections[connection.id] = connection
 
+    if user_id:
+        await _persist_agent_connection(user_id, connection)
+
     return connection
 
 
 def list_registered_agent_connections() -> list[AgentConnection]:
     with _registry_lock:
         return list(_registered_agent_connections.values())
+
+
+async def list_persisted_agent_connections(user_id: str) -> list[AgentConnection]:
+    from cognee.modules.users.methods.get_principal_configuration import (
+        get_principal_all_configuration,
+    )
+
+    all_configs = await get_principal_all_configuration(user_id)
+
+    for config in all_configs:
+        if config.get("name") == AGENT_CONFIG_NAME:
+            agents_dict = config.get("configuration", {}).get("agents", {})
+            return [AgentConnection(**agent_data) for agent_data in agents_dict.values()]
+    return []
 
 
 def clear_registered_agent_connections() -> None:

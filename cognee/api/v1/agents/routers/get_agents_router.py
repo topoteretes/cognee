@@ -1,26 +1,22 @@
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from cognee.api.DTO import OutDTO
-from cognee.api.v1.agents.agent_mode import (
-    is_agent_mode_enabled,
-    register_agent_use,
-    unregister_agent_use,
-)
+from cognee.api.v1.agents.agent_mode import register_agent, unregister_agent
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.delete_agent import delete_agent
-from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.models import RegisterAgentRequest
+from cognee.modules.agents.operations import (
+    get_agent_connection_detail,
+    list_agent_connections,
+)
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.models.User import User
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
 from fastapi_users.exceptions import UserAlreadyExists
 
-
-class AgentDTO(OutDTO):
-    agent_id: UUID
-    agent_email: str
-    api_key_label: Optional[str] = None
+RangeLiteral = Literal["24h", "7d", "30d", "all"]
 
 
 class AgentWithApiKeyDTO(OutDTO):
@@ -42,17 +38,47 @@ def _display_email(internal_email: str) -> str:
 def get_agents_router() -> APIRouter:
     router = APIRouter()
 
+    @router.get("")
+    async def list_agents_connections(
+        range: RangeLiteral = Query("30d"),
+        status_filter: Optional[Literal["active", "inactive", "unknown"]] = Query(
+            None,
+            alias="status",
+        ),
+        include_sources: bool = Query(True),
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+        user: User = Depends(get_authenticated_user),
+    ):
+        response = await list_agent_connections(
+            user=user,
+            range_key=range,
+            status_filter=status_filter,
+            include_sources=include_sources,
+            limit=limit,
+            offset=offset,
+        )
+        return jsonable_encoder(response)
+
+    @router.post("/register", status_code=status.HTTP_201_CREATED)
+    async def register_agent_endpoint(
+        request: RegisterAgentRequest,
+        user: User = Depends(get_authenticated_user),
+    ):
+        connection = await register_agent(user, request)
+        return jsonable_encoder(connection)
+
     @router.post("/create")
     async def create_agent_endpoint(
-        request: RegisterAgentRequest,
+        name: str,
         user: User = Depends(get_authenticated_user),
     ) -> AgentWithApiKeyDTO:
         try:
-            agent_user, api_key = await create_agent(request.name, user)
+            agent_user, api_key = await create_agent(name, user)
         except UserAlreadyExists:
             raise HTTPException(
                 status_code=409,
-                detail=f"Agent with name '{request.name}' already exists",
+                detail=f"Agent with name '{name}' already exists",
             )
 
         return AgentWithApiKeyDTO(
@@ -63,41 +89,38 @@ def get_agents_router() -> APIRouter:
 
     @router.get("/list")
     async def get_agents_endpoint(
+        limit: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
         user: User = Depends(get_authenticated_user),
-    ) -> list[AgentDTO]:
-        agents = await list_agents(user.id)
-        return [
-            AgentDTO(
-                agent_id=agent.user.id,
-                agent_email=_display_email(agent.user.email),
-                api_key_label=agent.api_key_label,
-            )
-            for agent in agents
-        ]
+    ):
+        response = await list_agent_connections(
+            user=user,
+            limit=limit,
+            offset=offset,
+        )
+        return jsonable_encoder(response)
 
-    @router.post("/mode/register_use")
-    async def register_agent_mode_endpoint(
+    @router.post("/unregister")
+    async def unregister_agent_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
-        if not is_agent_mode_enabled():
-            raise HTTPException(
-                status_code=400,
-                detail="Agent mode is not enabled. Set COGNEE_AGENT_MODE=true.",
-            )
-        count = register_agent_use()
+        count = unregister_agent()
         return AgentModeDTO(active_agents=count)
 
-    @router.post("/mode/unregister_use")
-    async def unregister_agent_mode_endpoint(
+    @router.get("/{agent_id}")
+    async def get_agent(
+        agent_id: str,
+        range: RangeLiteral = Query("all"),
         user: User = Depends(get_authenticated_user),
-    ) -> AgentModeDTO:
-        if not is_agent_mode_enabled():
-            raise HTTPException(
-                status_code=400,
-                detail="Agent mode is not enabled. Set COGNEE_AGENT_MODE=true.",
-            )
-        count = unregister_agent_use()
-        return AgentModeDTO(active_agents=count)
+    ):
+        response = await get_agent_connection_detail(
+            user=user,
+            agent_id=agent_id,
+            range_key=range,
+        )
+        if response is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        return jsonable_encoder(response)
 
     @router.delete("/{agent_id}")
     async def delete_agent_endpoint(

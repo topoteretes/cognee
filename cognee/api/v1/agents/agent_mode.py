@@ -17,10 +17,18 @@ server launched with COGNEE_AGENT_MODE=true will stay alive
 indefinitely while waiting for its first agent.
 """
 
+from __future__ import annotations
+
 import os
 import signal
 import threading
+from typing import TYPE_CHECKING
+
 from cognee.shared.logging_utils import get_logger
+
+if TYPE_CHECKING:
+    from cognee.modules.agents.models import AgentConnection, RegisterAgentRequest
+    from cognee.modules.users.models.User import User
 
 logger = get_logger(__name__)
 
@@ -56,14 +64,18 @@ def _watchdog():
         _shutdown_server()
 
 
-def register_agent_use() -> int:
+async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConnection:
     global _active_count, _watchdog_started
+
+    from cognee.modules.agents.operations import register_agent_from_request
+
+    connection = await register_agent_from_request(user, request)
 
     with _lock:
         _active_count += 1
         count = _active_count
 
-        if not _watchdog_started:
+        if is_agent_mode_enabled() and not _watchdog_started:
             _watchdog_started = True
             timer = threading.Timer(60.0, _watchdog)
             timer.daemon = True
@@ -71,10 +83,10 @@ def register_agent_use() -> int:
             logger.info("Agent mode watchdog started")
 
     logger.info("Agent registered (active: %d)", count)
-    return count
+    return connection
 
 
-def unregister_agent_use() -> int:
+def unregister_agent() -> int:
     global _active_count
 
     with _lock:

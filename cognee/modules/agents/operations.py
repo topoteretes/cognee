@@ -19,6 +19,7 @@ from cognee.modules.agents.registry import (
     build_agent_connection_id,
     classify_memory_source_type,
     derive_connection_type,
+    list_persisted_agent_connections,
     list_registered_agent_connections,
     register_agent_connection,
 )
@@ -301,6 +302,7 @@ async def list_agent_connections(
             permitted_dataset_ids=permitted_dataset_id_strings,
         )
     ]
+    persisted_agents = await list_persisted_agent_connections(str(user.id))
     trace_agents = await _trace_agents_for_user(
         user=user,
         visible_user_ids=visible_user_ids,
@@ -308,7 +310,7 @@ async def list_agent_connections(
         memory_sources_by_id=memory_sources_by_id,
         since=since,
     )
-    agents = _merge_agents([*registered_agents, *trace_agents])
+    agents = _merge_agents([*registered_agents, *persisted_agents, *trace_agents])
     if status_filter:
         agents = [agent for agent in agents if agent.status == status_filter]
 
@@ -377,7 +379,7 @@ async def get_agent_connection_detail(
     )
 
 
-def register_agent_from_request(user: User, request: RegisterAgentRequest) -> AgentConnection:
+async def register_agent_from_request(user: User, request: RegisterAgentRequest) -> AgentConnection:
     datasets = [
         AgentDatasetRef(id=dataset_id, role="read_write", type="dataset")
         for dataset_id in request.dataset_ids
@@ -390,7 +392,7 @@ def register_agent_from_request(user: User, request: RegisterAgentRequest) -> Ag
         )
         for dataset_name in request.dataset_names
     )
-    return register_agent_connection(
+    return await register_agent_connection(
         name=request.name,
         connection_type=request.type,
         memory_mode=request.memory_mode,
