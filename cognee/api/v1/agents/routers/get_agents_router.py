@@ -3,7 +3,7 @@ from uuid import UUID
 
 from cognee.api.DTO import OutDTO
 from cognee.api.v1.agents.agent_mode import register_agent, unregister_agent
-from cognee.api.v1.agents.models import RegisterAgentRequest
+from cognee.modules.agents.models import RegisterAgentRequest
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.get_agent import get_agent
 from cognee.modules.agents.list_agents import list_agents

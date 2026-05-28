@@ -7,7 +7,7 @@ from uuid import UUID as UUIDType
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.api.v1.agents.models import (
+from cognee.modules.agents.models import (
     AgentConnection,
     AgentDatasetRef,
     AgentDetailResponse,

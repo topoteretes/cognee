@@ -11,7 +11,7 @@ with patch("dotenv.load_dotenv"):
     from fastapi.testclient import TestClient
 
 from cognee.api.v1.agents import agent_mode
-from cognee.api.v1.agents.models import RegisterAgentRequest
+from cognee.modules.agents.models import RegisterAgentRequest
 from cognee.modules.users.models.User import User
 
 RUN_ID = uuid.uuid4().hex[:8]

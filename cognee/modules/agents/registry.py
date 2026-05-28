@@ -7,7 +7,7 @@ from threading import RLock
 from typing import Iterable, Optional
 from uuid import UUID
 
-from cognee.api.v1.agents.models import (
+from cognee.modules.agents.models import (
     AgentConnection,
     AgentConnectionType,
     AgentDatasetRef,

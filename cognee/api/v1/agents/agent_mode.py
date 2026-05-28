@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from cognee.shared.logging_utils import get_logger
 
 if TYPE_CHECKING:
-    from cognee.api.v1.agents.models import AgentConnection, RegisterAgentRequest
+    from cognee.modules.agents.models import AgentConnection, RegisterAgentRequest
     from cognee.modules.users.models.User import User
 
 logger = get_logger(__name__)
