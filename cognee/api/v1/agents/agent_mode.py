@@ -22,12 +22,13 @@ from __future__ import annotations
 import os
 import signal
 import threading
+from uuid import UUID
 from typing import TYPE_CHECKING
 
 from cognee.shared.logging_utils import get_logger
 
 if TYPE_CHECKING:
-    from cognee.modules.agents.models import AgentConnection, RegisterAgentRequest
+    from cognee.api.v1.agents.models import AgentConnection, RegisterAgentRequest
     from cognee.modules.users.models.User import User
 
 logger = get_logger(__name__)
@@ -43,7 +44,7 @@ def is_agent_mode_enabled() -> bool:
 
 _lock = threading.Lock()
 _active_count = 0
-_active_user_ids: set[str] = set()
+_active_user_ids: set[UUID] = set()
 _watchdog_started = False
 
 
@@ -72,7 +73,7 @@ async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConn
 
     connection = await register_agent_from_request(user, request)
 
-    user_id = str(user.id)
+    user_id = user.id
     with _lock:
         if user_id in _active_user_ids:
             return connection

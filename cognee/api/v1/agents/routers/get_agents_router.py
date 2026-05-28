@@ -3,9 +3,11 @@ from uuid import UUID
 
 from cognee.api.DTO import OutDTO
 from cognee.api.v1.agents.agent_mode import register_agent, unregister_agent
+from cognee.api.v1.agents.models import RegisterAgentRequest
 from cognee.modules.agents.create_agent import create_agent
+from cognee.modules.agents.get_agent import get_agent
+from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.delete_agent import delete_agent
-from cognee.modules.agents.models import RegisterAgentRequest
 from cognee.modules.agents.operations import (
     get_agent_connection_detail,
     list_agent_connections,
@@ -17,6 +19,12 @@ from fastapi.encoders import jsonable_encoder
 from fastapi_users.exceptions import UserAlreadyExists
 
 RangeLiteral = Literal["24h", "7d", "30d", "all"]
+
+
+class AgentDTO(OutDTO):
+    agent_id: UUID
+    agent_email: str
+    api_key_label: Optional[str] = None
 
 
 class AgentWithApiKeyDTO(OutDTO):
@@ -38,7 +46,7 @@ def _display_email(internal_email: str) -> str:
 def get_agents_router() -> APIRouter:
     router = APIRouter()
 
-    @router.get("")
+    @router.get("/connections")
     async def list_agents_connections(
         range: RangeLiteral = Query("30d"),
         status_filter: Optional[Literal["active", "inactive", "unknown"]] = Query(
@@ -68,6 +76,20 @@ def get_agents_router() -> APIRouter:
         connection = await register_agent(user, request)
         return jsonable_encoder(connection)
 
+    @router.get("/list")
+    async def list_agents_endpoint(
+        user: User = Depends(get_authenticated_user),
+    ) -> list[AgentDTO]:
+        agents = await list_agents(user.id)
+        return [
+            AgentDTO(
+                agent_id=agent.user.id,
+                agent_email=_display_email(agent.user.email),
+                api_key_label=agent.api_key_label,
+            )
+            for agent in agents
+        ]
+
     @router.post("/create")
     async def create_agent_endpoint(
         name: str,
@@ -87,19 +109,6 @@ def get_agents_router() -> APIRouter:
             agent_api_key=api_key,
         )
 
-    @router.get("/list")
-    async def get_agents_endpoint(
-        limit: int = Query(50, ge=1, le=500),
-        offset: int = Query(0, ge=0),
-        user: User = Depends(get_authenticated_user),
-    ):
-        response = await list_agent_connections(
-            user=user,
-            limit=limit,
-            offset=offset,
-        )
-        return jsonable_encoder(response)
-
     @router.post("/unregister")
     async def unregister_agent_endpoint(
         user: User = Depends(get_authenticated_user),
@@ -107,8 +116,8 @@ def get_agents_router() -> APIRouter:
         count = unregister_agent()
         return AgentModeDTO(active_agents=count)
 
-    @router.get("/{agent_id}")
-    async def get_agent(
+    @router.get("/connections/{agent_id}")
+    async def get_connection_detail(
         agent_id: str,
         range: RangeLiteral = Query("all"),
         user: User = Depends(get_authenticated_user),
@@ -119,8 +128,25 @@ def get_agents_router() -> APIRouter:
             range_key=range,
         )
         if response is None:
-            raise HTTPException(status_code=404, detail="agent not found")
+            raise HTTPException(status_code=404, detail="connection not found")
         return jsonable_encoder(response)
+
+    @router.get("/{agent_id}")
+    async def get_agent_endpoint(
+        agent_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ) -> AgentDTO:
+        try:
+            agent_info = await get_agent(agent_id, user.id)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        return AgentDTO(
+            agent_id=agent_info.user.id,
+            agent_email=_display_email(agent_info.user.email),
+            api_key_label=agent_info.api_key_label,
+        )
 
     @router.delete("/{agent_id}")
     async def delete_agent_endpoint(

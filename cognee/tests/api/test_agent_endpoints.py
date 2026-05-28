@@ -91,15 +91,16 @@ class TestAgentEndpoints:
         )
         assert resp.status_code == 200
 
-    def test_list_agents_returns_response(self, client, owner_token, agent):
+    def test_list_agents_returns_agent(self, client, owner_token, agent):
         resp = client.get(
             "/api/v1/agents/list",
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert resp.status_code == 200
-        data = resp.json()
-        assert "agents" in data
-        assert "total" in data
+        agents = resp.json()
+        assert isinstance(agents, list)
+        agent_ids = {a["agentId"] for a in agents}
+        assert agent["agentId"] in agent_ids
 
     def test_duplicate_agent_returns_409(self, client, owner_token, agent):
         resp = client.post(

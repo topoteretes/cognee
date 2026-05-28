@@ -7,7 +7,7 @@ from uuid import UUID as UUIDType
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.agents.models import (
+from cognee.api.v1.agents.models import (
     AgentConnection,
     AgentDatasetRef,
     AgentDetailResponse,
@@ -108,8 +108,8 @@ def _memory_sources_from_datasets(datasets: list[Any]) -> list[MemorySourceConne
                 id=str(dataset_id),
                 name=str(dataset_name),
                 type=classify_memory_source_type(str(dataset_name)),
-                owner_id=str(getattr(dataset, "owner_id", "")) or None,
-                tenant_id=str(getattr(dataset, "tenant_id", "")) or None,
+                owner_id=getattr(dataset, "owner_id", None),
+                tenant_id=getattr(dataset, "tenant_id", None),
                 status="active",
             )
         )
@@ -204,7 +204,7 @@ async def _trace_agents_for_user(
                 memory_mode="hybrid" if datasets else "session",
                 session_id=session_id,
                 user_id=owner_user_id,
-                tenant_id=str(getattr(user, "tenant_id", "")) or None,
+                tenant_id=getattr(user, "tenant_id", None),
                 datasets=datasets,
                 last_active_at=getattr(record, "last_activity_at", None),
                 status=status,
@@ -225,7 +225,7 @@ async def _trace_agents_for_user(
 def _is_visible_registered_agent(
     agent: AgentConnection,
     *,
-    visible_user_ids: set[str],
+    visible_user_ids: set[UUIDType],
     permitted_dataset_ids: set[str],
 ) -> bool:
     if agent.user_id and agent.user_id in visible_user_ids:
@@ -289,7 +289,7 @@ async def list_agent_connections(
     memory_sources_by_id = {source.id: source for source in memory_sources}
     permitted_dataset_ids = [UUIDType(source.id) for source in memory_sources]
     visible_user_ids = await _visible_user_ids(user)
-    visible_user_id_strings = {str(user_id) for user_id in visible_user_ids}
+    visible_user_id_set = set(visible_user_ids)
     permitted_dataset_id_strings = {source.id for source in memory_sources}
     since = _range_since(range_key)
 
@@ -298,13 +298,11 @@ async def list_agent_connections(
         for agent in list_registered_agent_connections()
         if _is_visible_registered_agent(
             agent,
-            visible_user_ids=visible_user_id_strings,
+            visible_user_ids=visible_user_id_set,
             permitted_dataset_ids=permitted_dataset_id_strings,
         )
     ]
-    persisted_agents = await list_persisted_agent_connections(
-        [str(uid) for uid in visible_user_ids]
-    )
+    persisted_agents = await list_persisted_agent_connections(visible_user_ids)
     trace_agents = await _trace_agents_for_user(
         user=user,
         visible_user_ids=visible_user_ids,
@@ -400,8 +398,8 @@ async def register_agent_from_request(user: User, request: RegisterAgentRequest)
         memory_mode=request.memory_mode,
         source=request.source,
         origin_function=request.origin_function,
-        user_id=str(user.id),
-        tenant_id=str(getattr(user, "tenant_id", "")) or None,
+        user_id=user.id,
+        tenant_id=getattr(user, "tenant_id", None),
         session_id=request.session_id,
         datasets=datasets,
         metadata=request.metadata,

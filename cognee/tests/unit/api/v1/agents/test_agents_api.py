@@ -77,7 +77,7 @@ def test_agents_register_and_list_endpoint(monkeypatch):
         assert created.status_code == 201
         assert created.json()["name"] == "support_agent"
 
-        response = client.get("/api/v1/agents")
+        response = client.get("/api/v1/agents/connections")
         assert response.status_code == 200
         body = response.json()
         assert body["total"] == 1
@@ -98,5 +98,5 @@ def test_agents_detail_endpoint_returns_404_for_unknown_agent(monkeypatch):
     app.dependency_overrides[get_authenticated_user] = lambda: user
 
     with TestClient(app) as client:
-        response = client.get("/api/v1/agents/missing")
+        response = client.get("/api/v1/agents/connections/missing")
         assert response.status_code == 404

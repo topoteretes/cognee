@@ -109,11 +109,9 @@ def agent_memory(
                 ),
                 source="agent_memory",
                 origin_function=fn.__qualname__,
-                user_id=str(resolved_user.id) if resolved_user is not None else None,
+                user_id=resolved_user.id if resolved_user is not None else None,
                 tenant_id=(
-                    str(getattr(resolved_user, "tenant_id"))
-                    if resolved_user is not None and getattr(resolved_user, "tenant_id", None)
-                    else None
+                    getattr(resolved_user, "tenant_id", None) if resolved_user is not None else None
                 ),
                 session_id=config.session_id,
                 datasets=[

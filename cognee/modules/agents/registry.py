@@ -5,8 +5,9 @@ import re
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Iterable, Optional
+from uuid import UUID
 
-from cognee.modules.agents.models import (
+from cognee.api.v1.agents.models import (
     AgentConnection,
     AgentConnectionType,
     AgentDatasetRef,
@@ -109,7 +110,7 @@ def _normalize_datasets(datasets: Iterable[AgentDatasetRef | dict] | None) -> li
     return normalized
 
 
-async def _persist_agent_connection(user_id: str, connection: AgentConnection) -> None:
+async def _persist_agent_connection(user_id: UUID, connection: AgentConnection) -> None:
     from cognee.modules.users.methods.get_principal_configuration import (
         get_principal_all_configuration,
     )
@@ -142,8 +143,8 @@ async def register_agent_connection(
     source: AgentSource = "api",
     agent_id: Optional[str] = None,
     origin_function: Optional[str] = None,
-    user_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
+    user_id: Optional[UUID] = None,
+    tenant_id: Optional[UUID] = None,
     session_id: Optional[str] = None,
     datasets: Iterable[AgentDatasetRef | dict] | None = None,
     status: str = "active",
@@ -155,7 +156,7 @@ async def register_agent_connection(
     resolved_agent_id = agent_id or build_agent_connection_id(
         name=name,
         origin_function=origin_function,
-        user_id=user_id,
+        user_id=str(user_id) if user_id is not None else None,
         session_id=session_id,
         dataset_id=primary_dataset_id,
         connection_type=connection_type,
@@ -194,7 +195,7 @@ def list_registered_agent_connections() -> list[AgentConnection]:
         return list(_registered_agent_connections.values())
 
 
-async def list_persisted_agent_connections(user_ids: list[str]) -> list[AgentConnection]:
+async def list_persisted_agent_connections(user_ids: list[UUID]) -> list[AgentConnection]:
     from cognee.modules.users.methods.get_principal_configuration import (
         get_principal_all_configuration,
     )

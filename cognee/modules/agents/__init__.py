@@ -1,4 +1,4 @@
-from cognee.modules.agents.models import (
+from cognee.api.v1.agents.models import (
     AgentConnection,
     AgentDatasetRef,
     AgentDetailResponse,

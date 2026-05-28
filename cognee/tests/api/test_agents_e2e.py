@@ -74,7 +74,7 @@ class TestAgentsE2E:
 
     def test_list_connections_empty(self, client, headers, _patch_operations):
         clear_registered_agent_connections()
-        resp = client.get("/api/v1/agents", headers=headers)
+        resp = client.get("/api/v1/agents/connections", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] == 0
@@ -142,7 +142,7 @@ class TestAgentsE2E:
         assert reg.status_code == 201
         agent_id = reg.json()["id"]
 
-        resp = client.get("/api/v1/agents", headers=headers)
+        resp = client.get("/api/v1/agents/connections", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] == 1
@@ -160,7 +160,7 @@ class TestAgentsE2E:
                 json={"name": f"paginated_{i}"},
             )
 
-        resp = client.get("/api/v1/agents?limit=2&offset=0", headers=headers)
+        resp = client.get("/api/v1/agents/connections?limit=2&offset=0", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] == 3
@@ -169,7 +169,7 @@ class TestAgentsE2E:
         assert body["limit"] == 2
         assert body["offset"] == 0
 
-        resp2 = client.get("/api/v1/agents?limit=2&offset=2", headers=headers)
+        resp2 = client.get("/api/v1/agents/connections?limit=2&offset=2", headers=headers)
         body2 = resp2.json()
         assert len(body2["agents"]) == 1
         assert body2["has_more"] is False
@@ -182,11 +182,11 @@ class TestAgentsE2E:
             json={"name": "active_agent"},
         )
 
-        resp = client.get("/api/v1/agents?status=active", headers=headers)
+        resp = client.get("/api/v1/agents/connections?status=active", headers=headers)
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
-        resp2 = client.get("/api/v1/agents?status=inactive", headers=headers)
+        resp2 = client.get("/api/v1/agents/connections?status=inactive", headers=headers)
         assert resp2.status_code == 200
         assert resp2.json()["total"] == 0
 
@@ -205,7 +205,7 @@ class TestAgentsE2E:
         assert reg.status_code == 201
         agent_id = reg.json()["id"]
 
-        resp = client.get(f"/api/v1/agents/{agent_id}", headers=headers)
+        resp = client.get(f"/api/v1/agents/connections/{agent_id}", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
         assert body["agent"]["id"] == agent_id
@@ -218,9 +218,9 @@ class TestAgentsE2E:
 
     def test_get_connection_detail_not_found(self, client, headers, _patch_operations):
         clear_registered_agent_connections()
-        resp = client.get("/api/v1/agents/nonexistent-id-12345", headers=headers)
+        resp = client.get("/api/v1/agents/connections/nonexistent-id-12345", headers=headers)
         assert resp.status_code == 404
-        assert resp.json()["detail"] == "agent not found"
+        assert resp.json()["detail"] == "connection not found"
 
     def test_register_multiple_connections_and_list(self, client, headers, _patch_operations):
         clear_registered_agent_connections()
@@ -235,7 +235,7 @@ class TestAgentsE2E:
             assert r.status_code == 201
             ids.append(r.json()["id"])
 
-        resp = client.get("/api/v1/agents", headers=headers)
+        resp = client.get("/api/v1/agents/connections", headers=headers)
         body = resp.json()
         assert body["total"] == 3
         returned_ids = {a["id"] for a in body["agents"]}
@@ -276,7 +276,7 @@ class TestAgentsE2E:
         assert r2.json()["id"] == first_id
         assert r2.json()["metadata"]["version"] == "2"
 
-        resp = client.get("/api/v1/agents", headers=headers)
+        resp = client.get("/api/v1/agents/connections", headers=headers)
         assert resp.json()["total"] == 1
 
     # ------------------------------------------------------------------ #
@@ -305,9 +305,8 @@ class TestAgentsE2E:
     def test_list_agents(self, client, headers):
         resp = client.get("/api/v1/agents/list", headers=headers)
         assert resp.status_code == 200
-        data = resp.json()
-        assert "agents" in data
-        assert "total" in data
+        agents = resp.json()
+        assert isinstance(agents, list)
 
     def test_sub_user_api_key_authenticates(self, client, headers):
         resp = client.post(
@@ -378,9 +377,9 @@ class TestAgentsE2E:
 
         try:
             endpoints = [
-                ("GET", "/api/v1/agents"),
+                ("GET", "/api/v1/agents/connections"),
                 ("POST", "/api/v1/agents/register"),
-                ("GET", "/api/v1/agents/some-id"),
+                ("GET", "/api/v1/agents/connections/some-id"),
                 ("POST", "/api/v1/agents/create?name=nope"),
                 ("GET", "/api/v1/agents/list"),
                 ("DELETE", f"/api/v1/agents/{uuid.uuid4()}"),
@@ -533,7 +532,7 @@ class TestAgentPersistence:
         assert persisted["memory_mode"] == "hybrid"
 
     def test_list_returns_persisted_agent(self, client, headers, owner, _patch_traces):
-        resp = client.get("/api/v1/agents", headers=headers)
+        resp = client.get("/api/v1/agents/connections", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
         agent_names = {a["name"] for a in body["agents"]}
@@ -564,7 +563,7 @@ class TestAgentPersistence:
         child_connection_id = reg_resp.json()["id"]
 
         clear_registered_agent_connections()
-        resp = client.get("/api/v1/agents", headers=headers)
+        resp = client.get("/api/v1/agents/connections", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
         agent_ids = {a["id"] for a in body["agents"]}
