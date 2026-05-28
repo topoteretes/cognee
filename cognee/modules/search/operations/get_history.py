@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import literal, select
@@ -9,12 +9,17 @@ from ..models.Query import Query
 from ..models.Result import Result
 
 
-async def get_history(user_id: UUID, limit: int = 10) -> list[dict[str, Any]]:
+async def get_history(
+    user_id: UUID, limit: int = 10, conversation_id: Optional[UUID] = None
+) -> list[dict[str, Any]]:
     db_engine = get_relational_engine()
 
     queries_query = select(
         Query.id, Query.text.label("text"), Query.created_at, literal("user").label("user")
     ).filter(Query.user_id == user_id)
+
+    if conversation_id is not None:
+        queries_query = queries_query.filter(Query.conversation_id == conversation_id)
 
     results_query = select(
         Result.id, Result.value.label("text"), Result.created_at, literal("system").label("user")
