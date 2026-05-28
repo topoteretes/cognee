@@ -302,7 +302,9 @@ async def list_agent_connections(
             permitted_dataset_ids=permitted_dataset_id_strings,
         )
     ]
-    persisted_agents = await list_persisted_agent_connections(str(user.id))
+    persisted_agents = await list_persisted_agent_connections(
+        [str(uid) for uid in visible_user_ids]
+    )
     trace_agents = await _trace_agents_for_user(
         user=user,
         visible_user_ids=visible_user_ids,

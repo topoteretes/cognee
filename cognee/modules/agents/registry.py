@@ -194,18 +194,19 @@ def list_registered_agent_connections() -> list[AgentConnection]:
         return list(_registered_agent_connections.values())
 
 
-async def list_persisted_agent_connections(user_id: str) -> list[AgentConnection]:
+async def list_persisted_agent_connections(user_ids: list[str]) -> list[AgentConnection]:
     from cognee.modules.users.methods.get_principal_configuration import (
         get_principal_all_configuration,
     )
 
-    all_configs = await get_principal_all_configuration(user_id)
-
-    for config in all_configs:
-        if config.get("name") == AGENT_CONFIG_NAME:
-            agents_dict = config.get("configuration", {}).get("agents", {})
-            return [AgentConnection(**agent_data) for agent_data in agents_dict.values()]
-    return []
+    agents: list[AgentConnection] = []
+    for user_id in user_ids:
+        all_configs = await get_principal_all_configuration(user_id)
+        for config in all_configs:
+            if config.get("name") == AGENT_CONFIG_NAME:
+                agents_dict = config.get("configuration", {}).get("agents", {})
+                agents.extend(AgentConnection(**data) for data in agents_dict.values())
+    return agents
 
 
 def clear_registered_agent_connections() -> None:
