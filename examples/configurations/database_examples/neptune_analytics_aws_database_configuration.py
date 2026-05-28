@@ -48,7 +48,7 @@ async def main():
     cognee.config.system_root_directory(cognee_directory_path)
 
     # Clean any existing data (optional)
-    await cognee.forget(everything=True)
+    # await cognee.forget(everything=True)
 
     # Create a dataset
     dataset_name = "neptune_example"

@@ -1,16 +1,14 @@
-import cognee
+import asyncio
+from uuid import UUID
 
+import cognee
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.tenants.methods import select_tenant
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.users.roles.methods import add_user_to_role
-from cognee.modules.users.roles.methods import create_role
-from cognee.modules.users.tenants.methods import create_tenant
-from cognee.modules.users.tenants.methods import add_user_to_tenant
-from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
+from cognee.modules.users.roles.methods import add_user_to_role, create_role
+from cognee.modules.users.tenants.methods import add_user_to_tenant, create_tenant, select_tenant
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 logger = get_logger()
 
@@ -23,8 +21,6 @@ preparation and manipulation of quantum states.
 
 def get_dataset_id(remember_result):
     """Extract dataset_id from remember output."""
-    from uuid import UUID
-
     return UUID(remember_result.dataset_id)
 
 
@@ -109,7 +105,5 @@ async def main():
 # Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled, vector provider is automatically set to use LanceDB.
 # The default graph provider is Ladybug (can be overridden via GRAPH_DATABASE_PROVIDER env var).
 if __name__ == "__main__":
-    import asyncio
-
     logger = setup_logging(log_level=CRITICAL)
     asyncio.run(main())
