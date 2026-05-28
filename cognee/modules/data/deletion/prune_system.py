@@ -1,6 +1,6 @@
 from asyncpg import UndefinedTableError
-from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import inspect, select
+from sqlalchemy.exc import OperationalError, DBAPIError
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.context_global_variables import backend_access_control_enabled
@@ -30,11 +30,14 @@ logger = get_logger()
 async def prune_graph_databases():
     try:
         dataset_databases = await _get_dataset_databases()
+        if not dataset_databases:
+            logger.debug("Skipping pruning of graph DB. No dataset databases found.")
+            return
         # Go through each dataset database and delete the graph database
         for dataset_database in dataset_databases:
             handler = get_graph_dataset_database_handler(dataset_database)
             await handler["handler_instance"].delete_dataset(dataset_database)
-    except (OperationalError, EntityNotFoundError, UndefinedTableError) as e:
+    except (OperationalError, EntityNotFoundError) as e:
         logger.debug(
             "Skipping pruning of graph DB. Error when accessing dataset_database table: %s",
             e,
@@ -45,11 +48,14 @@ async def prune_graph_databases():
 async def prune_vector_databases():
     try:
         dataset_databases = await _get_dataset_databases()
+        if not dataset_databases:
+            logger.debug("Skipping pruning of vector DB. No dataset databases found.")
+            return
         # Go through each dataset database and delete the vector database
         for dataset_database in dataset_databases:
             handler = get_vector_dataset_database_handler(dataset_database)
             await handler["handler_instance"].delete_dataset(dataset_database)
-    except (OperationalError, EntityNotFoundError, UndefinedTableError) as e:
+    except (OperationalError, EntityNotFoundError) as e:
         logger.debug(
             "Skipping pruning of vector DB. Error when accessing dataset_database table: %s",
             e,
@@ -59,9 +65,19 @@ async def prune_vector_databases():
 
 async def _get_dataset_databases() -> list[DatasetDatabase]:
     db_engine = get_relational_engine()
+    if not await _dataset_database_table_exists(db_engine):
+        return []
+
     async with db_engine.get_async_session() as session:
         result = await session.execute(select(DatasetDatabase))
         return result.scalars().all()
+
+
+async def _dataset_database_table_exists(db_engine) -> bool:
+    async with db_engine.engine.begin() as connection:
+        return await connection.run_sync(
+            lambda sync_connection: inspect(sync_connection).has_table("dataset_database")
+        )
 
 
 async def prune_system(graph=True, vector=True, metadata=True, cache=True):
