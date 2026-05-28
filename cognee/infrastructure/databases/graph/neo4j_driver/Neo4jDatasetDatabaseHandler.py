@@ -56,16 +56,16 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         graph_config = get_graph_config()
         connection_info = cls._resolve_neo4j_connection_info(graph_config)
 
-        dataset_database.graph_database_connection_info = dict(
-            dataset_database.graph_database_connection_info or {}
+        dataset_database.graph_database_connection_info["graph_database_username"] = (
+            connection_info["username"]
         )
-        dataset_database.graph_database_connection_info.update(
-            {
-                "graph_database_username": connection_info["username"],
-                "graph_database_password": connection_info["password"],
-                "graph_database_allow_anonymous": connection_info["allow_anonymous"],
-            }
+        dataset_database.graph_database_connection_info["graph_database_password"] = (
+            connection_info["password"]
         )
+        dataset_database.graph_database_connection_info["graph_database_allow_anonymous"] = (
+            connection_info["allow_anonymous"]
+        )
+
         if not dataset_database.graph_database_url:
             dataset_database.graph_database_url = connection_info["url"]
 
