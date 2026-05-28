@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -91,6 +92,21 @@ def get_remember_router() -> APIRouter:
                 status_code=400,
                 detail="Either datasetId or datasetName must be provided.",
             )
+
+        # Pre-read all UploadFile bytes into BytesIO while the request scope is
+        # still open. FastAPI's UploadFile is backed by SpooledTemporaryFile,
+        # which Starlette closes when the HTTP response is sent. With
+        # run_in_background=True the response is sent before the background
+        # asyncio task calls add(), so the file handles are already closed by
+        # then. Materialising the bytes here ensures data survives into the task.
+        if run_in_background and data:
+            materialized: list[BytesIO] = []
+            for f in data:
+                content = await f.read()
+                bio = BytesIO(content)
+                bio.name = f.filename or "upload"
+                materialized.append(bio)
+            data = materialized
 
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService
