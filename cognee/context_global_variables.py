@@ -93,29 +93,7 @@ def backend_access_control_enabled():
 
 
 VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "pgvector", "falkor"]
-GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["ladybug", "kuzu", "falkor", "postgres", "neo4j"]
-
-
-def is_multi_user_support_possible():
-    graph_config = get_graph_context_config()
-    vector_config = get_vectordb_context_config()
-
-    graph_handler = graph_config["graph_dataset_database_handler"]
-    vector_handler = vector_config["vector_dataset_database_handler"]
-    from cognee.infrastructure.databases.dataset_database_handler import (
-        supported_dataset_database_handlers,
-    )
-
-    return (
-        graph_config["graph_database_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
-        and vector_config["vector_db_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
-        and graph_handler in supported_dataset_database_handlers
-        and vector_handler in supported_dataset_database_handlers
-        and supported_dataset_database_handlers[graph_handler]["handler_provider"]
-        == graph_config["graph_database_provider"]
-        and supported_dataset_database_handlers[vector_handler]["handler_provider"]
-        == vector_config["vector_db_provider"]
-    )
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["ladybug", "kuzu", "falkor", "postgres"]
 
 
 class DatabaseContextManager:
