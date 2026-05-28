@@ -93,21 +93,6 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        # Pre-read all UploadFile bytes into BytesIO while the request scope is
-        # still open. FastAPI's UploadFile is backed by SpooledTemporaryFile,
-        # which Starlette closes when the HTTP response is sent. With
-        # run_in_background=True the response is sent before the background
-        # asyncio task calls add(), so the file handles are already closed by
-        # then. Materialising the bytes here ensures data survives into the task.
-        if run_in_background and data:
-            materialized: list[BytesIO] = []
-            for f in data:
-                content = await f.read()
-                bio = BytesIO(content)
-                bio.name = f.filename or "upload"
-                materialized.append(bio)
-            data = materialized
-
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService
         from cognee.shared.graph_model_utils import graph_schema_to_graph_model
@@ -138,6 +123,13 @@ def get_remember_router() -> APIRouter:
                     graph_model_parsed = graph_schema_to_graph_model(graph_model_schema)
                 except (json.JSONDecodeError, Exception) as parse_err:
                     logger.warning("remember: invalid graph_model JSON, ignoring: %s", parse_err)
+
+            # Background runs must not depend on caller/request-scoped stream lifetimes.
+            # Materialize stream-like inputs into owned in-memory buffers up front.
+            if run_in_background:
+                from cognee.api.v1.add.add import _materialize_stream_for_background
+
+                data = await _materialize_stream_for_background(data)
 
             result = await cognee_remember(
                 data,
