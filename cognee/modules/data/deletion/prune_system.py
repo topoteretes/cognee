@@ -1,3 +1,4 @@
+from asyncpg import UndefinedTableError
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
@@ -33,7 +34,7 @@ async def prune_graph_databases():
         for dataset_database in dataset_databases:
             handler = get_graph_dataset_database_handler(dataset_database)
             await handler["handler_instance"].delete_dataset(dataset_database)
-    except (OperationalError, EntityNotFoundError) as e:
+    except (OperationalError, EntityNotFoundError, UndefinedTableError) as e:
         logger.debug(
             "Skipping pruning of graph DB. Error when accessing dataset_database table: %s",
             e,
@@ -48,7 +49,7 @@ async def prune_vector_databases():
         for dataset_database in dataset_databases:
             handler = get_vector_dataset_database_handler(dataset_database)
             await handler["handler_instance"].delete_dataset(dataset_database)
-    except (OperationalError, EntityNotFoundError) as e:
+    except (OperationalError, EntityNotFoundError, UndefinedTableError) as e:
         logger.debug(
             "Skipping pruning of vector DB. Error when accessing dataset_database table: %s",
             e,
