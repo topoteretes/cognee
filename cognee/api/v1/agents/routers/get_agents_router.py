@@ -10,6 +10,7 @@ from cognee.api.v1.agents.agent_mode import (
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.delete_agent import delete_agent
 from cognee.modules.agents.list_agents import list_agents
+from cognee.modules.agents.models import RegisterAgentRequest
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.models.User import User
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,15 +44,15 @@ def get_agents_router() -> APIRouter:
 
     @router.post("/create")
     async def create_agent_endpoint(
-        name: str,
+        request: RegisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ) -> AgentWithApiKeyDTO:
         try:
-            agent_user, api_key = await create_agent(name, user)
+            agent_user, api_key = await create_agent(request.name, user)
         except UserAlreadyExists:
             raise HTTPException(
                 status_code=409,
-                detail=f"Agent with name '{name}' already exists",
+                detail=f"Agent with name '{request.name}' already exists",
             )
 
         return AgentWithApiKeyDTO(
