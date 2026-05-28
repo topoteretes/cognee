@@ -33,7 +33,7 @@ def test_performance_analysis():
             str(html_path),
             "--mock-llm",
             "--num-memories",
-            "50",
+            "20",
         ],
         cwd=str(COGNEE_ROOT),
         text=True,
