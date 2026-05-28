@@ -366,13 +366,17 @@ def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None
 
 def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
     everything = getattr(args, "everything", False)
-    dataset = getattr(args, "dataset", None)
+    dataset = getattr(args, "dataset_name", None)
+    dataset_id = getattr(args, "dataset_id", None)
     data_id = getattr(args, "data_id", None)
-    if not everything and not dataset and not data_id:
-        fmt.error("Specify --dataset, --data-id with --dataset, or --everything.")
+    if not everything and not dataset and not dataset_id and not data_id:
+        fmt.error(
+            "Specify --dataset-name or --dataset-id, --data-id with dataset, or --everything."
+        )
         return
     result = client.forget(
         dataset=dataset,
+        dataset_id=dataset_id,
         data_id=data_id,
         everything=everything,
     )
