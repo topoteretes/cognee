@@ -19,7 +19,7 @@ Endpoints under test:
 import os
 import uuid
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 with patch("dotenv.load_dotenv"):
     os.environ["REQUIRE_AUTHENTICATION"] = "true"
@@ -570,3 +570,261 @@ class TestAgentPersistence:
         assert child_connection_id in agent_ids, (
             "parent user should see child agent's persisted connection"
         )
+
+
+LIFECYCLE_RUN_ID = uuid.uuid4().hex[:8]
+LIFECYCLE_OWNER_EMAIL = f"lifecycle-{LIFECYCLE_RUN_ID}@example.com"
+LIFECYCLE_OWNER_PASSWORD = "lifecycle123!"
+
+
+class TestAgentFullLifecycle:
+    """Full lifecycle: create agents, register them, verify connections,
+    unregister, confirm cleanup, and test watchdog shutdown."""
+
+    @pytest.fixture(scope="class")
+    def client(self):
+        from cognee.api.client import app
+
+        with TestClient(app) as c:
+            yield c
+
+    @pytest.fixture(scope="class")
+    def owner(self, client):
+        reg = client.post(
+            "/api/v1/auth/register",
+            json={"email": LIFECYCLE_OWNER_EMAIL, "password": LIFECYCLE_OWNER_PASSWORD},
+        )
+        assert reg.status_code in (200, 201), reg.text
+        owner_id = reg.json()["id"]
+
+        login = client.post(
+            "/api/v1/auth/login",
+            data={"username": LIFECYCLE_OWNER_EMAIL, "password": LIFECYCLE_OWNER_PASSWORD},
+        )
+        assert login.status_code == 200, login.text
+        return {"id": owner_id, "token": login.json()["access_token"]}
+
+    @pytest.fixture(scope="class")
+    def headers(self, owner):
+        return {"Authorization": f"Bearer {owner['token']}"}
+
+    @pytest.fixture(scope="class")
+    def _patch_traces(self):
+        async def trace_agents_for_user(**_kwargs):
+            return []
+
+        with patch(
+            "cognee.modules.agents.operations._trace_agents_for_user",
+            trace_agents_for_user,
+        ):
+            yield
+
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        agent_mode._active_count = 0
+        agent_mode._active_user_ids.clear()
+        agent_mode._watchdog_started = False
+        clear_registered_agent_connections()
+        yield
+
+    def test_full_lifecycle(self, client, headers, owner, _patch_traces):
+        agent_a_name = f"agent-a-{LIFECYCLE_RUN_ID}"
+        agent_b_name = f"agent-b-{LIFECYCLE_RUN_ID}"
+
+        # -- Step 1: Create two agents in the DB --
+        resp_a = client.post(
+            f"/api/v1/agents/create?name={agent_a_name}",
+            headers=headers,
+        )
+        assert resp_a.status_code == 200, resp_a.text
+        agent_a = resp_a.json()
+        agent_a_key = agent_a["agentApiKey"]
+
+        resp_b = client.post(
+            f"/api/v1/agents/create?name={agent_b_name}",
+            headers=headers,
+        )
+        assert resp_b.status_code == 200, resp_b.text
+        agent_b = resp_b.json()
+        agent_b_key = agent_b["agentApiKey"]
+
+        # -- Step 2: Verify both appear in GET /list (DB agents) --
+        list_resp = client.get("/api/v1/agents/list", headers=headers)
+        assert list_resp.status_code == 200
+        db_agents = list_resp.json()
+        db_agent_ids = {a["agentId"] for a in db_agents}
+        assert agent_a["agentId"] in db_agent_ids
+        assert agent_b["agentId"] in db_agent_ids
+
+        # -- Step 3: Verify GET /{agent_id} returns each agent --
+        detail_a = client.get(f"/api/v1/agents/{agent_a['agentId']}", headers=headers)
+        assert detail_a.status_code == 200
+        assert detail_a.json()["agentId"] == agent_a["agentId"]
+
+        detail_b = client.get(f"/api/v1/agents/{agent_b['agentId']}", headers=headers)
+        assert detail_b.status_code == 200
+        assert detail_b.json()["agentId"] == agent_b["agentId"]
+
+        # -- Step 4: Register both agents (each authenticates with its API key) --
+        reg_a = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Api-Key": agent_a_key},
+            json={"name": agent_a_name, "type": "api", "memory_mode": "cognee"},
+        )
+        assert reg_a.status_code == 201, reg_a.text
+        connection_a_id = reg_a.json()["id"]
+        assert agent_mode._active_count == 1
+
+        reg_b = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Api-Key": agent_b_key},
+            json={"name": agent_b_name, "type": "sdk", "memory_mode": "hybrid"},
+        )
+        assert reg_b.status_code == 201, reg_b.text
+        connection_b_id = reg_b.json()["id"]
+        assert agent_mode._active_count == 2
+
+        # -- Step 5: Re-registering same agent doesn't increment counter --
+        reg_a_again = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Api-Key": agent_a_key},
+            json={"name": agent_a_name, "type": "api", "memory_mode": "cognee"},
+        )
+        assert reg_a_again.status_code == 201
+        assert agent_mode._active_count == 2, "re-register should not increment"
+
+        # -- Step 6: Verify GET /connections shows both --
+        conn_resp = client.get("/api/v1/agents/connections", headers=headers)
+        assert conn_resp.status_code == 200
+        conn_ids = {a["id"] for a in conn_resp.json()["agents"]}
+        assert connection_a_id in conn_ids
+        assert connection_b_id in conn_ids
+
+        # -- Step 7: Verify GET /connections/{id} returns detail --
+        detail_conn = client.get(f"/api/v1/agents/connections/{connection_a_id}", headers=headers)
+        assert detail_conn.status_code == 200
+        assert detail_conn.json()["agent"]["id"] == connection_a_id
+
+        # -- Step 8: Unregister agent A --
+        unreg_a = client.post(
+            "/api/v1/agents/unregister",
+            headers={"X-Api-Key": agent_a_key},
+        )
+        assert unreg_a.status_code == 200
+        assert unreg_a.json()["activeAgents"] == 1
+
+        # -- Step 9: Active connections should show B but not A --
+        conn_after = client.get("/api/v1/agents/connections", headers=headers)
+        assert conn_after.status_code == 200
+        conn_ids_after = {a["id"] for a in conn_after.json()["agents"]}
+        assert connection_a_id not in conn_ids_after, "unregistered agent should not appear"
+        assert connection_b_id in conn_ids_after, "still-registered agent should appear"
+
+        # -- Step 9b: active_only=false should still show A as inactive --
+        conn_all = client.get("/api/v1/agents/connections?active_only=false", headers=headers)
+        assert conn_all.status_code == 200
+        all_agents = conn_all.json()["agents"]
+        all_ids = {a["id"] for a in all_agents}
+        assert connection_a_id in all_ids, "inactive agent should appear with active_only=false"
+        agent_a_conn = next(a for a in all_agents if a["id"] == connection_a_id)
+        assert agent_a_conn["status"] == "inactive"
+
+        # -- Step 10: DB list still shows both (unregister doesn't delete the user) --
+        list_after = client.get("/api/v1/agents/list", headers=headers)
+        db_ids_after = {a["agentId"] for a in list_after.json()}
+        assert agent_a["agentId"] in db_ids_after
+        assert agent_b["agentId"] in db_ids_after
+
+        # -- Step 11: Unregister agent B --
+        unreg_b = client.post(
+            "/api/v1/agents/unregister",
+            headers={"X-Api-Key": agent_b_key},
+        )
+        assert unreg_b.status_code == 200
+        assert unreg_b.json()["activeAgents"] == 0
+
+        # -- Step 12: Active connections should be empty --
+        conn_empty = client.get("/api/v1/agents/connections", headers=headers)
+        assert conn_empty.json()["agents"] == []
+
+        # -- Step 12b: But all connections still exist as inactive in DB --
+        conn_all_final = client.get("/api/v1/agents/connections?active_only=false", headers=headers)
+        inactive_statuses = {a["status"] for a in conn_all_final.json()["agents"]}
+        assert inactive_statuses == {"inactive"}
+
+        # -- Step 13: Watchdog should trigger shutdown with 0 agents --
+        with patch.object(agent_mode, "_shutdown_server") as mock_shutdown:
+            agent_mode._watchdog()
+            mock_shutdown.assert_called_once()
+
+        # -- Step 14: Agent A can re-register after unregistering --
+        re_reg = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Api-Key": agent_a_key},
+            json={"name": agent_a_name, "type": "api"},
+        )
+        assert re_reg.status_code == 201
+        assert agent_mode._active_count == 1, "re-register after unregister should increment"
+
+        # -- Step 15: Watchdog should NOT shutdown with active agent --
+        with patch.object(agent_mode, "_shutdown_server") as mock_shutdown:
+            agent_mode._watchdog()
+            mock_shutdown.assert_not_called()
+
+        # -- Step 16: Delete agent B from DB --
+        del_resp = client.delete(
+            f"/api/v1/agents/{agent_b['agentId']}",
+            headers=headers,
+        )
+        assert del_resp.status_code == 200
+
+        # -- Step 17: DB list no longer shows B --
+        list_final = client.get("/api/v1/agents/list", headers=headers)
+        final_ids = {a["agentId"] for a in list_final.json()}
+        assert agent_b["agentId"] not in final_ids
+        assert agent_a["agentId"] in final_ids
+
+        # -- Step 18: Re-register agent A with different values (same name/type) --
+        re_reg_updated = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Api-Key": agent_a_key},
+            json={
+                "name": agent_a_name,
+                "type": "api",
+                "memory_mode": "session",
+                "metadata": {"version": "2"},
+            },
+        )
+        assert re_reg_updated.status_code == 201
+        updated_conn = re_reg_updated.json()
+        assert updated_conn["memory_mode"] == "session", "new values should replace old"
+        assert updated_conn["metadata"]["version"] == "2"
+        assert agent_mode._active_count == 1, "same user should not increment again"
+
+        # -- Step 19: Only one connection for agent A in the registry --
+        conn_after_update = client.get("/api/v1/agents/connections", headers=headers)
+        agent_a_conns = [
+            a for a in conn_after_update.json()["agents"] if a["id"] == updated_conn["id"]
+        ]
+        assert len(agent_a_conns) == 1
+        assert agent_a_conns[0]["memory_mode"] == "session"
+
+        # -- Step 20: Re-register with different name creates a second connection --
+        re_reg_new_name = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Api-Key": agent_a_key},
+            json={
+                "name": f"{agent_a_name}-v2",
+                "type": "api",
+                "memory_mode": "hybrid",
+            },
+        )
+        assert re_reg_new_name.status_code == 201
+        new_conn_id = re_reg_new_name.json()["id"]
+        assert new_conn_id != updated_conn["id"], "different name should produce different ID"
+
+        conn_both = client.get("/api/v1/agents/connections", headers=headers)
+        both_ids = {a["id"] for a in conn_both.json()["agents"]}
+        assert updated_conn["id"] in both_ids, "old connection should still exist"
+        assert new_conn_id in both_ids, "new connection should also exist"
+        assert agent_mode._active_count == 1, "same user, still only counted once"

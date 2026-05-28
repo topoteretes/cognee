@@ -23,7 +23,7 @@ async def test_register_agent_connection_normalizes_memory_sources():
         connection_type="api",
         memory_mode="hybrid",
         source="api",
-        user_id=str(default_user.id),
+        user_id=default_user.id,
         datasets=[{"id": str(uuid4()), "name": "company_brain", "role": "read_write"}],
     )
 

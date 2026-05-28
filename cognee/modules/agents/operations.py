@@ -281,6 +281,7 @@ async def list_agent_connections(
     range_key: RangeLiteral = "30d",
     status_filter: Optional[str] = None,
     include_sources: bool = True,
+    active_only: bool = True,
     limit: int = 50,
     offset: int = 0,
 ) -> AgentsListResponse:
@@ -302,7 +303,9 @@ async def list_agent_connections(
             permitted_dataset_ids=permitted_dataset_id_strings,
         )
     ]
-    persisted_agents = await list_persisted_agent_connections(visible_user_ids)
+    persisted_agents = await list_persisted_agent_connections(
+        visible_user_ids, active_only=active_only
+    )
     trace_agents = await _trace_agents_for_user(
         user=user,
         visible_user_ids=visible_user_ids,

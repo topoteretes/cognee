@@ -195,7 +195,9 @@ def list_registered_agent_connections() -> list[AgentConnection]:
         return list(_registered_agent_connections.values())
 
 
-async def list_persisted_agent_connections(user_ids: list[UUID]) -> list[AgentConnection]:
+async def list_persisted_agent_connections(
+    user_ids: list[UUID], active_only: bool = True
+) -> list[AgentConnection]:
     from cognee.modules.users.methods.get_principal_configuration import (
         get_principal_all_configuration,
     )
@@ -206,20 +208,47 @@ async def list_persisted_agent_connections(user_ids: list[UUID]) -> list[AgentCo
         for config in all_configs:
             if config.get("name") == AGENT_CONFIG_NAME:
                 agents_dict = config.get("configuration", {}).get("agents", {})
-                agents.extend(AgentConnection(**data) for data in agents_dict.values())
+                for data in agents_dict.values():
+                    connection = AgentConnection(**data)
+                    if not active_only or connection.status == "active":
+                        agents.append(connection)
     return agents
 
 
-def remove_user_agent_connections(user_id: UUID) -> None:
-    user_id_str = str(user_id)
+async def remove_user_agent_connections(user_id: UUID) -> None:
     with _registry_lock:
         to_remove = [
             key
             for key, conn in _registered_agent_connections.items()
-            if conn.user_id is not None and str(conn.user_id) == user_id_str
+            if conn.user_id is not None and conn.user_id == user_id
         ]
         for key in to_remove:
             del _registered_agent_connections[key]
+
+    await _deactivate_persisted_agent_connections(user_id)
+
+
+async def _deactivate_persisted_agent_connections(user_id: UUID) -> None:
+    from cognee.modules.users.methods.get_principal_configuration import (
+        get_principal_all_configuration,
+    )
+    from cognee.modules.users.methods.store_principal_configuration import (
+        store_principal_configuration,
+    )
+
+    all_configs = await get_principal_all_configuration(user_id)
+    for config in all_configs:
+        if config.get("name") == AGENT_CONFIG_NAME:
+            existing_config = config.get("configuration", {})
+            agents = existing_config.get("agents", {})
+            for agent_data in agents.values():
+                agent_data["status"] = "inactive"
+            await store_principal_configuration(
+                principal_id=user_id,
+                name=AGENT_CONFIG_NAME,
+                configuration={**existing_config, "agents": agents},
+            )
+            return
 
 
 def clear_registered_agent_connections() -> None:

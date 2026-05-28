@@ -54,6 +54,7 @@ def get_agents_router() -> APIRouter:
             alias="status",
         ),
         include_sources: bool = Query(True),
+        active_only: bool = Query(True),
         limit: int = Query(50, ge=1, le=500),
         offset: int = Query(0, ge=0),
         user: User = Depends(get_authenticated_user),
@@ -63,6 +64,7 @@ def get_agents_router() -> APIRouter:
             range_key=range,
             status_filter=status_filter,
             include_sources=include_sources,
+            active_only=active_only,
             limit=limit,
             offset=offset,
         )
@@ -113,7 +115,7 @@ def get_agents_router() -> APIRouter:
     async def unregister_agent_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
-        count = unregister_agent(user)
+        count = await unregister_agent(user)
         return AgentModeDTO(active_agents=count)
 
     @router.get("/connections/{agent_id}")

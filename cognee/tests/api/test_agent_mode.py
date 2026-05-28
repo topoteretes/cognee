@@ -128,8 +128,8 @@ class TestAgentMode:
     async def test_watchdog_shuts_down_after_all_unregister(self, mock_shutdown):
         await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
         await agent_mode.register_agent(_DUMMY_USER_2, _DUMMY_REQUEST_2)
-        agent_mode.unregister_agent(_DUMMY_USER)
-        agent_mode.unregister_agent(_DUMMY_USER_2)
+        await agent_mode.unregister_agent(_DUMMY_USER)
+        await agent_mode.unregister_agent(_DUMMY_USER_2)
 
         agent_mode._watchdog()
         mock_shutdown.assert_called_once()
