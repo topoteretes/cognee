@@ -55,37 +55,37 @@ class TestAgentMode:
     def test_register_increments_count(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
-        resp = client.post("/api/v1/agents/register", headers=headers)
+        resp = client.post("/api/v1/agents/mode/register_use", headers=headers)
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 1
 
-        resp = client.post("/api/v1/agents/register", headers=headers)
+        resp = client.post("/api/v1/agents/mode/register_use", headers=headers)
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 2
 
     def test_unregister_decrements_count(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
-        client.post("/api/v1/agents/register", headers=headers)
-        client.post("/api/v1/agents/register", headers=headers)
+        client.post("/api/v1/agents/mode/register_use", headers=headers)
+        client.post("/api/v1/agents/mode/register_use", headers=headers)
 
-        resp = client.post("/api/v1/agents/unregister", headers=headers)
+        resp = client.post("/api/v1/agents/mode/unregister_use", headers=headers)
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 1
 
     def test_unregister_does_not_go_below_zero(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
-        resp = client.post("/api/v1/agents/unregister", headers=headers)
+        resp = client.post("/api/v1/agents/mode/unregister_use", headers=headers)
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 0
 
-        resp = client.post("/api/v1/agents/unregister", headers=headers)
+        resp = client.post("/api/v1/agents/mode/unregister_use", headers=headers)
         assert resp.json()["activeAgents"] == 0
 
     @patch.object(agent_mode, "_shutdown_server")
     def test_watchdog_does_not_shutdown_with_active_agents(self, mock_shutdown):
-        agent_mode.register_agent()
+        agent_mode.register_agent_use()
         agent_mode._watchdog()
         mock_shutdown.assert_not_called()
 
@@ -96,10 +96,10 @@ class TestAgentMode:
 
     @patch.object(agent_mode, "_shutdown_server")
     def test_watchdog_shuts_down_after_all_unregister(self, mock_shutdown):
-        agent_mode.register_agent()
-        agent_mode.register_agent()
-        agent_mode.unregister_agent()
-        agent_mode.unregister_agent()
+        agent_mode.register_agent_use()
+        agent_mode.register_agent_use()
+        agent_mode.unregister_agent_use()
+        agent_mode.unregister_agent_use()
 
         agent_mode._watchdog()
         mock_shutdown.assert_called_once()
@@ -108,9 +108,9 @@ class TestAgentMode:
         headers = {"Authorization": f"Bearer {owner_token}"}
 
         with patch.dict(os.environ, {"COGNEE_AGENT_MODE": "false"}):
-            resp = client.post("/api/v1/agents/register", headers=headers)
+            resp = client.post("/api/v1/agents/mode/register_use", headers=headers)
             assert resp.status_code == 400
             assert "COGNEE_AGENT_MODE" in resp.json()["detail"]
 
-            resp = client.post("/api/v1/agents/unregister", headers=headers)
+            resp = client.post("/api/v1/agents/mode/unregister_use", headers=headers)
             assert resp.status_code == 400

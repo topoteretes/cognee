@@ -4,8 +4,8 @@ from uuid import UUID
 from cognee.api.DTO import OutDTO
 from cognee.api.v1.agents.agent_mode import (
     is_agent_mode_enabled,
-    register_agent,
-    unregister_agent,
+    register_agent_use,
+    unregister_agent_use,
 )
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.delete_agent import delete_agent
@@ -41,7 +41,7 @@ def _display_email(internal_email: str) -> str:
 def get_agents_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("/")
+    @router.post("/create")
     async def create_agent_endpoint(
         name: str,
         user: User = Depends(get_authenticated_user),
@@ -60,16 +60,7 @@ def get_agents_router() -> APIRouter:
             agent_api_key=api_key,
         )
 
-    @router.delete("/{agent_id}")
-    async def delete_agent_endpoint(
-        agent_id: UUID, user: User = Depends(get_authenticated_user)
-    ) -> None:
-        try:
-            await delete_agent(agent_id, user.id)
-        except PermissionError:
-            raise HTTPException(status_code=403, detail="Not authorized")
-
-    @router.get("/")
+    @router.get("/list")
     async def get_agents_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> list[AgentDTO]:
@@ -83,8 +74,8 @@ def get_agents_router() -> APIRouter:
             for agent in agents
         ]
 
-    @router.post("/register")
-    async def register_agent_endpoint(
+    @router.post("/mode/register_use")
+    async def register_agent_mode_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
         if not is_agent_mode_enabled():
@@ -92,11 +83,11 @@ def get_agents_router() -> APIRouter:
                 status_code=400,
                 detail="Agent mode is not enabled. Set COGNEE_AGENT_MODE=true.",
             )
-        count = register_agent()
+        count = register_agent_use()
         return AgentModeDTO(active_agents=count)
 
-    @router.post("/unregister")
-    async def unregister_agent_endpoint(
+    @router.post("/mode/unregister_use")
+    async def unregister_agent_mode_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
         if not is_agent_mode_enabled():
@@ -104,7 +95,16 @@ def get_agents_router() -> APIRouter:
                 status_code=400,
                 detail="Agent mode is not enabled. Set COGNEE_AGENT_MODE=true.",
             )
-        count = unregister_agent()
+        count = unregister_agent_use()
         return AgentModeDTO(active_agents=count)
+
+    @router.delete("/{agent_id}")
+    async def delete_agent_endpoint(
+        agent_id: UUID, user: User = Depends(get_authenticated_user)
+    ) -> None:
+        try:
+            await delete_agent(agent_id, user.id)
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Not authorized")
 
     return router

@@ -47,7 +47,7 @@ class TestAgentEndpoints:
     @pytest.fixture(scope="class")
     def agent(self, client, owner_token):
         resp = client.post(
-            f"/api/v1/agents/?name={AGENT_NAME}",
+            f"/api/v1/agents/create?name={AGENT_NAME}",
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert resp.status_code == 200
@@ -93,7 +93,7 @@ class TestAgentEndpoints:
 
     def test_list_agents_returns_agent(self, client, owner_token, agent):
         resp = client.get(
-            "/api/v1/agents/",
+            "/api/v1/agents/list",
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert resp.status_code == 200
@@ -107,7 +107,7 @@ class TestAgentEndpoints:
 
     def test_duplicate_agent_returns_409(self, client, owner_token, agent):
         resp = client.post(
-            f"/api/v1/agents/?name={AGENT_NAME}",
+            f"/api/v1/agents/create?name={AGENT_NAME}",
             headers={"Authorization": f"Bearer {owner_token}"},
         )
         assert resp.status_code == 409

@@ -56,7 +56,7 @@ def _watchdog():
         _shutdown_server()
 
 
-def register_agent() -> int:
+def register_agent_use() -> int:
     global _active_count, _watchdog_started
 
     with _lock:
@@ -74,7 +74,7 @@ def register_agent() -> int:
     return count
 
 
-def unregister_agent() -> int:
+def unregister_agent_use() -> int:
     global _active_count
 
     with _lock:
