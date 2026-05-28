@@ -1,6 +1,5 @@
-from asyncpg import UndefinedTableError
 from sqlalchemy import inspect, select
-from sqlalchemy.exc import OperationalError, DBAPIError
+from sqlalchemy.exc import OperationalError
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.context_global_variables import backend_access_control_enabled
