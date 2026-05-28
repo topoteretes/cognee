@@ -1672,7 +1672,11 @@ jobs:
           VECTOR_DB_PASSWORD: cognee
           VECTOR_DATASET_DATABASE_HANDLER: 'pgvector'
           GRAPH_DATABASE_PROVIDER: 'postgres'
-          GRAPH_DATABASE_URL: postgresql+asyncpg://cognee:cognee@${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}:5432/cognee_db
+          GRAPH_DATABASE_USERNAME: cognee
+          GRAPH_DATABASE_PASSWORD: cognee
+          GRAPH_DATABASE_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          GRAPH_DATABASE_PORT: 5432
+          GRAPH_DATABASE_NAME: "cognee_db"
         run: uv run pytest cognee/tests/test_performance_analysis.py -v
 
   performance-test-neo4j:
