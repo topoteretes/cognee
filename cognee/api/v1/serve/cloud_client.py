@@ -68,10 +68,12 @@ class CloudClient:
 
         # Handle data — string or file-like objects
         if isinstance(data, str):
+            # Send plain strings as a regular form field so the backend
+            # treats them as text (not file uploads) and can write them
+            # to the session cache via _add_to_session.
             form.add_field(
                 "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                data,
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -79,8 +81,7 @@ class CloudClient:
                 if isinstance(item, str):
                     form.add_field(
                         "data",
-                        io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        item,
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):
