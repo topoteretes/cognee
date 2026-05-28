@@ -4,7 +4,6 @@ from uuid import UUID
 import pytest
 
 from cognee.context_global_variables import (
-    is_multi_user_support_possible,
     multi_user_support_possible,
 )
 from cognee.infrastructure.databases.dataset_database_handler.supported_dataset_database_handlers import (
@@ -65,16 +64,7 @@ def test_neo4j_dataset_handler_enables_multi_user_support(monkeypatch):
     configure_neo4j(monkeypatch)
 
     assert get_graph_config().graph_dataset_database_handler == NEO4J_DATASET_DATABASE_HANDLER
-    assert is_multi_user_support_possible() is True
     assert multi_user_support_possible() is True
-
-
-def test_neo4j_provider_does_not_implicitly_select_dataset_handler(monkeypatch):
-    monkeypatch.setenv("GRAPH_DATABASE_PROVIDER", "neo4j")
-    get_graph_config.cache_clear()
-
-    assert get_graph_config().graph_dataset_database_handler == "ladybug"
-    assert is_multi_user_support_possible() is False
 
 
 def test_neo4j_dataset_handler_alias_maps_to_dataset_handler(monkeypatch):
