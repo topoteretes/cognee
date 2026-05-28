@@ -15,22 +15,19 @@ class ForgetCommand(SupportsCliCommand):
     description = """
 Remove data from the knowledge graph.
 
-Use --everything to delete all user data, --dataset-name/--dataset-id
+Use --everything to delete all user data, --dataset/--dataset-id
 to delete a dataset, or dataset + --data-id to delete a single item.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--dataset-name",
-            help="Dataset name to delete",
-        )
+        parser.add_argument("--dataset", help="Dataset name to delete")
         parser.add_argument(
             "--dataset-id",
             help="Dataset UUID to delete",
         )
         parser.add_argument(
             "--data-id",
-            help="UUID of a specific data item to delete (requires dataset-name or dataset-id)",
+            help="UUID of a specific data item to delete (requires dataset or dataset-id)",
         )
         parser.add_argument(
             "--everything",
@@ -45,15 +42,15 @@ to delete a dataset, or dataset + --data-id to delete a single item.
 
             data_id = UUID(args.data_id) if args.data_id else None
             dataset_id = UUID(args.dataset_id) if args.dataset_id else None
-            dataset = args.dataset_name
+            dataset = args.dataset
 
             if dataset and dataset_id:
-                fmt.error("Provide either --dataset-name or --dataset-id, not both.")
+                fmt.error("Provide either --dataset or --dataset-id, not both.")
                 return
 
             if not args.everything and not dataset and not dataset_id and not data_id:
                 fmt.error(
-                    "Specify --dataset-name or --dataset-id, --data-id with dataset, or --everything."
+                    "Specify --dataset or --dataset-id, --data-id with dataset, or --everything."
                 )
                 return
 
