@@ -412,7 +412,7 @@ class TestAgentsE2E:
         async def trace_agents_for_user(**_kwargs):
             return []
 
-        async def persisted_agent_connections(_user_id):
+        async def persisted_agent_connections(_user_id, active_only=True):
             return []
 
         with (
