@@ -1,4 +1,4 @@
-"""Tests for explicit dataset_name/dataset_id handling in cognee.forget()."""
+"""Tests for explicit dataset/dataset_id handling in cognee.forget()."""
 
 import importlib
 import pytest
@@ -60,7 +60,7 @@ async def test_forget_routes_dataset_id_without_name_inference():
 
 
 @pytest.mark.asyncio
-async def test_forget_routes_dataset_name_as_name():
+async def test_forget_routes_dataset_as_name():
     forget_dataset = AsyncMock(return_value={"status": "success", "dataset_id": str(uuid4())})
 
     with (
@@ -73,7 +73,7 @@ async def test_forget_routes_dataset_name_as_name():
         ),
         patch.object(forget_module, "_forget_dataset", forget_dataset),
     ):
-        await forget_module.forget(dataset_name="scientists", user=USER)
+        await forget_module.forget(dataset="scientists", user=USER)
 
     assert _CapturingContextManager.captured == ["scientists"]
     forget_dataset.assert_awaited_once()
@@ -91,10 +91,10 @@ async def test_forget_passes_dataset_id_to_remote_client():
     remote_client.forget.assert_awaited_once()
     kwargs = remote_client.forget.call_args.kwargs
     assert kwargs["dataset_id"] == dataset_id
-    assert kwargs["dataset_name"] is None
+    assert kwargs["dataset"] is None
 
 
 @pytest.mark.asyncio
-async def test_forget_rejects_both_dataset_name_and_dataset_id():
-    with pytest.raises(ValueError, match="either dataset_name or dataset_id"):
-        await forget_module.forget(dataset_name="scientists", dataset_id=uuid4(), user=USER)
+async def test_forget_rejects_both_dataset_and_dataset_id():
+    with pytest.raises(ValueError, match="either dataset or dataset_id"):
+        await forget_module.forget(dataset="scientists", dataset_id=uuid4(), user=USER)

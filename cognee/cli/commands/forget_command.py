@@ -45,13 +45,13 @@ to delete a dataset, or dataset + --data-id to delete a single item.
 
             data_id = UUID(args.data_id) if args.data_id else None
             dataset_id = UUID(args.dataset_id) if args.dataset_id else None
-            dataset_name = args.dataset_name
+            dataset = args.dataset_name
 
-            if dataset_name and dataset_id:
+            if dataset and dataset_id:
                 fmt.error("Provide either --dataset-name or --dataset-id, not both.")
                 return
 
-            if not args.everything and not dataset_name and not dataset_id and not data_id:
+            if not args.everything and not dataset and not dataset_id and not data_id:
                 fmt.error(
                     "Specify --dataset-name or --dataset-id, --data-id with dataset, or --everything."
                 )
@@ -61,7 +61,7 @@ to delete a dataset, or dataset + --data-id to delete a single item.
                 try:
                     return await cognee.forget(
                         data_id=data_id,
-                        dataset_name=dataset_name,
+                        dataset=dataset,
                         dataset_id=dataset_id,
                         everything=args.everything,
                     )

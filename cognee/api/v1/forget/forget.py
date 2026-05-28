@@ -16,7 +16,7 @@ logger = get_logger("forget")
 async def forget(
     *,
     data_id: Optional[UUID] = None,
-    dataset_name: Optional[str] = None,
+    dataset: Optional[str] = None,
     dataset_id: Optional[UUID] = None,
     everything: bool = False,
     memory_only: bool = False,
@@ -33,27 +33,27 @@ async def forget(
         await cognee.forget(data_id=data_id, dataset_id=dataset_id)
 
         # Forget an entire dataset (all data + graph nodes + vector entries)
-        await cognee.forget(dataset_name="scientists")
+        await cognee.forget(dataset="scientists")
 
         # Forget everything the current user owns
         await cognee.forget(everything=True)
 
         # Forget only memory (graph + vector) for a dataset (keep raw files)
-        await cognee.forget(dataset_name="scientists", memory_only=True)
+        await cognee.forget(dataset="scientists", memory_only=True)
 
         # Forget only memory for a single file in a dataset
-        await cognee.forget(dataset_name="scientists", data_id=data_id, memory_only=True)
+        await cognee.forget(dataset="scientists", data_id=data_id, memory_only=True)
 
     Args:
         data_id: UUID of a specific data item to remove.
-            Requires ``dataset_name`` or ``dataset_id`` to also be set.
-        dataset_name: Dataset name. When set alone, deletes the
+            Requires ``dataset`` or ``dataset_id`` to also be set.
+        dataset: Dataset name. When set alone, deletes the
             entire dataset. When set with ``data_id``, deletes that item
             from this dataset.
-        dataset_id: Dataset UUID. Alternative to ``dataset_name``.
+        dataset_id: Dataset UUID. Alternative to ``dataset``.
         everything: If True, delete all datasets and data the user owns.
-            Ignores ``data_id``, ``dataset_name``, and ``dataset_id``.
-        memory_only: If True (requires ``dataset_name`` or ``dataset_id``), delete only memory
+            Ignores ``data_id``, ``dataset``, and ``dataset_id``.
+        memory_only: If True (requires ``dataset`` or ``dataset_id``), delete only memory
             (graph nodes/edges and vector embeddings) and reset pipeline status.
             Raw files and data records are preserved so the dataset can
             be re-cognified with different settings.
@@ -65,10 +65,10 @@ async def forget(
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
 
-    dataset_ref = dataset_id or dataset_name
+    dataset_ref = dataset_id or dataset
 
-    if dataset_name and dataset_id:
-        raise ValueError("Provide either dataset_name or dataset_id, not both.")
+    if dataset and dataset_id:
+        raise ValueError("Provide either dataset or dataset_id, not both.")
 
     if everything:
         target = "everything"
@@ -88,7 +88,7 @@ async def forget(
         user if user and hasattr(user, "id") else "sdk",
         additional_properties={
             "target": target,
-            "dataset_name": dataset_name or "",
+            "dataset_name": dataset or "",
             "dataset_id": str(dataset_id) if dataset_id else "",
             "data_id": str(data_id) if data_id else "",
             "cognee_version": cognee_version,
@@ -106,7 +106,7 @@ async def forget(
         if client is not None:
             result = await client.forget(
                 data_id=data_id,
-                dataset_name=dataset_name,
+                dataset=dataset,
                 dataset_id=dataset_id,
                 everything=everything,
                 memory_only=memory_only,
@@ -135,7 +135,7 @@ async def forget(
 
             if memory_only:
                 if dataset_ref is None:
-                    raise ValueError("memory_only requires dataset_name or dataset_id.")
+                    raise ValueError("memory_only requires dataset or dataset_id.")
                 if data_id is not None:
                     return await _forget_data_memory(data_id, dataset_ref, user)
                 return await _forget_dataset_memory(dataset_ref, user)
@@ -147,11 +147,9 @@ async def forget(
                 return await _forget_dataset(dataset_ref, user)
 
             if data_id is not None:
-                raise ValueError("data_id requires dataset_name or dataset_id.")
+                raise ValueError("data_id requires dataset or dataset_id.")
 
-            raise ValueError(
-                "Specify dataset_name, dataset_id, data_id+dataset, or everything=True."
-            )
+            raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
 
 
 async def _forget_everything(user) -> dict:

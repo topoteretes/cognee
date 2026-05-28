@@ -301,8 +301,8 @@ class CloudClient:
         payload = {}
         if kwargs.get("everything"):
             payload["everything"] = True
-        if kwargs.get("dataset_name"):
-            payload["dataset_name"] = str(kwargs["dataset_name"])
+        if kwargs.get("dataset"):
+            payload["dataset"] = str(kwargs["dataset"])
         if kwargs.get("dataset_id"):
             payload["dataset_id"] = str(kwargs["dataset_id"])
         if kwargs.get("data_id"):
