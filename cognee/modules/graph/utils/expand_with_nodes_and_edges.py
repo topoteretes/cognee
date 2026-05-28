@@ -64,12 +64,15 @@ def _process_ontology_nodes(
 
 
 def _process_ontology_edges(
-    ontology_edges: list, existing_edges_map: dict, ontology_relationships: list
+    ontology_nodes: list, ontology_edges: list, existing_edges_map: dict, ontology_relationships: list
 ) -> None:
     """Process ontology edges and add them if new"""
+    node_category = {node.name: node.category for node in ontology_nodes}
     for source, relation, target in ontology_edges:
-        source_node_id = generate_node_id(source)
-        target_node_id = generate_node_id(target)
+        source_prefix = "type" if node_category.get(source) == "classes" else "entity"
+        target_prefix = "type" if node_category.get(target) == "classes" else "entity"
+        source_node_id = generate_node_id(f"{source_prefix}:{source}")
+        target_node_id = generate_node_id(f"{target_prefix}:{target}")
         relationship_name = generate_edge_name(relation)
         edge_key = _create_edge_key(source_node_id, target_node_id, relationship_name)
 
@@ -141,7 +144,7 @@ def _create_type_node(
 
     # Process ontology nodes and edges
     _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
-    _process_ontology_edges(ontology_edges, existing_edges_map, ontology_relationships)
+    _process_ontology_edges(ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships)
 
     return type_node
 
@@ -202,7 +205,7 @@ def _create_entity_node(
 
     # Process ontology nodes and edges
     _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
-    _process_ontology_edges(ontology_edges, existing_edges_map, ontology_relationships)
+    _process_ontology_edges(ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships)
 
     return entity_node
 

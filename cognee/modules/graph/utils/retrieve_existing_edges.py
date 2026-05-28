@@ -71,8 +71,8 @@ async def retrieve_existing_edges(
 
         graph_node_edges.extend(
             (
-                generate_node_id(edge.source_node_id),
-                generate_node_id(edge.target_node_id),
+                generate_node_id(f"entity:{edge.source_node_id}"),
+                generate_node_id(f"entity:{edge.target_node_id}"),
                 generate_edge_name(edge.relationship_name),
             )
             for edge in graph.edges
