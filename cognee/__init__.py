@@ -62,3 +62,6 @@ from cognee.modules.agent_memory import agent_memory
 
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
+
+# Graceful shutdown
+from cognee.shutdown import shutdown, shutdown_sync

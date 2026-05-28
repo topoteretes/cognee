@@ -32,6 +32,10 @@ async def main():
     for result_text in search_results:
         print(result_text)
 
+    # Graceful shutdown: release database adapters, close HTTP clients, and
+    # drain pending async tasks so the process can exit cleanly.
+    await cognee.shutdown()
+
 
 if __name__ == "__main__":
     logger = setup_logging(log_level=ERROR)
