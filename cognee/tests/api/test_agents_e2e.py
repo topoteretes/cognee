@@ -828,3 +828,70 @@ class TestAgentFullLifecycle:
         assert updated_conn["id"] in both_ids, "old connection should still exist"
         assert new_conn_id in both_ids, "new connection should also exist"
         assert agent_mode._active_count == 1, "same user, still only counted once"
+
+        # -- Step 21: Unregister agent A, verify inactive in DB --
+        client.post("/api/v1/agents/unregister", headers={"X-Api-Key": agent_a_key})
+
+        conn_inactive = client.get("/api/v1/agents/connections?active_only=false", headers=headers)
+        a_conns = [a for a in conn_inactive.json()["agents"] if a["user_id"] == agent_a["agentId"]]
+        assert all(c["status"] == "inactive" for c in a_conns), (
+            "all agent A connections should be inactive after unregister"
+        )
+
+        # -- Step 22: Re-register agent A, verify DB status flips back to active --
+        re_reg_after_deactivate = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Api-Key": agent_a_key},
+            json={"name": agent_a_name, "type": "api", "memory_mode": "cognee"},
+        )
+        assert re_reg_after_deactivate.status_code == 201
+        reactivated_id = re_reg_after_deactivate.json()["id"]
+
+        conn_reactivated = client.get(
+            "/api/v1/agents/connections?active_only=false", headers=headers
+        )
+        reactivated = next(
+            a for a in conn_reactivated.json()["agents"] if a["id"] == reactivated_id
+        )
+        assert reactivated["status"] == "active", "re-registered connection should be active in DB"
+
+        # -- Step 23: Create agent C, register it, then delete it from DB --
+        agent_c_name = f"agent-c-{LIFECYCLE_RUN_ID}"
+        resp_c = client.post(
+            f"/api/v1/agents/create?name={agent_c_name}",
+            headers=headers,
+        )
+        assert resp_c.status_code == 200
+        agent_c = resp_c.json()
+        agent_c_key = agent_c["agentApiKey"]
+
+        reg_c = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Api-Key": agent_c_key},
+            json={"name": agent_c_name, "type": "api"},
+        )
+        assert reg_c.status_code == 201
+        connection_c_id = reg_c.json()["id"]
+
+        # Verify agent C shows in connections before delete
+        conn_before_delete = client.get("/api/v1/agents/connections", headers=headers)
+        assert connection_c_id in {a["id"] for a in conn_before_delete.json()["agents"]}
+
+        # Delete agent C from DB
+        del_c = client.delete(
+            f"/api/v1/agents/{agent_c['agentId']}",
+            headers=headers,
+        )
+        assert del_c.status_code == 200
+
+        # Verify agent C is gone from DB list
+        list_after_del = client.get("/api/v1/agents/list", headers=headers)
+        assert agent_c["agentId"] not in {a["agentId"] for a in list_after_del.json()}
+
+        # Verify agent C connections are cleaned up (not in active or inactive)
+        conn_after_delete = client.get(
+            "/api/v1/agents/connections?active_only=false", headers=headers
+        )
+        assert connection_c_id not in {a["id"] for a in conn_after_delete.json()["agents"]}, (
+            "deleted agent's connections should be cleaned up"
+        )

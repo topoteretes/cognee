@@ -215,7 +215,7 @@ async def list_persisted_agent_connections(
     return agents
 
 
-async def remove_user_agent_connections(user_id: UUID) -> None:
+def _remove_from_registry(user_id: UUID) -> None:
     with _registry_lock:
         to_remove = [
             key
@@ -225,7 +225,15 @@ async def remove_user_agent_connections(user_id: UUID) -> None:
         for key in to_remove:
             del _registered_agent_connections[key]
 
+
+async def deactivate_user_agent_connections(user_id: UUID) -> None:
+    _remove_from_registry(user_id)
     await _deactivate_persisted_agent_connections(user_id)
+
+
+async def delete_user_agent_connections(user_id: UUID) -> None:
+    _remove_from_registry(user_id)
+    await _delete_persisted_agent_connections(user_id)
 
 
 async def _deactivate_persisted_agent_connections(user_id: UUID) -> None:
@@ -247,6 +255,27 @@ async def _deactivate_persisted_agent_connections(user_id: UUID) -> None:
                 principal_id=user_id,
                 name=AGENT_CONFIG_NAME,
                 configuration={**existing_config, "agents": agents},
+            )
+            return
+
+
+async def _delete_persisted_agent_connections(user_id: UUID) -> None:
+    from cognee.modules.users.methods.get_principal_configuration import (
+        get_principal_all_configuration,
+    )
+    from cognee.modules.users.methods.store_principal_configuration import (
+        store_principal_configuration,
+    )
+
+    all_configs = await get_principal_all_configuration(user_id)
+    for config in all_configs:
+        if config.get("name") == AGENT_CONFIG_NAME:
+            existing_config = config.get("configuration", {})
+            existing_config.pop("agents", None)
+            await store_principal_configuration(
+                principal_id=user_id,
+                name=AGENT_CONFIG_NAME,
+                configuration=existing_config,
             )
             return
 

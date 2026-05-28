@@ -156,6 +156,8 @@ def get_agents_router() -> APIRouter:
     ) -> None:
         try:
             await delete_agent(agent_id, user.id)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Agent not found")
         except PermissionError:
             raise HTTPException(status_code=403, detail="Not authorized")
 
