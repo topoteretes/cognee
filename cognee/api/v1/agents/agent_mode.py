@@ -93,10 +93,16 @@ async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConn
     return connection
 
 
-def unregister_agent() -> int:
+def unregister_agent(user: User) -> int:
     global _active_count
 
+    from cognee.modules.agents.registry import remove_user_agent_connections
+
+    user_id = user.id
+    remove_user_agent_connections(user_id)
+
     with _lock:
+        _active_user_ids.discard(user_id)
         _active_count = max(0, _active_count - 1)
         count = _active_count
 

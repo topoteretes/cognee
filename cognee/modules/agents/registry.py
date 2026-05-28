@@ -210,6 +210,18 @@ async def list_persisted_agent_connections(user_ids: list[UUID]) -> list[AgentCo
     return agents
 
 
+def remove_user_agent_connections(user_id: UUID) -> None:
+    user_id_str = str(user_id)
+    with _registry_lock:
+        to_remove = [
+            key
+            for key, conn in _registered_agent_connections.items()
+            if conn.user_id is not None and str(conn.user_id) == user_id_str
+        ]
+        for key in to_remove:
+            del _registered_agent_connections[key]
+
+
 def clear_registered_agent_connections() -> None:
     with _registry_lock:
         _registered_agent_connections.clear()

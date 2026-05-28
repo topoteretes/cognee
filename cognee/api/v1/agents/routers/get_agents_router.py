@@ -113,7 +113,7 @@ def get_agents_router() -> APIRouter:
     async def unregister_agent_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
-        count = unregister_agent()
+        count = unregister_agent(user)
         return AgentModeDTO(active_agents=count)
 
     @router.get("/connections/{agent_id}")
