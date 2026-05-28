@@ -12,8 +12,8 @@ from cognee.infrastructure.databases.dataset_database_handler.supported_dataset_
 )
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jDatasetDatabaseHandler import (
-    NEO4J_LOCAL_DATASET_DATABASE_HANDLER,
-    Neo4jLocalDatasetDatabaseHandler,
+    NEO4J_DATASET_DATABASE_HANDLER,
+    Neo4jDatasetDatabaseHandler,
 )
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
@@ -42,9 +42,9 @@ def clear_database_config(monkeypatch):
     get_vectordb_config.cache_clear()
 
 
-def configure_local_neo4j(monkeypatch):
+def configure_neo4j(monkeypatch):
     monkeypatch.setenv("GRAPH_DATABASE_PROVIDER", "neo4j")
-    monkeypatch.setenv("GRAPH_DATASET_DATABASE_HANDLER", NEO4J_LOCAL_DATASET_DATABASE_HANDLER)
+    monkeypatch.setenv("GRAPH_DATASET_DATABASE_HANDLER", NEO4J_DATASET_DATABASE_HANDLER)
     monkeypatch.setenv("GRAPH_DATABASE_URL", "bolt://localhost:7687")
     monkeypatch.setenv("GRAPH_DATABASE_USERNAME", "neo4j")
     monkeypatch.setenv("GRAPH_DATABASE_PASSWORD", "pleaseletmein")
@@ -54,22 +54,22 @@ def configure_local_neo4j(monkeypatch):
     get_vectordb_config.cache_clear()
 
 
-def test_neo4j_local_handler_is_registered():
-    handler = supported_dataset_database_handlers[NEO4J_LOCAL_DATASET_DATABASE_HANDLER]
+def test_neo4j_handler_is_registered():
+    handler = supported_dataset_database_handlers[NEO4J_DATASET_DATABASE_HANDLER]
 
-    assert handler["handler_instance"] is Neo4jLocalDatasetDatabaseHandler
+    assert handler["handler_instance"] is Neo4jDatasetDatabaseHandler
     assert handler["handler_provider"] == "neo4j"
 
 
-def test_neo4j_local_dataset_handler_enables_multi_user_support(monkeypatch):
-    configure_local_neo4j(monkeypatch)
+def test_neo4j_dataset_handler_enables_multi_user_support(monkeypatch):
+    configure_neo4j(monkeypatch)
 
-    assert get_graph_config().graph_dataset_database_handler == NEO4J_LOCAL_DATASET_DATABASE_HANDLER
+    assert get_graph_config().graph_dataset_database_handler == NEO4J_DATASET_DATABASE_HANDLER
     assert is_multi_user_support_possible() is True
     assert multi_user_support_possible() is True
 
 
-def test_neo4j_provider_does_not_implicitly_select_local_dataset_handler(monkeypatch):
+def test_neo4j_provider_does_not_implicitly_select_dataset_handler(monkeypatch):
     monkeypatch.setenv("GRAPH_DATABASE_PROVIDER", "neo4j")
     get_graph_config.cache_clear()
 
@@ -77,17 +77,17 @@ def test_neo4j_provider_does_not_implicitly_select_local_dataset_handler(monkeyp
     assert is_multi_user_support_possible() is False
 
 
-def test_neo4j_dataset_handler_alias_maps_to_local_handler(monkeypatch):
+def test_neo4j_dataset_handler_alias_maps_to_dataset_handler(monkeypatch):
     monkeypatch.setenv("GRAPH_DATABASE_PROVIDER", "neo4j")
     monkeypatch.setenv("GRAPH_DATASET_DATABASE_HANDLER", "neo4j")
     get_graph_config.cache_clear()
 
-    assert get_graph_config().graph_dataset_database_handler == NEO4J_LOCAL_DATASET_DATABASE_HANDLER
+    assert get_graph_config().graph_dataset_database_handler == NEO4J_DATASET_DATABASE_HANDLER
 
 
 @pytest.mark.asyncio
-async def test_create_dataset_creates_local_neo4j_database(monkeypatch):
-    configure_local_neo4j(monkeypatch)
+async def test_create_dataset_creates_neo4j_database(monkeypatch):
+    configure_neo4j(monkeypatch)
     created_databases = []
     initialized_databases = []
 
@@ -98,17 +98,17 @@ async def test_create_dataset_creates_local_neo4j_database(monkeypatch):
         initialized_databases.append(graph_db_name)
 
     monkeypatch.setattr(
-        Neo4jLocalDatasetDatabaseHandler,
+        Neo4jDatasetDatabaseHandler,
         "_create_neo4j_database",
         classmethod(fake_create_neo4j_database),
     )
     monkeypatch.setattr(
-        Neo4jLocalDatasetDatabaseHandler,
+        Neo4jDatasetDatabaseHandler,
         "_initialize_graph_database",
         classmethod(fake_initialize_graph_database),
     )
 
-    database_info = await Neo4jLocalDatasetDatabaseHandler.create_dataset(DATASET_ID, None)
+    database_info = await Neo4jDatasetDatabaseHandler.create_dataset(DATASET_ID, None)
 
     assert created_databases == ["cognee12345678123456781234567812345678"]
     assert initialized_databases == created_databases
@@ -117,22 +117,20 @@ async def test_create_dataset_creates_local_neo4j_database(monkeypatch):
         "graph_database_url": "bolt://localhost:7687",
         "graph_database_name": "cognee12345678123456781234567812345678",
         "graph_database_key": "",
-        "graph_dataset_database_handler": NEO4J_LOCAL_DATASET_DATABASE_HANDLER,
+        "graph_dataset_database_handler": NEO4J_DATASET_DATABASE_HANDLER,
         "graph_database_connection_info": {},
     }
 
 
 @pytest.mark.asyncio
 async def test_resolve_dataset_connection_info_uses_live_config_credentials(monkeypatch):
-    configure_local_neo4j(monkeypatch)
+    configure_neo4j(monkeypatch)
     dataset_database = SimpleNamespace(
         graph_database_url="bolt://stored:7687",
         graph_database_connection_info={},
     )
 
-    resolved = await Neo4jLocalDatasetDatabaseHandler.resolve_dataset_connection_info(
-        dataset_database
-    )
+    resolved = await Neo4jDatasetDatabaseHandler.resolve_dataset_connection_info(dataset_database)
 
     assert resolved.graph_database_url == "bolt://stored:7687"
     assert resolved.graph_database_connection_info == {
@@ -144,7 +142,7 @@ async def test_resolve_dataset_connection_info_uses_live_config_credentials(monk
 
 @pytest.mark.asyncio
 async def test_create_neo4j_database_uses_system_database(monkeypatch):
-    configure_local_neo4j(monkeypatch)
+    configure_neo4j(monkeypatch)
     calls = []
     closed = []
 
@@ -177,17 +175,17 @@ async def test_create_neo4j_database_uses_system_database(monkeypatch):
         calls.append(("wait", graph_db_name, timeout_seconds))
 
     monkeypatch.setattr(
-        Neo4jLocalDatasetDatabaseHandler,
+        Neo4jDatasetDatabaseHandler,
         "_create_neo4j_driver",
         classmethod(lambda cls, **connection_info: FakeDriver()),
     )
     monkeypatch.setattr(
-        Neo4jLocalDatasetDatabaseHandler,
+        Neo4jDatasetDatabaseHandler,
         "_wait_for_database_online",
         classmethod(fake_wait_for_database_online),
     )
 
-    await Neo4jLocalDatasetDatabaseHandler._create_neo4j_database(
+    await Neo4jDatasetDatabaseHandler._create_neo4j_database(
         "cognee12345678123456781234567812345678"
     )
 
@@ -204,7 +202,7 @@ async def test_create_neo4j_database_uses_system_database(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delete_dataset_evicts_and_drops_database(monkeypatch):
-    configure_local_neo4j(monkeypatch)
+    configure_neo4j(monkeypatch)
     dropped_databases = []
     evicted_configs = []
 
@@ -212,13 +210,13 @@ async def test_delete_dataset_evicts_and_drops_database(monkeypatch):
         dropped_databases.append(graph_db_name)
 
     monkeypatch.setattr(
-        Neo4jLocalDatasetDatabaseHandler,
+        Neo4jDatasetDatabaseHandler,
         "_drop_neo4j_database",
         classmethod(fake_drop_neo4j_database),
     )
     monkeypatch.setattr(
         "cognee.infrastructure.databases.graph.neo4j_driver."
-        "Neo4jLocalDatasetDatabaseHandler.evict_graph_engine",
+        "Neo4jDatasetDatabaseHandler.evict_graph_engine",
         lambda **kwargs: evicted_configs.append(kwargs),
     )
 
@@ -229,7 +227,7 @@ async def test_delete_dataset_evicts_and_drops_database(monkeypatch):
         graph_database_connection_info={},
     )
 
-    await Neo4jLocalDatasetDatabaseHandler.delete_dataset(dataset_database)
+    await Neo4jDatasetDatabaseHandler.delete_dataset(dataset_database)
 
     assert dropped_databases == ["cognee12345678123456781234567812345678"]
     assert evicted_configs == [
@@ -242,6 +240,6 @@ async def test_delete_dataset_evicts_and_drops_database(monkeypatch):
             "graph_database_password": "pleaseletmein",
             "graph_database_allow_anonymous": False,
             "graph_database_key": "",
-            "graph_dataset_database_handler": NEO4J_LOCAL_DATASET_DATABASE_HANDLER,
+            "graph_dataset_database_handler": NEO4J_DATASET_DATABASE_HANDLER,
         }
     ]

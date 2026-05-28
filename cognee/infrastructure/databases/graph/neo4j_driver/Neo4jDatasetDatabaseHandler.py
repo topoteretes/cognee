@@ -23,7 +23,7 @@ NEO4J_DATABASE_ONLINE_STATUS = "online"
 NEO4J_DATABASE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]{2,62}$")
 
 
-class Neo4jLocalDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
+class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """Handler for per-dataset databases in a local/self-hosted Neo4j DBMS."""
 
     @classmethod
@@ -32,8 +32,7 @@ class Neo4jLocalDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         if graph_config.graph_database_provider != "neo4j":
             raise ValueError(
-                "Neo4jLocalDatasetDatabaseHandler can only be used with Neo4j graph database "
-                "provider."
+                "Neo4jDatasetDatabaseHandler can only be used with Neo4j graph database provider."
             )
 
         graph_db_name = cls._database_name_for_dataset(dataset_id)
