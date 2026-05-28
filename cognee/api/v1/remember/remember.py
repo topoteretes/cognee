@@ -65,11 +65,26 @@ class RememberKwargs(TypedDict, total=False):
     graph_db_config: dict
     content_type: Literal["skills"]
     skill_improvement: dict[str, Any]
+    primary_key: str
+    write_disposition: str
+    query: str
+    max_rows_per_table: int
 
 
 # Kwarg routing: which RememberKwargs go to add(), cognify(), or both.
 # Kept in sync with RememberKwargs above and the add()/cognify() signatures.
-_ADD_ONLY = frozenset({"dataset_id", "node_set", "preferred_loaders", "importance_weight"})
+_ADD_ONLY = frozenset(
+    {
+        "dataset_id",
+        "node_set",
+        "preferred_loaders",
+        "importance_weight",
+        "primary_key",
+        "write_disposition",
+        "query",
+        "max_rows_per_table",
+    }
+)
 _COGNIFY_ONLY = frozenset({"graph_model", "chunks_per_batch", "config", "temporal_cognify"})
 _SHARED = frozenset(
     {

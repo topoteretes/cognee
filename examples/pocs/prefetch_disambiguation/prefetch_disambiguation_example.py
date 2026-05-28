@@ -1,14 +1,14 @@
 import asyncio
-import time
-from typing import Optional, Callable, Any, Awaitable
-
-import cognee
-from cognee.api.v1.visualize.visualize import visualize_graph
-from pathlib import Path
 import os
+import time
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Optional
+
 import nltk
 from nltk.tokenize import sent_tokenize
 
+import cognee
+from cognee import visualize_graph
 from examples.pocs.prefetch_disambiguation.prefetch_disambiguation import (
     prefetch_disambiguation,
 )

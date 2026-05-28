@@ -21,27 +21,31 @@ preparation and manipulation of quantum states.
 """
 
 
-# Extract dataset_ids from cognify results
-def extract_dataset_id_from_cognify(cognify_result):
-    """Extract dataset_id from cognify output dictionary"""
-    return next(iter(cognify_result), None)  # Return the first dataset_id
+def get_dataset_id(remember_result):
+    """Extract dataset_id from remember output."""
+    from uuid import UUID
+
+    return UUID(remember_result.dataset_id)
 
 
 async def tenant_and_role_constraints_example():
-    # NOTE: When a document is added in Cognee with permissions enabled only the owner of the document has permissions
+    # NOTE: When a document is remembered in Cognee with permissions enabled only the owner of the document has permissions
     # to work with the document initially.
 
-    # Add document for user_1, add it under dataset name QUANTUM
+    # Remember document for user_1 under dataset name QUANTUM
     print("\nCreating user_1: user_1@example.com")
     user_1 = await create_user("user_1@example.com", "example")
-    await cognee.add([text], dataset_name="QUANTUM", user=user_1)
+    quantum_remember_result = await cognee.remember(
+        [text],
+        dataset_name="QUANTUM",
+        user=user_1,
+        self_improvement=False,
+    )
 
-    quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=user_1)
-
-    # Get dataset IDs from cognify results
-    # Note: When we want to work with datasets from other users (search, add, cognify and etc.) we must supply dataset
-    # information through dataset_id using dataset name only looks for datasets owned by current user
-    quantum_dataset_id = extract_dataset_id_from_cognify(quantum_cognify_result)
+    # Get dataset IDs from remember results
+    # Note: When we want to work with datasets from other users (recall, remember, and etc.) we must supply dataset
+    # information through dataset_ids; using dataset names only looks for datasets owned by current user
+    quantum_dataset_id = get_dataset_id(quantum_remember_result)
 
     # Users can also be added to Roles and Tenants and then permission can be assigned on a Role/Tenant level as well
     # To create a Role a user first must be an owner of a Tenant
