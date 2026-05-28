@@ -45,6 +45,7 @@ def get_remember_router() -> APIRouter:
         ),
         graph_model: Optional[str] = Form(
             default=None,
+            examples=[""],
             description="JSON-serialised graph model schema (same format as the cognify endpoint).",
         ),
         content_type: Optional[str] = Form(default=None, examples=[""]),
