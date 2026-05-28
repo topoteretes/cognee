@@ -43,6 +43,7 @@ def is_agent_mode_enabled() -> bool:
 
 _lock = threading.Lock()
 _active_count = 0
+_active_user_ids: set[str] = set()
 _watchdog_started = False
 
 
@@ -71,7 +72,12 @@ async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConn
 
     connection = await register_agent_from_request(user, request)
 
+    user_id = str(user.id)
     with _lock:
+        if user_id in _active_user_ids:
+            return connection
+
+        _active_user_ids.add(user_id)
         _active_count += 1
         count = _active_count
 

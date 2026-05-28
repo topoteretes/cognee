@@ -19,15 +19,22 @@ OWNER_EMAIL = f"agentmode-owner-{RUN_ID}@example.com"
 OWNER_PASSWORD = "ownerpass123!"
 
 REGISTER_BODY = {"name": "test-agent"}
+REGISTER_BODY_2 = {"name": "test-agent-2"}
 
 _DUMMY_USER = User(email="test@test.com", hashed_password="!")
+_DUMMY_USER_2 = User(email="test2@test.com", hashed_password="!")
 _DUMMY_REQUEST = RegisterAgentRequest(name="test-agent")
+_DUMMY_REQUEST_2 = RegisterAgentRequest(name="test-agent-2")
 
 
 def _reset_agent_mode():
     """Reset module-level globals between tests."""
+    from cognee.modules.agents.registry import clear_registered_agent_connections
+
     agent_mode._active_count = 0
+    agent_mode._active_user_ids.clear()
     agent_mode._watchdog_started = False
+    clear_registered_agent_connections()
 
 
 @pytest.fixture(autouse=True)
@@ -77,19 +84,22 @@ class TestAgentMode:
         assert resp.status_code == 201
         assert agent_mode._active_count == 1
 
-        resp = client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
-        assert resp.status_code == 201
-        assert agent_mode._active_count == 2
+    def test_same_user_does_not_increment_twice(self, client, owner_token):
+        headers = {"Authorization": f"Bearer {owner_token}"}
+
+        client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
+        client.post("/api/v1/agents/register", json=REGISTER_BODY_2, headers=headers)
+        assert agent_mode._active_count == 1
 
     def test_unregister_decrements_count(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
         client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
-        client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
+        assert agent_mode._active_count == 1
 
         resp = client.post("/api/v1/agents/unregister", headers=headers)
         assert resp.status_code == 200
-        assert resp.json()["activeAgents"] == 1
+        assert resp.json()["activeAgents"] == 0
 
     def test_unregister_does_not_go_below_zero(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
@@ -117,7 +127,7 @@ class TestAgentMode:
     @patch.object(agent_mode, "_shutdown_server")
     async def test_watchdog_shuts_down_after_all_unregister(self, mock_shutdown):
         await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
-        await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
+        await agent_mode.register_agent(_DUMMY_USER_2, _DUMMY_REQUEST_2)
         agent_mode.unregister_agent()
         agent_mode.unregister_agent()
 
@@ -129,3 +139,11 @@ class TestAgentMode:
         with patch.dict(os.environ, {"COGNEE_AGENT_MODE": "false"}):
             await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
             assert not agent_mode._watchdog_started
+
+    @pytest.mark.asyncio
+    async def test_re_register_does_not_increment_count(self):
+        await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
+        assert agent_mode._active_count == 1
+
+        await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
+        assert agent_mode._active_count == 1
