@@ -16,7 +16,7 @@ from cognee.infrastructure.databases.dataset_database_handler import (
 from cognee.modules.users.models import DatasetDatabase, User
 
 
-NEO4J_LOCAL_DATASET_DATABASE_HANDLER = "neo4j_local"
+NEO4J_DATASET_DATABASE_HANDLER = "neo4j"
 NEO4J_SYSTEM_DATABASE = "system"
 NEO4J_DATASET_DATABASE_PREFIX = "cognee"
 NEO4J_DATABASE_ONLINE_STATUS = "online"
@@ -46,7 +46,7 @@ class Neo4jLocalDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "graph_database_url": graph_config.graph_database_url,
             "graph_database_name": graph_db_name,
             "graph_database_key": graph_config.graph_database_key,
-            "graph_dataset_database_handler": NEO4J_LOCAL_DATASET_DATABASE_HANDLER,
+            "graph_dataset_database_handler": NEO4J_DATASET_DATABASE_HANDLER,
             "graph_database_connection_info": {},
         }
 
@@ -92,7 +92,7 @@ class Neo4jLocalDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             graph_database_password=graph_database_password,
             graph_database_allow_anonymous=graph_database_allow_anonymous,
             graph_database_key=dataset_database.graph_database_key,
-            graph_dataset_database_handler=NEO4J_LOCAL_DATASET_DATABASE_HANDLER,
+            graph_dataset_database_handler=NEO4J_DATASET_DATABASE_HANDLER,
         )
 
         await cls._drop_neo4j_database(graph_db_name)
@@ -111,7 +111,7 @@ class Neo4jLocalDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         if not database_name.startswith(NEO4J_DATASET_DATABASE_PREFIX):
             raise ValueError(
                 "Refusing to manage a Neo4j database that was not created by the "
-                "neo4j_local dataset handler."
+                "neo4j dataset handler."
             )
 
         if not NEO4J_DATABASE_NAME_PATTERN.fullmatch(database_name):
@@ -165,7 +165,7 @@ class Neo4jLocalDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             graph_database_password=connection_info["password"],
             graph_database_allow_anonymous=connection_info["allow_anonymous"],
             graph_database_key=graph_config.graph_database_key,
-            graph_dataset_database_handler=NEO4J_LOCAL_DATASET_DATABASE_HANDLER,
+            graph_dataset_database_handler=NEO4J_DATASET_DATABASE_HANDLER,
         )
         await engine.initialize()
 

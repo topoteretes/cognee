@@ -11,7 +11,7 @@ from cognee.infrastructure.databases.dataset_database_handler.supported_dataset_
     supported_dataset_database_handlers,
 )
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jLocalDatasetDatabaseHandler import (
+from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jDatasetDatabaseHandler import (
     NEO4J_LOCAL_DATASET_DATABASE_HANDLER,
     Neo4jLocalDatasetDatabaseHandler,
 )

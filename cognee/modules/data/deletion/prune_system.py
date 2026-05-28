@@ -1,3 +1,4 @@
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -26,9 +27,8 @@ logger = get_logger()
 
 
 async def prune_graph_databases():
-    db_engine = get_relational_engine()
     try:
-        dataset_databases = await db_engine.get_all_data_from_table("dataset_database")
+        dataset_databases = await _get_dataset_databases()
         # Go through each dataset database and delete the graph database
         for dataset_database in dataset_databases:
             handler = get_graph_dataset_database_handler(dataset_database)
@@ -42,9 +42,8 @@ async def prune_graph_databases():
 
 
 async def prune_vector_databases():
-    db_engine = get_relational_engine()
     try:
-        dataset_databases = await db_engine.get_all_data_from_table("dataset_database")
+        dataset_databases = await _get_dataset_databases()
         # Go through each dataset database and delete the vector database
         for dataset_database in dataset_databases:
             handler = get_vector_dataset_database_handler(dataset_database)
@@ -55,6 +54,13 @@ async def prune_vector_databases():
             e,
         )
         return
+
+
+async def _get_dataset_databases() -> list[DatasetDatabase]:
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(select(DatasetDatabase))
+        return result.scalars().all()
 
 
 async def prune_system(graph=True, vector=True, metadata=True, cache=True):
