@@ -458,9 +458,6 @@ class TestAgentsE2E:
         async def visible_user_ids(_user):
             return [uuid.UUID(owner["id"])]
 
-        async def trace_agents_for_user(**_kwargs):
-            return []
-
         async def persisted_agent_connections(_user_id, active_only=True):
             return []
 
@@ -472,10 +469,6 @@ class TestAgentsE2E:
             patch(
                 "cognee.modules.agents.operations._visible_user_ids",
                 visible_user_ids,
-            ),
-            patch(
-                "cognee.modules.agents.operations._trace_agents_for_user",
-                trace_agents_for_user,
             ),
             patch(
                 "cognee.modules.agents.operations.list_persisted_agent_connections",
@@ -522,17 +515,6 @@ class TestAgentPersistence:
     def headers(self, owner):
         return {"Authorization": f"Bearer {owner['token']}"}
 
-    @pytest.fixture(scope="class")
-    def _patch_traces(self, owner):
-        async def trace_agents_for_user(**_kwargs):
-            return []
-
-        with patch(
-            "cognee.modules.agents.operations._trace_agents_for_user",
-            trace_agents_for_user,
-        ):
-            yield
-
     def _seed_configuration(self, client, headers):
         resp = client.post(
             "/api/v1/configuration/store_user_configuration",
@@ -552,7 +534,7 @@ class TestAgentPersistence:
                 return config["configuration"]
         return None
 
-    def test_register_persists_without_overwriting(self, client, headers, owner, _patch_traces):
+    def test_register_persists_without_overwriting(self, client, headers, owner):
         self._seed_configuration(client, headers)
 
         clear_registered_agent_connections()
@@ -580,14 +562,14 @@ class TestAgentPersistence:
         assert persisted["type"] == "api"
         assert persisted["memory_mode"] == "hybrid"
 
-    def test_list_returns_persisted_agent(self, client, headers, owner, _patch_traces):
+    def test_list_returns_persisted_agent(self, client, headers, owner):
         resp = client.get("/api/v1/agents/connections", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
         agent_names = {a["agent_session_name"] for a in body["agents"]}
         assert PERSIST_AGENT_NAME in agent_names
 
-    def test_parent_sees_child_agent_connection(self, client, headers, owner, _patch_traces):
+    def test_parent_sees_child_agent_connection(self, client, headers, owner):
         child_name = f"child-agent-{PERSIST_RUN_ID}"
         create_resp = client.post(
             f"/api/v1/agents/create?name={child_name}",
@@ -657,17 +639,6 @@ class TestAgentFullLifecycle:
     def headers(self, owner):
         return {"Authorization": f"Bearer {owner['token']}"}
 
-    @pytest.fixture(scope="class")
-    def _patch_traces(self):
-        async def trace_agents_for_user(**_kwargs):
-            return []
-
-        with patch(
-            "cognee.modules.agents.operations._trace_agents_for_user",
-            trace_agents_for_user,
-        ):
-            yield
-
     @pytest.fixture(autouse=True)
     def _reset(self):
         agent_mode._active_count = 0
@@ -676,7 +647,7 @@ class TestAgentFullLifecycle:
         clear_registered_agent_connections()
         yield
 
-    def test_full_lifecycle(self, client, headers, owner, _patch_traces):
+    def test_full_lifecycle(self, client, headers, owner):
         agent_a_name = f"agent-a-{LIFECYCLE_RUN_ID}"
         agent_b_name = f"agent-b-{LIFECYCLE_RUN_ID}"
 
@@ -1006,17 +977,6 @@ class TestMultiTenantIsolation:
         assert login.status_code == 200
         return {"id": reg.json()["id"], "token": login.json()["access_token"]}
 
-    @pytest.fixture(scope="class")
-    def _patch_traces(self):
-        async def trace_agents_for_user(**_kwargs):
-            return []
-
-        with patch(
-            "cognee.modules.agents.operations._trace_agents_for_user",
-            trace_agents_for_user,
-        ):
-            yield
-
     @pytest.fixture(autouse=True)
     def _reset(self):
         agent_mode._active_count = 0
@@ -1057,7 +1017,7 @@ class TestMultiTenantIsolation:
         assert agent_b_id in b_agent_ids
         assert agent_a_id not in b_agent_ids, "user B should not see user A's agent"
 
-    def test_users_cannot_see_each_others_connections(self, client, user_a, user_b, _patch_traces):
+    def test_users_cannot_see_each_others_connections(self, client, user_a, user_b):
         headers_a = {"Authorization": f"Bearer {user_a['token']}"}
         headers_b = {"Authorization": f"Bearer {user_b['token']}"}
 
