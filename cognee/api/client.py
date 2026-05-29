@@ -300,7 +300,7 @@ app.include_router(
     tags=["health"],
 )
 
-app.include_router(get_agents_router(), prefix="/api/v1/agents", tags=["agents"])
+app.include_router(get_agents_router(), prefix="/api/v1/agents")
 
 # Activity / observability
 app.include_router(
