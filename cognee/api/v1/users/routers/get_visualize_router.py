@@ -71,7 +71,10 @@ def get_visualize_router() -> APIRouter:
             return HTMLResponse(html_visualization)
 
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Visualization request failed: %s", error)
+            return JSONResponse(
+                status_code=409, content={"error": "Unable to render visualization."}
+            )
 
     @router.post("/multi", response_model=None)
     async def visualize_multi(
@@ -128,6 +131,9 @@ def get_visualize_router() -> APIRouter:
             return HTMLResponse(html_visualization)
 
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Multi-user visualization request failed: %s", error)
+            return JSONResponse(
+                status_code=409, content={"error": "Unable to render visualization."}
+            )
 
     return router

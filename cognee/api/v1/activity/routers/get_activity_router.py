@@ -13,6 +13,9 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
     get_specific_user_permission_datasets,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_activity_router() -> APIRouter:
@@ -115,8 +118,9 @@ def get_activity_router() -> APIRouter:
                 )
 
             return result
-        except Exception as e:
-            return {"error": str(e)}
+        except Exception as error:
+            logger.error("Failed to retrieve activity traces: %s", error)
+            return {"error": "Unable to retrieve activity traces."}
 
     @router.get("/users")
     async def get_tenant_users(user: User = Depends(get_authenticated_user)):

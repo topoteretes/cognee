@@ -5,8 +5,11 @@ from typing import Optional, List
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee.shared.logging_utils import get_logger
 from cognee import __version__ as cognee_version
 from ..ontologies import OntologyService
+
+logger = get_logger(__name__)
 
 
 def get_ontology_router() -> APIRouter:
@@ -75,10 +78,12 @@ def get_ontology_router() -> APIRouter:
                     }
                 ]
             }
-        except ValueError as e:
-            return JSONResponse(status_code=400, content={"error": str(e)})
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": str(e)})
+        except ValueError as error:
+            logger.warning("Ontology upload request failed: %s", error)
+            return JSONResponse(status_code=400, content={"error": "Invalid ontology request."})
+        except Exception as error:
+            logger.error("Ontology upload failed: %s", error)
+            return JSONResponse(status_code=500, content={"error": "Ontology upload failed."})
 
     @router.delete("/{ontology_key}", response_model=dict)
     async def delete_ontology(
@@ -107,10 +112,15 @@ def get_ontology_router() -> APIRouter:
         try:
             ontology_service.delete_ontology(ontology_key=ontology_key, user=user)
             return {"status": "success", "ontology_key": ontology_key}
-        except ValueError as e:
-            return JSONResponse(status_code=400, content={"error": str(e)})
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": str(e)})
+        except ValueError as error:
+            logger.warning("Ontology delete request failed: %s", error)
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Ontology key not found or invalid."},
+            )
+        except Exception as error:
+            logger.error("Ontology delete failed: %s", error)
+            return JSONResponse(status_code=500, content={"error": "Ontology delete failed."})
 
     @router.get("", response_model=dict)
     async def list_ontologies(user: User = Depends(get_authenticated_user)):
@@ -135,7 +145,8 @@ def get_ontology_router() -> APIRouter:
         try:
             metadata = ontology_service.list_ontologies(user)
             return metadata
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"error": str(e)})
+        except Exception as error:
+            logger.error("Ontology list failed: %s", error)
+            return JSONResponse(status_code=500, content={"error": "Ontology list failed."})
 
     return router

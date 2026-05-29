@@ -24,10 +24,10 @@ def get_health_router():
                     "version": health_status.version,
                 },
             )
-        except Exception as e:
+        except Exception:
             return JSONResponse(
                 status_code=503,
-                content={"status": "not ready", "reason": f"health check failed: {str(e)}"},
+                content={"status": "not ready", "reason": "health check failed"},
             )
 
     @health_router.get("/detailed", response_model=dict)
@@ -44,10 +44,10 @@ def get_health_router():
                 status_code = 503
 
             return JSONResponse(status_code=status_code, content=health_status.model_dump())
-        except Exception as e:
+        except Exception:
             return JSONResponse(
                 status_code=503,
-                content={"status": "unhealthy", "error": f"Health check system failure: {str(e)}"},
+                content={"status": "unhealthy", "error": "Health check system failure"},
             )
 
     return health_router

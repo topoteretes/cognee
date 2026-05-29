@@ -5,6 +5,9 @@ on:
     - cron: "0 0 * * 1" # Runs every Monday
   workflow_dispatch: # Allows manual trigger
 
+permissions:
+  contents: write
+
 jobs:
   update-contributors:
     runs-on: ubuntu-latest

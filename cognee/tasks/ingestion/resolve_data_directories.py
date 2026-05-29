@@ -1,10 +1,22 @@
-import os
+from pathlib import Path
 from urllib.parse import urlparse
 from typing import List, Union, BinaryIO
 
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+
+def _resolve_existing_local_path(item: str) -> Path | None:
+    try:
+        return resolve_local_path(item, must_exist=True)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    except ValueError as error:
+        raise CogneeSystemError(message="Local path is outside allowed roots.") from error
 
 
 async def resolve_data_directories(
@@ -62,21 +74,23 @@ async def resolve_data_directories(
                     resolved_data.extend(s3_files)
                 else:
                     raise S3FileSystemNotFoundError()
+                continue
 
-            elif os.path.isdir(item):  # If it's a directory
+            local_path = _resolve_existing_local_path(item)
+
+            if local_path and local_path.is_dir():  # If it's a directory
                 if include_subdirectories:
                     # Recursively add all files in the directory and subdirectories
-                    for root, _, files in os.walk(item):
-                        resolved_data.extend([os.path.join(root, f) for f in files])
+                    for file_path in local_path.rglob("*"):
+                        if file_path.is_file():
+                            resolved_data.append(str(file_path))
                 else:
                     # Add all files (not subdirectories) in the directory
                     resolved_data.extend(
-                        [
-                            os.path.join(item, f)
-                            for f in os.listdir(item)
-                            if os.path.isfile(os.path.join(item, f))
-                        ]
+                        str(file_path) for file_path in local_path.iterdir() if file_path.is_file()
                     )
+            elif local_path and local_path.is_file():
+                resolved_data.append(str(local_path))
             else:  # If it's a file or text add it directly
                 resolved_data.append(item)
         else:  # If it's not a string add it directly

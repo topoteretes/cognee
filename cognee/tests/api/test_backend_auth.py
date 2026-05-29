@@ -106,7 +106,7 @@ class TestAuthFlow:
 class TestHashApiKey:
     """
     Confirm that when HASH_API_KEY=true, the API key stored in the database
-    is the SHA-256 hash of the raw key, not the raw key itself.
+    is a deterministic hash of the raw key, not the raw key itself.
     """
 
     @pytest.fixture(scope="class")
@@ -159,5 +159,5 @@ class TestHashApiKey:
 
         assert stored_key != raw_key, "Raw key should not be stored in plaintext"
         assert stored_key == compute_hash(raw_key), (
-            "Stored key should be SHA-256 hash of the raw key"
+            "Stored key should be deterministic hash of the raw key"
         )
