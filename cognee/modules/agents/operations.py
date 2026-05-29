@@ -163,6 +163,7 @@ def _attach_connected_agent_ids(
 async def list_agent_connections(
     *,
     user: User,
+    agent_id: Optional[UUIDType] = None,
     range_key: RangeLiteral = "30d",
     status_filter: Optional[str] = None,
     include_sources: bool = True,
@@ -189,6 +190,13 @@ async def list_agent_connections(
         visible_user_ids, active_only=active_only
     )
     agents = _merge_agents([*registered_agents, *persisted_agents])
+    if agent_id:
+        agent_id_str = str(agent_id)
+        agents = [
+            agent
+            for agent in agents
+            if agent.user_id is not None and str(agent.user_id) == agent_id_str
+        ]
     if status_filter:
         agents = [agent for agent in agents if agent.status == status_filter]
 
@@ -208,24 +216,24 @@ async def list_agent_connections(
 async def get_agent_connection_detail(
     *,
     user: User,
-    agent_id: str,
+    agent_id: UUIDType,
     agent_session_name: Optional[str] = None,
 ) -> Optional[AgentDetailResponse]:
     response = await list_agent_connections(
         user=user,
+        agent_id=agent_id,
         include_sources=True,
         limit=10000,
         offset=0,
     )
-    agent = next(
-        (
-            item
-            for item in response.agents
-            if item.id == agent_id
-            and (agent_session_name is None or item.agent_session_name == agent_session_name)
-        ),
-        None,
-    )
+    if agent_session_name:
+        matching = [
+            item for item in response.agents if item.agent_session_name == agent_session_name
+        ]
+    else:
+        matching = list(response.agents)
+
+    agent = matching[0] if matching else None
     if agent is None:
         return None
 

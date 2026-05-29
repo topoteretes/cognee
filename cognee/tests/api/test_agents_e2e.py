@@ -191,7 +191,7 @@ class TestAgentsE2E:
         assert resp2.status_code == 200
         assert resp2.json()["total"] == 0
 
-    def test_get_connection_detail(self, client, headers, _patch_operations):
+    def test_get_connection_detail(self, client, headers, owner, _patch_operations):
         clear_registered_agent_connections()
         reg = client.post(
             "/api/v1/agents/register",
@@ -204,12 +204,13 @@ class TestAgentsE2E:
             },
         )
         assert reg.status_code == 201
-        agent_id = reg.json()["id"]
 
-        resp = client.get(f"/api/v1/agents/connections/{agent_id}", headers=headers)
+        resp = client.get(
+            f"/api/v1/agents/connections/{owner['id']}?agent_session_name=detail_agent",
+            headers=headers,
+        )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["agent"]["id"] == agent_id
         assert body["agent"]["agent_session_name"] == "detail_agent"
         assert body["agent"]["type"] == "mcp"
         assert "memory_sources" in body
@@ -219,7 +220,8 @@ class TestAgentsE2E:
 
     def test_get_connection_detail_not_found(self, client, headers, _patch_operations):
         clear_registered_agent_connections()
-        resp = client.get("/api/v1/agents/connections/nonexistent-id-12345", headers=headers)
+        fake_id = str(uuid.uuid4())
+        resp = client.get(f"/api/v1/agents/connections/{fake_id}", headers=headers)
         assert resp.status_code == 404
         assert resp.json()["detail"] == "connection not found"
 
@@ -396,7 +398,7 @@ class TestAgentsE2E:
             endpoints = [
                 ("GET", "/api/v1/agents/connections", None),
                 ("POST", "/api/v1/agents/register", {"agent_session_name": "x"}),
-                ("GET", "/api/v1/agents/connections/some-id", None),
+                ("GET", f"/api/v1/agents/connections/{uuid.uuid4()}", None),
                 ("POST", "/api/v1/agents/create?name=nope", None),
                 ("GET", "/api/v1/agents/list", None),
                 ("DELETE", f"/api/v1/agents/{uuid.uuid4()}", None),
@@ -691,10 +693,13 @@ class TestAgentFullLifecycle:
         assert connection_a_id in conn_ids
         assert connection_b_id in conn_ids
 
-        # -- Step 7: Verify GET /connections/{id} returns detail --
-        detail_conn = client.get(f"/api/v1/agents/connections/{connection_a_id}", headers=headers)
+        # -- Step 7: Verify GET /connections/{agent_id} returns detail --
+        detail_conn = client.get(
+            f"/api/v1/agents/connections/{agent_a['agentId']}?agent_session_name={agent_a_name}",
+            headers=headers,
+        )
         assert detail_conn.status_code == 200
-        assert detail_conn.json()["agent"]["id"] == connection_a_id
+        assert detail_conn.json()["agent"]["agent_session_name"] == agent_a_name
 
         # -- Step 8: Unregister agent A's connection --
         unreg_a = client.post(

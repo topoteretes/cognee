@@ -92,6 +92,11 @@ def get_agents_router() -> APIRouter:
 
     @router.get("/connections", tags=[CONNECTIONS_TAG])
     async def list_agents_connections(
+        agent_id: Optional[UUID] = Query(
+            None,
+            description="Filter connections by agent user ID. "
+            "Only returns connections belonging to this specific agent.",
+        ),
         range: RangeLiteral = Query("30d"),
         status_filter: Optional[Literal["active", "inactive", "unknown"]] = Query(
             None,
@@ -105,6 +110,7 @@ def get_agents_router() -> APIRouter:
     ):
         response = await list_agent_connections(
             user=user,
+            agent_id=agent_id,
             range_key=range,
             status_filter=status_filter,
             include_sources=include_sources,
@@ -114,12 +120,30 @@ def get_agents_router() -> APIRouter:
         )
         return jsonable_encoder(response)
 
-    @router.get("/connections/{agent_id}", tags=[CONNECTIONS_TAG])
-    async def get_connection_detail(
-        agent_id: str,
+    @router.get("/connections/me", tags=[CONNECTIONS_TAG])
+    async def get_my_connection_detail(
         agent_session_name: Optional[str] = Query(
             None,
-            description="Filter by connection name within the authenticated user's connections.",
+            description="Filter by connection name. "
+            "Uses the authenticated user's ID as the agent ID.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        response = await get_agent_connection_detail(
+            user=user,
+            agent_id=user.id,
+            agent_session_name=agent_session_name,
+        )
+        if response is None:
+            raise HTTPException(status_code=404, detail="connection not found")
+        return jsonable_encoder(response)
+
+    @router.get("/connections/{agent_id}", tags=[CONNECTIONS_TAG])
+    async def get_connection_detail(
+        agent_id: UUID,
+        agent_session_name: Optional[str] = Query(
+            None,
+            description="Filter by connection name within the agent's connections.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
