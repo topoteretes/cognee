@@ -226,9 +226,14 @@ def _remove_from_registry(user_id: UUID) -> None:
             del _registered_agent_connections[key]
 
 
-async def deactivate_user_agent_connections(user_id: UUID) -> None:
-    _remove_from_registry(user_id)
-    await _deactivate_persisted_agent_connections(user_id)
+def _remove_connection_from_registry(connection_id: str) -> None:
+    with _registry_lock:
+        _registered_agent_connections.pop(connection_id, None)
+
+
+async def deactivate_agent_connection(user_id: UUID, connection_id: str) -> None:
+    _remove_connection_from_registry(connection_id)
+    await _deactivate_persisted_connection(user_id, connection_id)
 
 
 async def delete_user_agent_connections(user_id: UUID) -> None:
@@ -236,7 +241,7 @@ async def delete_user_agent_connections(user_id: UUID) -> None:
     await _delete_persisted_agent_connections(user_id)
 
 
-async def _deactivate_persisted_agent_connections(user_id: UUID) -> None:
+async def _deactivate_persisted_connection(user_id: UUID, connection_id: str) -> None:
     from cognee.modules.users.methods.get_principal_configuration import (
         get_principal_all_configuration,
     )
@@ -249,13 +254,13 @@ async def _deactivate_persisted_agent_connections(user_id: UUID) -> None:
         if config.get("name") == AGENT_CONFIG_NAME:
             existing_config = config.get("configuration", {})
             agents = existing_config.get("agents", {})
-            for agent_data in agents.values():
-                agent_data["status"] = "inactive"
-            await store_principal_configuration(
-                principal_id=user_id,
-                name=AGENT_CONFIG_NAME,
-                configuration={**existing_config, "agents": agents},
-            )
+            if connection_id in agents:
+                agents[connection_id]["status"] = "inactive"
+                await store_principal_configuration(
+                    principal_id=user_id,
+                    name=AGENT_CONFIG_NAME,
+                    configuration={**existing_config, "agents": agents},
+                )
             return
 
 

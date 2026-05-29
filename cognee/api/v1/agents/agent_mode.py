@@ -1,20 +1,20 @@
 """Agent mode: automatic server shutdown when no agents are active.
 
-When COGNEE_AGENT_MODE=true, the server tracks how many agents have
-registered via the /register endpoint. A background watchdog thread
+When COGNEE_AGENT_MODE=true, the server tracks how many agent connections
+have registered via the /register endpoint. A background watchdog thread
 starts on the first registration and checks every 60 seconds whether
-any agents remain. If the count drops to zero the watchdog sends
+any connections remain. If the count drops to zero the watchdog sends
 SIGTERM, shutting the server down gracefully.
 
 This is designed for ephemeral deployments where an external
 orchestrator spins up a Cognee server for one or more agents. Each
 agent calls /register on connect and /unregister when done. Once all
-agents finish, the server tears itself down automatically instead of
+connections finish, the server tears itself down automatically instead of
 idling.
 
-The watchdog does NOT start until at least one agent registers, so a
+The watchdog does NOT start until at least one connection registers, so a
 server launched with COGNEE_AGENT_MODE=true will stay alive
-indefinitely while waiting for its first agent.
+indefinitely while waiting for its first connection.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from __future__ import annotations
 import os
 import signal
 import threading
-from uuid import UUID
 from typing import TYPE_CHECKING
 
 from cognee.shared.logging_utils import get_logger
@@ -44,12 +43,12 @@ def is_agent_mode_enabled() -> bool:
 
 _lock = threading.Lock()
 _active_count = 0
-_active_user_ids: set[UUID] = set()
+_active_connection_ids: set[str] = set()
 _watchdog_started = False
 
 
 def _shutdown_server():
-    logger.info("No active agents remaining — shutting down server")
+    logger.info("No active agent connections remaining — shutting down server")
     os.kill(os.getpid(), signal.SIGTERM)
 
 
@@ -73,12 +72,11 @@ async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConn
 
     connection = await register_agent_from_request(user, request)
 
-    user_id = user.id
     with _lock:
-        if user_id in _active_user_ids:
+        if connection.id in _active_connection_ids:
             return connection
 
-        _active_user_ids.add(user_id)
+        _active_connection_ids.add(connection.id)
         _active_count += 1
         count = _active_count
 
@@ -89,24 +87,34 @@ async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConn
             timer.start()
             logger.info("Agent mode watchdog started")
 
-    logger.info("Agent registered (active: %d)", count)
+    logger.info("Agent connection registered (active: %d)", count)
     return connection
 
 
-async def unregister_agent(user: User) -> int:
+async def unregister_agent(user: User, request: RegisterAgentRequest) -> int:
     global _active_count
 
-    from cognee.modules.agents.registry import deactivate_user_agent_connections
+    from cognee.modules.agents.registry import (
+        build_agent_connection_id,
+        deactivate_agent_connection,
+    )
 
-    user_id = user.id
-    await deactivate_user_agent_connections(user_id)
+    connection_id = build_agent_connection_id(
+        name=request.name,
+        user_id=str(user.id) if user.id is not None else None,
+        session_id=request.session_id,
+        connection_type=request.type,
+    )
+
+    await deactivate_agent_connection(user.id, connection_id)
 
     with _lock:
-        _active_user_ids.discard(user_id)
-        _active_count = max(0, _active_count - 1)
+        if connection_id in _active_connection_ids:
+            _active_connection_ids.discard(connection_id)
+            _active_count = max(0, _active_count - 1)
         count = _active_count
 
-    logger.info("Agent unregistered (active: %d)", count)
+    logger.info("Agent connection unregistered (active: %d)", count)
     return count
 
 

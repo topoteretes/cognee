@@ -50,7 +50,7 @@ def get_agents_router() -> APIRouter:
     router = APIRouter()
 
     # ------------------------------------------------------------------ #
-    # Agent management
+    # Agent management (fixed paths first)
     # ------------------------------------------------------------------ #
 
     @router.get("/list", tags=[MANAGEMENT_TAG])
@@ -86,36 +86,8 @@ def get_agents_router() -> APIRouter:
             agent_api_key=api_key,
         )
 
-    @router.get("/{agent_id}", tags=[MANAGEMENT_TAG])
-    async def get_agent_endpoint(
-        agent_id: UUID,
-        user: User = Depends(get_authenticated_user),
-    ) -> AgentDTO:
-        try:
-            agent_info = await get_agent(agent_id, user.id)
-        except LookupError:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        except PermissionError:
-            raise HTTPException(status_code=403, detail="Not authorized")
-        return AgentDTO(
-            agent_id=agent_info.user.id,
-            agent_email=_display_email(agent_info.user.email),
-            api_key_label=agent_info.api_key_label,
-        )
-
-    @router.delete("/{agent_id}", tags=[MANAGEMENT_TAG])
-    async def delete_agent_endpoint(
-        agent_id: UUID, user: User = Depends(get_authenticated_user)
-    ) -> None:
-        try:
-            await delete_agent(agent_id, user.id)
-        except LookupError:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        except PermissionError:
-            raise HTTPException(status_code=403, detail="Not authorized")
-
     # ------------------------------------------------------------------ #
-    # Agent connections
+    # Agent connections (fixed paths)
     # ------------------------------------------------------------------ #
 
     @router.get("/connections", tags=[CONNECTIONS_TAG])
@@ -167,9 +139,42 @@ def get_agents_router() -> APIRouter:
 
     @router.post("/unregister", tags=[CONNECTIONS_TAG])
     async def unregister_agent_endpoint(
+        request: RegisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
-        count = await unregister_agent(user)
+        count = await unregister_agent(user, request)
         return AgentModeDTO(active_agents=count)
+
+    # ------------------------------------------------------------------ #
+    # Path-parameter routes MUST come last
+    # ------------------------------------------------------------------ #
+
+    @router.get("/{agent_id}", tags=[MANAGEMENT_TAG])
+    async def get_agent_endpoint(
+        agent_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ) -> AgentDTO:
+        try:
+            agent_info = await get_agent(agent_id, user.id)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        return AgentDTO(
+            agent_id=agent_info.user.id,
+            agent_email=_display_email(agent_info.user.email),
+            api_key_label=agent_info.api_key_label,
+        )
+
+    @router.delete("/{agent_id}", tags=[MANAGEMENT_TAG])
+    async def delete_agent_endpoint(
+        agent_id: UUID, user: User = Depends(get_authenticated_user)
+    ) -> None:
+        try:
+            await delete_agent(agent_id, user.id)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Not authorized")
 
     return router

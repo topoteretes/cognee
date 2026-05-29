@@ -348,21 +348,29 @@ class TestAgentsE2E:
     # Unregister endpoint
     # ------------------------------------------------------------------ #
 
-    def test_unregister(self, client, headers):
-        agent_mode._active_count = 2
-        agent_mode._watchdog_started = False
+    def test_unregister(self, client, headers, _patch_operations):
+        clear_registered_agent_connections()
+        agent_mode._active_count = 0
+        agent_mode._active_connection_ids.clear()
 
-        resp = client.post("/api/v1/agents/unregister", headers=headers)
+        client.post("/api/v1/agents/register", headers=headers, json={"name": "unreg-a"})
+        client.post("/api/v1/agents/register", headers=headers, json={"name": "unreg-b"})
+        assert agent_mode._active_count == 2
+
+        resp = client.post("/api/v1/agents/unregister", json={"name": "unreg-a"}, headers=headers)
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 1
 
-        resp2 = client.post("/api/v1/agents/unregister", headers=headers)
+        resp2 = client.post("/api/v1/agents/unregister", json={"name": "unreg-b"}, headers=headers)
         assert resp2.json()["activeAgents"] == 0
 
     def test_unregister_floor_at_zero(self, client, headers):
         agent_mode._active_count = 0
+        agent_mode._active_connection_ids.clear()
 
-        resp = client.post("/api/v1/agents/unregister", headers=headers)
+        resp = client.post(
+            "/api/v1/agents/unregister", json={"name": "nonexistent"}, headers=headers
+        )
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 0
 
@@ -377,16 +385,16 @@ class TestAgentsE2E:
 
         try:
             endpoints = [
-                ("GET", "/api/v1/agents/connections"),
-                ("POST", "/api/v1/agents/register"),
-                ("GET", "/api/v1/agents/connections/some-id"),
-                ("POST", "/api/v1/agents/create?name=nope"),
-                ("GET", "/api/v1/agents/list"),
-                ("DELETE", f"/api/v1/agents/{uuid.uuid4()}"),
-                ("POST", "/api/v1/agents/unregister"),
+                ("GET", "/api/v1/agents/connections", None),
+                ("POST", "/api/v1/agents/register", {"name": "x"}),
+                ("GET", "/api/v1/agents/connections/some-id", None),
+                ("POST", "/api/v1/agents/create?name=nope", None),
+                ("GET", "/api/v1/agents/list", None),
+                ("DELETE", f"/api/v1/agents/{uuid.uuid4()}", None),
+                ("POST", "/api/v1/agents/unregister", {"name": "x"}),
             ]
-            for method, path in endpoints:
-                resp = client.request(method, path)
+            for method, path, body in endpoints:
+                resp = client.request(method, path, json=body)
                 assert resp.status_code == 401, f"{method} {path} returned {resp.status_code}"
         finally:
             client.cookies.update(saved_cookies)
@@ -397,9 +405,12 @@ class TestAgentsE2E:
 
     @pytest.fixture(autouse=True)
     def _reset_agent_mode(self):
-        saved = agent_mode._active_count
+        saved_count = agent_mode._active_count
+        saved_ids = set(agent_mode._active_connection_ids)
         yield
-        agent_mode._active_count = saved
+        agent_mode._active_count = saved_count
+        agent_mode._active_connection_ids.clear()
+        agent_mode._active_connection_ids.update(saved_ids)
 
     @pytest.fixture(scope="class")
     def _patch_operations(self, owner):
@@ -622,7 +633,7 @@ class TestAgentFullLifecycle:
     @pytest.fixture(autouse=True)
     def _reset(self):
         agent_mode._active_count = 0
-        agent_mode._active_user_ids.clear()
+        agent_mode._active_connection_ids.clear()
         agent_mode._watchdog_started = False
         clear_registered_agent_connections()
         yield
@@ -705,10 +716,11 @@ class TestAgentFullLifecycle:
         assert detail_conn.status_code == 200
         assert detail_conn.json()["agent"]["id"] == connection_a_id
 
-        # -- Step 8: Unregister agent A --
+        # -- Step 8: Unregister agent A's connection --
         unreg_a = client.post(
             "/api/v1/agents/unregister",
             headers={"X-Api-Key": agent_a_key},
+            json={"name": agent_a_name, "type": "api"},
         )
         assert unreg_a.status_code == 200
         assert unreg_a.json()["activeAgents"] == 1
@@ -735,10 +747,11 @@ class TestAgentFullLifecycle:
         assert agent_a["agentId"] in db_ids_after
         assert agent_b["agentId"] in db_ids_after
 
-        # -- Step 11: Unregister agent B --
+        # -- Step 11: Unregister agent B's connection --
         unreg_b = client.post(
             "/api/v1/agents/unregister",
             headers={"X-Api-Key": agent_b_key},
+            json={"name": agent_b_name, "type": "sdk"},
         )
         assert unreg_b.status_code == 200
         assert unreg_b.json()["activeAgents"] == 0
@@ -827,15 +840,29 @@ class TestAgentFullLifecycle:
         both_ids = {a["id"] for a in conn_both.json()["agents"]}
         assert updated_conn["id"] in both_ids, "old connection should still exist"
         assert new_conn_id in both_ids, "new connection should also exist"
-        assert agent_mode._active_count == 1, "same user, still only counted once"
+        assert agent_mode._active_count == 2, "two connections from same user count separately"
 
-        # -- Step 21: Unregister agent A, verify inactive in DB --
-        client.post("/api/v1/agents/unregister", headers={"X-Api-Key": agent_a_key})
+        # -- Step 21: Unregister one of agent A's connections, other stays active --
+        client.post(
+            "/api/v1/agents/unregister",
+            headers={"X-Api-Key": agent_a_key},
+            json={"name": agent_a_name, "type": "api"},
+        )
 
-        conn_inactive = client.get("/api/v1/agents/connections?active_only=false", headers=headers)
-        a_conns = [a for a in conn_inactive.json()["agents"] if a["user_id"] == agent_a["agentId"]]
-        assert all(c["status"] == "inactive" for c in a_conns), (
-            "all agent A connections should be inactive after unregister"
+        conn_after_partial = client.get(
+            "/api/v1/agents/connections?active_only=false", headers=headers
+        )
+        a_conn = next(
+            (a for a in conn_after_partial.json()["agents"] if a["id"] == updated_conn["id"]),
+            None,
+        )
+        assert a_conn is not None and a_conn["status"] == "inactive"
+        v2_conn = next(
+            (a for a in conn_after_partial.json()["agents"] if a["id"] == new_conn_id),
+            None,
+        )
+        assert v2_conn is not None and v2_conn["status"] == "active", (
+            "other connection should still be active"
         )
 
         # -- Step 22: Re-register agent A, verify DB status flips back to active --

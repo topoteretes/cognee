@@ -32,7 +32,7 @@ def _reset_agent_mode():
     from cognee.modules.agents.registry import clear_registered_agent_connections
 
     agent_mode._active_count = 0
-    agent_mode._active_user_ids.clear()
+    agent_mode._active_connection_ids.clear()
     agent_mode._watchdog_started = False
     clear_registered_agent_connections()
 
@@ -42,9 +42,16 @@ def _patch_persistence(monkeypatch):
     async def noop_persist(_user_id, _connection):
         pass
 
+    async def noop_deactivate(_user_id, _connection_id):
+        pass
+
     monkeypatch.setattr(
         "cognee.modules.agents.registry._persist_agent_connection",
         noop_persist,
+    )
+    monkeypatch.setattr(
+        "cognee.modules.agents.registry._deactivate_persisted_connection",
+        noop_deactivate,
     )
 
 
@@ -84,31 +91,29 @@ class TestAgentMode:
         assert resp.status_code == 201
         assert agent_mode._active_count == 1
 
-    def test_same_user_does_not_increment_twice(self, client, owner_token):
+    def test_two_connections_increment_separately(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
         client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
         client.post("/api/v1/agents/register", json=REGISTER_BODY_2, headers=headers)
-        assert agent_mode._active_count == 1
+        assert agent_mode._active_count == 2
 
-    def test_unregister_decrements_count(self, client, owner_token):
+    def test_unregister_specific_connection(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
         client.post("/api/v1/agents/register", json=REGISTER_BODY, headers=headers)
-        assert agent_mode._active_count == 1
+        client.post("/api/v1/agents/register", json=REGISTER_BODY_2, headers=headers)
+        assert agent_mode._active_count == 2
 
-        resp = client.post("/api/v1/agents/unregister", headers=headers)
+        resp = client.post("/api/v1/agents/unregister", json=REGISTER_BODY, headers=headers)
         assert resp.status_code == 200
-        assert resp.json()["activeAgents"] == 0
+        assert resp.json()["activeAgents"] == 1
 
     def test_unregister_does_not_go_below_zero(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
-        resp = client.post("/api/v1/agents/unregister", headers=headers)
+        resp = client.post("/api/v1/agents/unregister", json=REGISTER_BODY, headers=headers)
         assert resp.status_code == 200
-        assert resp.json()["activeAgents"] == 0
-
-        resp = client.post("/api/v1/agents/unregister", headers=headers)
         assert resp.json()["activeAgents"] == 0
 
     @pytest.mark.asyncio
@@ -128,8 +133,8 @@ class TestAgentMode:
     async def test_watchdog_shuts_down_after_all_unregister(self, mock_shutdown):
         await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
         await agent_mode.register_agent(_DUMMY_USER_2, _DUMMY_REQUEST_2)
-        await agent_mode.unregister_agent(_DUMMY_USER)
-        await agent_mode.unregister_agent(_DUMMY_USER_2)
+        await agent_mode.unregister_agent(_DUMMY_USER, _DUMMY_REQUEST)
+        await agent_mode.unregister_agent(_DUMMY_USER_2, _DUMMY_REQUEST_2)
 
         agent_mode._watchdog()
         mock_shutdown.assert_called_once()
@@ -141,9 +146,15 @@ class TestAgentMode:
             assert not agent_mode._watchdog_started
 
     @pytest.mark.asyncio
-    async def test_re_register_does_not_increment_count(self):
+    async def test_re_register_same_connection_does_not_increment(self):
         await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
         assert agent_mode._active_count == 1
 
         await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
         assert agent_mode._active_count == 1
+
+    @pytest.mark.asyncio
+    async def test_same_user_different_connections_increment(self):
+        await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
+        await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST_2)
+        assert agent_mode._active_count == 2
