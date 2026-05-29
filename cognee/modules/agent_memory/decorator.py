@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import uuid
 from typing import Any, Callable, Optional
 
 from cognee.exceptions import CogneeValidationError
@@ -18,11 +19,16 @@ from cognee.modules.agent_memory.runtime import (
     set_current_agent_memory_context,
     validate_agent_memory_config,
 )
-from cognee.modules.agents.registry import derive_memory_mode, register_agent_connection
+from cognee.modules.agents.registry import (
+    deactivate_agent_connection,
+    derive_memory_mode,
+    register_agent_connection,
+)
 
 
 def agent_memory(
     *,
+    agent_session_name: Optional[str] = None,
     with_memory: bool = True,
     with_session_memory: bool = False,
     save_session_traces: bool = False,
@@ -99,8 +105,9 @@ def agent_memory(
                 user=resolved_user,
                 scope=scope,
             )
-            await register_agent_connection(
-                name=fn.__qualname__,
+            connection_name = agent_session_name or str(uuid.uuid4())
+            connection = await register_agent_connection(
+                agent_session_name=connection_name,
                 connection_type="sdk",
                 memory_mode=derive_memory_mode(
                     with_memory=config.with_memory,
@@ -150,6 +157,8 @@ def agent_memory(
             finally:
                 reset_current_agent_memory_context(token)
                 await persist_trace(context)
+                if resolved_user is not None and resolved_user.id is not None:
+                    await deactivate_agent_connection(resolved_user.id, connection.id)
 
         return wrapper
 
