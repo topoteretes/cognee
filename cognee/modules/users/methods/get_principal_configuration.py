@@ -25,12 +25,12 @@ async def get_principal_configuration(config_id: UUID) -> dict:
         return config_record.configuration if config_record else {}
 
 
-async def get_principal_all_configuration(principal_id: str) -> list[dict[str, dict]]:
+async def get_principal_all_configuration(principal_id: UUID) -> list[dict[str, dict]]:
     """
     Retrieves all Cognee configurations for a specific principal.
 
     Args:
-        principal_id (str): The unique identifier of the owner (user/group).
+        principal_id (UUID): The unique identifier of the owner (user/group).
 
     Returns:
         list[dict]: A list of configuration dictionaries. Returns an empty list if none are found.

@@ -1437,6 +1437,98 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/api/test_backend_auth.py
 
+  run_agent_endpoint_tests:
+    name: Agent Endpoint Tests
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Agent Endpoint Tests
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/api/test_agent_endpoints.py -v
+
+  run_agent_mode_tests:
+    name: Agent Mode Tests
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Agent Mode Tests
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/api/test_agent_mode.py -v
+
+  run_agent_e2e_tests:
+    name: Agent E2E Tests
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Agent E2E Tests
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/api/test_agents_e2e.py -v
+
+  run_agent_registry_tests:
+    name: Agent Registry Tests
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Agent Registry Tests
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/unit/modules/agents/test_agent_registry.py -v
+
   backwards-compatibility-sqlite:
     name: Backwards compatibility — SQLite + LanceDB + Kuzu
     runs-on: ubuntu-22.04

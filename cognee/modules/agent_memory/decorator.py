@@ -18,6 +18,7 @@ from cognee.modules.agent_memory.runtime import (
     set_current_agent_memory_context,
     validate_agent_memory_config,
 )
+from cognee.modules.agents.registry import derive_memory_mode, register_agent_connection
 
 
 def agent_memory(
@@ -97,6 +98,42 @@ def agent_memory(
                 method_params=build_method_params(fn, args, kwargs),
                 user=resolved_user,
                 scope=scope,
+            )
+            await register_agent_connection(
+                name=fn.__qualname__,
+                connection_type="sdk",
+                memory_mode=derive_memory_mode(
+                    with_memory=config.with_memory,
+                    with_session_memory=config.with_session_memory,
+                    save_session_traces=config.save_session_traces,
+                ),
+                source="agent_memory",
+                origin_function=fn.__qualname__,
+                user_id=resolved_user.id if resolved_user is not None else None,
+                tenant_id=(
+                    getattr(resolved_user, "tenant_id", None) if resolved_user is not None else None
+                ),
+                session_id=config.session_id,
+                datasets=[
+                    {
+                        "id": str(scope.dataset_id),
+                        "name": scope.dataset_name,
+                        "role": "read_write",
+                    }
+                ]
+                if scope is not None
+                else (
+                    [{"name": config.dataset_name, "role": "read_write"}]
+                    if config.dataset_name
+                    else []
+                ),
+                metadata={
+                    "memory_top_k": config.memory_top_k,
+                    "memory_only_context": config.memory_only_context,
+                    "save_session_traces": config.save_session_traces,
+                    "with_session_memory": config.with_session_memory,
+                    "with_memory": config.with_memory,
+                },
             )
             token = set_current_agent_memory_context(context)
 
