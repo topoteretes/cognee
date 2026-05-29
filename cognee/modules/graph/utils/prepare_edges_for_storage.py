@@ -25,41 +25,45 @@ def get_edge_retrieval_text(edge_text: Any, relationship_name: Any) -> str:
     return _get_nonblank_text(edge_text) or _get_nonblank_text(relationship_name) or ""
 
 
-def _short_id(node_id: Any) -> str:
-    return str(node_id)[:8]
-
-
 def _trim_preview(text: str, max_length: int = 80) -> str:
     return " ".join(text.split())[:max_length]
 
 
 def _get_node_label(node: Any, node_id: Any) -> str:
-    short_id = _short_id(node_id)
+    """Return a human-readable label for a node, based on the author's
+    declared `metadata["index_fields"]`. Falls back to `name` if declared.
+
+    Raises:
+        ValueError: when the node has neither a usable `index_fields` value
+            nor a `name`. `add_data_points` implicitly requires
+            `index_fields` to embed the node, so a node that reaches here
+            without one is misuse — surface it loudly instead of producing
+            a silent placeholder label.
+    """
     if node is None:
-        return short_id
+        raise ValueError(
+            f"Cannot build a fallback edge_text label: node {node_id!r} was not "
+            "found in the nodes lookup. Pass the endpoint nodes alongside the "
+            "edges to ensure_default_edge_properties."
+        )
+
+    metadata = _get_value(node, "metadata") or {}
+    for field in metadata.get("index_fields") or []:
+        value = _get_nonblank_text(_get_value(node, field))
+        if value:
+            return _trim_preview(value)
 
     name = _get_nonblank_text(_get_value(node, "name"))
     if name:
         return name
 
     type_name = type(node).__name__
-    if type_name == "DocumentChunk":
-        chunk_index = _get_value(node, "chunk_index")
-        if chunk_index is not None:
-            return f"chunk {chunk_index}"
-
-        text = _get_nonblank_text(_get_value(node, "text"))
-        if text:
-            return _trim_preview(text)
-
-    title = _get_nonblank_text(_get_value(node, "title"))
-    if title:
-        return title
-
-    if type_name:
-        return f"{type_name} {short_id}"
-
-    return short_id
+    raise ValueError(
+        f"Cannot build a fallback edge_text label for a {type_name} node "
+        f"({node_id!r}): the class declares no usable `metadata['index_fields']` "
+        "and no `name`. Add `index_fields` to the DataPoint subclass so "
+        "add_data_points can both embed it and label it."
+    )
 
 
 def _make_node_lookup(nodes: Iterable[Any] | None) -> dict[str, Any]:

@@ -85,20 +85,24 @@ async def setup_test_environment_complex():
         brand: str
         model: str
         year: int
+        metadata: dict = {"index_fields": ["brand"]}
 
     class Location(DataPoint):
         country: str
         city: str
+        metadata: dict = {"index_fields": ["city"]}
 
     class Home(DataPoint):
         location: Location
         rooms: int
         sqm: int
+        metadata: dict = {"index_fields": ["sqm"]}
 
     class Person(DataPoint):
         name: str
         works_for: Company
         owns: Optional[list[Union[Car, Home]]] = None
+        metadata: dict = {"index_fields": ["name"]}
 
     company1 = Company(name="Figma")
     company2 = Company(name="Canva")

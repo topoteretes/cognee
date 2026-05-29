@@ -32,6 +32,26 @@ class TitledPoint(DataPoint):
     metadata: dict = {"index_fields": ["title"]}
 
 
+class IndexedNonNamePoint(DataPoint):
+    """`name` is present, but `index_fields` points to a different field."""
+
+    name: str
+    handle: str
+    metadata: dict = {"index_fields": ["handle"]}
+
+
+class OnlyNamePoint(DataPoint):
+    """Has `name` but no `index_fields` declared."""
+
+    name: str
+
+
+class UnlabelablePoint(DataPoint):
+    """Has neither `name` nor `index_fields` — the misuse case."""
+
+    payload: str
+
+
 def _make_unified_mock():
     """Create a mock UnifiedStoreEngine with graph and vector properties."""
     graph_engine = AsyncMock()
@@ -307,14 +327,25 @@ def test_create_triplets_skips_nodes_without_id():
 
 
 def test_ensure_default_edge_properties_preserves_existing_defaults():
-    edge = ("source", "target", "related_to", {"edge_object_id": "edge-id", "feedback_weight": 0.9})
+    # edge_text is supplied so the fallback path isn't invoked; this test
+    # focuses on edge_object_id and feedback_weight surviving.
+    edge = (
+        "source",
+        "target",
+        "related_to",
+        {
+            "edge_object_id": "edge-id",
+            "feedback_weight": 0.9,
+            "edge_text": "source related to target",
+        },
+    )
 
     result = ensure_default_edge_properties([edge])
 
     properties = result[0][3]
     assert properties["edge_object_id"] == "edge-id"
     assert properties["feedback_weight"] == 0.9
-    assert properties["edge_text"] == "source related to target."
+    assert properties["edge_text"] == "source related to target"
 
 
 @pytest.mark.parametrize(
@@ -339,12 +370,48 @@ def test_ensure_default_edge_properties_preserves_nonblank_edge_text():
     assert result[0][3]["edge_text"] == "Alice works at Acme."
 
 
-def test_ensure_default_edge_properties_uses_id_labels_when_nodes_are_unavailable():
+def test_ensure_default_edge_properties_raises_when_node_lookup_fails():
+    # Nodes were not passed to ensure_default_edge_properties, so the source
+    # node can't be resolved. Misuse should surface loudly, not silently
+    # produce a placeholder label.
     edge = ("source-node-id", "target-node-id", "related_to", {})
 
-    result = ensure_default_edge_properties([edge])
+    with pytest.raises(ValueError, match="not found in the nodes lookup"):
+        ensure_default_edge_properties([edge])
 
-    assert result[0][3]["edge_text"] == "source-n related to target-n."
+
+def test_ensure_default_edge_properties_raises_when_label_cannot_be_derived():
+    # The DataPoint has neither `name` nor a usable `index_fields` value.
+    # add_data_points implicitly requires index_fields, so the helper must
+    # surface this loudly rather than substitute a synthesized label.
+    source = UnlabelablePoint(payload="hello")
+    target = NamedPoint(name="Acme")
+    edge = (str(source.id), str(target.id), "related_to", {})
+
+    with pytest.raises(ValueError, match="UnlabelablePoint.*index_fields"):
+        ensure_default_edge_properties([edge], nodes=[source, target])
+
+
+def test_ensure_default_edge_properties_prefers_index_field_over_name():
+    # When both `name` and a different `index_fields[0]` are declared, the
+    # author's index_fields choice wins.
+    source = IndexedNonNamePoint(name="Display Name", handle="@actual_handle")
+    target = NamedPoint(name="Acme")
+    edge = (str(source.id), str(target.id), "tagged", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "@actual_handle tagged Acme."
+
+
+def test_ensure_default_edge_properties_falls_back_to_name_when_index_fields_missing():
+    source = OnlyNamePoint(name="Alice")
+    target = OnlyNamePoint(name="Bob")
+    edge = (str(source.id), str(target.id), "knows", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "Alice knows Bob."
 
 
 def test_ensure_default_edge_properties_prefers_title_when_name_is_unavailable():
@@ -357,7 +424,10 @@ def test_ensure_default_edge_properties_prefers_title_when_name_is_unavailable()
     assert result[0][3]["edge_text"] == "Source Title references Target Title."
 
 
-def test_ensure_default_edge_properties_uses_chunk_index_for_document_chunks():
+def test_ensure_default_edge_properties_uses_index_field_for_document_chunks():
+    # DocumentChunk declares `metadata = {"index_fields": ["text"]}`, so the
+    # fallback label uses the chunk's text (trimmed), per the index_fields
+    # contract — no class-name special-casing in the helper.
     document = Document(
         name="Doc",
         raw_data_location="memory",
@@ -376,7 +446,7 @@ def test_ensure_default_edge_properties_uses_chunk_index_for_document_chunks():
 
     result = ensure_default_edge_properties([edge], nodes=[chunk, entity])
 
-    assert result[0][3]["edge_text"] == "chunk 3 contains Alice."
+    assert result[0][3]["edge_text"] == "Chunk text contains Alice."
 
 
 @pytest.mark.asyncio
