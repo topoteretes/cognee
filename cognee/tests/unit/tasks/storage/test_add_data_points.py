@@ -370,26 +370,28 @@ def test_ensure_default_edge_properties_preserves_nonblank_edge_text():
     assert result[0][3]["edge_text"] == "Alice works at Acme."
 
 
-def test_ensure_default_edge_properties_raises_when_node_lookup_fails():
-    # Nodes were not passed to ensure_default_edge_properties, so the source
-    # node can't be resolved. Misuse should surface loudly, not silently
-    # produce a placeholder label.
+def test_ensure_default_edge_properties_uses_node_id_when_node_lookup_fails():
+    # Nodes were not passed to ensure_default_edge_properties, so neither
+    # endpoint can be resolved. Soft-fall back to the raw id so structural
+    # edges still get a usable (if ugly) label.
     edge = ("source-node-id", "target-node-id", "related_to", {})
 
-    with pytest.raises(ValueError, match="not found in the nodes lookup"):
-        ensure_default_edge_properties([edge])
+    result = ensure_default_edge_properties([edge])
+
+    assert result[0][3]["edge_text"] == "source-node-id related to target-node-id."
 
 
-def test_ensure_default_edge_properties_raises_when_label_cannot_be_derived():
-    # The DataPoint has neither `name` nor a usable `index_fields` value.
-    # add_data_points implicitly requires index_fields, so the helper must
-    # surface this loudly rather than substitute a synthesized label.
+def test_ensure_default_edge_properties_uses_type_name_when_label_cannot_be_derived():
+    # Structural DataPoints (e.g. `Timestamp`) intentionally declare empty
+    # `index_fields` and no `name`. The helper soft-falls back to the class
+    # name so the graph still functions; a warning is emitted separately.
     source = UnlabelablePoint(payload="hello")
     target = NamedPoint(name="Acme")
     edge = (str(source.id), str(target.id), "related_to", {})
 
-    with pytest.raises(ValueError, match="UnlabelablePoint.*index_fields"):
-        ensure_default_edge_properties([edge], nodes=[source, target])
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "UnlabelablePoint related to Acme."
 
 
 def test_ensure_default_edge_properties_prefers_index_field_over_name():

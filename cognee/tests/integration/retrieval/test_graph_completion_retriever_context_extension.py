@@ -96,7 +96,6 @@ async def setup_test_environment_complex():
         location: Location
         rooms: int
         sqm: int
-        metadata: dict = {"index_fields": ["sqm"]}
 
     class Person(DataPoint):
         name: str

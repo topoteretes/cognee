@@ -3,6 +3,9 @@
 from typing import Any, Dict, Iterable, List, Tuple
 
 from cognee.modules.engine.utils import generate_edge_object_id
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 def _get_value(item: Any, field_name: str) -> Any:
@@ -31,21 +34,22 @@ def _trim_preview(text: str, max_length: int = 80) -> str:
 
 def _get_node_label(node: Any, node_id: Any) -> str:
     """Return a human-readable label for a node, based on the author's
-    declared `metadata["index_fields"]`. Falls back to `name` if declared.
+    declared `metadata["index_fields"]`. Falls back to `name` if declared,
+    then to the class name as a last resort.
 
-    Raises:
-        ValueError: when the node has neither a usable `index_fields` value
-            nor a `name`. `add_data_points` implicitly requires
-            `index_fields` to embed the node, so a node that reaches here
-            without one is misuse — surface it loudly instead of producing
-            a silent placeholder label.
+    Structural DataPoints (e.g. `Timestamp`) intentionally declare empty
+    `index_fields` and have no `name`. For those we emit the class name
+    rather than raising, since they are part of the graph but were never
+    intended to carry an embeddable identifier.
     """
     if node is None:
-        raise ValueError(
-            f"Cannot build a fallback edge_text label: node {node_id!r} was not "
-            "found in the nodes lookup. Pass the endpoint nodes alongside the "
-            "edges to ensure_default_edge_properties."
+        logger.warning(
+            "Cannot resolve node %r to build a fallback edge_text label; "
+            "falling back to the node id. Pass the endpoint nodes alongside "
+            "the edges to ensure_default_edge_properties.",
+            node_id,
         )
+        return str(node_id)
 
     metadata = _get_value(node, "metadata") or {}
     for field in metadata.get("index_fields") or []:
@@ -58,12 +62,13 @@ def _get_node_label(node: Any, node_id: Any) -> str:
         return name
 
     type_name = type(node).__name__
-    raise ValueError(
-        f"Cannot build a fallback edge_text label for a {type_name} node "
-        f"({node_id!r}): the class declares no usable `metadata['index_fields']` "
-        "and no `name`. Add `index_fields` to the DataPoint subclass so "
-        "add_data_points can both embed it and label it."
+    logger.warning(
+        "Falling back to class name %r as the edge_text label for node %r: "
+        "neither `metadata['index_fields']` nor `name` yields a value.",
+        type_name,
+        node_id,
     )
+    return type_name
 
 
 def _make_node_lookup(nodes: Iterable[Any] | None) -> dict[str, Any]:
