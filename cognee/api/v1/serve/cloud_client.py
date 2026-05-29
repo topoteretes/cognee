@@ -302,10 +302,13 @@ class CloudClient:
         if kwargs.get("everything"):
             payload["everything"] = True
         if kwargs.get("dataset"):
-            ds = kwargs["dataset"]
-            payload["dataset"] = str(ds)
+            payload["dataset"] = str(kwargs["dataset"])
+        if kwargs.get("dataset_id"):
+            payload["dataset_id"] = str(kwargs["dataset_id"])
         if kwargs.get("data_id"):
             payload["data_id"] = str(kwargs["data_id"])
+        if kwargs.get("memory_only") is not None:
+            payload["memory_only"] = bool(kwargs["memory_only"])
 
         async with session.post(
             f"{self.service_url}/api/v1/forget",

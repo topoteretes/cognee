@@ -78,6 +78,8 @@ class GraphConfig(BaseSettings):
             self.graph_dataset_database_handler = "kuzu"
         if provider == "postgres" and graph_dataset_database_handler in ("ladybug", "postgres"):
             self.graph_dataset_database_handler = "postgres_graph"
+        if provider == "neo4j" and graph_dataset_database_handler in ("ladybug", "neo4j"):
+            self.graph_dataset_database_handler = "neo4j"
         base_config = get_base_config()
 
         databases_directory_path = os.path.join(base_config.system_root_directory, "databases")

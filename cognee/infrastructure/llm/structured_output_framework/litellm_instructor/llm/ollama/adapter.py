@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import logging
 from typing import Any
@@ -81,7 +82,11 @@ class OllamaAPIAdapter(LLMInterface):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -134,7 +139,11 @@ class OllamaAPIAdapter(LLMInterface):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -175,7 +184,11 @@ class OllamaAPIAdapter(LLMInterface):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -221,7 +234,11 @@ class OllamaAPIAdapter(LLMInterface):
         )  # ty:ignore[no-matching-overload]
 
         # Ensure response is valid before accessing .choices[0].message.content
-        if not hasattr(response, "choices") or not response.choices:
+        if (
+            not hasattr(response, "choices")
+            or not response.choices
+            or response.choices[0].message is None
+        ):
             raise ValueError("Image transcription failed. No response received.")
 
         return response.choices[0].message.content

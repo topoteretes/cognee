@@ -34,6 +34,8 @@ async def test_global_context_index_pipeline_calls_memify(monkeypatch):
         max_bucket_size=7,
         placement_distance_threshold=0.8,
         rebuild=True,
+        bucketing_strategy="graph",
+        min_overlap=0.2,
     )
 
     assert result == {"status": "ok"}
@@ -45,6 +47,9 @@ async def test_global_context_index_pipeline_calls_memify(monkeypatch):
     assert call_kwargs["run_in_background"] is False
     assert len(call_kwargs["extraction_tasks"]) == 1
     assert len(call_kwargs["enrichment_tasks"]) == 1
+    task_kwargs = call_kwargs["enrichment_tasks"][0].default_params["kwargs"]
+    assert task_kwargs["bucketing_strategy"] == "graph"
+    assert task_kwargs["min_overlap"] == 0.2
 
 
 @pytest.mark.asyncio
@@ -80,6 +85,8 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
             user=user,
             dataset="docs",
             run_in_background=False,
+            bucketing_strategy="graph",
+            max_bucket_size=4,
         )
     else:
         global_context_mock.assert_not_awaited()

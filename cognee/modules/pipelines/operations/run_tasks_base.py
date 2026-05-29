@@ -31,13 +31,24 @@ def _build_result_summary(executable, task_name: str, count: int) -> str:
 
 
 def _stamp_provenance(
-    data, pipeline_name, task_name, visited=None, node_set=None, user_label=None, content_hash=None
+    data,
+    pipeline_name,
+    task_name,
+    visited=None,
+    node_set=None,
+    user_label=None,
+    content_hash=None,
+    task_index=None,
 ):
     """Recursively stamp DataPoints with provenance. Only sets if currently None.
 
     The ``visited`` set should be persisted across task calls (via
     PipelineContext._provenance_visited) so that DataPoints stamped in
     earlier stages are skipped in later ones.
+
+    ``task_index`` (when provided and > 0) is written to ``topological_rank``
+    for any DataPoint whose rank is the default sentinel (None or 0). This lets
+    the visualization lay nodes out in pipeline order.
     """
     if visited is None:
         visited = set()
@@ -54,6 +65,14 @@ def _stamp_provenance(
             data.source_task = task_name
         if data.source_user is None and user_label is not None:
             data.source_user = user_label
+
+        # topological_rank defaults to 0 on DataPoint; treat 0 the same as
+        # None (unset) so legacy pipelines that already produced rank-0 nodes
+        # get a real value the first time they pass through this stamper.
+        if task_index is not None and task_index > 0:
+            current_rank = getattr(data, "topological_rank", None)
+            if current_rank is None or current_rank == 0:
+                data.topological_rank = task_index
 
         # Propagate node_set from parent or pick up from this data point
         current_node_set = node_set
@@ -81,12 +100,20 @@ def _stamp_provenance(
                     current_node_set,
                     user_label,
                     current_hash,
+                    task_index,
                 )
 
     elif isinstance(data, (list, tuple)):
         for item in data:
             _stamp_provenance(
-                item, pipeline_name, task_name, visited, node_set, user_label, content_hash
+                item,
+                pipeline_name,
+                task_name,
+                visited,
+                node_set,
+                user_label,
+                content_hash,
+                task_index,
             )
 
 
@@ -150,6 +177,18 @@ async def handle_task(
 
     task_name = running_task.executable.__name__
 
+    # Stamp a 1-based pipeline-stage index onto every DataPoint produced by
+    # this task. Used by visualization to lay out nodes left-to-right in
+    # pipeline order. handle_task can be called many times for one task when
+    # an upstream task streams multiple results, so rank is "position in the
+    # pipeline" (deduplicated) rather than invocation count. ctx may be None
+    # for non-context pipelines; topological_rank is then not written.
+    task_index = None
+    if ctx is not None:
+        if task_name not in ctx.task_sequence:
+            ctx.task_sequence.append(task_name)
+        task_index = ctx.task_sequence.index(task_name) + 1
+
     with new_span(f"cognee.pipeline.task.{task_name}") as span:
         span.set_attribute(COGNEE_PIPELINE_TASK_NAME, task_name)
 
@@ -177,6 +216,7 @@ async def handle_task(
                     node_set=input_node_set,
                     user_label=user_label,
                     content_hash=input_content_hash,
+                    task_index=task_index,
                 )
 
                 async for result in run_tasks_base(leftover_tasks, result_data, user, ctx):

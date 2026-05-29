@@ -66,10 +66,26 @@ async def test_brute_force_triplet_search_end_to_end(clean_environment):
 
 
 @pytest.mark.asyncio
-async def test_brute_force_triplet_search_feedback_does_not_override_missing_component_penalties(
+async def test_node_feedback_does_not_modify_penalty_placeholder_in_edge_only_retrieval(
     clean_environment,
 ):
-    """With edge-only retrieval, feedback must not collapse node fallback penalties."""
+    """The penalty placeholder assigned to a node with no vector match in the
+    searched collection is not modified by the node's feedback_weight.
+    Feedback only blends real cosine distances; placeholder values bypass
+    that blend.
+
+    Setup: two candidate edges, identical in every factor that the scorer
+    weighs except the node-level feedback_weight. Both edges share the
+    same explicit edge_text (so the EdgeType vector is shared and edge
+    distance is tied by construction) and the same edge feedback_weight.
+    Limiting retrieval to the EdgeType collection forces both candidates'
+    nodes to receive the penalty placeholder.
+
+    If the placeholder were affected by feedback_weight, cranking
+    feedback_influence from 0 to 1 would let the high-node-feedback pair
+    overtake the low-node-feedback pair. The penalty floor must prevent
+    that, so the same edge must win in both runs.
+    """
 
     await setup()
 
@@ -81,55 +97,58 @@ async def test_brute_force_triplet_search_feedback_does_not_override_missing_com
         name: str
         metadata: dict = {"index_fields": ["name"]}
 
-    preferred_person = Person(name="Preferred Person", feedback_weight=0.95)
-    preferred_company = Company(name="Preferred Company", feedback_weight=0.95)
-    fallback_person = Person(name="Fallback Person", feedback_weight=0.05)
-    fallback_company = Company(name="Fallback Company", feedback_weight=0.05)
+    person_a = Person(name="Person A", feedback_weight=0.95)
+    company_a = Company(name="Company A", feedback_weight=0.95)
+    person_b = Person(name="Person B", feedback_weight=0.05)
+    company_b = Company(name="Company B", feedback_weight=0.05)
+
+    shared_edge_text = "Some person works for some company."
+    shared_edge_feedback = 0.5
 
     await add_data_points(
-        [
-            preferred_person,
-            preferred_company,
-            fallback_person,
-            fallback_company,
-        ],
+        [person_a, company_a, person_b, company_b],
         custom_edges=[
             (
-                str(preferred_person.id),
-                str(preferred_company.id),
-                "works_for_different",
-                {"relationship_name": "works_for", "feedback_weight": 0.95},
+                str(person_a.id),
+                str(company_a.id),
+                "works_for",
+                {
+                    "edge_text": shared_edge_text,
+                    "feedback_weight": shared_edge_feedback,
+                },
             ),
             (
-                str(fallback_person.id),
-                str(fallback_company.id),
+                str(person_b.id),
+                str(company_b.id),
                 "works_for",
-                {"relationship_name": "works_for", "feedback_weight": 0.05},
+                {
+                    "edge_text": shared_edge_text,
+                    "feedback_weight": shared_edge_feedback,
+                },
             ),
         ],
     )
 
-    no_feedback_results = await brute_force_triplet_search(
-        query="works_for",
+    search_kwargs = dict(
+        query=shared_edge_text,
         top_k=1,
         collections=["EdgeType_relationship_name"],
-        feedback_influence=0.0,
     )
 
-    full_feedback_results = await brute_force_triplet_search(
-        query="works_for",
-        top_k=1,
-        collections=["EdgeType_relationship_name"],
-        feedback_influence=1.0,
+    top_with_no_feedback = await brute_force_triplet_search(**search_kwargs, feedback_influence=0.0)
+    top_with_full_feedback = await brute_force_triplet_search(
+        **search_kwargs, feedback_influence=1.0
     )
 
-    assert len(no_feedback_results) == 1
-    assert len(full_feedback_results) == 1
+    assert len(top_with_no_feedback) == 1
+    assert len(top_with_full_feedback) == 1
 
-    distance_only_edge = no_feedback_results[0]
-    assert distance_only_edge.node1.attributes["name"] == "Fallback Person"
-    assert distance_only_edge.node2.attributes["name"] == "Fallback Company"
+    winner_without_feedback = top_with_no_feedback[0].node1.attributes["name"]
+    winner_with_full_feedback = top_with_full_feedback[0].node1.attributes["name"]
 
-    feedback_weighted_edge = full_feedback_results[0]
-    assert feedback_weighted_edge.node1.attributes["name"] == "Fallback Person"
-    assert feedback_weighted_edge.node2.attributes["name"] == "Fallback Company"
+    assert winner_without_feedback == winner_with_full_feedback, (
+        "Edge-only retrieval ranking flipped between feedback_influence=0.0 "
+        "and feedback_influence=1.0. The high-node-feedback pair overtook the "
+        "low-node-feedback pair, which means the penalty placeholder on the "
+        "missing nodes was being blended by feedback instead of held fixed."
+    )
