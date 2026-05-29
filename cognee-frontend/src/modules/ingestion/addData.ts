@@ -1,6 +1,16 @@
 import { CogneeInstance } from "../instances/types";
 
-export default async function addData(dataset: { id?: string, name?: string }, files: File[], instance: CogneeInstance) {
+interface AddDataOptions {
+  graphModel?: object;
+  customPrompt?: string;
+  ontologyKey?: string[];
+}
+
+export default async function addData(
+  dataset: { id?: string, name?: string },
+  files: File[],
+  instance: CogneeInstance,
+) {
   const formData = new FormData();
   files.forEach((file) => {
     formData.append("data", file, file.name);

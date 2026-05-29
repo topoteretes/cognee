@@ -2,9 +2,9 @@ import localFetch from "@/modules/instances/localFetch";
 
 export interface ApiKey {
   id: string;
-  api_key: string;
+  key: string;
   label: string;
-  name?: string;
+  name: string;
 }
 
 export default async function getApiKeys(): Promise<ApiKey[]> {
