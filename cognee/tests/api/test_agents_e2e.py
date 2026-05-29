@@ -88,7 +88,7 @@ class TestAgentsE2E:
             "/api/v1/agents/register",
             headers=headers,
             json={
-                "name": "support_bot",
+                "agent_session_name": "support_bot",
                 "type": "api",
                 "memory_mode": "hybrid",
                 "session_id": "sess-001",
@@ -101,7 +101,7 @@ class TestAgentsE2E:
         )
         assert resp.status_code == 201, resp.text
         connection = resp.json()
-        assert connection["name"] == "support_bot"
+        assert connection["agent_session_name"] == "support_bot"
         assert connection["type"] == "api"
         assert connection["memory_mode"] == "hybrid"
         assert connection["session_id"] == "sess-001"
@@ -119,11 +119,11 @@ class TestAgentsE2E:
         resp = client.post(
             "/api/v1/agents/register",
             headers=headers,
-            json={"name": "minimal_agent"},
+            json={"agent_session_name": "minimal_agent"},
         )
         assert resp.status_code == 201, resp.text
         connection = resp.json()
-        assert connection["name"] == "minimal_agent"
+        assert connection["agent_session_name"] == "minimal_agent"
         assert connection["type"] == "api"
         assert connection["memory_mode"] == "unknown"
         assert connection["source"] == "api"
@@ -135,7 +135,7 @@ class TestAgentsE2E:
             "/api/v1/agents/register",
             headers=headers,
             json={
-                "name": "list_test_agent",
+                "agent_session_name": "list_test_agent",
                 "type": "sdk",
                 "memory_mode": "cognee",
             },
@@ -148,7 +148,7 @@ class TestAgentsE2E:
         body = resp.json()
         assert body["total"] == 1
         assert body["agents"][0]["id"] == agent_id
-        assert body["agents"][0]["name"] == "list_test_agent"
+        assert body["agents"][0]["agent_session_name"] == "list_test_agent"
         assert body["limit"] == 50
         assert body["offset"] == 0
 
@@ -158,7 +158,7 @@ class TestAgentsE2E:
             client.post(
                 "/api/v1/agents/register",
                 headers=headers,
-                json={"name": f"paginated_{i}"},
+                json={"agent_session_name": f"paginated_{i}"},
             )
 
         resp = client.get("/api/v1/agents/connections?limit=2&offset=0", headers=headers)
@@ -180,7 +180,7 @@ class TestAgentsE2E:
         client.post(
             "/api/v1/agents/register",
             headers=headers,
-            json={"name": "active_agent"},
+            json={"agent_session_name": "active_agent"},
         )
 
         resp = client.get("/api/v1/agents/connections?status=active", headers=headers)
@@ -197,7 +197,7 @@ class TestAgentsE2E:
             "/api/v1/agents/register",
             headers=headers,
             json={
-                "name": "detail_agent",
+                "agent_session_name": "detail_agent",
                 "type": "mcp",
                 "memory_mode": "session",
                 "session_id": "detail-sess",
@@ -210,7 +210,7 @@ class TestAgentsE2E:
         assert resp.status_code == 200
         body = resp.json()
         assert body["agent"]["id"] == agent_id
-        assert body["agent"]["name"] == "detail_agent"
+        assert body["agent"]["agent_session_name"] == "detail_agent"
         assert body["agent"]["type"] == "mcp"
         assert "memory_sources" in body
         assert "recent_sessions" in body
@@ -231,7 +231,7 @@ class TestAgentsE2E:
             r = client.post(
                 "/api/v1/agents/register",
                 headers=headers,
-                json={"name": name, "type": "sdk"},
+                json={"agent_session_name": name, "type": "sdk"},
             )
             assert r.status_code == 201
             ids.append(r.json()["id"])
@@ -250,7 +250,7 @@ class TestAgentsE2E:
             "/api/v1/agents/register",
             headers=headers,
             json={
-                "name": "dataset_agent",
+                "agent_session_name": "dataset_agent",
                 "dataset_ids": [dataset_id],
             },
         )
@@ -263,7 +263,7 @@ class TestAgentsE2E:
     def test_register_connection_idempotent_update(self, client, headers, _patch_operations):
         clear_registered_agent_connections()
         payload = {
-            "name": "idempotent_agent",
+            "agent_session_name": "idempotent_agent",
             "type": "api",
             "metadata": {"version": "1"},
         }
@@ -354,15 +354,23 @@ class TestAgentsE2E:
         agent_mode._active_count = 0
         agent_mode._active_connection_ids.clear()
 
-        client.post("/api/v1/agents/register", headers=headers, json={"name": "unreg-a"})
-        client.post("/api/v1/agents/register", headers=headers, json={"name": "unreg-b"})
+        client.post(
+            "/api/v1/agents/register", headers=headers, json={"agent_session_name": "unreg-a"}
+        )
+        client.post(
+            "/api/v1/agents/register", headers=headers, json={"agent_session_name": "unreg-b"}
+        )
         assert agent_mode._active_count == 2
 
-        resp = client.post("/api/v1/agents/unregister", json={"name": "unreg-a"}, headers=headers)
+        resp = client.post(
+            "/api/v1/agents/unregister", json={"agent_session_name": "unreg-a"}, headers=headers
+        )
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 1
 
-        resp2 = client.post("/api/v1/agents/unregister", json={"name": "unreg-b"}, headers=headers)
+        resp2 = client.post(
+            "/api/v1/agents/unregister", json={"agent_session_name": "unreg-b"}, headers=headers
+        )
         assert resp2.json()["activeAgents"] == 0
 
     def test_unregister_floor_at_zero(self, client, headers):
@@ -370,7 +378,7 @@ class TestAgentsE2E:
         agent_mode._active_connection_ids.clear()
 
         resp = client.post(
-            "/api/v1/agents/unregister", json={"name": "nonexistent"}, headers=headers
+            "/api/v1/agents/unregister", json={"agent_session_name": "nonexistent"}, headers=headers
         )
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 0
@@ -387,12 +395,12 @@ class TestAgentsE2E:
         try:
             endpoints = [
                 ("GET", "/api/v1/agents/connections", None),
-                ("POST", "/api/v1/agents/register", {"name": "x"}),
+                ("POST", "/api/v1/agents/register", {"agent_session_name": "x"}),
                 ("GET", "/api/v1/agents/connections/some-id", None),
                 ("POST", "/api/v1/agents/create?name=nope", None),
                 ("GET", "/api/v1/agents/list", None),
                 ("DELETE", f"/api/v1/agents/{uuid.uuid4()}", None),
-                ("POST", "/api/v1/agents/unregister", {"name": "x"}),
+                ("POST", "/api/v1/agents/unregister", {"agent_session_name": "x"}),
             ]
             for method, path, body in endpoints:
                 resp = client.request(method, path, json=body)
@@ -523,7 +531,7 @@ class TestAgentPersistence:
             "/api/v1/agents/register",
             headers=headers,
             json={
-                "name": PERSIST_AGENT_NAME,
+                "agent_session_name": PERSIST_AGENT_NAME,
                 "type": "api",
                 "memory_mode": "hybrid",
                 "source": "api",
@@ -539,7 +547,7 @@ class TestAgentPersistence:
         assert agent_config["custom_setting"] == "keep_me", "pre-existing config was overwritten"
         assert agent_id in agent_config["agents"], "registered agent not persisted"
         persisted = agent_config["agents"][agent_id]
-        assert persisted["name"] == PERSIST_AGENT_NAME
+        assert persisted["agent_session_name"] == PERSIST_AGENT_NAME
         assert persisted["type"] == "api"
         assert persisted["memory_mode"] == "hybrid"
 
@@ -547,7 +555,7 @@ class TestAgentPersistence:
         resp = client.get("/api/v1/agents/connections", headers=headers)
         assert resp.status_code == 200
         body = resp.json()
-        agent_names = {a["name"] for a in body["agents"]}
+        agent_names = {a["agent_session_name"] for a in body["agents"]}
         assert PERSIST_AGENT_NAME in agent_names
 
     def test_parent_sees_child_agent_connection(self, client, headers, owner, _patch_traces):
@@ -565,7 +573,7 @@ class TestAgentPersistence:
             "/api/v1/agents/register",
             headers=child_headers,
             json={
-                "name": child_connection_name,
+                "agent_session_name": child_connection_name,
                 "type": "sdk",
                 "memory_mode": "cognee",
                 "source": "api",
@@ -681,7 +689,7 @@ class TestAgentFullLifecycle:
         reg_a = client.post(
             "/api/v1/agents/register",
             headers={"X-Api-Key": agent_a_key},
-            json={"name": agent_a_name, "type": "api", "memory_mode": "cognee"},
+            json={"agent_session_name": agent_a_name, "type": "api", "memory_mode": "cognee"},
         )
         assert reg_a.status_code == 201, reg_a.text
         connection_a_id = reg_a.json()["id"]
@@ -690,7 +698,7 @@ class TestAgentFullLifecycle:
         reg_b = client.post(
             "/api/v1/agents/register",
             headers={"X-Api-Key": agent_b_key},
-            json={"name": agent_b_name, "type": "sdk", "memory_mode": "hybrid"},
+            json={"agent_session_name": agent_b_name, "type": "sdk", "memory_mode": "hybrid"},
         )
         assert reg_b.status_code == 201, reg_b.text
         connection_b_id = reg_b.json()["id"]
@@ -700,7 +708,7 @@ class TestAgentFullLifecycle:
         reg_a_again = client.post(
             "/api/v1/agents/register",
             headers={"X-Api-Key": agent_a_key},
-            json={"name": agent_a_name, "type": "api", "memory_mode": "cognee"},
+            json={"agent_session_name": agent_a_name, "type": "api", "memory_mode": "cognee"},
         )
         assert reg_a_again.status_code == 201
         assert agent_mode._active_count == 2, "re-register should not increment"
@@ -721,7 +729,7 @@ class TestAgentFullLifecycle:
         unreg_a = client.post(
             "/api/v1/agents/unregister",
             headers={"X-Api-Key": agent_a_key},
-            json={"name": agent_a_name, "type": "api"},
+            json={"agent_session_name": agent_a_name},
         )
         assert unreg_a.status_code == 200
         assert unreg_a.json()["activeAgents"] == 1
@@ -752,7 +760,7 @@ class TestAgentFullLifecycle:
         unreg_b = client.post(
             "/api/v1/agents/unregister",
             headers={"X-Api-Key": agent_b_key},
-            json={"name": agent_b_name, "type": "sdk"},
+            json={"agent_session_name": agent_b_name},
         )
         assert unreg_b.status_code == 200
         assert unreg_b.json()["activeAgents"] == 0
@@ -775,7 +783,7 @@ class TestAgentFullLifecycle:
         re_reg = client.post(
             "/api/v1/agents/register",
             headers={"X-Api-Key": agent_a_key},
-            json={"name": agent_a_name, "type": "api"},
+            json={"agent_session_name": agent_a_name, "type": "api"},
         )
         assert re_reg.status_code == 201
         assert agent_mode._active_count == 1, "re-register after unregister should increment"
@@ -803,7 +811,7 @@ class TestAgentFullLifecycle:
             "/api/v1/agents/register",
             headers={"X-Api-Key": agent_a_key},
             json={
-                "name": agent_a_name,
+                "agent_session_name": agent_a_name,
                 "type": "api",
                 "memory_mode": "session",
                 "metadata": {"version": "2"},
@@ -828,7 +836,7 @@ class TestAgentFullLifecycle:
             "/api/v1/agents/register",
             headers={"X-Api-Key": agent_a_key},
             json={
-                "name": f"{agent_a_name}-v2",
+                "agent_session_name": f"{agent_a_name}-v2",
                 "type": "api",
                 "memory_mode": "hybrid",
             },
@@ -847,7 +855,7 @@ class TestAgentFullLifecycle:
         client.post(
             "/api/v1/agents/unregister",
             headers={"X-Api-Key": agent_a_key},
-            json={"name": agent_a_name, "type": "api"},
+            json={"agent_session_name": agent_a_name},
         )
 
         conn_after_partial = client.get(
@@ -870,7 +878,7 @@ class TestAgentFullLifecycle:
         re_reg_after_deactivate = client.post(
             "/api/v1/agents/register",
             headers={"X-Api-Key": agent_a_key},
-            json={"name": agent_a_name, "type": "api", "memory_mode": "cognee"},
+            json={"agent_session_name": agent_a_name, "type": "api", "memory_mode": "cognee"},
         )
         assert re_reg_after_deactivate.status_code == 201
         reactivated_id = re_reg_after_deactivate.json()["id"]
@@ -896,7 +904,7 @@ class TestAgentFullLifecycle:
         reg_c = client.post(
             "/api/v1/agents/register",
             headers={"X-Api-Key": agent_c_key},
-            json={"name": agent_c_name, "type": "api"},
+            json={"agent_session_name": agent_c_name, "type": "api"},
         )
         assert reg_c.status_code == 201
         connection_c_id = reg_c.json()["id"]
@@ -1028,7 +1036,7 @@ class TestMultiTenantIsolation:
         reg_a = client.post(
             "/api/v1/agents/register",
             headers=headers_a,
-            json={"name": f"conn-a-{ISOLATION_RUN_ID}", "type": "api"},
+            json={"agent_session_name": f"conn-a-{ISOLATION_RUN_ID}", "type": "api"},
         )
         assert reg_a.status_code == 201
         conn_a_id = reg_a.json()["id"]
@@ -1037,7 +1045,7 @@ class TestMultiTenantIsolation:
         reg_b = client.post(
             "/api/v1/agents/register",
             headers=headers_b,
-            json={"name": f"conn-b-{ISOLATION_RUN_ID}", "type": "sdk"},
+            json={"agent_session_name": f"conn-b-{ISOLATION_RUN_ID}", "type": "sdk"},
         )
         assert reg_b.status_code == 201
         conn_b_id = reg_b.json()["id"]

@@ -75,24 +75,12 @@ def derive_connection_type(
 
 def build_agent_connection_id(
     *,
-    name: str | None = None,
-    origin_function: str | None = None,
+    agent_session_name: str,
     user_id: str | None = None,
-    session_id: str | None = None,
-    dataset_id: str | None = None,
-    connection_type: str | None = None,
 ) -> str:
-    identity = "|".join(
-        [
-            origin_function or name or "agent",
-            user_id or "",
-            session_id or "",
-            dataset_id or "",
-            connection_type or "",
-        ]
-    )
+    identity = f"{agent_session_name}|{user_id or ''}"
     digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
-    base = re.sub(r"[^a-zA-Z0-9_-]+", "-", origin_function or name or "agent").strip("-")
+    base = re.sub(r"[^a-zA-Z0-9_-]+", "-", agent_session_name).strip("-")
     base = base[-48:] if len(base) > 48 else base
     return f"{base or 'agent'}-{digest}"
 
@@ -137,7 +125,7 @@ async def _persist_agent_connection(user_id: UUID, connection: AgentConnection) 
 
 async def register_agent_connection(
     *,
-    name: str,
+    agent_session_name: str,
     connection_type: AgentConnectionType = "unknown",
     memory_mode: AgentMemoryMode = "unknown",
     source: AgentSource = "api",
@@ -152,18 +140,13 @@ async def register_agent_connection(
     metadata: Optional[dict] = None,
 ) -> AgentConnection:
     dataset_refs = _normalize_datasets(datasets)
-    primary_dataset_id = next((dataset.id for dataset in dataset_refs if dataset.id), None)
     resolved_agent_id = agent_id or build_agent_connection_id(
-        name=name,
-        origin_function=origin_function,
+        agent_session_name=agent_session_name,
         user_id=str(user_id) if user_id is not None else None,
-        session_id=session_id,
-        dataset_id=primary_dataset_id,
-        connection_type=connection_type,
     )
     connection = AgentConnection(
         id=resolved_agent_id,
-        name=name,
+        agent_session_name=agent_session_name,
         type=connection_type,
         memory_mode=memory_mode,
         session_id=session_id,

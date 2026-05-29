@@ -189,17 +189,13 @@ async def _trace_agents_for_user(
         )
         status = "active" if row.effective_status == "running" else "inactive"
         agent_id = build_agent_connection_id(
-            name=name,
-            origin_function=origin_function,
+            agent_session_name=name,
             user_id=owner_user_id,
-            session_id=session_id,
-            dataset_id=datasets[0].id if datasets else None,
-            connection_type=connection_type,
         )
         agents.append(
             AgentConnection(
                 id=agent_id,
-                name=name,
+                agent_session_name=name,
                 type=connection_type,
                 memory_mode="hybrid" if datasets else "session",
                 session_id=session_id,
@@ -396,7 +392,7 @@ async def register_agent_from_request(user: User, request: RegisterAgentRequest)
         for dataset_name in request.dataset_names
     )
     return await register_agent_connection(
-        name=request.name,
+        agent_session_name=request.agent_session_name,
         connection_type=request.type,
         memory_mode=request.memory_mode,
         source=request.source,

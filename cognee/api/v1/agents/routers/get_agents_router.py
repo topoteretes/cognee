@@ -3,7 +3,7 @@ from uuid import UUID
 
 from cognee.api.DTO import OutDTO
 from cognee.modules.agents.agent_mode import register_agent, unregister_agent
-from cognee.modules.agents.models import RegisterAgentRequest
+from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.get_agent import get_agent
 from cognee.modules.agents.list_agents import list_agents
@@ -139,7 +139,7 @@ def get_agents_router() -> APIRouter:
 
     @router.post("/unregister", tags=[CONNECTIONS_TAG])
     async def unregister_agent_endpoint(
-        request: RegisterAgentRequest,
+        request: UnregisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
         count = await unregister_agent(user, request)
