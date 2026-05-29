@@ -23,7 +23,7 @@ class AgentDatasetRef(BaseModel):
 
 class AgentConnection(BaseModel):
     id: str
-    name: str
+    agent_session_name: str
     type: AgentConnectionType = "unknown"
     memory_mode: AgentMemoryMode = "unknown"
     session_id: Optional[str] = None
@@ -66,7 +66,10 @@ class AgentDetailResponse(BaseModel):
 
 
 class RegisterAgentRequest(BaseModel):
-    name: str
+    agent_session_name: str = Field(
+        description="A unique name for this agent connection. "
+        "Combined with the authenticated user's ID to identify the connection."
+    )
     type: AgentConnectionType = "api"
     memory_mode: AgentMemoryMode = "unknown"
     session_id: Optional[str] = None
@@ -75,3 +78,10 @@ class RegisterAgentRequest(BaseModel):
     source: AgentSource = "api"
     origin_function: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class UnregisterAgentRequest(BaseModel):
+    agent_session_name: str = Field(
+        description="The name used when registering the connection. "
+        "Combined with the authenticated user's ID to identify which connection to deactivate."
+    )

@@ -16,14 +16,11 @@ from cognee.modules.agents.models import (
     RegisterAgentRequest,
 )
 from cognee.modules.agents.registry import (
-    build_agent_connection_id,
     classify_memory_source_type,
-    derive_connection_type,
     list_persisted_agent_connections,
     list_registered_agent_connections,
     register_agent_connection,
 )
-from cognee.modules.session_lifecycle.metrics import list_session_rows
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
@@ -45,12 +42,6 @@ def _range_since(range_key: RangeLiteral) -> Optional[datetime]:
     if range_key == "30d":
         return now - timedelta(days=30)
     return None
-
-
-def _entry_value(entry: Any, key: str, default: Any = None) -> Any:
-    if isinstance(entry, dict):
-        return entry.get(key, default)
-    return getattr(entry, key, default)
 
 
 def _entry_to_dict(entry: Any) -> dict[str, Any]:
@@ -116,112 +107,6 @@ def _memory_sources_from_datasets(datasets: list[Any]) -> list[MemorySourceConne
     return sources
 
 
-def _dataset_ref_for_id(
-    dataset_id: Any,
-    memory_sources_by_id: dict[str, MemorySourceConnection],
-) -> Optional[AgentDatasetRef]:
-    if dataset_id is None:
-        return None
-    source = memory_sources_by_id.get(str(dataset_id))
-    if source is None:
-        return AgentDatasetRef(id=str(dataset_id), role="read", type="dataset")
-    return AgentDatasetRef(id=source.id, name=source.name, role="read", type=source.type)
-
-
-async def _trace_agents_for_user(
-    *,
-    user: User,
-    visible_user_ids: list[UUIDType],
-    permitted_dataset_ids: list[UUIDType],
-    memory_sources_by_id: dict[str, MemorySourceConnection],
-    since: Optional[datetime],
-) -> list[AgentConnection]:
-    try:
-        page = await list_session_rows(
-            user_ids=visible_user_ids,
-            permitted_dataset_ids=permitted_dataset_ids,
-            since=since,
-            status_filter=None,
-            limit=500,
-            offset=0,
-            order_by="last_activity_at",
-            descending=True,
-        )
-    except Exception as error:
-        logger.warning("Failed to list session rows for agents API: %s", error)
-        return []
-
-    try:
-        from cognee.infrastructure.session.get_session_manager import get_session_manager
-
-        session_manager = get_session_manager()
-    except Exception:
-        session_manager = None
-
-    agents = []
-    for row in page.sessions:
-        record = row.record
-        owner_user_id = str(getattr(record, "user_id", ""))
-        session_id = getattr(record, "session_id", None)
-        if not owner_user_id or not session_id or session_manager is None:
-            continue
-
-        try:
-            traces = await session_manager.get_agent_trace_session(
-                user_id=owner_user_id,
-                session_id=session_id,
-                last_n=20,
-            )
-        except Exception:
-            traces = []
-        if not traces:
-            continue
-
-        first_trace = traces[0]
-        origin_function = _entry_value(first_trace, "origin_function", None)
-        name = str(origin_function or session_id)
-        dataset_ref = _dataset_ref_for_id(getattr(record, "dataset_id", None), memory_sources_by_id)
-        datasets = [dataset_ref] if dataset_ref else []
-        connection_type = derive_connection_type(
-            origin_function=origin_function,
-            session_id=session_id,
-            source="session_trace",
-        )
-        status = "active" if row.effective_status == "running" else "inactive"
-        agent_id = build_agent_connection_id(
-            name=name,
-            origin_function=origin_function,
-            user_id=owner_user_id,
-            session_id=session_id,
-            dataset_id=datasets[0].id if datasets else None,
-            connection_type=connection_type,
-        )
-        agents.append(
-            AgentConnection(
-                id=agent_id,
-                name=name,
-                type=connection_type,
-                memory_mode="hybrid" if datasets else "session",
-                session_id=session_id,
-                user_id=owner_user_id,
-                tenant_id=getattr(user, "tenant_id", None),
-                datasets=datasets,
-                last_active_at=getattr(record, "last_activity_at", None),
-                status=status,
-                source="session_trace",
-                origin_function=str(origin_function) if origin_function else None,
-                metadata={
-                    "session_status": getattr(record, "status", None),
-                    "effective_status": row.effective_status,
-                    "trace_count": len(traces),
-                    "error_count": getattr(record, "error_count", 0),
-                },
-            )
-        )
-
-    return agents
-
-
 def _is_visible_registered_agent(
     agent: AgentConnection,
     *,
@@ -278,6 +163,7 @@ def _attach_connected_agent_ids(
 async def list_agent_connections(
     *,
     user: User,
+    agent_id: Optional[UUIDType] = None,
     range_key: RangeLiteral = "30d",
     status_filter: Optional[str] = None,
     include_sources: bool = True,
@@ -287,12 +173,9 @@ async def list_agent_connections(
 ) -> AgentsListResponse:
     readable_datasets = await _readable_datasets_for(user)
     memory_sources = _memory_sources_from_datasets(readable_datasets)
-    memory_sources_by_id = {source.id: source for source in memory_sources}
-    permitted_dataset_ids = [UUIDType(source.id) for source in memory_sources]
     visible_user_ids = await _visible_user_ids(user)
     visible_user_id_set = set(visible_user_ids)
     permitted_dataset_id_strings = {source.id for source in memory_sources}
-    since = _range_since(range_key)
 
     registered_agents = [
         agent
@@ -306,14 +189,14 @@ async def list_agent_connections(
     persisted_agents = await list_persisted_agent_connections(
         visible_user_ids, active_only=active_only
     )
-    trace_agents = await _trace_agents_for_user(
-        user=user,
-        visible_user_ids=visible_user_ids,
-        permitted_dataset_ids=permitted_dataset_ids,
-        memory_sources_by_id=memory_sources_by_id,
-        since=since,
-    )
-    agents = _merge_agents([*registered_agents, *persisted_agents, *trace_agents])
+    agents = _merge_agents([*registered_agents, *persisted_agents])
+    if agent_id:
+        agent_id_str = str(agent_id)
+        agents = [
+            agent
+            for agent in agents
+            if agent.user_id is not None and str(agent.user_id) == agent_id_str
+        ]
     if status_filter:
         agents = [agent for agent in agents if agent.status == status_filter]
 
@@ -333,17 +216,24 @@ async def list_agent_connections(
 async def get_agent_connection_detail(
     *,
     user: User,
-    agent_id: str,
-    range_key: RangeLiteral = "all",
+    agent_id: UUIDType,
+    agent_session_name: Optional[str] = None,
 ) -> Optional[AgentDetailResponse]:
     response = await list_agent_connections(
         user=user,
-        range_key=range_key,
+        agent_id=agent_id,
         include_sources=True,
         limit=10000,
         offset=0,
     )
-    agent = next((item for item in response.agents if item.id == agent_id), None)
+    if agent_session_name:
+        matching = [
+            item for item in response.agents if item.agent_session_name == agent_session_name
+        ]
+    else:
+        matching = list(response.agents)
+
+    agent = matching[0] if matching else None
     if agent is None:
         return None
 
@@ -396,7 +286,7 @@ async def register_agent_from_request(user: User, request: RegisterAgentRequest)
         for dataset_name in request.dataset_names
     )
     return await register_agent_connection(
-        name=request.name,
+        agent_session_name=request.agent_session_name,
         connection_type=request.type,
         memory_mode=request.memory_mode,
         source=request.source,

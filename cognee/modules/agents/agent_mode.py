@@ -27,7 +27,11 @@ from typing import TYPE_CHECKING
 from cognee.shared.logging_utils import get_logger
 
 if TYPE_CHECKING:
-    from cognee.modules.agents.models import AgentConnection, RegisterAgentRequest
+    from cognee.modules.agents.models import (
+        AgentConnection,
+        RegisterAgentRequest,
+        UnregisterAgentRequest,
+    )
     from cognee.modules.users.models.User import User
 
 logger = get_logger(__name__)
@@ -91,7 +95,7 @@ async def register_agent(user: User, request: RegisterAgentRequest) -> AgentConn
     return connection
 
 
-async def unregister_agent(user: User, request: RegisterAgentRequest) -> int:
+async def unregister_agent(user: User, request: UnregisterAgentRequest) -> int:
     global _active_count
 
     from cognee.modules.agents.registry import (
@@ -100,10 +104,8 @@ async def unregister_agent(user: User, request: RegisterAgentRequest) -> int:
     )
 
     connection_id = build_agent_connection_id(
-        name=request.name,
+        agent_session_name=request.agent_session_name,
         user_id=str(user.id) if user.id is not None else None,
-        session_id=request.session_id,
-        connection_type=request.type,
     )
 
     await deactivate_agent_connection(user.id, connection_id)
