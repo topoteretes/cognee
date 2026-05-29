@@ -57,7 +57,7 @@ jobs:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
         run: |
-          uv run pytest cognee/tests/integration/retrieval/test_graph_completion_retriever_cot.py -v --timeout=300
+          uv run pytest cognee/tests/integration/retrieval/graph_completion/test_graph_completion_retriever_cot.py -v --timeout=300
 
   load-tests:
     if: false
