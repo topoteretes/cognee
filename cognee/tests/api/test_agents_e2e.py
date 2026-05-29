@@ -7,13 +7,14 @@ in a lightweight test context — everything else (registry, models, DB) runs
 for real.
 
 Endpoints under test:
-  POST   /register          — register agent connection
-  GET    /                  — list agent connections
-  GET    /{agent_id}        — agent connection detail
-  POST   /create            — create sub-user agent
-  GET    /list              — list agents
-  DELETE /{agent_id}        — delete sub-user agent
-  POST   /unregister        — agent-mode unregister
+  GET    /connections            — list agent connections
+  GET    /connections/{agent_id} — agent connection detail
+  POST   /register              — register agent connection
+  POST   /unregister            — unregister agent connection
+  GET    /list                  — list agents from DB
+  POST   /create                — create agent
+  GET    /{agent_id}            — get agent from DB
+  DELETE /{agent_id}            — delete agent
 """
 
 import os
@@ -29,7 +30,7 @@ with patch("dotenv.load_dotenv"):
 
     from fastapi.testclient import TestClient
 
-from cognee.api.v1.agents import agent_mode
+from cognee.modules.agents import agent_mode
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME, clear_registered_agent_connections
 
 RUN_ID = uuid.uuid4().hex[:8]
@@ -922,3 +923,167 @@ class TestAgentFullLifecycle:
         assert connection_c_id not in {a["id"] for a in conn_after_delete.json()["agents"]}, (
             "deleted agent's connections should be cleaned up"
         )
+
+
+ISOLATION_RUN_ID = uuid.uuid4().hex[:8]
+ISOLATION_USER_A_EMAIL = f"isolation-a-{ISOLATION_RUN_ID}@example.com"
+ISOLATION_USER_B_EMAIL = f"isolation-b-{ISOLATION_RUN_ID}@example.com"
+ISOLATION_PASSWORD = "isolation123!"
+
+
+class TestMultiTenantIsolation:
+    """Verify that users cannot see each other's agents or connections."""
+
+    @pytest.fixture(scope="class")
+    def client(self):
+        from cognee.api.client import app
+
+        with TestClient(app) as c:
+            yield c
+
+    @pytest.fixture(scope="class")
+    def user_a(self, client):
+        reg = client.post(
+            "/api/v1/auth/register",
+            json={"email": ISOLATION_USER_A_EMAIL, "password": ISOLATION_PASSWORD},
+        )
+        assert reg.status_code in (200, 201), reg.text
+        login = client.post(
+            "/api/v1/auth/login",
+            data={"username": ISOLATION_USER_A_EMAIL, "password": ISOLATION_PASSWORD},
+        )
+        assert login.status_code == 200
+        return {"id": reg.json()["id"], "token": login.json()["access_token"]}
+
+    @pytest.fixture(scope="class")
+    def user_b(self, client):
+        reg = client.post(
+            "/api/v1/auth/register",
+            json={"email": ISOLATION_USER_B_EMAIL, "password": ISOLATION_PASSWORD},
+        )
+        assert reg.status_code in (200, 201), reg.text
+        login = client.post(
+            "/api/v1/auth/login",
+            data={"username": ISOLATION_USER_B_EMAIL, "password": ISOLATION_PASSWORD},
+        )
+        assert login.status_code == 200
+        return {"id": reg.json()["id"], "token": login.json()["access_token"]}
+
+    @pytest.fixture(scope="class")
+    def _patch_traces(self):
+        async def trace_agents_for_user(**_kwargs):
+            return []
+
+        with patch(
+            "cognee.modules.agents.operations._trace_agents_for_user",
+            trace_agents_for_user,
+        ):
+            yield
+
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        agent_mode._active_count = 0
+        agent_mode._active_connection_ids.clear()
+        agent_mode._watchdog_started = False
+        clear_registered_agent_connections()
+        yield
+
+    def test_users_cannot_see_each_others_agents(self, client, user_a, user_b):
+        headers_a = {"Authorization": f"Bearer {user_a['token']}"}
+        headers_b = {"Authorization": f"Bearer {user_b['token']}"}
+
+        # User A creates an agent
+        resp_a = client.post(
+            f"/api/v1/agents/create?name=agent-of-a-{ISOLATION_RUN_ID}",
+            headers=headers_a,
+        )
+        assert resp_a.status_code == 200
+        agent_a_id = resp_a.json()["agentId"]
+
+        # User B creates an agent
+        resp_b = client.post(
+            f"/api/v1/agents/create?name=agent-of-b-{ISOLATION_RUN_ID}",
+            headers=headers_b,
+        )
+        assert resp_b.status_code == 200
+        agent_b_id = resp_b.json()["agentId"]
+
+        # User A lists agents — should see only their own
+        list_a = client.get("/api/v1/agents/list", headers=headers_a)
+        a_agent_ids = {a["agentId"] for a in list_a.json()}
+        assert agent_a_id in a_agent_ids
+        assert agent_b_id not in a_agent_ids, "user A should not see user B's agent"
+
+        # User B lists agents — should see only their own
+        list_b = client.get("/api/v1/agents/list", headers=headers_b)
+        b_agent_ids = {a["agentId"] for a in list_b.json()}
+        assert agent_b_id in b_agent_ids
+        assert agent_a_id not in b_agent_ids, "user B should not see user A's agent"
+
+    def test_users_cannot_see_each_others_connections(self, client, user_a, user_b, _patch_traces):
+        headers_a = {"Authorization": f"Bearer {user_a['token']}"}
+        headers_b = {"Authorization": f"Bearer {user_b['token']}"}
+
+        # User A registers a connection
+        reg_a = client.post(
+            "/api/v1/agents/register",
+            headers=headers_a,
+            json={"name": f"conn-a-{ISOLATION_RUN_ID}", "type": "api"},
+        )
+        assert reg_a.status_code == 201
+        conn_a_id = reg_a.json()["id"]
+
+        # User B registers a connection
+        reg_b = client.post(
+            "/api/v1/agents/register",
+            headers=headers_b,
+            json={"name": f"conn-b-{ISOLATION_RUN_ID}", "type": "sdk"},
+        )
+        assert reg_b.status_code == 201
+        conn_b_id = reg_b.json()["id"]
+
+        # User A lists connections — should see only their own
+        conns_a = client.get("/api/v1/agents/connections", headers=headers_a)
+        a_conn_ids = {a["id"] for a in conns_a.json()["agents"]}
+        assert conn_a_id in a_conn_ids
+        assert conn_b_id not in a_conn_ids, "user A should not see user B's connection"
+
+        # User B lists connections — should see only their own
+        conns_b = client.get("/api/v1/agents/connections", headers=headers_b)
+        b_conn_ids = {a["id"] for a in conns_b.json()["agents"]}
+        assert conn_b_id in b_conn_ids
+        assert conn_a_id not in b_conn_ids, "user B should not see user A's connection"
+
+    def test_user_cannot_delete_others_agent(self, client, user_a, user_b):
+        headers_a = {"Authorization": f"Bearer {user_a['token']}"}
+        headers_b = {"Authorization": f"Bearer {user_b['token']}"}
+
+        resp = client.post(
+            f"/api/v1/agents/create?name=protected-{ISOLATION_RUN_ID}",
+            headers=headers_a,
+        )
+        assert resp.status_code == 200
+        agent_id = resp.json()["agentId"]
+
+        del_resp = client.delete(
+            f"/api/v1/agents/{agent_id}",
+            headers=headers_b,
+        )
+        assert del_resp.status_code == 403, "user B should not be able to delete user A's agent"
+
+    def test_user_cannot_get_others_agent(self, client, user_a, user_b):
+        headers_a = {"Authorization": f"Bearer {user_a['token']}"}
+        headers_b = {"Authorization": f"Bearer {user_b['token']}"}
+
+        resp = client.post(
+            f"/api/v1/agents/create?name=private-{ISOLATION_RUN_ID}",
+            headers=headers_a,
+        )
+        assert resp.status_code == 200
+        agent_id = resp.json()["agentId"]
+
+        get_resp = client.get(
+            f"/api/v1/agents/{agent_id}",
+            headers=headers_b,
+        )
+        assert get_resp.status_code == 403, "user B should not be able to get user A's agent"

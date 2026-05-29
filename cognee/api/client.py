@@ -359,7 +359,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    from cognee.api.v1.agents.agent_mode import is_agent_mode_enabled, set_agent_mode
+    from cognee.modules.agents.agent_mode import is_agent_mode_enabled, set_agent_mode
 
     if args.agent_mode:
         set_agent_mode(True)
