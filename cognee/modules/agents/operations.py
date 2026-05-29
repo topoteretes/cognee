@@ -278,6 +278,7 @@ async def list_agent_connections(
     status_filter: Optional[str] = None,
     include_sources: bool = True,
     active_only: bool = True,
+    agent_session_name: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> AgentsListResponse:
@@ -310,6 +311,8 @@ async def list_agent_connections(
         since=since,
     )
     agents = _merge_agents([*registered_agents, *persisted_agents, *trace_agents])
+    if agent_session_name:
+        agents = [agent for agent in agents if agent.agent_session_name == agent_session_name]
     if status_filter:
         agents = [agent for agent in agents if agent.status == status_filter]
 

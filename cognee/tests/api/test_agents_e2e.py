@@ -243,6 +243,35 @@ class TestAgentsE2E:
         for agent_id in ids:
             assert agent_id in returned_ids
 
+    def test_filter_connections_by_agent_session_name(self, client, headers, _patch_operations):
+        clear_registered_agent_connections()
+        client.post(
+            "/api/v1/agents/register",
+            headers=headers,
+            json={"agent_session_name": "target_agent", "type": "api"},
+        )
+        client.post(
+            "/api/v1/agents/register",
+            headers=headers,
+            json={"agent_session_name": "other_agent", "type": "sdk"},
+        )
+
+        resp = client.get(
+            "/api/v1/agents/connections?agent_session_name=target_agent",
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["agents"][0]["agent_session_name"] == "target_agent"
+
+        resp_none = client.get(
+            "/api/v1/agents/connections?agent_session_name=nonexistent",
+            headers=headers,
+        )
+        assert resp_none.status_code == 200
+        assert resp_none.json()["total"] == 0
+
     def test_register_connection_with_dataset_ids(self, client, headers, _patch_operations):
         clear_registered_agent_connections()
         dataset_id = str(uuid.uuid4())
