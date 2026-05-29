@@ -167,7 +167,6 @@ async def list_agent_connections(
     status_filter: Optional[str] = None,
     include_sources: bool = True,
     active_only: bool = True,
-    agent_session_name: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> AgentsListResponse:
@@ -190,8 +189,6 @@ async def list_agent_connections(
         visible_user_ids, active_only=active_only
     )
     agents = _merge_agents([*registered_agents, *persisted_agents])
-    if agent_session_name:
-        agents = [agent for agent in agents if agent.agent_session_name == agent_session_name]
     if status_filter:
         agents = [agent for agent in agents if agent.status == status_filter]
 
@@ -212,16 +209,23 @@ async def get_agent_connection_detail(
     *,
     user: User,
     agent_id: str,
-    range_key: RangeLiteral = "all",
+    agent_session_name: Optional[str] = None,
 ) -> Optional[AgentDetailResponse]:
     response = await list_agent_connections(
         user=user,
-        range_key=range_key,
         include_sources=True,
         limit=10000,
         offset=0,
     )
-    agent = next((item for item in response.agents if item.id == agent_id), None)
+    agent = next(
+        (
+            item
+            for item in response.agents
+            if item.id == agent_id
+            and (agent_session_name is None or item.agent_session_name == agent_session_name)
+        ),
+        None,
+    )
     if agent is None:
         return None
 

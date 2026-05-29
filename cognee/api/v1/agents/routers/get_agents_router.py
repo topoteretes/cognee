@@ -92,12 +92,6 @@ def get_agents_router() -> APIRouter:
 
     @router.get("/connections", tags=[CONNECTIONS_TAG])
     async def list_agents_connections(
-        agent_session_name: Optional[str] = Query(
-            None,
-            description="Filter by connection name. Use this to retrieve the stored "
-            "configuration for a specific agent connection. The agent authenticates "
-            "via API key and passes the name it used during registration.",
-        ),
         range: RangeLiteral = Query("30d"),
         status_filter: Optional[Literal["active", "inactive", "unknown"]] = Query(
             None,
@@ -115,7 +109,6 @@ def get_agents_router() -> APIRouter:
             status_filter=status_filter,
             include_sources=include_sources,
             active_only=active_only,
-            agent_session_name=agent_session_name,
             limit=limit,
             offset=offset,
         )
@@ -124,13 +117,16 @@ def get_agents_router() -> APIRouter:
     @router.get("/connections/{agent_id}", tags=[CONNECTIONS_TAG])
     async def get_connection_detail(
         agent_id: str,
-        range: RangeLiteral = Query("all"),
+        agent_session_name: Optional[str] = Query(
+            None,
+            description="Filter by connection name within the authenticated user's connections.",
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         response = await get_agent_connection_detail(
             user=user,
             agent_id=agent_id,
-            range_key=range,
+            agent_session_name=agent_session_name,
         )
         if response is None:
             raise HTTPException(status_code=404, detail="connection not found")
