@@ -44,7 +44,11 @@ def _process_ontology_nodes(
 ) -> None:
     """Process and store ontology nodes"""
     for ontology_node in ontology_nodes:
-        ont_node_id = generate_node_id(f"type:{ontology_node.name}") if ontology_node.category == "classes" else generate_node_id(f"entity:{ontology_node.name}")
+        ont_node_id = (
+            generate_node_id(f"type:{ontology_node.name}")
+            if ontology_node.category == "classes"
+            else generate_node_id(f"entity:{ontology_node.name}")
+        )
         ont_node_name = generate_node_name(ontology_node.name)
 
         if ontology_node.category == "classes":
@@ -72,7 +76,10 @@ def _process_ontology_nodes(
 
 
 def _process_ontology_edges(
-    ontology_nodes: list, ontology_edges: list, existing_edges_map: dict, ontology_relationships: list
+    ontology_nodes: list,
+    ontology_edges: list,
+    existing_edges_map: dict,
+    ontology_relationships: list,
 ) -> None:
     """Process ontology edges and add them if new"""
     node_category = {node.name: node.category for node in ontology_nodes}
@@ -152,7 +159,9 @@ def _create_type_node(
 
     # Process ontology nodes and edges
     _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
-    _process_ontology_edges(ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships)
+    _process_ontology_edges(
+        ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
+    )
 
     return type_node
 
@@ -213,7 +222,9 @@ def _create_entity_node(
 
     # Process ontology nodes and edges
     _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
-    _process_ontology_edges(ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships)
+    _process_ontology_edges(
+        ontology_nodes, ontology_edges, existing_edges_map, ontology_relationships
+    )
 
     return entity_node
 
