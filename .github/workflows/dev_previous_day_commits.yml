@@ -110,6 +110,7 @@ jobs:
       - name: Generate branch notes
         env:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
           NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
@@ -126,6 +127,7 @@ jobs:
         id: assessment
         env:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
           NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}

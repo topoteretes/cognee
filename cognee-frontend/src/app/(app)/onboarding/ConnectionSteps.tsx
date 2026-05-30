@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
+import { trackEvent } from "@/modules/analytics";
 
 // ── Shared components ──
 
@@ -63,9 +65,9 @@ function colorizeLine(line: string): React.ReactNode {
   return parts.length > 0 ? parts : <span style={{ color: "#E4E4E7" }}>{line}</span>;
 }
 
-function CopyBtn({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: () => void }) {
+function CopyBtn({ text, copied, onCopy, step }: { text: string; copied: boolean; onCopy: () => void; step?: string }) {
   return (
-    <button onClick={onCopy} className="cursor-pointer hover:opacity-80" style={{ background: copied ? "#22C55E22" : "#ffffff10", border: "none", borderRadius: 6, padding: "4px 10px", flexShrink: 0, display: "flex", alignItems: "center", gap: 4, transition: "background 150ms" }} title="Copy">
+    <button onClick={() => { if (step) { trackEvent({ pageName: `Onboarding - ${step}`, eventName: "onboarding_code_copied", additionalProperties: { step: step.toLowerCase().replace(/ /g, "_"), snippet: text.slice(0, 30) } }); } onCopy(); }} className="cursor-pointer hover:opacity-80" style={{ background: copied ? "#22C55E22" : "#ffffff10", border: "none", borderRadius: 6, padding: "4px 10px", flexShrink: 0, display: "flex", alignItems: "center", gap: 4, transition: "background 150ms" }} title="Copy">
       {copied ? (
         <><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg><span style={{ color: "#22C55E", fontSize: 11, fontWeight: 500 }}>Copied</span></>
       ) : (
@@ -75,42 +77,44 @@ function CopyBtn({ text, copied, onCopy }: { text: string; copied: boolean; onCo
   );
 }
 
-function CodeBlock({ children }: { children: string }) {
+function CodeBlock({ children, step }: { children: string; step?: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div style={{ backgroundColor: "#0F0F10", borderRadius: 10, border: "1px solid #2A2A2E", display: "flex", alignItems: "center", justifyContent: "space-between", paddingBlock: 14, paddingInline: 20, gap: 12 }}>
-      <code style={{ color: "#E4E4E7", fontFamily: '"Fira Code", "SF Mono", "Courier New", monospace', fontSize: 13.5, lineHeight: "20px", wordBreak: "break-all" }}>{colorizeLine(children)}</code>
-      <CopyBtn text={children} copied={copied} onCopy={() => { navigator.clipboard.writeText(children); setCopied(true); setTimeout(() => setCopied(false), 2000); }} />
+    <div style={{ backgroundColor: "#0F0F10", borderRadius: 10, border: "1px solid #2A2A2E", display: "flex", alignItems: "center", justifyContent: "space-between", paddingBlock: 14, paddingInline: 20, gap: 12, overflow: "hidden" }}>
+      <code style={{ color: "#E4E4E7", fontFamily: '"Fira Code", "SF Mono", "Courier New", monospace', fontSize: 13.5, lineHeight: "20px", overflowX: "auto", whiteSpace: "nowrap" }}>{colorizeLine(children)}</code>
+      <CopyBtn text={children} copied={copied} step={step} onCopy={() => { navigator.clipboard.writeText(children); setCopied(true); setTimeout(() => setCopied(false), 2000); }} />
     </div>
   );
 }
 
-function MultiLineCode({ lines }: { lines: string[] }) {
+function MultiLineCode({ lines, step }: { lines: string[]; step?: string }) {
   const full = lines.join("\n");
   const [copied, setCopied] = useState(false);
   return (
-    <div style={{ backgroundColor: "#0F0F10", borderRadius: 10, border: "1px solid #2A2A2E", display: "flex", flexDirection: "column", paddingBlock: 16, paddingInline: 20, position: "relative", gap: 0 }}>
-      <div style={{ position: "absolute", top: 12, right: 12 }}>
-        <CopyBtn text={full} copied={copied} onCopy={() => { navigator.clipboard.writeText(full); setCopied(true); setTimeout(() => setCopied(false), 2000); }} />
+    <div style={{ backgroundColor: "#0F0F10", borderRadius: 10, border: "1px solid #2A2A2E", display: "flex", flexDirection: "column", paddingBlock: 16, paddingInline: 20, position: "relative", gap: 0, overflow: "hidden" }}>
+      <div style={{ position: "absolute", top: 12, right: 12, zIndex: 1 }}>
+        <CopyBtn text={full} copied={copied} step={step} onCopy={() => { navigator.clipboard.writeText(full); setCopied(true); setTimeout(() => setCopied(false), 2000); }} />
       </div>
-      {lines.map((line, i) => (
-        <div key={i} style={{ display: "flex", gap: 16, minHeight: 22 }}>
-          <span style={{ color: "#4A4A4F", fontFamily: '"Fira Code", "SF Mono", monospace', fontSize: 12, lineHeight: "22px", userSelect: "none", width: 20, textAlign: "right", flexShrink: 0 }}>{i + 1}</span>
-          <code style={{ fontFamily: '"Fira Code", "SF Mono", "Courier New", monospace', fontSize: 13.5, lineHeight: "22px", whiteSpace: "pre" }}>{colorizeLine(line)}</code>
-        </div>
-      ))}
+      <div style={{ overflowX: "auto" }}>
+        {lines.map((line, i) => (
+          <div key={i} style={{ display: "flex", gap: 16, minHeight: 22 }}>
+            <span style={{ color: "#4A4A4F", fontFamily: '"Fira Code", "SF Mono", monospace', fontSize: 12, lineHeight: "22px", userSelect: "none", width: 20, textAlign: "right", flexShrink: 0 }}>{i + 1}</span>
+            <code style={{ fontFamily: '"Fira Code", "SF Mono", "Courier New", monospace', fontSize: 13.5, lineHeight: "22px", whiteSpace: "pre" }}>{colorizeLine(line)}</code>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function TokenDisplay({ label, token }: { label: string; token: string }) {
+function TokenDisplay({ label, token, step }: { label: string; token: string; step?: string }) {
   const masked = token.length > 8 ? token.slice(0, 6) + "****" + token.slice(-4) : token || "sk-cog-****3f8a";
   const [copied, setCopied] = useState(false);
   return (
     <div style={{ alignItems: "center", backgroundColor: "#F4F4F5", borderRadius: 8, display: "flex", gap: 12, paddingBlock: 12, paddingInline: 16 }}>
       <span style={{ color: "#71717A", fontFamily: '"Inter", system-ui, sans-serif', fontSize: 13, flexShrink: 0 }}>{label}:</span>
       <span style={{ color: "#18181B", fontFamily: '"Fira Code", "Courier New", monospace', fontSize: 13 }}>{masked}</span>
-      <button onClick={() => { navigator.clipboard.writeText(token || masked); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="cursor-pointer" style={{ background: "none", border: "none", padding: 0, marginLeft: "auto", flexShrink: 0 }}>
+      <button onClick={() => { if (step) { trackEvent({ pageName: `Onboarding - ${step}`, eventName: "onboarding_code_copied", additionalProperties: { step: step.toLowerCase().replace(/ /g, "_"), snippet: (token || masked).slice(0, 30) } }); } navigator.clipboard.writeText(token || masked); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="cursor-pointer" style={{ background: "none", border: "none", padding: 0, marginLeft: "auto", flexShrink: 0 }}>
         {copied ? <span style={{ color: "#22C55E", fontSize: 11 }}>Copied</span> : (
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="#71717A" strokeWidth="1.5" /><path d="M11 3H4.5A1.5 1.5 0 003 4.5V11" stroke="#71717A" strokeWidth="1.5" strokeLinecap="round" /></svg>
         )}
@@ -129,14 +133,14 @@ function WaitingIndicator({ text }: { text: string }) {
   );
 }
 
-function NavButtons({ onBack, onContinue, continueDisabled }: { onBack: () => void; onContinue?: () => void; continueDisabled?: boolean }) {
+function NavButtons({ onBack, onContinue, continueDisabled, pageName }: { onBack: () => void; onContinue?: () => void; continueDisabled?: boolean; pageName?: string }) {
   return (
     <div style={{ display: "flex", gap: 12 }}>
-      <button onClick={onBack} className="cursor-pointer" style={{ alignItems: "center", borderColor: "#E4E4E7", borderRadius: 8, borderStyle: "solid", borderWidth: 1, background: "white", display: "flex", height: 40, justifyContent: "center", paddingInline: 20 }}>
+      <button onClick={() => { if (pageName) { trackEvent({ pageName, eventName: "onboarding_nav_back_clicked" }); } onBack(); }} className="cursor-pointer" style={{ alignItems: "center", borderColor: "#E4E4E7", borderRadius: 8, borderStyle: "solid", borderWidth: 1, background: "white", display: "flex", height: 40, justifyContent: "center", paddingInline: 20 }}>
         <span style={{ color: "#3F3F46", fontFamily: '"Inter", system-ui, sans-serif', fontSize: 13, fontWeight: 500 }}>Back</span>
       </button>
       {onContinue && (
-        <button onClick={onContinue} disabled={continueDisabled} className="cursor-pointer" style={{ alignItems: "center", backgroundColor: continueDisabled ? "#E4E4E7" : "#6510F4", borderRadius: 8, border: "none", display: "flex", height: 40, justifyContent: "center", paddingInline: 20, opacity: continueDisabled ? 0.6 : 1 }}>
+        <button onClick={() => { if (pageName) { trackEvent({ pageName, eventName: "onboarding_nav_continue_clicked" }); } onContinue(); }} disabled={continueDisabled} className="cursor-pointer" style={{ alignItems: "center", backgroundColor: continueDisabled ? "#E4E4E7" : "#6510F4", borderRadius: 8, border: "none", display: "flex", height: 40, justifyContent: "center", paddingInline: 20, opacity: continueDisabled ? 0.6 : 1 }}>
           <span style={{ color: continueDisabled ? "#A1A1AA" : "#FFFFFF", fontFamily: '"Inter", system-ui, sans-serif', fontSize: 13, fontWeight: 500 }}>Continue</span>
         </button>
       )}
@@ -144,9 +148,9 @@ function NavButtons({ onBack, onContinue, continueDisabled }: { onBack: () => vo
   );
 }
 
-function SkipLink({ onClick }: { onClick: () => void }) {
+function SkipLink({ onClick, pageName }: { onClick: () => void; pageName?: string }) {
   return (
-    <button onClick={onClick} className="cursor-pointer" style={{ background: "none", border: "none", color: "#9CA3AF", fontFamily: '"Inter", system-ui, sans-serif', fontSize: 13, paddingTop: 16 }}>
+    <button onClick={() => { if (pageName) { trackEvent({ pageName, eventName: "onboarding_skip_clicked" }); } onClick(); }} className="cursor-pointer" style={{ background: "none", border: "none", color: "#9CA3AF", fontFamily: '"Inter", system-ui, sans-serif', fontSize: 13, paddingTop: 16 }}>
       Skip onboarding and go to dashboard
     </button>
   );
@@ -154,27 +158,29 @@ function SkipLink({ onClick }: { onClick: () => void }) {
 
 // ── Connect Local Cognee SDK ──
 
-export function LocalCogneeStep({ onBack, onSkip }: { onBack: () => void; onSkip: () => void }) {
+export function LocalCogneeStep({ onBack, onSkip, standalone }: { onBack: () => void; onSkip: () => void; standalone?: boolean }) {
   const [connectMode, setConnectMode] = useState<"cloud" | "direct">("cloud");
 
   return (
-    <div style={{ alignItems: "center", display: "flex", flexDirection: "column", flexGrow: 1, gap: 32, paddingBlock: 48, paddingInline: 40, fontFamily: '"Inter", system-ui, sans-serif', overflowY: "auto" }}>
-      <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 8 }}>
-        <StepBadge step={1} />
-        <h1 style={{ color: "#18181B", fontSize: 28, fontWeight: 600, lineHeight: "34px", margin: 0 }}>Connect your local Cognee SDK</h1>
-        <p style={{ color: "#71717A", fontSize: 15, lineHeight: "22px", margin: 0, textAlign: "center", maxWidth: 540 }}>
-          Use <code style={{ background: "#F4F4F5", padding: "1px 6px", borderRadius: 4, fontSize: 13 }}>cognee.serve()</code> to link your local Python SDK to a remote Cognee instance. All operations (remember, recall, forget, improve) will route to the connected instance.
-        </p>
-      </div>
+    <div style={{ alignItems: "center", display: "flex", flexDirection: "column", flexGrow: 1, gap: standalone ? 16 : 32, paddingBlock: standalone ? 16 : 48, paddingInline: standalone ? 16 : 40, fontFamily: '"Inter", system-ui, sans-serif', overflowY: "auto" }}>
+      {!standalone && (
+        <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 8 }}>
+          <StepBadge step={1} />
+          <h1 style={{ color: "#18181B", fontSize: 28, fontWeight: 600, lineHeight: "34px", margin: 0 }}>Connect your local Cognee SDK</h1>
+          <p style={{ color: "#71717A", fontSize: 15, lineHeight: "22px", margin: 0, textAlign: "center", maxWidth: 540 }}>
+            Use <code style={{ background: "#F4F4F5", padding: "1px 6px", borderRadius: 4, fontSize: 13 }}>cognee.serve()</code> to link your local Python SDK to a remote Cognee instance. All operations (remember, recall, forget, improve) will route to the connected instance.
+          </p>
+        </div>
+      )}
 
-      <div style={{ backgroundColor: "#FFFFFF", borderColor: "#E4E4E7", borderRadius: 12, borderStyle: "solid", borderWidth: 1, display: "flex", flexDirection: "column", gap: 20, paddingBlock: 24, paddingInline: 24, width: 620 }}>
+      <div style={{ backgroundColor: "#FFFFFF", borderColor: standalone ? "transparent" : "#E4E4E7", borderRadius: standalone ? 0 : 12, borderStyle: "solid", borderWidth: standalone ? 0 : 1, display: "flex", flexDirection: "column", gap: 20, paddingBlock: 24, paddingInline: 24, width: "100%" }}>
 
         {/* Connection mode toggle */}
         <div style={{ display: "flex", gap: 0, borderRadius: 8, border: "1px solid #E4E4E7", overflow: "hidden" }}>
-          <button onClick={() => setConnectMode("cloud")} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: connectMode === "cloud" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: connectMode === "cloud" ? "#6510F4" : "#71717A", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
+          <button onClick={() => { trackEvent({ pageName: "Onboarding - Local Cognee", eventName: "local_cognee_mode_switched", additionalProperties: { mode: "cloud" } }); setConnectMode("cloud"); }} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: connectMode === "cloud" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: connectMode === "cloud" ? "#6510F4" : "#71717A", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
             Connect to Cognee Cloud
           </button>
-          <button onClick={() => setConnectMode("direct")} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: connectMode === "direct" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: connectMode === "direct" ? "#6510F4" : "#71717A", fontFamily: "inherit" }}>
+          <button onClick={() => { trackEvent({ pageName: "Onboarding - Local Cognee", eventName: "local_cognee_mode_switched", additionalProperties: { mode: "direct" } }); setConnectMode("direct"); }} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: connectMode === "direct" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: connectMode === "direct" ? "#6510F4" : "#71717A", fontFamily: "inherit" }}>
             Connect to any instance
           </button>
         </div>
@@ -184,7 +190,7 @@ export function LocalCogneeStep({ onBack, onSkip }: { onBack: () => void; onSkip
             {/* CLOUD: device code login */}
             <div style={{ display: "flex", gap: 10, background: "#F0EDFF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px" }}>
               <span style={{ fontSize: 12, color: "#52525B", lineHeight: "18px" }}>
-                <strong>One command.</strong> Cognee opens your browser for login, discovers your cloud tenant, creates an API key, and connects — all automatically. Your credentials are saved locally for future sessions.
+                Connect your local Cognee SDK to your cloud tenant using the API Base URL and key from the <a href="/api-keys" style={{ color: "#6510F4", textDecoration: "underline" }}>API Keys</a> page. All operations (remember, recall) will route to cloud.
               </span>
             </div>
 
@@ -192,39 +198,48 @@ export function LocalCogneeStep({ onBack, onSkip }: { onBack: () => void; onSkip
               <NumberCircle n={1} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Install Cognee</span>
             </div>
-            <CodeBlock>pip install cognee</CodeBlock>
+            <CodeBlock step="Local Cognee">pip install cognee</CodeBlock>
 
             <Divider />
 
             <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
               <NumberCircle n={2} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Connect to cloud</span>
+              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Get your API Base URL and API key</span>
             </div>
             <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
-              This opens a browser window for authentication. After login, your tenant is discovered automatically and the SDK connects to it.
+              Copy your API Base URL and API key from the API Keys page.
             </span>
-            <MultiLineCode lines={[
-              "import cognee",
-              "",
-              "await cognee.serve()  # Opens browser for login",
-              "# Connected to Cognee Cloud at https://tenant-xxx.cognee.ai",
-            ]} />
+            <Link
+              href="/api-keys"
+              onClick={() => trackEvent({ pageName: "Onboarding - Local Cognee", eventName: "local_go_to_api_keys" })}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#F0EDFF", color: "#6510F4", border: "1px solid #DDD6FE", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, textDecoration: "none", width: "fit-content" }}
+            >
+              Go to API Keys
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
+            </Link>
 
             <Divider />
 
             <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
               <NumberCircle n={3} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Use Cognee — everything routes to cloud</span>
+              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Connect and use Cognee</span>
             </div>
-            <MultiLineCode lines={[
-              "# Add data — ingested into your cloud tenant",
-              'await cognee.remember("Einstein developed general relativity in 1915.")',
+            <MultiLineCode step="Local Cognee" lines={[
+              "import asyncio",
+              "import cognee",
               "",
-              "# Search — queries your cloud knowledge graph",
-              'results = await cognee.recall("What did Einstein develop?")',
+              "async def main():",
+              '    await cognee.serve(',
+              '        url="<your-api-base-url>",',
+              '        api_key="<your-api-key>"',
+              "    )",
               "",
-              "# Disconnect when done (credentials saved for next time)",
-              "await cognee.disconnect()",
+              '    await cognee.remember("Einstein developed general relativity in 1915.", datasets=["default_dataset"])',
+              "",
+              '    results = await cognee.recall("What did Einstein develop?", datasets=["default_dataset"])',
+              "    print(results)",
+              "",
+              "asyncio.run(main())",
             ]} />
 
             <Divider />
@@ -232,7 +247,7 @@ export function LocalCogneeStep({ onBack, onSkip }: { onBack: () => void; onSkip
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ color: "#71717A", fontSize: 12, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>Re-connecting</span>
               <span style={{ color: "#A1A1AA", fontSize: 12, lineHeight: "18px" }}>
-                Credentials are saved at <code style={{ fontSize: 11 }}>~/.cognee/cloud_credentials.json</code>. Next time you call <code style={{ fontSize: 11 }}>cognee.serve()</code>, it reconnects instantly without re-authenticating (until the token expires).
+                Credentials are saved at <code style={{ fontSize: 11 }}>~/.cognee/cloud_credentials.json</code>. Subsequent <code style={{ fontSize: 11 }}>cognee.serve()</code> calls reconnect automatically.
               </span>
             </div>
           </>
@@ -249,7 +264,7 @@ export function LocalCogneeStep({ onBack, onSkip }: { onBack: () => void; onSkip
               <NumberCircle n={1} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Install Cognee</span>
             </div>
-            <CodeBlock>pip install cognee</CodeBlock>
+            <CodeBlock step="Local Cognee">pip install cognee</CodeBlock>
 
             <Divider />
 
@@ -257,36 +272,25 @@ export function LocalCogneeStep({ onBack, onSkip }: { onBack: () => void; onSkip
               <NumberCircle n={2} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Connect with URL and API key</span>
             </div>
-            <MultiLineCode lines={[
+            <MultiLineCode step="Local Cognee" lines={[
+              "import asyncio",
               "import cognee",
               "",
-              "# Connect to a specific instance",
-              'await cognee.serve(',
-              '    url="https://your-instance.cognee.ai",',
-              '    api_key="your-api-key"',
-              ")",
+              "async def main():",
+              "    # Connect to a specific instance",
+              '    await cognee.serve(',
+              '        url="https://your-instance.cognee.ai",',
+              '        api_key="your-api-key"',
+              "    )",
               "",
-              "# Or use environment variables",
-              "# COGNEE_SERVICE_URL=https://your-instance.cognee.ai",
-              "# COGNEE_API_KEY=your-api-key",
-              "await cognee.serve()  # Reads from env",
-            ]} />
-
-            <Divider />
-
-            <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
-              <NumberCircle n={3} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Use Cognee — everything routes to the instance</span>
-            </div>
-            <MultiLineCode lines={[
-              '# Add and process data on the remote instance',
-              'await cognee.remember("Your data here", dataset_name="my_project")',
+              "    # Add and process data on the remote instance",
+              '    await cognee.remember("Your data here", datasets=["default_dataset"])',
               "",
-              '# Query the remote knowledge graph',
-              'results = await cognee.recall("What do we know about X?")',
+              "    # Query the remote knowledge graph",
+              '    results = await cognee.recall("What do we know about X?", datasets=["default_dataset"])',
+              "    print(results)",
               "",
-              "# Disconnect",
-              "await cognee.disconnect()",
+              "asyncio.run(main())",
             ]} />
 
             <Divider />
@@ -296,7 +300,8 @@ export function LocalCogneeStep({ onBack, onSkip }: { onBack: () => void; onSkip
               <span style={{ color: "#A1A1AA", fontSize: 12, lineHeight: "18px" }}>
                 To connect to a Cognee backend running on the same machine or your local network:
               </span>
-              <MultiLineCode lines={[
+              <MultiLineCode step="Local Cognee" lines={[
+                "# Inside an async function:",
                 '# Same machine',
                 'await cognee.serve(url="http://localhost:8000")',
                 "",
@@ -308,37 +313,142 @@ export function LocalCogneeStep({ onBack, onSkip }: { onBack: () => void; onSkip
         )}
       </div>
 
-      <NavButtons onBack={onBack} continueDisabled={false} onContinue={onSkip} />
+      {!standalone && <NavButtons onBack={onBack} continueDisabled={false} onContinue={onSkip} pageName="Onboarding - Local Cognee" />}
     </div>
+  );
+}
+
+// ── MCP Server Content (Local / Cloud toggle) ──
+
+function McpServerContent() {
+  const [mcpMode, setMcpMode] = useState<"local" | "cloud">("local");
+
+  return (
+    <>
+      <div style={{ display: "flex", gap: 10, background: "#F0EDFF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px" }}>
+        <span style={{ fontSize: 12, color: "#52525B", lineHeight: "18px" }}>
+          Cognee runs as an <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener noreferrer" style={{ color: "#6510F4", textDecoration: "underline" }} onClick={() => trackEvent({ pageName: "Onboarding - Agent", eventName: "click_out", additionalProperties: { target_url: "https://modelcontextprotocol.io" } })}>MCP (Model Context Protocol)</a> server. Any MCP-compatible client (Claude Desktop, Cursor, VS Code Copilot, etc.) can connect to it as a tool provider.
+        </span>
+      </div>
+
+      {/* Local / Cloud toggle */}
+      <div style={{ display: "flex", gap: 0, borderRadius: 8, border: "1px solid #E4E4E7", overflow: "hidden" }}>
+        <button onClick={() => { trackEvent({ pageName: "Onboarding - Agent", eventName: "mcp_mode_switched", additionalProperties: { mode: "local" } }); setMcpMode("local"); }} className="cursor-pointer" style={{ flex: 1, padding: "8px 16px", background: mcpMode === "local" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: mcpMode === "local" ? "#6510F4" : "#71717A", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
+          Local
+        </button>
+        <button onClick={() => { trackEvent({ pageName: "Onboarding - Agent", eventName: "mcp_mode_switched", additionalProperties: { mode: "cloud" } }); setMcpMode("cloud"); }} className="cursor-pointer" style={{ flex: 1, padding: "8px 16px", background: mcpMode === "cloud" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: mcpMode === "cloud" ? "#6510F4" : "#71717A", fontFamily: "inherit" }}>
+          Cloud
+        </button>
+      </div>
+
+      <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
+        <NumberCircle n={1} />
+        <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Start the MCP server</span>
+      </div>
+
+      {mcpMode === "local" ? (
+        <>
+          <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
+            The MCP server starts automatically with <code style={{ fontSize: 11 }}>cognee -ui</code>, or run it standalone:
+          </span>
+          <CodeBlock step="Agent">cognee-mcp --transport sse --port 8001</CodeBlock>
+          <div style={{ display: "flex", gap: 8, background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 14px", alignItems: "flex-start" }}>
+            <span style={{ fontSize: 16, flexShrink: 0 }}>&#9888;</span>
+            <span style={{ fontSize: 12, color: "#92400E", lineHeight: "18px" }}>
+              Local mode requires an LLM API key. Set it as an environment variable before starting:<br />
+              <code style={{ fontSize: 11, background: "#FDE68A", padding: "1px 4px", borderRadius: 3 }}>LLM_API_KEY=sk-... cognee-mcp --transport sse --port 8001</code>
+            </span>
+          </div>
+        </>
+      ) : (
+        <>
+          <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
+            Connect the MCP server to Cognee Cloud. Use your API Base URL and API key from the <Link href="/api-keys" style={{ color: "#6510F4", textDecoration: "underline" }} onClick={() => trackEvent({ pageName: "Onboarding - Agent", eventName: "mcp_go_to_api_keys" })}>API Keys</Link> page.
+          </span>
+          <MultiLineCode step="Agent" lines={[
+            'cognee-mcp --transport sse --port 8001 \\',
+            '  --serve-url https://your-instance.cognee.ai \\',
+            '  --serve-api-key ck_your_api_key',
+          ]} />
+        </>
+      )}
+
+      <Divider />
+
+      <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
+        <NumberCircle n={2} />
+        <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Add to your MCP client config</span>
+      </div>
+      <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
+        Add Cognee as a tool server in your MCP client&apos;s configuration:
+      </span>
+      <MultiLineCode step="Agent" lines={[
+        '{',
+        '  "mcpServers": {',
+        '    "cognee": {',
+        '      "url": "http://localhost:8001/sse"',
+        '    }',
+        '  }',
+        '}',
+      ]} />
+
+      <Divider />
+
+      <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
+        <NumberCircle n={3} />
+        <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Available tools</span>
+      </div>
+      <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
+        Once connected, your MCP client gets these tools:
+      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {[
+          { tool: "remember", desc: "Store data in memory (add + cognify in one step)" },
+          { tool: "recall", desc: "Search memory with auto-routing" },
+          { tool: "cognify", desc: "Build the knowledge graph from ingested data" },
+          { tool: "search", desc: "Query the knowledge graph with different search types" },
+          { tool: "improve", desc: "Enrich the knowledge graph and bridge session data" },
+          { tool: "forget_memory", desc: "Delete data from memory" },
+          { tool: "list_data", desc: "List datasets and their contents" },
+        ].map((t) => (
+          <div key={t.tool} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
+            <code style={{ background: "#F4F4F5", padding: "2px 8px", borderRadius: 4, fontSize: 12, color: "#6510F4", fontWeight: 500 }}>{t.tool}</code>
+            <span style={{ fontSize: 12, color: "#71717A" }}>{t.desc}</span>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
 // ── Agent Connection ──
 
-export function AgentStep({ onBack, onSkip }: { onBack: () => void; onSkip: () => void }) {
+export function AgentStep({ onBack, onSkip, standalone }: { onBack: () => void; onSkip: () => void; standalone?: boolean }) {
   const [method, setMethod] = useState<"sdk" | "mcp" | "api">("sdk");
 
   return (
-    <div style={{ alignItems: "center", display: "flex", flexDirection: "column", flexGrow: 1, gap: 32, paddingBlock: 48, paddingInline: 40, fontFamily: '"Inter", system-ui, sans-serif', overflowY: "auto" }}>
-      <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 8 }}>
-        <StepBadge step={1} />
-        <h1 style={{ color: "#18181B", fontSize: 28, fontWeight: 600, lineHeight: "34px", margin: 0 }}>Connect your Agent</h1>
-        <p style={{ color: "#71717A", fontSize: 15, lineHeight: "22px", margin: 0, textAlign: "center", maxWidth: 520 }}>
-          Give any agent memory by connecting it to Cognee. Choose how your agent should integrate.
-        </p>
-      </div>
+    <div style={{ alignItems: "center", display: "flex", flexDirection: "column", flexGrow: 1, gap: standalone ? 16 : 32, paddingBlock: standalone ? 16 : 48, paddingInline: standalone ? 16 : 40, fontFamily: '"Inter", system-ui, sans-serif', overflowY: "auto" }}>
+      {!standalone && (
+        <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 8 }}>
+          <StepBadge step={1} />
+          <h1 style={{ color: "#18181B", fontSize: 28, fontWeight: 600, lineHeight: "34px", margin: 0 }}>Connect your Agent</h1>
+          <p style={{ color: "#71717A", fontSize: 15, lineHeight: "22px", margin: 0, textAlign: "center", maxWidth: 520 }}>
+            Give any agent memory by connecting it to Cognee. Choose how your agent should integrate.
+          </p>
+        </div>
+      )}
 
-      <div style={{ backgroundColor: "#FFFFFF", borderColor: "#E4E4E7", borderRadius: 12, borderStyle: "solid", borderWidth: 1, display: "flex", flexDirection: "column", gap: 20, paddingBlock: 24, paddingInline: 24, width: 620 }}>
+      <div style={{ backgroundColor: "#FFFFFF", borderColor: standalone ? "transparent" : "#E4E4E7", borderRadius: standalone ? 0 : 12, borderStyle: "solid", borderWidth: standalone ? 0 : 1, display: "flex", flexDirection: "column", gap: 20, paddingBlock: 24, paddingInline: 24, width: "100%" }}>
 
         {/* Method tabs */}
         <div style={{ display: "flex", gap: 0, borderRadius: 8, border: "1px solid #E4E4E7", overflow: "hidden" }}>
-          <button onClick={() => setMethod("sdk")} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: method === "sdk" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: method === "sdk" ? "#6510F4" : "#71717A", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
+          <button onClick={() => { trackEvent({ pageName: "Onboarding - Agent", eventName: "agent_method_switched", additionalProperties: { method: "sdk" } }); setMethod("sdk"); }} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: method === "sdk" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: method === "sdk" ? "#6510F4" : "#71717A", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
             Python SDK
           </button>
-          <button onClick={() => setMethod("mcp")} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: method === "mcp" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: method === "mcp" ? "#6510F4" : "#71717A", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
+          <button onClick={() => { trackEvent({ pageName: "Onboarding - Agent", eventName: "agent_method_switched", additionalProperties: { method: "mcp" } }); setMethod("mcp"); }} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: method === "mcp" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: method === "mcp" ? "#6510F4" : "#71717A", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
             MCP Server
           </button>
-          <button onClick={() => setMethod("api")} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: method === "api" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: method === "api" ? "#6510F4" : "#71717A", fontFamily: "inherit" }}>
+          <button onClick={() => { trackEvent({ pageName: "Onboarding - Agent", eventName: "agent_method_switched", additionalProperties: { method: "api" } }); setMethod("api"); }} className="cursor-pointer" style={{ flex: 1, padding: "10px 16px", background: method === "api" ? "#F0EDFF" : "#fff", border: "none", fontSize: 13, fontWeight: 500, color: method === "api" ? "#6510F4" : "#71717A", fontFamily: "inherit" }}>
             REST API
           </button>
         </div>
@@ -348,7 +458,7 @@ export function AgentStep({ onBack, onSkip }: { onBack: () => void; onSkip: () =
           <>
             <div style={{ display: "flex", gap: 10, background: "#F0EDFF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px" }}>
               <span style={{ fontSize: 12, color: "#52525B", lineHeight: "18px" }}>
-                The Cognee Python SDK works with any agent framework. Use <code style={{ background: "#E4DEFF", padding: "1px 4px", borderRadius: 3, fontSize: 11 }}>cognee.serve()</code> to connect, then <code style={{ background: "#E4DEFF", padding: "1px 4px", borderRadius: 3, fontSize: 11 }}>remember</code> / <code style={{ background: "#E4DEFF", padding: "1px 4px", borderRadius: 3, fontSize: 11 }}>recall</code> from your agent code.
+                The Cognee Python SDK works with any agent framework. Use <code style={{ background: "#E4DEFF", padding: "1px 4px", borderRadius: 3, fontSize: 11 }}>cognee.serve(url, api_key)</code> to connect, then <code style={{ background: "#E4DEFF", padding: "1px 4px", borderRadius: 3, fontSize: 11 }}>remember</code> / <code style={{ background: "#E4DEFF", padding: "1px 4px", borderRadius: 3, fontSize: 11 }}>recall</code> from your agent code.
               </span>
             </div>
 
@@ -356,30 +466,36 @@ export function AgentStep({ onBack, onSkip }: { onBack: () => void; onSkip: () =
               <NumberCircle n={1} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Install Cognee</span>
             </div>
-            <CodeBlock>pip install cognee</CodeBlock>
+            <CodeBlock step="Agent">pip install cognee</CodeBlock>
 
             <Divider />
 
             <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
               <NumberCircle n={2} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Connect and give your agent memory</span>
+              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Connect your agent</span>
             </div>
-            <MultiLineCode lines={[
+            <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
+              Use your API Base URL and API key from the <Link href="/api-keys" style={{ color: "#6510F4", textDecoration: "underline" }} onClick={() => trackEvent({ pageName: "Onboarding - Agent", eventName: "agent_go_to_api_keys" })}>API Keys</Link> page.
+            </span>
+            <MultiLineCode step="Agent" lines={[
+              "import asyncio",
               "import cognee",
               "",
-              "# Connect to Cognee (cloud or self-hosted)",
-              "await cognee.serve()  # Cloud: browser login",
-              '# await cognee.serve(url="http://localhost:8000")  # Local',
+              "async def main():",
+              "    await cognee.serve(",
+              '        url="<your-api-base-url>",',
+              '        api_key="<your-api-key>"',
+              "    )",
               "",
-              "# Store knowledge from your agent",
-              'await cognee.remember("User prefers dark mode and concise answers.")',
+              "    # Store knowledge from your agent",
+              '    await cognee.remember("User prefers dark mode and concise answers.", datasets=["default_dataset"])',
               "",
-              "# Retrieve relevant context for your agent",
-              'results = await cognee.recall("What are the user preferences?")',
+              "    # Retrieve relevant context for your agent",
+              '    results = await cognee.recall("What are the user preferences?", datasets=["default_dataset"])',
+              "    for item in results:",
+              '        print(item["search_result"])',
               "",
-              "# Use results in your agent's prompt/context",
-              "for item in results:",
-              '    print(item["search_result"])',
+              "asyncio.run(main())",
             ]} />
 
             <Divider />
@@ -395,64 +511,7 @@ export function AgentStep({ onBack, onSkip }: { onBack: () => void; onSkip: () =
 
         {/* ── MCP Server ── */}
         {method === "mcp" && (
-          <>
-            <div style={{ display: "flex", gap: 10, background: "#F0EDFF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px" }}>
-              <span style={{ fontSize: 12, color: "#52525B", lineHeight: "18px" }}>
-                Cognee runs as an <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener noreferrer" style={{ color: "#6510F4", textDecoration: "underline" }}>MCP (Model Context Protocol)</a> server. Any MCP-compatible client (Claude Desktop, Cursor, VS Code Copilot, etc.) can connect to it as a tool provider.
-              </span>
-            </div>
-
-            <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
-              <NumberCircle n={1} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Start the MCP server</span>
-            </div>
-            <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
-              The MCP server starts automatically with <code style={{ fontSize: 11 }}>cognee -ui</code>, or run it standalone:
-            </span>
-            <CodeBlock>cognee mcp --transport sse --port 8001</CodeBlock>
-
-            <Divider />
-
-            <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
-              <NumberCircle n={2} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Add to your MCP client config</span>
-            </div>
-            <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
-              Add Cognee as a tool server in your MCP client's configuration:
-            </span>
-            <MultiLineCode lines={[
-              '{',
-              '  "mcpServers": {',
-              '    "cognee": {',
-              '      "url": "http://localhost:8001/sse"',
-              '    }',
-              '  }',
-              '}',
-            ]} />
-
-            <Divider />
-
-            <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
-              <NumberCircle n={3} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Available tools</span>
-            </div>
-            <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
-              Once connected, your MCP client gets these tools:
-            </span>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {[
-                { tool: "cognee_add", desc: "Ingest text or files into a dataset" },
-                { tool: "cognee_cognify", desc: "Build the knowledge graph" },
-                { tool: "cognee_search", desc: "Query the knowledge graph" },
-                { tool: "cognee_get_datasets", desc: "List available datasets" },
-              ].map((t) => (
-                <div key={t.tool} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
-                  <code style={{ background: "#F4F4F5", padding: "2px 8px", borderRadius: 4, fontSize: 12, color: "#6510F4", fontWeight: 500 }}>{t.tool}</code>
-                  <span style={{ fontSize: 12, color: "#71717A" }}>{t.desc}</span>
-                </div>
-              ))}
-            </div>
-          </>
+          <McpServerContent />
         )}
 
         {/* ── REST API ── */}
@@ -460,57 +519,53 @@ export function AgentStep({ onBack, onSkip }: { onBack: () => void; onSkip: () =
           <>
             <div style={{ display: "flex", gap: 10, background: "#F0EDFF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px" }}>
               <span style={{ fontSize: 12, color: "#52525B", lineHeight: "18px" }}>
-                Use the REST API directly from any language or framework. Authenticate with an API key and call the endpoints.
+                Use the REST API directly from any language or framework. Create an API key, then use it to call the endpoints.
               </span>
             </div>
 
             <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
               <NumberCircle n={1} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Get your API key</span>
+              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Create an API key</span>
             </div>
             <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
-              Create an API key from the <a href="/api-keys" style={{ color: "#6510F4", textDecoration: "underline" }}>API Keys</a> page, or register your agent programmatically:
+              Use the <Link href="/api-keys" style={{ color: "#6510F4", textDecoration: "underline" }}>API Keys</Link> page to create a key, or call the local backend endpoint directly.
             </span>
-            <MultiLineCode lines={[
-              "# Register an agent user",
-              'curl -X POST http://localhost:8000/api/v1/auth/register \\',
+            <div style={{ display: "flex", gap: 8, background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 14px", alignItems: "flex-start" }}>
+              <span style={{ fontSize: 16, flexShrink: 0 }}>&#9888;</span>
+              <span style={{ fontSize: 12, color: "#92400E", lineHeight: "18px" }}>
+                Newly created API keys are only shown once in the response. Copy and store them securely.
+              </span>
+            </div>
+            <MultiLineCode step="Agent" lines={[
+              "# Create an API key",
+              'curl -X POST "<your-api-base-url>/api/v1/auth/api-keys" \\',
               '  -H "Content-Type: application/json" \\',
-              '  -d \'{"email": "MyAgent-001@cognee.agent",',
-              '       "password": "secret", "is_verified": true}\'',
+              '  -d \'{"name": "MyAgent"}\'',
               "",
-              "# Login and get a token",
-              'curl -X POST http://localhost:8000/api/v1/auth/login \\',
-              '  -d "username=MyAgent-001@cognee.agent&password=secret"',
-              "",
-              "# Create an API key (use the token from login)",
-              'curl -X POST http://localhost:8000/api/v1/auth/api-keys \\',
-              '  -H "Authorization: Bearer <token>" \\',
-              '  -H "Content-Type: application/json" \\',
-              '  -d \'{"name": "MyAgent-001"}\'',
+              "# List your API keys",
+              'curl "<your-api-base-url>/api/v1/auth/api-keys" \\',
+              '  -H "X-Api-Key: <your-api-key>"',
             ]} />
 
             <Divider />
 
             <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
               <NumberCircle n={2} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Add data and query</span>
+              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Store and retrieve knowledge</span>
             </div>
-            <MultiLineCode lines={[
-              "# Add data",
-              'curl -X POST http://localhost:8000/api/v1/add \\',
-              '  -H "X-Api-Key: <your-key>" \\',
+            <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
+              Use the API key to store and query knowledge.
+            </span>
+            <MultiLineCode step="Agent" lines={[
+              "# Remember — store knowledge",
+              'curl -X POST "<your-api-base-url>/api/v1/remember" \\',
+              '  -H "X-Api-Key: <api-key>" \\',
               '  -F "data=@document.pdf" \\',
               '  -F "datasetName=my_agent_data"',
               "",
-              "# Build knowledge graph",
-              'curl -X POST http://localhost:8000/api/v1/cognify \\',
-              '  -H "X-Api-Key: <your-key>" \\',
-              '  -H "Content-Type: application/json" \\',
-              '  -d \'{"datasets": ["my_agent_data"]}\'',
-              "",
-              "# Search",
-              'curl -X POST http://localhost:8000/api/v1/search \\',
-              '  -H "X-Api-Key: <your-key>" \\',
+              "# Recall — query the knowledge graph",
+              'curl -X POST "<your-api-base-url>/api/v1/recall" \\',
+              '  -H "X-Api-Key: <api-key>" \\',
               '  -H "Content-Type: application/json" \\',
               '  -d \'{"query": "What do we know?"}\'',
             ]} />
@@ -518,7 +573,7 @@ export function AgentStep({ onBack, onSkip }: { onBack: () => void; onSkip: () =
         )}
       </div>
 
-      <NavButtons onBack={onBack} continueDisabled={false} onContinue={onSkip} />
+      {!standalone && <NavButtons onBack={onBack} continueDisabled={false} onContinue={onSkip} pageName="Onboarding - Agent" />}
     </div>
   );
 }
@@ -643,7 +698,7 @@ function SourceCategoryTab({ label, active, onClick }: { label: string; active: 
   );
 }
 
-export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: () => void }) {
+export function DatabaseStep({ onBack, onSkip, standalone }: { onBack: () => void; onSkip: () => void; standalone?: boolean }) {
   const [category, setCategory] = useState<SourceCategory>("database");
   const [dbType, setDbType] = useState("PostgreSQL");
   const [saasSource, setSaasSource] = useState(SAAS_SOURCES[0].name);
@@ -653,30 +708,32 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
   const saasConfig = SAAS_SOURCES.find((s) => s.name === saasSource) || SAAS_SOURCES[0];
 
   return (
-    <div style={{ alignItems: "center", display: "flex", flexDirection: "column", flexGrow: 1, gap: 32, paddingBlock: 48, paddingInline: 40, fontFamily: '"Inter", system-ui, sans-serif', overflowY: "auto" }}>
-      <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 8 }}>
-        <StepBadge step={1} />
-        <h1 style={{ color: "#18181B", fontSize: 28, fontWeight: 600, lineHeight: "34px", margin: 0 }}>Ingest from Any Source</h1>
-        <p style={{ color: "#71717A", fontSize: 15, lineHeight: "22px", margin: 0, textAlign: "center", maxWidth: 560 }}>
-          Cognee uses <a href="https://dlthub.com" target="_blank" rel="noopener noreferrer" style={{ color: "#6510F4", textDecoration: "underline" }}>dlt (data load tool)</a> to connect to databases, SaaS platforms, and APIs. Data is extracted, loaded into a knowledge graph with schema and relationships preserved, and made searchable.
-        </p>
-      </div>
+    <div style={{ alignItems: "center", display: "flex", flexDirection: "column", flexGrow: 1, gap: standalone ? 16 : 32, paddingBlock: standalone ? 16 : 48, paddingInline: standalone ? 16 : 40, fontFamily: '"Inter", system-ui, sans-serif', overflowY: "auto" }}>
+      {!standalone && (
+        <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 8 }}>
+          <StepBadge step={1} />
+          <h1 style={{ color: "#18181B", fontSize: 28, fontWeight: 600, lineHeight: "34px", margin: 0 }}>Ingest from Any Source</h1>
+          <p style={{ color: "#71717A", fontSize: 15, lineHeight: "22px", margin: 0, textAlign: "center", maxWidth: 560 }}>
+            Cognee uses <a href="https://dlthub.com" target="_blank" rel="noopener noreferrer" style={{ color: "#6510F4", textDecoration: "underline" }} onClick={() => trackEvent({ pageName: "Onboarding - Database", eventName: "click_out", additionalProperties: { target_url: "https://dlthub.com" } })}>dlt (data load tool)</a> to connect to databases, SaaS platforms, and APIs. Data is extracted, loaded into a knowledge graph with schema and relationships preserved, and made searchable.
+          </p>
+        </div>
+      )}
 
-      <div style={{ backgroundColor: "#FFFFFF", borderColor: "#E4E4E7", borderRadius: 12, borderStyle: "solid", borderWidth: 1, display: "flex", flexDirection: "column", gap: 20, paddingBlock: 24, paddingInline: 24, width: 640 }}>
+      <div style={{ backgroundColor: "#FFFFFF", borderColor: standalone ? "transparent" : "#E4E4E7", borderRadius: standalone ? 0 : 12, borderStyle: "solid", borderWidth: standalone ? 0 : 1, display: "flex", flexDirection: "column", gap: 20, paddingBlock: 24, paddingInline: 24, width: "100%" }}>
 
         {/* Source category tabs */}
         <div style={{ display: "flex", gap: 0, borderRadius: 8, border: "1px solid #E4E4E7", overflow: "hidden" }}>
-          <SourceCategoryTab label="Databases" active={category === "database"} onClick={() => setCategory("database")} />
-          <SourceCategoryTab label="SaaS & APIs" active={category === "saas"} onClick={() => setCategory("saas")} />
-          <SourceCategoryTab label="Files & CSV" active={category === "files"} onClick={() => setCategory("files")} />
+          <SourceCategoryTab label="Databases" active={category === "database"} onClick={() => { trackEvent({ pageName: "Onboarding - Database", eventName: "database_category_switched", additionalProperties: { category: "database" } }); setCategory("database"); }} />
+          <SourceCategoryTab label="SaaS & APIs" active={category === "saas"} onClick={() => { trackEvent({ pageName: "Onboarding - Database", eventName: "database_category_switched", additionalProperties: { category: "saas" } }); setCategory("saas"); }} />
+          <SourceCategoryTab label="Files & CSV" active={category === "files"} onClick={() => { trackEvent({ pageName: "Onboarding - Database", eventName: "database_category_switched", additionalProperties: { category: "files" } }); setCategory("files"); }} />
         </div>
 
         {/* Mode toggle */}
         <div style={{ display: "flex", gap: 0, borderRadius: 8, border: "1px solid #E4E4E7", overflow: "hidden" }}>
-          <button onClick={() => setMode("local")} className="cursor-pointer" style={{ flex: 1, padding: "8px 14px", background: mode === "local" ? "#F4F4F5" : "#fff", border: "none", fontSize: 12, fontWeight: 500, color: mode === "local" ? "#18181B" : "#A1A1AA", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
+          <button onClick={() => { trackEvent({ pageName: "Onboarding - Database", eventName: "database_mode_switched", additionalProperties: { mode: "local" } }); setMode("local"); }} className="cursor-pointer" style={{ flex: 1, padding: "8px 14px", background: mode === "local" ? "#F4F4F5" : "#fff", border: "none", fontSize: 12, fontWeight: 500, color: mode === "local" ? "#18181B" : "#A1A1AA", fontFamily: "inherit", borderRight: "1px solid #E4E4E7" }}>
             Local / Self-hosted
           </button>
-          <button onClick={() => setMode("cloud")} className="cursor-pointer" style={{ flex: 1, padding: "8px 14px", background: mode === "cloud" ? "#F4F4F5" : "#fff", border: "none", fontSize: 12, fontWeight: 500, color: mode === "cloud" ? "#18181B" : "#A1A1AA", fontFamily: "inherit" }}>
+          <button onClick={() => { trackEvent({ pageName: "Onboarding - Database", eventName: "database_mode_switched", additionalProperties: { mode: "cloud" } }); setMode("cloud"); }} className="cursor-pointer" style={{ flex: 1, padding: "8px 14px", background: mode === "cloud" ? "#F4F4F5" : "#fff", border: "none", fontSize: 12, fontWeight: 500, color: mode === "cloud" ? "#18181B" : "#A1A1AA", fontFamily: "inherit" }}>
             Cognee Cloud
           </button>
         </div>
@@ -687,7 +744,7 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
               <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             <span style={{ fontSize: 12, color: "#92400E", lineHeight: "18px" }}>
-              For cloud, the Cognee SDK runs locally to access your data sources, then pushes extracted data to your cloud tenant. Run <code style={{ background: "#FEF3C7", fontSize: 11 }}>await cognee.serve()</code> first to connect.
+              For cloud, the Cognee SDK runs locally to access your data sources, then pushes extracted data to your cloud tenant. Call <code style={{ background: "#FEF3C7", fontSize: 11 }}>cognee.serve(url, api_key)</code> first to connect.
             </span>
           </div>
         )}
@@ -699,7 +756,7 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
           <>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <span style={{ color: "#71717A", fontSize: 12, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>Database type</span>
-              <select value={dbType} onChange={(e) => setDbType(e.target.value)} style={{ backgroundColor: "#fff", borderColor: "#E4E4E7", borderRadius: 8, borderStyle: "solid", borderWidth: 1, height: 38, paddingInline: 14, fontSize: 13, fontWeight: 500, color: "#18181B", outline: "none" }}>
+              <select value={dbType} onChange={(e) => { trackEvent({ pageName: "Onboarding - Database", eventName: "database_type_selected", additionalProperties: { db_type: e.target.value } }); setDbType(e.target.value); }} style={{ backgroundColor: "#fff", borderColor: "#E4E4E7", borderRadius: 8, borderStyle: "solid", borderWidth: 1, height: 38, paddingInline: 14, fontSize: 13, fontWeight: 500, color: "#18181B", outline: "none" }}>
                 {Object.keys(DB_CONFIGS).map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
@@ -714,19 +771,33 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
               <NumberCircle n={1} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Install and ingest</span>
             </div>
-            <MultiLineCode lines={[
+            <MultiLineCode step="Database" lines={[
               '# Install DLT support',
               'pip install "cognee[dlt]"',
-              "",
+            ]} />
+            <MultiLineCode step="Database" lines={[
+              "import asyncio",
               "import cognee",
-              ...(mode === "cloud" ? ['await cognee.serve()  # Connect to cloud first', ""] : []),
-              `await cognee.remember("${dbConfig.example}", dataset_name="my_db")`,
+              "",
+              "async def main():",
+              ...(mode === "cloud" ? [
+                '    # Connect to cloud first',
+                '    await cognee.serve(',
+                '        url="https://api.aws.cognee.ai",',
+                '        api_key="your-api-key"',
+                "    )",
+                "",
+              ] : []),
+              `    await cognee.remember("${dbConfig.example}", datasets=["default_dataset"])`,
+              "",
+              "asyncio.run(main())",
             ]} />
 
             <Divider />
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ color: "#71717A", fontSize: 12, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>Optional: filter with SQL</span>
-              <MultiLineCode lines={[
+              <MultiLineCode step="Database" lines={[
+                "# Inside an async function:",
                 "await cognee.add(",
                 `    "${dbConfig.example}",`,
                 '    query="SELECT * FROM orders WHERE status = \'active\'"',
@@ -743,7 +814,7 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
               <span style={{ color: "#71717A", fontSize: 12, fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>Data source</span>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {SAAS_SOURCES.map((s) => (
-                  <button key={s.name} onClick={() => setSaasSource(s.name)} className="cursor-pointer" style={{
+                  <button key={s.name} onClick={() => { trackEvent({ pageName: "Onboarding - Database", eventName: "saas_source_selected", additionalProperties: { source: s.name } }); setSaasSource(s.name); }} className="cursor-pointer" style={{
                     padding: "6px 14px", borderRadius: 6, fontSize: 13, fontWeight: 500, fontFamily: "inherit",
                     background: saasSource === s.name ? "#F0EDFF" : "#fff",
                     border: saasSource === s.name ? "1px solid #DDD6FE" : "1px solid #E4E4E7",
@@ -765,7 +836,7 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
               <NumberCircle n={1} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Install</span>
             </div>
-            <CodeBlock>{saasConfig.install}</CodeBlock>
+            <CodeBlock step="Database">{saasConfig.install}</CodeBlock>
 
             <Divider />
 
@@ -773,11 +844,22 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
               <NumberCircle n={2} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Create source and ingest</span>
             </div>
-            <MultiLineCode lines={[
+            <MultiLineCode step="Database" lines={[
+              "import asyncio",
               "import cognee",
-              ...(mode === "cloud" ? ["await cognee.serve()  # Connect to cloud", ""] : []),
-              ...saasConfig.code,
-              'await cognee.cognify()  # Build knowledge graph',
+              "",
+              "async def main():",
+              ...(mode === "cloud" ? [
+                '    await cognee.serve(',
+                '        url="https://api.aws.cognee.ai",',
+                '        api_key="your-api-key"',
+                "    )",
+                "",
+              ] : []),
+              ...saasConfig.code.map((l: string) => `    ${l}`),
+              '    await cognee.cognify()  # Build knowledge graph',
+              "",
+              "asyncio.run(main())",
             ]} />
           </>
         )}
@@ -795,18 +877,29 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
               <NumberCircle n={1} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Documents (PDF, DOCX, TXT, MD)</span>
             </div>
-            <MultiLineCode lines={[
+            <MultiLineCode step="Database" lines={[
+              "import asyncio",
               "import cognee",
-              ...(mode === "cloud" ? ["await cognee.serve()", ""] : []),
-              '# Single file',
-              'await cognee.remember("/path/to/report.pdf")',
               "",
-              "# Multiple files",
-              "await cognee.remember([",
-              '    "/path/to/doc1.pdf",',
-              '    "/path/to/doc2.docx",',
-              '    "Some inline text content",',
-              "])",
+              "async def main():",
+              ...(mode === "cloud" ? [
+                '    await cognee.serve(',
+                '        url="https://api.aws.cognee.ai",',
+                '        api_key="your-api-key"',
+                "    )",
+                "",
+              ] : []),
+              '    # Single file',
+              '    await cognee.remember("/path/to/report.pdf", datasets=["default_dataset"])',
+              "",
+              "    # Multiple files",
+              "    await cognee.remember([",
+              '        "/path/to/doc1.pdf",',
+              '        "/path/to/doc2.docx",',
+              '        "Some inline text content",',
+              '    ], datasets=["default_dataset"])',
+              "",
+              "asyncio.run(main())",
             ]} />
 
             <Divider />
@@ -818,9 +911,9 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
             <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
               CSV files are auto-detected and ingested as structured tables with column types and relationships preserved.
             </span>
-            <MultiLineCode lines={[
-              '# Auto-detected as structured data',
-              'await cognee.remember("/path/to/data.csv", dataset_name="sales")',
+            <MultiLineCode step="Database" lines={[
+              "# Inside an async function:",
+              'await cognee.remember("/path/to/data.csv", datasets=["default_dataset"])',
             ]} />
 
             <Divider />
@@ -829,15 +922,15 @@ export function DatabaseStep({ onBack, onSkip }: { onBack: () => void; onSkip: (
               <NumberCircle n={3} />
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Cloud storage (S3, GCS)</span>
             </div>
-            <MultiLineCode lines={[
-              '# S3 path',
-              'await cognee.remember("s3://my-bucket/documents/report.pdf")',
+            <MultiLineCode step="Database" lines={[
+              "# Inside an async function:",
+              'await cognee.remember("s3://my-bucket/documents/report.pdf", datasets=["default_dataset"])',
             ]} />
           </>
         )}
       </div>
 
-      <NavButtons onBack={onBack} continueDisabled={false} onContinue={onSkip} />
+      {!standalone && <NavButtons onBack={onBack} continueDisabled={false} onContinue={onSkip} pageName="Onboarding - Database" />}
     </div>
   );
 }

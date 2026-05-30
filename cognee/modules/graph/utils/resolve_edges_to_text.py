@@ -80,11 +80,19 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
     for edge in retrieved_edges:
         source_name = nodes[edge.node1.id]["name"]
         target_name = nodes[edge.node2.id]["name"]
-        edge_label = edge.attributes.get("edge_text")
-        if not edge_label:
-            edge_label = edge.attributes.get("relationship_type")
+        edge_label = (
+            edge.attributes.get("relationship_type")
+            or edge.attributes.get("relationship_name")
+            or edge.attributes.get("edge_text")
+        )
 
-        connections.append(f"{source_name} --[{edge_label}]--> {target_name}")
+        line = f"{source_name} --[{edge_label}]--> {target_name}"
+
+        description = edge.attributes.get("edge_text")
+        if description and description != edge_label:
+            line += f"  ({description})"
+
+        connections.append(line)
 
     connection_section = "\n".join(connections)
 

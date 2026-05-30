@@ -11,20 +11,20 @@ with patch("dotenv.load_dotenv"):
     from fastapi.testclient import TestClient
 
 from cognee.modules.agents import agent_mode
-from cognee.modules.agents.models import RegisterAgentRequest
+from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
 from cognee.modules.users.models.User import User
 
 RUN_ID = uuid.uuid4().hex[:8]
 OWNER_EMAIL = f"agentmode-owner-{RUN_ID}@example.com"
 OWNER_PASSWORD = "ownerpass123!"
 
-REGISTER_BODY = {"name": "test-agent"}
-REGISTER_BODY_2 = {"name": "test-agent-2"}
+REGISTER_BODY = {"agent_session_name": "test-agent"}
+REGISTER_BODY_2 = {"agent_session_name": "test-agent-2"}
 
 _DUMMY_USER = User(email="test@test.com", hashed_password="!")
 _DUMMY_USER_2 = User(email="test2@test.com", hashed_password="!")
-_DUMMY_REQUEST = RegisterAgentRequest(name="test-agent")
-_DUMMY_REQUEST_2 = RegisterAgentRequest(name="test-agent-2")
+_DUMMY_REQUEST = RegisterAgentRequest(agent_session_name="test-agent")
+_DUMMY_REQUEST_2 = RegisterAgentRequest(agent_session_name="test-agent-2")
 
 
 def _reset_agent_mode():
@@ -105,14 +105,22 @@ class TestAgentMode:
         client.post("/api/v1/agents/register", json=REGISTER_BODY_2, headers=headers)
         assert agent_mode._active_count == 2
 
-        resp = client.post("/api/v1/agents/unregister", json=REGISTER_BODY, headers=headers)
+        resp = client.post(
+            "/api/v1/agents/unregister",
+            json={"agent_session_name": "test-agent"},
+            headers=headers,
+        )
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 1
 
     def test_unregister_does_not_go_below_zero(self, client, owner_token):
         headers = {"Authorization": f"Bearer {owner_token}"}
 
-        resp = client.post("/api/v1/agents/unregister", json=REGISTER_BODY, headers=headers)
+        resp = client.post(
+            "/api/v1/agents/unregister",
+            json={"agent_session_name": "test-agent"},
+            headers=headers,
+        )
         assert resp.status_code == 200
         assert resp.json()["activeAgents"] == 0
 
@@ -133,8 +141,12 @@ class TestAgentMode:
     async def test_watchdog_shuts_down_after_all_unregister(self, mock_shutdown):
         await agent_mode.register_agent(_DUMMY_USER, _DUMMY_REQUEST)
         await agent_mode.register_agent(_DUMMY_USER_2, _DUMMY_REQUEST_2)
-        await agent_mode.unregister_agent(_DUMMY_USER, _DUMMY_REQUEST)
-        await agent_mode.unregister_agent(_DUMMY_USER_2, _DUMMY_REQUEST_2)
+        await agent_mode.unregister_agent(
+            _DUMMY_USER, UnregisterAgentRequest(agent_session_name="test-agent")
+        )
+        await agent_mode.unregister_agent(
+            _DUMMY_USER_2, UnregisterAgentRequest(agent_session_name="test-agent-2")
+        )
 
         agent_mode._watchdog()
         mock_shutdown.assert_called_once()

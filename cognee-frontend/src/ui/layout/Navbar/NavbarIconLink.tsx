@@ -11,6 +11,7 @@ interface NavbarIconLinkProps {
   isActive: boolean;
   external?: boolean;
   onClick?: () => void;
+  badge?: ReactNode;
 }
 
 export default function NavbarIconLink({
@@ -20,6 +21,7 @@ export default function NavbarIconLink({
   isActive,
   external,
   onClick,
+  badge,
 }: NavbarIconLinkProps) {
   const classes = classNames(
     "flex items-center gap-[10px] rounded-[6px] px-3 py-2 text-[14px] transition-colors",
@@ -39,6 +41,7 @@ export default function NavbarIconLink({
     >
       {icon}
       {text}
+      {badge}
     </Link>
   );
 }
