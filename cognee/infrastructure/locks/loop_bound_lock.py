@@ -45,6 +45,7 @@ class LoopBoundLock:
         )
 
     def _lock_for_running_loop(self) -> asyncio.Lock:
+        """Return this loop's underlying lock, creating it on first use."""
         loop = asyncio.get_running_loop()
         lock = self._locks.get(loop)
         if lock is None:
@@ -53,9 +54,11 @@ class LoopBoundLock:
         return lock
 
     async def acquire(self) -> bool:
+        """Acquire the lock for the running event loop."""
         return await self._lock_for_running_loop().acquire()
 
     def release(self) -> None:
+        """Release the running loop's lock; raise if it was not acquired here."""
         lock = self._locks.get(asyncio.get_running_loop())
         if lock is None:
             raise RuntimeError("release() called without a matching acquire() on this event loop")

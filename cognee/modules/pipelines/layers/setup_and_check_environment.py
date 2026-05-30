@@ -1,5 +1,5 @@
 import os
-
+import asyncio
 from cognee.context_global_variables import (
     graph_db_config as context_graph_db_config,
     vector_db_config as context_vector_db_config,
@@ -11,13 +11,12 @@ from cognee.infrastructure.databases.relational import (
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
-from cognee.infrastructure.locks.loop_bound_lock import LoopBoundLock
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 _first_run_done = False
-_first_run_lock = LoopBoundLock()
+_first_run_lock = asyncio.Lock()
 
 
 async def setup_and_check_environment(
