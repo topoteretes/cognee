@@ -752,7 +752,7 @@ class PostgresAdapter(GraphDBInterface):
         # nodes and edges in two unioned result sets distinguished by 'kind'
         query_str = f"""
             WITH RECURSIVE neighborhood(id, hops) AS (
-                SELECT unnest(:seeds), 0
+                SELECT unnest(CAST(:seeds AS text[])), 0
               UNION
                 SELECT CASE WHEN e.source_id = n.id THEN e.target_id
                             ELSE e.source_id END,

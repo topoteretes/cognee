@@ -51,10 +51,26 @@ const EMPTY_PAGE: SessionsPage = {
   has_more: false,
 };
 
-export function listSessions(
+// Cache per instance base URL so we probe at most once per page load.
+// Uses a Promise cache so concurrent callers share the same in-flight request.
+const _sessionsProbe = new Map<string, Promise<boolean>>();
+
+function isSessionsAvailable(instance: CogneeInstance): Promise<boolean> {
+  const key = (instance as { baseUrl?: string }).baseUrl ?? "default";
+  const existing = _sessionsProbe.get(key);
+  if (existing) return existing;
+  const probe = instance.fetch("/v1/sessions?limit=1")
+    .then((r) => r.ok)
+    .catch(() => false);
+  _sessionsProbe.set(key, probe);
+  return probe;
+}
+
+export async function listSessions(
   instance: CogneeInstance,
   params: { range?: TimeRange; limit?: number; offset?: number; status?: string } = {},
 ): Promise<SessionsPage> {
+  if (!(await isSessionsAvailable(instance))) return EMPTY_PAGE;
   const q = new URLSearchParams();
   if (params.range) q.set("range", params.range);
   if (params.limit !== undefined) q.set("limit", String(params.limit));
@@ -66,10 +82,11 @@ export function listSessions(
     .catch(() => EMPTY_PAGE);
 }
 
-export function getSessionStats(
+export async function getSessionStats(
   instance: CogneeInstance,
   range: TimeRange = "24h",
 ): Promise<SessionStats | null> {
+  if (!(await isSessionsAvailable(instance))) return null;
   return instance
     .fetch(`/v1/sessions/stats?range=${range}`)
     .then((r) => (r.ok ? r.json() : null))
@@ -97,10 +114,11 @@ export interface SessionDetail extends SessionRow {
   traces: TraceEntry[];
 }
 
-export function getSessionDetail(
+export async function getSessionDetail(
   instance: CogneeInstance,
   sessionId: string,
 ): Promise<SessionDetail | null> {
+  if (!(await isSessionsAvailable(instance))) return null;
   return instance
     .fetch(`/v1/sessions/${encodeURIComponent(sessionId)}`)
     .then((r) => (r.ok ? r.json() : null))
