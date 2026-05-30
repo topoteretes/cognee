@@ -15,7 +15,7 @@ export default async function getApiKeys(): Promise<ApiKey[]> {
     if (!Array.isArray(data)) return [];
     return data.map((item: Record<string, unknown>) => ({
       id: String(item.id ?? ""),
-      api_key: String(item.key ?? ""),
+      key: String(item.key ?? ""),
       label: String(item.label ?? ""),
       name: String(item.name ?? ""),
     }));

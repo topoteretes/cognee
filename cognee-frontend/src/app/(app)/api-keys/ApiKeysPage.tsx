@@ -75,12 +75,20 @@ export default function ApiKeysPage() {
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
+      const created = await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
       trackEvent({ pageName: "API Keys", eventName: "api_key_created", additionalProperties: { key_name: newName.trim() } });
+      setKeys((prev) => [
+        {
+          id: created.id,
+          key: created.key,
+          label: created.label || created.key,
+          name: created.name || newName.trim(),
+          isNew: true,
+        },
+        ...prev.filter((k) => k.id !== created.id),
+      ]);
       setNewName("");
       setShowCreateModal(false);
-      // Reload the list to pick up the newly created key
-      await loadKeys();
     } catch (err) {
       console.error("Failed to create key:", err);
     } finally {

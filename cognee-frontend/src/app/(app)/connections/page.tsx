@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import { listSessions, type SessionRow } from "@/modules/sessions/getSessions";
+import createApiKey from "@/modules/apiKeys/createAPIKey";
 import { trackEvent, TrackPageView } from "@/modules/analytics";
 
 interface Agent {
@@ -102,6 +103,7 @@ export default function ConnectionsPage() {
   const [showDeleteAgentModal, setShowDeleteAgentModal] = useState(false);
   const [deletingAgent, setDeletingAgent] = useState(false);
   const [allSessions, setAllSessions] = useState<SessionRow[]>([]);
+  const isLocalDev = process.env.NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT === "false";
 
   useEffect(() => {
     if (!cogniInstance || isInitializing) return;
@@ -116,25 +118,28 @@ export default function ConnectionsPage() {
       const firstAgent = agentData.find((x: Agent) => x.is_agent);
       if (firstAgent) setSelectedAgentId(firstAgent.id);
 
-      // Fetch shared dataset IDs for each agent sequentially to avoid overwhelming the pod
+      // Fetch shared dataset IDs for each agent sequentially to avoid overwhelming the pod.
+      // The open-source local backend does not expose /v1/agents/* management routes.
       const agentList = agentData.filter((x: Agent) => x.is_agent);
       const permMap: Record<string, Record<string, Set<string>>> = {};
-      for (const agent of agentList) {
-        try {
-          const res = await cogniInstance.fetch(`/v1/agents/${agent.id}/datasets`);
-          if (res.ok) {
-            const ids: string[] = await res.json();
-            if (ids.length > 0) {
-              const dsPerms: Record<string, Set<string>> = {};
-              for (const id of ids) dsPerms[id] = new Set(["read"]);
-              permMap[agent.id] = dsPerms;
+      if (!isLocalDev) {
+        for (const agent of agentList) {
+          try {
+            const res = await cogniInstance.fetch(`/v1/agents/${agent.id}/datasets`);
+            if (res.ok) {
+              const ids: string[] = await res.json();
+              if (ids.length > 0) {
+                const dsPerms: Record<string, Set<string>> = {};
+                for (const id of ids) dsPerms[id] = new Set(["read"]);
+                permMap[agent.id] = dsPerms;
+              }
             }
-          }
-        } catch { /* ignore */ }
+          } catch { /* ignore */ }
+        }
       }
       setAgentPermissions(permMap);
     }).finally(() => setLoading(false));
-  }, [cogniInstance, isInitializing]);
+  }, [cogniInstance, isInitializing, isLocalDev]);
 
   // Keep local datasets in sync with FilterContext
   useEffect(() => {
@@ -217,6 +222,17 @@ export default function ConnectionsPage() {
     setCreatingAgent(true);
     setCreateAgentError(null);
     try {
+      if (isLocalDev) {
+        const key = await createApiKey({ name: createAgentName.trim(), noRedirectOnAuth: true });
+        setCreatedAgent({
+          agentId: key.id,
+          agentEmail: key.name || createAgentName.trim(),
+          agentApiKey: key.key,
+        });
+        trackEvent({ pageName: "Connections", eventName: "local_api_key_created", additionalProperties: { key_id: key.id } });
+        return;
+      }
+
       const res = await cogniInstance.fetch(`/v1/agents/?name=${encodeURIComponent(createAgentName.trim())}`, { method: "POST" });
       if (!res.ok) {
         const body = await res.text();
@@ -263,14 +279,19 @@ export default function ConnectionsPage() {
           <h1 style={{ fontSize: 20, fontWeight: 300, color: "#18181B", margin: 0, fontFamily: '"TWK Lausanne", system-ui, sans-serif' }}>Connections</h1>
           <span style={{ fontSize: 14, color: "#71717A" }}>Manage agents, personal datasets, and shared organization data.</span>
         </div>
-        <button
-          onClick={() => setShowCreateAgentModal(true)}
+        <Link
+          href={isLocalDev ? "/api-keys" : "#"}
+          onClick={(event) => {
+            if (isLocalDev) return;
+            event.preventDefault();
+            setShowCreateAgentModal(true);
+          }}
           className="hover:bg-cognee-purple-hover cursor-pointer"
           style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit", flexShrink: 0 }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-          Create agent
-        </button>
+          {isLocalDev ? "Create API key" : "Create agent"}
+        </Link>
       </div>
 
       {/* Tabs */}
@@ -367,8 +388,10 @@ export default function ConnectionsPage() {
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 480, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
             {!createdAgent ? (
               <>
-                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Create Agent</h2>
-                <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>Give your agent a name. An API key will be generated automatically.</p>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>{isLocalDev ? "Create API key" : "Create Agent"}</h2>
+                <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>
+                  {isLocalDev ? "Give your local API key a name. Use it to connect agents to this backend." : "Give your agent a name. An API key will be generated automatically."}
+                </p>
                 <input
                   type="text"
                   placeholder="e.g. MyAgent, research-bot, support-agent"
@@ -389,13 +412,13 @@ export default function ConnectionsPage() {
                     className="cursor-pointer"
                     style={{ background: createAgentName.trim() ? "#6510F4" : "#E4E4E7", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: createAgentName.trim() ? "#fff" : "#A1A1AA", fontFamily: "inherit" }}
                   >
-                    {creatingAgent ? "Creating..." : "Create Agent"}
+                    {creatingAgent ? "Creating..." : isLocalDev ? "Create API key" : "Create Agent"}
                   </button>
                 </div>
               </>
             ) : (
               <>
-                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Agent Created</h2>
+                <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>{isLocalDev ? "API Key Created" : "Agent Created"}</h2>
                 <div style={{ display: "flex", gap: 8, background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 14px", alignItems: "flex-start" }}>
                   <span style={{ fontSize: 16, flexShrink: 0 }}>&#9888;</span>
                   <span style={{ fontSize: 12, color: "#92400E", lineHeight: "18px" }}>
@@ -404,11 +427,11 @@ export default function ConnectionsPage() {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: "#71717A" }}>Agent ID</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "#71717A" }}>{isLocalDev ? "Key ID" : "Agent ID"}</span>
                     <span style={{ fontSize: 13, fontFamily: '"Fira Code", "SF Mono", monospace', color: "#18181B", background: "#F4F4F5", borderRadius: 6, padding: "8px 12px", wordBreak: "break-all" }}>{createdAgent.agentId}</span>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: "#71717A" }}>Agent Email</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "#71717A" }}>{isLocalDev ? "Key Name" : "Agent Email"}</span>
                     <span style={{ fontSize: 13, fontFamily: '"Fira Code", "SF Mono", monospace', color: "#18181B", background: "#F4F4F5", borderRadius: 6, padding: "8px 12px" }}>{createdAgent.agentEmail}</span>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -484,15 +507,20 @@ export default function ConnectionsPage() {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: "60px 20px", flex: 1 }}>
           <span style={{ color: "#A1A1AA" }}><AgentIconSmall /></span>
           <span style={{ fontSize: 15, fontWeight: 500, color: "#18181B" }}>No agents connected yet</span>
-          <span style={{ fontSize: 13, color: "#71717A", textAlign: "center", maxWidth: 360 }}>Create an agent to get an API key, or follow the integration guides to set up a connection.</span>
+          <span style={{ fontSize: 13, color: "#71717A", textAlign: "center", maxWidth: 360 }}>{isLocalDev ? "Create a local API key or follow the integration guides to set up a connection." : "Create an agent to get an API key, or follow the integration guides to set up a connection."}</span>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button
-              onClick={() => setShowCreateAgentModal(true)}
+            <Link
+              href={isLocalDev ? "/api-keys" : "#"}
+              onClick={(event) => {
+                if (isLocalDev) return;
+                event.preventDefault();
+                setShowCreateAgentModal(true);
+              }}
               className="cursor-pointer"
               style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#6510F4", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 500, fontFamily: "inherit" }}
             >
-              Create Agent
-            </button>
+              {isLocalDev ? "Create API key" : "Create Agent"}
+            </Link>
             <Link
               href="/connect-agent"
               style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#fff", color: "#3F3F46", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 500, textDecoration: "none" }}

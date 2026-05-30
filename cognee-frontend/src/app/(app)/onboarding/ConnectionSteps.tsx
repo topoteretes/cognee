@@ -519,30 +519,31 @@ export function AgentStep({ onBack, onSkip, standalone }: { onBack: () => void; 
           <>
             <div style={{ display: "flex", gap: 10, background: "#F0EDFF", border: "1px solid #DDD6FE", borderRadius: 8, padding: "10px 14px" }}>
               <span style={{ fontSize: 12, color: "#52525B", lineHeight: "18px" }}>
-                Use the REST API directly from any language or framework. Create an agent, then use its API key to call the endpoints.
+                Use the REST API directly from any language or framework. Create an API key, then use it to call the endpoints.
               </span>
             </div>
 
             <div style={{ alignItems: "center", display: "flex", gap: 12 }}>
               <NumberCircle n={1} />
-              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Create an agent</span>
+              <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Create an API key</span>
             </div>
             <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
-              Use your API key from the <Link href="/api-keys" style={{ color: "#6510F4", textDecoration: "underline" }}>API Keys</Link> page to create an agent. The response includes the agent{"'"}s own API key.
+              Use the <Link href="/api-keys" style={{ color: "#6510F4", textDecoration: "underline" }}>API Keys</Link> page to create a key, or call the local backend endpoint directly.
             </span>
             <div style={{ display: "flex", gap: 8, background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 14px", alignItems: "flex-start" }}>
               <span style={{ fontSize: 16, flexShrink: 0 }}>&#9888;</span>
               <span style={{ fontSize: 12, color: "#92400E", lineHeight: "18px" }}>
-                The agent API key is only shown once in the response. Copy and store it securely — you won{"'"}t be able to retrieve it again.
+                Newly created API keys are only shown once in the response. Copy and store them securely.
               </span>
             </div>
             <MultiLineCode step="Agent" lines={[
-              "# Create an agent (returns agent_id, agent_email, agent_api_key)",
-              'curl -X POST "<your-api-base-url>/api/v1/agents/?name=MyAgent" \\',
-              '  -H "X-Api-Key: <your-api-key>"',
+              "# Create an API key",
+              'curl -X POST "<your-api-base-url>/api/v1/auth/api-keys" \\',
+              '  -H "Content-Type: application/json" \\',
+              '  -d \'{"name": "MyAgent"}\'',
               "",
-              "# List your agents",
-              'curl "<your-api-base-url>/api/v1/agents/" \\',
+              "# List your API keys",
+              'curl "<your-api-base-url>/api/v1/auth/api-keys" \\',
               '  -H "X-Api-Key: <your-api-key>"',
             ]} />
 
@@ -553,18 +554,18 @@ export function AgentStep({ onBack, onSkip, standalone }: { onBack: () => void; 
               <span style={{ color: "#18181B", fontSize: 14, fontWeight: 500 }}>Store and retrieve knowledge</span>
             </div>
             <span style={{ color: "#71717A", fontSize: 12, lineHeight: "18px" }}>
-              Use the agent{"'"}s API key to store and query knowledge.
+              Use the API key to store and query knowledge.
             </span>
             <MultiLineCode step="Agent" lines={[
               "# Remember — store knowledge",
-              'curl -X POST "<your-api-base-url>/api/v1/remember" \\',
-              '  -H "X-Api-Key: <agent-api-key>" \\',
+              'curl -X POST "<your-api-base-url>/api/v2/remember" \\',
+              '  -H "X-Api-Key: <api-key>" \\',
               '  -F "data=@document.pdf" \\',
               '  -F "datasetName=my_agent_data"',
               "",
               "# Recall — query the knowledge graph",
-              'curl -X POST "<your-api-base-url>/api/v1/recall" \\',
-              '  -H "X-Api-Key: <agent-api-key>" \\',
+              'curl -X POST "<your-api-base-url>/api/v2/recall" \\',
+              '  -H "X-Api-Key: <api-key>" \\',
               '  -H "Content-Type: application/json" \\',
               '  -d \'{"query": "What do we know?"}\'',
             ]} />

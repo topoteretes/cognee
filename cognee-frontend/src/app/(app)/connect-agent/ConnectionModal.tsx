@@ -5,6 +5,8 @@ import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import getOrCreateApiKey from "@/modules/apiKeys/getOrCreateApiKey";
 import { TERMINAL_EXPORT, fillTemplate } from "./prompts";
 
+const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+
 function CopyRow({ label, text, loading }: { label: string; text: string; loading?: boolean }) {
   const [copied, setCopied] = useState(false);
 
@@ -72,7 +74,7 @@ export default function ConnectionModal({ title, logoSrc, steps, onClose }: Conn
       .finally(() => setLoading(false));
   }, []);
 
-  const baseUrl = serviceUrl || "https://your-tenant.aws.cognee.ai";
+  const baseUrl = serviceUrl || localApiUrl;
 
   return (
     <div
