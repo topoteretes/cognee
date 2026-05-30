@@ -56,13 +56,6 @@ const EMPTY_PAGE: SessionsPage = {
 const _sessionsProbe = new Map<string, Promise<boolean>>();
 
 function isSessionsAvailable(instance: CogneeInstance): Promise<boolean> {
-  if (
-    instance.name === "LocalCognee" ||
-    process.env.NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT === "false"
-  ) {
-    return Promise.resolve(false);
-  }
-
   const key = (instance as { baseUrl?: string }).baseUrl ?? "default";
   const existing = _sessionsProbe.get(key);
   if (existing) return existing;

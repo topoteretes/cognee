@@ -558,13 +558,13 @@ export function AgentStep({ onBack, onSkip, standalone }: { onBack: () => void; 
             </span>
             <MultiLineCode step="Agent" lines={[
               "# Remember — store knowledge",
-              'curl -X POST "<your-api-base-url>/api/v2/remember" \\',
+              'curl -X POST "<your-api-base-url>/api/v1/remember" \\',
               '  -H "X-Api-Key: <api-key>" \\',
               '  -F "data=@document.pdf" \\',
               '  -F "datasetName=my_agent_data"',
               "",
               "# Recall — query the knowledge graph",
-              'curl -X POST "<your-api-base-url>/api/v2/recall" \\',
+              'curl -X POST "<your-api-base-url>/api/v1/recall" \\',
               '  -H "X-Api-Key: <api-key>" \\',
               '  -H "Content-Type: application/json" \\',
               '  -d \'{"query": "What do we know?"}\'',

@@ -10,17 +10,16 @@ export default async function localFetch(url: URL | RequestInfo, options: Reques
     authHeaders["X-Api-Key"] = apiKey;
   }
 
-  // The local backend mounts versioned routes under /api/v1 and /api/v2.
+  // The local backend mounts API routes under /api/v1.
   // Most component paths arrive as "/v1/datasets/" etc., but some (like
   // "/configuration/...") omit the version prefix. Default those to /v1.
   let urlStr = typeof url === "string" ? url : url.toString();
   if (!urlStr.startsWith("/")) {
     urlStr = `/${urlStr}`;
   }
-  if (!/^\/v\d+(\/|\?|$)/.test(urlStr)) {
-    urlStr = "/v1" + urlStr;
-  }
-  const fullUrl = localApiUrl + "/api" + urlStr;
+  const fullUrl = urlStr === "/health" || urlStr.startsWith("/health?")
+    ? localApiUrl + urlStr
+    : localApiUrl + "/api" + (/^\/v\d+(\/|\?|$)/.test(urlStr) ? urlStr : "/v1" + urlStr);
   const method = options.method || "GET";
 
   console.log(`[LOCAL-API] → ${method} ${fullUrl}`);

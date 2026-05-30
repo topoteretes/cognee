@@ -21,7 +21,7 @@ Your Cognee credentials are available as environment variables:
 ### Store knowledge (remember)
 When the user shares important information, facts, preferences, or context worth preserving:
 \`\`\`
-POST $COGNEE_BASE_URL/api/v2/remember
+POST $COGNEE_BASE_URL/api/v1/remember
 Headers: X-Api-Key: $COGNEE_API_KEY
 Content-Type: multipart/form-data
 Body: data=<text or file>&datasetName=<dataset>
@@ -30,7 +30,7 @@ Body: data=<text or file>&datasetName=<dataset>
 ### Retrieve knowledge (recall)
 Before answering questions, check if relevant knowledge exists:
 \`\`\`
-POST $COGNEE_BASE_URL/api/v2/recall
+POST $COGNEE_BASE_URL/api/v1/recall
 Headers: X-Api-Key: $COGNEE_API_KEY
 Content-Type: application/json
 Body: {"query": "<user question>"}
@@ -77,7 +77,7 @@ Your Cognee credentials are available as environment variables:
 ### Store knowledge (remember)
 When the user shares important information, facts, preferences, or context worth preserving:
 \`\`\`bash
-curl -X POST $COGNEE_BASE_URL/api/v2/remember \\
+curl -X POST $COGNEE_BASE_URL/api/v1/remember \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -F "data=<text or file>" \\
   -F "datasetName=<dataset>"
@@ -86,7 +86,7 @@ curl -X POST $COGNEE_BASE_URL/api/v2/remember \\
 ### Retrieve knowledge (recall)
 Before answering questions, check if relevant knowledge exists:
 \`\`\`bash
-curl -X POST $COGNEE_BASE_URL/api/v2/recall \\
+curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"query": "<user question>"}'
@@ -133,7 +133,7 @@ Use the Cognee REST API from any skill or conversation:
 
 ### Store knowledge (remember)
 \`\`\`bash
-curl -X POST $COGNEE_BASE_URL/api/v2/remember \\
+curl -X POST $COGNEE_BASE_URL/api/v1/remember \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -F "data=<text or file>" \\
   -F "datasetName=<dataset>"
@@ -141,7 +141,7 @@ curl -X POST $COGNEE_BASE_URL/api/v2/remember \\
 
 ### Retrieve knowledge (recall)
 \`\`\`bash
-curl -X POST $COGNEE_BASE_URL/api/v2/recall \\
+curl -X POST $COGNEE_BASE_URL/api/v1/recall \\
   -H "X-Api-Key: $COGNEE_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"query": "<user question>"}'

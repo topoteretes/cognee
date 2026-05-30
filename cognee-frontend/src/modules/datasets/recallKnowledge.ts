@@ -18,12 +18,12 @@ export interface RecallRequest {
 }
 
 /**
- * Unified recall call. Hits POST /v2/recall (not /v1/search), so the
+ * Unified recall call. Hits POST /v1/recall (not /v1/search), so the
  * server's scope-aware fan-out applies: graph + session + trace +
  * graph_context, tagged with _source.
  *
- * Default keeps ``GRAPH_COMPLETION`` for backward compatibility with
- * the current backend recall DTO.
+ * Pass ``searchType: null`` to opt into the server's auto-router.
+ * Default keeps ``GRAPH_COMPLETION`` for backward compat.
  */
 export default function recallKnowledge(
   instance: CogneeInstance,
@@ -35,10 +35,12 @@ export default function recallKnowledge(
   if (req.datasets) body.datasets = req.datasets;
   if (req.datasetIds) body.dataset_ids = req.datasetIds;
   if (req.topK !== undefined) body.top_k = req.topK;
-  if (req.searchType != null) body.search_type = req.searchType;
+  // Explicit null asks the server to auto-route; omitting keeps
+  // the current HTTP default (GRAPH_COMPLETION).
+  if (req.searchType !== undefined) body.search_type = req.searchType;
 
   return instance
-    .fetch("/v2/recall", {
+    .fetch("/v1/recall", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
