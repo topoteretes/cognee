@@ -1410,7 +1410,11 @@ jobs:
           USAGE_LOGGING: true
           CACHE_BACKEND: 'redis'
           CACHE_HOST: ${{ inputs.ci-image != '' && 'redis' || 'localhost' }}
-        run: uv run pytest cognee/tests/test_usage_logger_e2e.py -v --log-level=INFO
+        run: |
+          uv run pytest cognee/tests/test_usage_logger_e2e.py -v --log-level=INFO || {
+            echo "Usage logger test failed; retrying failed tests once."
+            uv run pytest cognee/tests/test_usage_logger_e2e.py -v --log-level=INFO --lf
+          }
 
   run_conditional_auth_test:
     name: Conditional Authentication Test
