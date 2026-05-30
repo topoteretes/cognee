@@ -640,3 +640,62 @@ def test_multifile_ontology_with_overlapping_entities():
 
         os.unlink(file1_path)
         os.unlink(file2_path)
+
+
+def test_file_object_turtle_ontology_is_parsed():
+    """A Turtle ontology supplied as a file object must be parsed, not silently
+    dropped by a hardcoded ``format='xml'`` (regression for issue #2907)."""
+    import io
+
+    ns = Namespace("http://example.org/")
+    turtle = (
+        "@prefix ex: <http://example.org/> .\n"
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n"
+        "ex:Animal a rdfs:Class .\n"
+        "ex:Dog a rdfs:Class ; rdfs:subClassOf ex:Animal .\n"
+    )
+    file_obj = io.BytesIO(turtle.encode("utf-8"))
+    file_obj.name = "ontology.ttl"
+
+    resolver = RDFLibOntologyResolver(ontology_file=file_obj)
+
+    assert resolver.graph is not None
+    assert len(resolver.graph) > 0
+    assert (ns.Dog, RDFS.subClassOf, ns.Animal) in resolver.graph
+
+
+def test_file_object_turtle_without_name_is_parsed():
+    """Turtle file objects without a usable filename (e.g. upload spools) still parse
+    via the serialization fallback rather than failing as RDF/XML."""
+    import io
+
+    turtle = (
+        "@prefix ex: <http://example.org/> .\n"
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n"
+        "ex:Animal a rdfs:Class .\n"
+    )
+
+    resolver = RDFLibOntologyResolver(ontology_file=io.BytesIO(turtle.encode("utf-8")))
+
+    assert resolver.graph is not None
+    assert len(resolver.graph) > 0
+
+
+def test_file_object_rdfxml_ontology_still_parses():
+    """RDF/XML file objects continue to parse (no regression from format detection)."""
+    import io
+
+    rdfxml = (
+        '<?xml version="1.0"?>\n'
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"\n'
+        '         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">\n'
+        '  <rdfs:Class rdf:about="http://example.org/Animal"/>\n'
+        "</rdf:RDF>\n"
+    )
+    file_obj = io.BytesIO(rdfxml.encode("utf-8"))
+    file_obj.name = "ontology.owl"
+
+    resolver = RDFLibOntologyResolver(ontology_file=file_obj)
+
+    assert resolver.graph is not None
+    assert len(resolver.graph) > 0

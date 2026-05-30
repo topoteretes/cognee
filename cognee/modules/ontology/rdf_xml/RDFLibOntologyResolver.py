@@ -4,6 +4,7 @@ from cognee.shared.logging_utils import get_logger
 from collections import deque
 from typing import List, Tuple, Dict, Optional, Any, Union, IO
 from rdflib import Graph, URIRef, RDF, RDFS, OWL
+from rdflib.util import guess_format
 
 from cognee.modules.ontology.exceptions import (
     OntologyInitializationError,
@@ -15,6 +16,37 @@ from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.modules.ontology.matching_strategies import MatchingStrategy, FuzzyMatchingStrategy
 
 logger = get_logger("OntologyAdapter")
+
+# "xml" is first so nameless/unknown-extension uploads keep the prior default behaviour.
+_RDF_FORMAT_FALLBACKS = ("xml", "turtle", "n3", "json-ld", "nt")
+
+
+def _parse_rdf_into(graph: Graph, content, source_name: str = "") -> str:
+    """Parse RDF ``content`` into ``graph`` (mutated in place), detecting the
+    serialization instead of assuming RDF/XML.
+
+    Tries the format guessed from ``source_name`` first (when a filename is
+    available), then a small set of common serializations. Returns the format
+    that parsed. Raises the last parse error if none match, so the caller can
+    decide how to handle an unparseable input.
+    """
+    candidates = []
+    guessed = guess_format(source_name) if isinstance(source_name, str) and source_name else None
+    if guessed:
+        candidates.append(guessed)
+    candidates.extend(fmt for fmt in _RDF_FORMAT_FALLBACKS if fmt != guessed)
+
+    last_error = None
+    for fmt in candidates:
+        try:
+            parsed = Graph()
+            parsed.parse(data=content, format=fmt)
+        except Exception as exc:  # noqa: BLE001 - try the next serialization
+            last_error = exc
+            continue
+        graph += parsed
+        return fmt
+    raise last_error or ValueError("No supported RDF serialization matched the ontology content")
 
 
 class RDFLibOntologyResolver(BaseOntologyResolver):
@@ -57,9 +89,14 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     for file_obj in file_objects:
                         try:
                             content = file_obj.read()
-                            self.graph.parse(data=content, format="xml")
+                            ontology_format = _parse_rdf_into(
+                                self.graph, content, getattr(file_obj, "name", "") or ""
+                            )
                             loaded_objects.append(file_obj)
-                            logger.info("Ontology loaded successfully from file object")
+                            logger.info(
+                                "Ontology loaded successfully from file object (format=%s)",
+                                ontology_format,
+                            )
                         except Exception as e:
                             logger.warning("Failed to parse ontology file object: %s", str(e))
 
