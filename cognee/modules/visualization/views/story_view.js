@@ -845,6 +845,32 @@ searchInput.addEventListener("input",function(){
   draw();
 });
 
+// ── Schema → graph highlight bridge (PR3) ──
+// Resolve a semantic schema type name to its instance node ids, then reuse
+// the search-highlight path (searchMatches + draw) so type instances light up.
+// An Entity's semantic type is its is_a target's name; all other nodes match
+// on their raw `type`. Mirrors the type resolution in describeNode/preprocessor.
+function nodeMatchesSchemaType(n, typeName){
+  if(n.type===typeName)return true;
+  if(n.type!=="Entity")return false;
+  for(var i=0;i<links.length;i++){
+    var l=links[i];
+    var sid=l.source.id||l.source;
+    var isIsA=l.relation==="is_a"||(l.edge_info&&l.edge_info.relationship_name==="is_a");
+    if(sid===n.id&&isIsA){
+      var t=nodesById[l.target.id||l.target];
+      if(t&&(t.name||t.id)===typeName)return true;
+    }
+  }
+  return false;
+}
+window._highlightSchemaType=function(typeName){
+  searchQuery="__schema_type__";
+  searchMatches.clear();
+  nodes.forEach(function(n){if(nodeMatchesSchemaType(n,typeName))searchMatches.add(n.id)});
+  draw();
+};
+
 // ── Info panel (Phase 1e: sectioned inspector reading preprocessor enrichment) ──
 var infoPanel=document.getElementById("info-panel");
 var nodesById={};
