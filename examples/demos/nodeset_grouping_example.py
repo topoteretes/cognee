@@ -1,8 +1,9 @@
-import os
 import asyncio
+import os
+
 import cognee
-from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.shared.logging_utils import setup_logging, ERROR
+from cognee import visualize_graph
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 text_a = """
     AI is revolutionizing financial services through intelligent fraud detection
@@ -24,13 +25,11 @@ node_set_c = ["MedTech"]
 
 
 async def main():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
-    await cognee.add(text_a, node_set=node_set_a)
-    await cognee.add(text_b, node_set=node_set_b)
-    await cognee.add(text_c, node_set=node_set_c)
-    await cognee.cognify()
+    await cognee.remember(text_a, node_set=node_set_a, self_improvement=False)
+    await cognee.remember(text_b, node_set=node_set_b, self_improvement=False)
+    await cognee.remember(text_c, node_set=node_set_c, self_improvement=False)
 
     visualization_path = os.path.join(
         os.path.dirname(__file__), ".artifacts", "nodeset_grouping.html"
