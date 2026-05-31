@@ -290,13 +290,16 @@ def test_schema_graph_falls_back_to_type_graph_when_no_schema_nodes():
     result = preprocess(_alice_like_graph())
     assert "nodes" in result.schema_graph
     assert "links" in result.schema_graph
-    # Type-graph fallback emits one GraphNodeType per distinct type
+    # Type-graph fallback emits one GraphNodeType per distinct semantic type.
+    # Entity instances resolve to their EntityType via is_a, so "type:Entity"
+    # is replaced by the resolved "type:Person" / "type:Field".
     type_node_ids = {
         n["id"] for n in result.schema_graph["nodes"] if n.get("type") == "GraphNodeType"
     }
     assert "type:TextDocument" in type_node_ids
     assert "type:DocumentChunk" in type_node_ids
-    assert "type:Entity" in type_node_ids
+    assert "type:Entity" not in type_node_ids
+    assert "type:Person" in type_node_ids
 
 
 def test_schema_graph_uses_schema_nodes_when_present():
@@ -326,6 +329,62 @@ def test_schema_graph_uses_schema_nodes_when_present():
     assert "SchemaTable" in schema_node_types
 
 
+def test_schema_type_nodes_resolve_semantic_types_via_is_a():
+    """Entity instances collapse into their EntityType semantic types
+    (Person/Field) via the is_a edge, so the literal "Entity" never appears."""
+    result = preprocess(_alice_like_graph())
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    assert "Entity" not in type_nodes
+    assert "Person" in type_nodes
+    assert "Field" in type_nodes
+    assert type_nodes["Person"]["instance_count"] == 2
+    assert type_nodes["Field"]["instance_count"] == 1
+
+
+def test_schema_type_nodes_carry_bounded_deterministic_samples():
+    result = preprocess(_alice_like_graph())
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    person = type_nodes["Person"]
+    # Alice has degree 3 (contains, is_a, knows), Bob has degree 3
+    # (contains, is_a, knows). Tie on degree breaks to name order: Alice, Bob.
+    assert person["samples"] == ["Alice", "Bob"]
+    assert person["sample_size"] == 2
+    assert type_nodes["Field"]["samples"] == ["NLP"]
+
+    # Samples never exceed the per-type cap regardless of instance count.
+    for node in type_nodes.values():
+        assert node["sample_size"] <= 5
+        assert len(node["samples"]) == node["sample_size"]
+
+
+def test_schema_type_nodes_carry_full_relationship_distribution():
+    result = preprocess(_alice_like_graph())
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    person_rels = {
+        (r["relation"], r["to_type"]): r["count"] for r in type_nodes["Person"]["relationships"]
+    }
+    # Alice + Bob both is_a the EntityType node; alice knows bob (Person -> Person).
+    assert person_rels[("is_a", "EntityType")] == 2
+    assert person_rels[("knows", "Person")] == 1
+
+    # DocumentChunk contains Person twice (alice, bob), Field once (nlp).
+    chunk_rels = {
+        (r["relation"], r["to_type"]): r["count"]
+        for r in type_nodes["DocumentChunk"]["relationships"]
+    }
+    assert chunk_rels[("contains", "Person")] == 2
+    assert chunk_rels[("contains", "Field")] == 1
+
+
 def test_empty_graph_does_not_crash():
     result = preprocess(([], []))
     assert result.nodes == []
@@ -339,6 +398,42 @@ def test_provenance_index_indexes_only_nodes_with_provenance():
     # c1 has provenance; doc1 doesn't
     assert "c1" in result.provenance_index
     assert "doc1" not in result.provenance_index
+
+
+def test_operation_layer_maps_operations_to_present_types():
+    """The transformation impact-layer emits operation nodes + typed links only
+    for catalog operations that touch a type present in the graph, expanding
+    'Entity' to the semantic entity types."""
+    nodes = [
+        ("d1", {"type": "TextDocument", "name": "a.txt"}),
+        ("p1", {"type": "Entity", "name": "Carlos"}),
+        ("t_person", {"type": "EntityType", "name": "Person"}),
+    ]
+    edges = [("p1", "t_person", "is_a", {})]
+    schema = preprocess((nodes, edges)).schema_graph
+
+    op_ids = {o["id"] for o in schema["operations"]}
+    assert "op:cognify" in op_ids
+
+    cognify_targets = {
+        (link["target"], link["effect"])
+        for link in schema["operation_links"]
+        if link["source"] == "op:cognify"
+    }
+    assert ("type:TextDocument", "produces") in cognify_targets
+    assert ("type:Person", "produces") in cognify_targets  # Entity → semantic type
+    assert ("type:EntityType", "produces") in cognify_targets
+
+    # An operation whose only targets are absent (Rule) is filtered out entirely.
+    assert "op:coding_rule_associations" not in op_ids
+
+    # Modify effects are surfaced (feedback weighting touches entity types).
+    feedback_targets = {
+        (link["target"], link["effect"])
+        for link in schema["operation_links"]
+        if link["source"] == "op:apply_feedback_weights"
+    }
+    assert ("type:Person", "modifies") in feedback_targets
 
 
 if __name__ == "__main__":

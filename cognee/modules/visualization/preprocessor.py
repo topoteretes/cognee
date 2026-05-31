@@ -27,6 +27,9 @@ SCHEMA_GRAPH_NODE_TYPES = {
     "TableType",
 }
 
+# Maximum sample instance names attached to each schema type node.
+SCHEMA_SAMPLES_PER_TYPE = 5
+
 
 # Stage assignment by node type — drives the left-to-right Story layout.
 # Unknown types fall through to "other".
@@ -143,8 +146,20 @@ def node_type_rank(node_type):
     Order matches the Story view's pipeline column order
     (Documents → Chunks → Entities → Types → Summaries → Context) so the
     Schema diagram uses the same left-to-right narrative as the Graph tab.
+
+    Actor / ownership types occupy negative ranks so they flow in *before*
+    the document pipeline (Organization → People → Agents → Sessions →
+    Brain → Documents → … ): agents write sessions, which are recorded into
+    the brains they belong to.
     """
     type_ranks = {
+        # Actor & ownership layer (left of the document pipeline)
+        "Tenant": -5,
+        "User": -4,
+        "Agent": -3,
+        "Session": -2,
+        "Dataset": -1,
+        # Document → memory pipeline
         "TextDocument": 0,
         "DocumentChunk": 1,
         "Entity": 2,
@@ -273,14 +288,7 @@ def extract_schema_graph_data(nodes_list, links_list):
             if source not in schema_node_ids or target not in schema_node_ids:
                 continue
 
-            edge_info = link.get("edge_info") or {}
-            label = (
-                link.get("relationship_type")
-                or edge_info.get("relationship_name")
-                or edge_info.get("relationship_type")
-                or link.get("relation")
-                or "related"
-            )
+            label = _link_relation(link)
             link_key = (source, target, label)
             if link_key in seen_links:
                 continue
@@ -382,15 +390,90 @@ def _relationship_label(relation_counts):
     return ", ".join(parts) if parts else f"{total} edges"
 
 
-def extract_type_schema_graph_data(nodes_list, links_list):
-    """Fallback schema view: collapse the graph to one node per type."""
+# Relationship name of the Entity -> EntityType edge used to resolve the
+# semantic type of extracted entities (mirrors get_schema_inventory).
+ENTITY_TYPE_RELATION = "is_a"
+
+
+def _link_relation(link):
+    """Read a link's relation name across the shapes the preprocessor emits."""
+    edge_info = link.get("edge_info") or {}
+    return (
+        link.get("relationship_type")
+        or edge_info.get("relationship_name")
+        or edge_info.get("relationship_type")
+        or link.get("relation")
+        or "related"
+    )
+
+
+def resolve_semantic_types(nodes_list, links_list):
+    """Map each node id to its semantic type name.
+
+    Non-Entity nodes keep their raw ``type`` property. Entity nodes (``type ==
+    "Entity"``) resolve to the EntityType ``name`` reached via the ``is_a`` edge,
+    so semantic types (Person/Tool/Broker) surface instead of the literal
+    "Entity". Mirrors ``get_schema_inventory._resolve_node_types`` adapted to the
+    preprocessor's normalized node/link shape.
+    """
     nodes_by_id = {node["id"]: node for node in nodes_list}
+
+    # Collect the EntityType target name for each Entity source via the is_a edge
+    entity_type_name = {}
+    for link in links_list:
+        source = str(link["source"])
+        target = str(link["target"])
+        if _link_relation(link) == ENTITY_TYPE_RELATION and target in nodes_by_id:
+            entity_type_name[source] = nodes_by_id[target].get("name")
+
+    node_type = {}
+    for node in nodes_list:
+        node_id = node["id"]
+        raw_type = node.get("type")
+        if raw_type == "Entity" and entity_type_name.get(node_id):
+            node_type[node_id] = entity_type_name[node_id]
+        else:
+            node_type[node_id] = raw_type or "Node"
+    return node_type
+
+
+def extract_type_schema_graph_data(nodes_list, links_list):
+    """Fallback schema view: collapse the graph to one node per semantic type."""
+    node_type_by_id = resolve_semantic_types(nodes_list, links_list)
+
+    # Names reached via the is_a edge are semantic *entity* types (Person, Broker,
+    # …) — rank them in the Entity column rather than letting them fall through to
+    # the default ("Summaries") rank.
+    nodes_by_id_lookup = {node["id"]: node for node in nodes_list}
+    semantic_type_names = set()
+    for link in links_list:
+        if _link_relation(link) == ENTITY_TYPE_RELATION:
+            target_node = nodes_by_id_lookup.get(str(link["target"]))
+            if target_node and target_node.get("name"):
+                semantic_type_names.add(target_node["name"])
+
+    def _rank_for(type_name):
+        if type_name in semantic_type_names:
+            return node_type_rank("Entity")
+        return node_type_rank(type_name)
+
     nodes_by_type: Dict[str, List[Dict]] = defaultdict(list)
     for node in nodes_list:
-        nodes_by_type[node.get("type") or "Node"].append(node)
+        nodes_by_type[node_type_by_id[node["id"]]].append(node)
+
+    # Aggregate the full per-source-type relationship distribution keyed by
+    # (relation, target_type). Built once and shared with the per-type "samples"
+    # records and the lossy pair-edge labels below.
+    relationships_by_type: Dict[str, Counter] = defaultdict(Counter)
+    for link in links_list:
+        source_type = node_type_by_id.get(str(link["source"]))
+        target_type = node_type_by_id.get(str(link["target"]))
+        if source_type is None or target_type is None:
+            continue
+        relationships_by_type[source_type][(_link_relation(link), target_type)] += 1
 
     schema_nodes = []
-    for node_type, type_nodes in sorted(nodes_by_type.items()):
+    for node_type_name, type_nodes in sorted(nodes_by_type.items()):
         # Surface the most-common pipeline / task / user that produced this
         # type so the Schema card can show "produced by cognify_pipeline /
         # extract_graph_from_data" prominently rather than burying it as
@@ -412,38 +495,49 @@ def extract_type_schema_graph_data(nodes_list, links_list):
         top_task = task_counter.most_common(1)[0][0] if task_counter else None
         top_user = user_counter.most_common(1)[0][0] if user_counter else None
 
+        # Rank instances by descending degree, then name, so the sample list is
+        # deterministic rather than dict-order-dependent. PR3's side panel reads
+        # these names directly.
+        ranked = sorted(
+            type_nodes,
+            key=lambda tn: (-(tn.get("degree") or 0), tn.get("name") or ""),
+        )
+        samples = [tn["name"] for tn in ranked[:SCHEMA_SAMPLES_PER_TYPE]]
+
+        # Full per-pair relationship distribution for this source type, sorted by
+        # descending count then target/relation as stable tiebreakers.
+        relationships = sorted(
+            (
+                {"to_type": target_type, "relation": relation, "count": count}
+                for (relation, target_type), count in relationships_by_type[node_type_name].items()
+            ),
+            key=lambda rel: (-rel["count"], rel["to_type"] or "", rel["relation"]),
+        )
+
         schema_nodes.append(
             {
-                "id": f"type:{node_type}",
-                "name": node_type,
+                "id": f"type:{node_type_name}",
+                "name": node_type_name,
                 "type": "GraphNodeType",
-                "rank": node_type_rank(node_type),
+                "rank": _rank_for(node_type_name),
                 "fields": extract_type_schema_fields(type_nodes),
                 "source_pipeline": top_pipeline,
                 "source_task": top_task,
                 "source_user": top_user,
                 "instance_count": len(type_nodes),
+                "samples": samples,
+                "sample_size": len(samples),
+                "relationships": relationships,
             }
         )
 
     relation_counts_by_pair: Dict[Tuple[str, str], Counter] = defaultdict(Counter)
     for link in links_list:
-        source_node = nodes_by_id.get(str(link["source"]))
-        target_node = nodes_by_id.get(str(link["target"]))
-        if source_node is None or target_node is None:
+        source_type = node_type_by_id.get(str(link["source"]))
+        target_type = node_type_by_id.get(str(link["target"]))
+        if source_type is None or target_type is None:
             continue
-
-        edge_info = link.get("edge_info") or {}
-        relation = (
-            link.get("relationship_type")
-            or edge_info.get("relationship_name")
-            or edge_info.get("relationship_type")
-            or link.get("relation")
-            or "related"
-        )
-        source_type = source_node.get("type") or "Node"
-        target_type = target_node.get("type") or "Node"
-        relation_counts_by_pair[(source_type, target_type)][relation] += 1
+        relation_counts_by_pair[(source_type, target_type)][_link_relation(link)] += 1
 
     schema_links: List[Dict[str, Any]] = []
     for index, ((source_type, target_type), relation_counts) in enumerate(
@@ -453,8 +547,8 @@ def extract_type_schema_graph_data(nodes_list, links_list):
         )
     ):
         rel_id = f"rel:{index}:{source_type}:{target_type}"
-        source_rank = node_type_rank(source_type)
-        target_rank = node_type_rank(target_type)
+        source_rank = _rank_for(source_type)
+        target_rank = _rank_for(target_type)
         if source_rank == target_rank:
             rel_rank = source_rank + 0.5
         else:
@@ -496,7 +590,125 @@ def extract_type_schema_graph_data(nodes_list, links_list):
         schema_links.append({"source": f"type:{source_type}", "target": rel_id, "label": "from"})
         schema_links.append({"source": rel_id, "target": f"type:{target_type}", "label": "to"})
 
-    return {"nodes": schema_nodes, "links": schema_links}
+    # Instance-level drill-down data so the inspector can navigate
+    # Type → instance → neighbours without dropping to the global graph:
+    #   * instances_by_type: every instance name (not just the 5 samples), per type
+    #   * instance_index: a compact per-instance adjacency (outgoing/incoming edges)
+    # NOTE: for very large graphs this should be scoped/paginated; it is sized to
+    # the schema graph (one entry per instance) which is fine for typical graphs.
+    instances_by_type: Dict[str, List[Dict[str, str]]] = defaultdict(list)
+    instance_index: Dict[str, Dict[str, Any]] = {}
+    for node in nodes_list:
+        nid = str(node["id"])
+        type_name = node_type_by_id[node["id"]]
+        display_name = node.get("name") or nid
+        instances_by_type[type_name].append({"id": nid, "name": display_name})
+        instance_index[nid] = {
+            "id": nid,
+            "name": display_name,
+            "type": type_name,
+            "out": [],
+            "in": [],
+        }
+    for type_name in instances_by_type:
+        instances_by_type[type_name].sort(key=lambda rec: rec["name"])
+    for link in links_list:
+        source = str(link["source"])
+        target = str(link["target"])
+        if source not in instance_index or target not in instance_index:
+            continue
+        relation = _link_relation(link)
+        instance_index[source]["out"].append({"relation": relation, "id": target})
+        instance_index[target]["in"].append({"relation": relation, "id": source})
+
+    return {
+        "nodes": schema_nodes,
+        "links": schema_links,
+        "instances_by_type": dict(instances_by_type),
+        "instance_index": instance_index,
+    }
+
+
+def build_operation_layer(schema_graph, nodes_list, links_list):
+    """Attach a transformation impact-layer to ``schema_graph`` in place.
+
+    For each catalog operation whose effects touch a schema type present in the
+    graph, emit an operation node and typed impact links
+    (produces/enriches/modifies/removes). ``"Entity"`` effects expand to the
+    semantic entity types actually present (Person/Broker/…). Links are flagged
+    ``observed`` when the live provenance (a type's top ``source_pipeline``)
+    matches the operation's pipeline. Existing nodes/links are left untouched.
+    """
+    from cognee.modules.visualization.operations_catalog import get_operations_catalog
+
+    type_nodes = [n for n in schema_graph.get("nodes", []) if n.get("type") == "GraphNodeType"]
+    present = {n["name"] for n in type_nodes}
+    pipeline_by_type = {n["name"]: n.get("source_pipeline") for n in type_nodes}
+
+    # Semantic entity types are those reached via the is_a edge (Person/Broker/…).
+    nodes_by_id = {n["id"]: n for n in nodes_list}
+    semantic_entity_types = set()
+    for link in links_list:
+        if _link_relation(link) == ENTITY_TYPE_RELATION:
+            target = nodes_by_id.get(str(link["target"]))
+            if target and target.get("name"):
+                semantic_entity_types.add(target["name"])
+
+    def resolve_targets(effect):
+        names = set()
+        target_type = effect.get("target_type")
+        if target_type == "Entity":
+            names |= (semantic_entity_types & present)
+            if "Entity" in present:
+                names.add("Entity")
+        elif target_type and target_type in present:
+            names.add(target_type)
+        node_set = effect.get("target_node_set")
+        if node_set and node_set in present:
+            names.add(node_set)
+        return names
+
+    operations = []
+    operation_links = []
+    for op in get_operations_catalog():
+        seen = set()
+        links_for_op = []
+        for effect in op.get("effects", []):
+            for type_name in resolve_targets(effect):
+                key = (effect["effect"], type_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                observed = (
+                    op.get("pipeline_name") is not None
+                    and pipeline_by_type.get(type_name) == op.get("pipeline_name")
+                )
+                links_for_op.append(
+                    {
+                        "source": "op:" + op["name"],
+                        "target": "type:" + type_name,
+                        "effect": effect["effect"],
+                        "property": effect.get("property"),
+                        "observed": bool(observed),
+                    }
+                )
+        if not links_for_op:
+            continue  # operation doesn't touch any type present in this graph
+        operations.append(
+            {
+                "id": "op:" + op["name"],
+                "name": op["label"],
+                "type": "GraphOperation",
+                "op_kind": op.get("kind", "pipeline"),
+                "scope": op.get("scope", "subset"),
+                "summary": op.get("summary", ""),
+            }
+        )
+        operation_links.extend(links_for_op)
+
+    schema_graph["operations"] = operations
+    schema_graph["operation_links"] = operation_links
+    return schema_graph
 
 
 # ── Story-view enrichment ────────────────────────────────────────────────────
@@ -725,6 +937,7 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
     }
 
     schema_graph = extract_schema_graph_data(nodes, links)
+    build_operation_layer(schema_graph, nodes, links)
 
     # Stages present in the graph, in canonical left-to-right order
     present_stages = [s for s in STAGE_ORDER if any(n["stage"] == s for n in nodes)]
