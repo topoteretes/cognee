@@ -200,3 +200,70 @@ async def test_get_context_empty_payload(mock_vector_engine):
         )
 
     assert context == ""
+
+
+@pytest.mark.asyncio
+async def test_get_completion_attaches_score_to_payloads():
+    """get_completion_from_context exposes each chunk's retrieval distance as 'score'."""
+    retriever = ChunksRetriever()
+
+    objects = [
+        SimpleNamespace(payload={"text": "a"}, score=0.2),
+        SimpleNamespace(payload={"text": "b"}, score=0.7),
+    ]
+
+    completion = await retriever.get_completion_from_context("test query", objects, None)
+
+    assert completion == [
+        {"text": "a", "score": 0.2},
+        {"text": "b", "score": 0.7},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_init_max_distance_default_none():
+    """max_distance defaults to None, leaving distance filtering off."""
+    assert ChunksRetriever().max_distance is None
+
+
+@pytest.mark.asyncio
+async def test_init_custom_max_distance():
+    """max_distance is stored when supplied."""
+    assert ChunksRetriever(max_distance=0.35).max_distance == 0.35
+
+
+@pytest.mark.asyncio
+async def test_get_retrieved_objects_filters_by_max_distance(mock_vector_engine):
+    """Chunks farther than max_distance are dropped before they reach the caller."""
+    near = SimpleNamespace(payload={"text": "near"}, score=0.1)
+    far = SimpleNamespace(payload={"text": "far"}, score=0.9)
+    mock_vector_engine.search.return_value = [near, far]
+
+    retriever = ChunksRetriever(max_distance=0.5)
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        objects = await retriever.get_retrieved_objects("test query")
+
+    assert [o.payload["text"] for o in objects] == ["near"]
+
+
+@pytest.mark.asyncio
+async def test_max_distance_survivors_carry_score_end_to_end(mock_vector_engine):
+    """A chunk surviving the max_distance filter carries its score in the completion."""
+    near = SimpleNamespace(payload={"text": "near"}, score=0.1)
+    far = SimpleNamespace(payload={"text": "far"}, score=0.9)
+    mock_vector_engine.search.return_value = [near, far]
+
+    retriever = ChunksRetriever(max_distance=0.5)
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        objects = await retriever.get_retrieved_objects("test query")
+        completion = await retriever.get_completion_from_context("test query", objects, None)
+
+    assert completion == [{"text": "near", "score": 0.1}]
