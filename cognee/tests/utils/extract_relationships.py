@@ -26,8 +26,8 @@ def extract_relationships(
         relationships.append(relationship)
 
     for node in graph.nodes:
-        node_id = generate_node_id(node.id)
-        type_node_id = generate_node_id(node.type)
+        node_id = generate_node_id(f"entity:{node.id}")
+        type_node_id = generate_node_id(f"type:{node.type}")
         type_edge_id = f"{str(node_id)}_is_a_{str(type_node_id)}"
 
         if type_edge_id not in cache:

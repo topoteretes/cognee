@@ -17,12 +17,11 @@ from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, Field
 
-from cognee.infrastructure.engine import DataPoint, Embeddable, Dedup
+from cognee.infrastructure.engine import DataPoint, Dedup, Embeddable
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.pipelines.tasks.task import task
 from cognee.modules.pipelines.operations.run_pipeline import run_pipeline
+from cognee.modules.pipelines.tasks.task import task
 from cognee.tasks.storage import add_data_points
-
 
 # -- Data models --
 
@@ -159,9 +158,9 @@ async def main():
 
     print(results[0] if results else "No output")
 
-    # Search the graph
-    print("\n--- Search: 'Who worked on gravity?' ---")
-    answer = await cognee.search(
+    # Recall from the graph
+    print("\n--- Recall: 'Who worked on gravity?' ---")
+    answer = await cognee.recall(
         "Who worked on gravity?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )

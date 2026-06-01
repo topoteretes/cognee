@@ -49,13 +49,13 @@ async def test_retrieve_existing_edges_queries_graph_edges_from_all_chunks(mock_
     queried_edges = graph_engine.has_edges.await_args.args[0]
 
     assert (
-        generate_node_id("Source 1"),
-        generate_node_id("Target 1"),
+        generate_node_id("entity:Source 1"),
+        generate_node_id("entity:Target 1"),
         generate_edge_name("Knows"),
     ) in queried_edges
     assert (
-        generate_node_id("Source 2"),
-        generate_node_id("Target 2"),
+        generate_node_id("entity:Source 2"),
+        generate_node_id("entity:Target 2"),
         generate_edge_name("Works With"),
     ) in queried_edges
 

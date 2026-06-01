@@ -10,6 +10,8 @@ export type PlanType = string | null;
 export interface AvailableTenant {
   id: string;
   name: string;
+  isOwner: boolean;
+  ownerHasSubscription: boolean;
 }
 
 export interface TenantContextValue {
@@ -21,8 +23,10 @@ export interface TenantContextValue {
   error: string | null;
   statusMessage: { title: string; subtitle: string } | null;
   availableTenants: AvailableTenant[];
-  switchTenant: (tenantId: string) => void;
+  switchTenant: (tenantId: string, tenantName?: string, navigateTo?: string) => void;
   planType: PlanType;
+  hasAccess: boolean;
+  requestCreateWorkspace: () => void;
 }
 
 export const localInstance: CogneeInstance = {
@@ -41,6 +45,8 @@ export const TenantContext = createContext<TenantContextValue>({
   availableTenants: [],
   switchTenant: () => {},
   planType: null,
+  hasAccess: true,
+  requestCreateWorkspace: () => {},
 });
 
 export function useTenant() {
@@ -52,6 +58,8 @@ export function useTenant() {
     availableTenants: context.availableTenants,
     switchTenant: context.switchTenant,
     planType: context.planType,
+    hasAccess: context.hasAccess,
+    requestCreateWorkspace: context.requestCreateWorkspace,
   };
 }
 

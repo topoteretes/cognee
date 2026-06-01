@@ -10,6 +10,7 @@ import { CogneeInstance } from "../instances/types";
 interface CognifyOptions {
   graphModel?: object;
   customPrompt?: string;
+  ontologyKey?: string[];
   llmModel?: string;
 }
 
@@ -25,12 +26,12 @@ export default async function cognifyDataset(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      datasets: [dataset.id],
+      datasets: [dataset.name],
       datasetIds: [dataset.id],
-      runInBackground: false,
+      runInBackground: true,
       ...(options?.graphModel ? { graphModel: options.graphModel } : {}),
       customPrompt: options?.customPrompt ?? "",
-      ontologyKey: [],
+      ontologyKey: options?.ontologyKey ?? [],
       chunksPerBatch: 10,
       ...(options?.llmModel && { llmModel: options.llmModel }),
     }),
