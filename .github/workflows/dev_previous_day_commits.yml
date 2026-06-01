@@ -1,13 +1,12 @@
 name: automation | Draft Docs PRs For Previous Day Dev PRs
 
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
       lookback_days:
         description: Number of UTC calendar days to look back when scanning merged PRs
         required: false
-        default: "4"
+        default: "1"
       anchor_date:
         description: Optional UTC date to scan, in YYYY-MM-DD format
         required: false
@@ -20,7 +19,7 @@ permissions:
   pull-requests: read
 
 env:
-  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '4' }}
+  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
 
 jobs:
   prepare-merged-branches:
