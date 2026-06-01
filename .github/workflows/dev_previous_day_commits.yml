@@ -1,6 +1,7 @@
-name: automation | Draft Docs PRs For Current Day Dev Merges
+name: automation | Draft Docs PRs For Previous Day Dev PRs
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       lookback_days:
@@ -16,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 env:
   lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
@@ -40,11 +42,12 @@ jobs:
       - name: Fetch latest dev branch
         run: git fetch origin dev:refs/remotes/origin/dev --no-tags
 
-      - name: Prepare current day merged branches
+      - name: Prepare merged PRs
         id: prepare
         shell: bash
         env:
           INPUT_ANCHOR_DATE: ${{ github.event.inputs.anchor_date || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -113,12 +116,20 @@ jobs:
           LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
           NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+          PR_TITLE: ${{ matrix.pr_title }}
+          PR_BODY_B64: ${{ matrix.pr_body_b64 }}
+          PR_URL: ${{ matrix.pr_url }}
         run: |
           uv run python tools/generate_branch_notes.py \
             --branch-name "${{ matrix.branch_name }}" \
             --merge-sha "${{ matrix.merge_sha }}" \
             --first-parent "${{ matrix.first_parent }}" \
             --second-parent "${{ matrix.second_parent }}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --pr-body-base64 "${PR_BODY_B64}" \
+            --pr-url "${PR_URL}" \
             --json-output "${NOTES_JSON}" \
             --markdown-output "${NOTES_MARKDOWN}"
 
@@ -152,8 +163,9 @@ jobs:
           needs_update = bool(assessment.get("needs_documentation_update"))
           branch_slug = os.environ["BRANCH_SLUG"]
           short_sha = os.environ["SHORT_SHA"]
-          docs_branch = f"automation/docs-{branch_slug}-{short_sha}"
-          pr_title = f"docs: draft updates for {os.environ['BRANCH_NAME']}"
+          pr_number = "${{ matrix.pr_number }}"
+          docs_branch = f"automation/docs-pr-{pr_number}-{branch_slug}-{short_sha}"
+          pr_title = f"docs: draft updates for PR #{pr_number}"
 
           output_path = Path(os.environ["GITHUB_OUTPUT"])
           with output_path.open("a", encoding="utf-8") as fh:
@@ -272,6 +284,7 @@ jobs:
             Your job is to document the actual behavior and API changes introduced by this branch, not to make adjacent or generic documentation improvements.
 
             - Branch: `${{ matrix.branch_name }}`
+            - PR: `#${{ matrix.pr_number }} ${{ matrix.pr_title }}`
             - Merge SHA: `${{ matrix.merge_sha }}`
             - Short SHA: `${{ matrix.short_sha }}`
             - First parent: `${{ matrix.first_parent }}`
@@ -481,7 +494,7 @@ jobs:
         run: |
           EXISTING_PR_NUMBER="$(gh pr list \
             --repo "${TARGET_REPO}" \
-            --head "topoteretes:${HEAD_BRANCH}" \
+            --head "${HEAD_BRANCH}" \
             --base main \
             --state open \
             --json number \
@@ -523,8 +536,9 @@ jobs:
           CHANGED_FILES: ${{ steps.pr_content.outputs.changed_files }}
         run: |
           {
-            echo "## Branch docs review: ${{ matrix.branch_name }}"
+            echo "## PR docs review: #${{ matrix.pr_number }} ${{ matrix.pr_title }}"
             echo
+            echo "- Branch: \`${{ matrix.branch_name }}\`"
             echo "- Merge commit: \`${{ matrix.merge_sha }}\`"
             echo "- Needs documentation update: \`${{ steps.assessment.outputs.needs_update }}\`"
             if [ "${{ steps.assessment.outputs.needs_update }}" = "true" ]; then

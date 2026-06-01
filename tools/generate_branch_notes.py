@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 from pathlib import Path
@@ -29,7 +30,14 @@ except ModuleNotFoundError:
 
 
 def collect_branch_payload(
-    first_parent: str, second_parent: str, branch_name: str, merge_sha: str
+    first_parent: str,
+    second_parent: str,
+    branch_name: str,
+    merge_sha: str,
+    pr_number: str | None = None,
+    pr_title: str | None = None,
+    pr_body: str | None = None,
+    pr_url: str | None = None,
 ) -> dict[str, Any]:
     changed_files = get_branch_changed_files(first_parent, second_parent)
     commit_subjects = get_branch_commit_subjects(first_parent, second_parent)
@@ -39,6 +47,10 @@ def collect_branch_payload(
         "merge_sha": merge_sha,
         "first_parent": first_parent,
         "second_parent": second_parent,
+        "pr_number": pr_number,
+        "pr_title": pr_title,
+        "pr_body": pr_body,
+        "pr_url": pr_url,
         "changed_files": changed_files,
         "commit_subjects": commit_subjects,
         "diff_stat": diff_stat,
@@ -115,6 +127,9 @@ def format_markdown(notes: Any, payload: dict[str, Any]) -> str:
         f"# {get('title', 'Branch notes')}",
         "",
         f"**Branch:** {payload['branch_name']}",
+        f"**PR:** #{payload['pr_number']} {payload['pr_title']}"
+        if payload.get("pr_number")
+        else "**PR:** Not available",
         f"**Merge SHA:** {payload['merge_sha']}",
         "",
         "## Summary",
@@ -150,6 +165,11 @@ def parse_args():
     parser.add_argument("--merge-sha", required=True)
     parser.add_argument("--first-parent", required=True)
     parser.add_argument("--second-parent", required=True)
+    parser.add_argument("--pr-number", default=None)
+    parser.add_argument("--pr-title", default=None)
+    parser.add_argument("--pr-body", default=None)
+    parser.add_argument("--pr-body-base64", default=None)
+    parser.add_argument("--pr-url", default=None)
     parser.add_argument("--json-output", required=True, type=Path)
     parser.add_argument("--markdown-output", required=True, type=Path)
     return parser.parse_args()
@@ -157,8 +177,19 @@ def parse_args():
 
 async def main():
     args = parse_args()
+    pr_body = args.pr_body
+    if args.pr_body_base64:
+        pr_body = base64.b64decode(args.pr_body_base64).decode("utf-8")
+
     payload = collect_branch_payload(
-        args.first_parent, args.second_parent, args.branch_name, args.merge_sha
+        args.first_parent,
+        args.second_parent,
+        args.branch_name,
+        args.merge_sha,
+        pr_number=args.pr_number,
+        pr_title=args.pr_title,
+        pr_body=pr_body,
+        pr_url=args.pr_url,
     )
     notes = await generate_notes_with_llm(payload)
 
