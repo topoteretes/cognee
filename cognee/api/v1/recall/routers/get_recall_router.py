@@ -12,7 +12,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.modules.search.operations import get_history
+from cognee.modules.search.operations import get_history, log_query
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
@@ -115,6 +115,12 @@ def get_recall_router() -> APIRouter:
         from cognee.api.v1.recall import recall as cognee_recall
 
         try:
+            await log_query(
+                payload.query,
+                payload.search_type.value if payload.search_type else "recall",
+                user.id,
+                session_id=payload.session_id,
+            )
             results = await cognee_recall(
                 query_text=payload.query,
                 query_type=payload.search_type,
