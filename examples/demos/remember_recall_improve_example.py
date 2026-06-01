@@ -22,10 +22,10 @@ import asyncio
 import os
 
 # Enable filesystem-based session caching (required for session_id and improve)
-os.environ["CACHING"] = "true"
-os.environ["CACHE_BACKEND"] = "fs"
+os.environ.setdefault("CACHING", "true")
+os.environ.setdefault("CACHE_BACKEND", "fs")
 
-import cognee
+import cognee  # noqa: E402
 
 PERMANENT_TEXT = (
     "Albert Einstein developed the theory of general relativity, "

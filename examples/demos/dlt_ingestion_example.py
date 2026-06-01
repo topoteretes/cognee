@@ -145,10 +145,10 @@ async def main():
         **DLT_REMEMBER_KWARGS,
     )
 
-    # ── Mode 5: Adding some unstructured text about users and pets along with the dlt resource ──
-
     result = await cognee.recall("What products are in inventory?")
     print("Mode 4 results:", result)
+    
+    # ── Mode 5: Adding some unstructured text about users and pets along with the dlt resource ──
 
     text = """Alice has two pets: a cat named Fluffy and a dog named Spot.
     She often says Fluffy is calm in the mornings, while Spot gets excited whenever someone mentions a walk.
