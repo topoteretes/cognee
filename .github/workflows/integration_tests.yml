@@ -14,12 +14,12 @@ on:
 
 jobs:
   integration-retrieval:
-    name: Integration - Retrieval (${{ matrix.split-group }}/3)
+    name: Integration - Retrieval (${{ matrix.split-group }}/4)
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        split-group: [1, 2, 3]
+        split-group: [1, 2, 3, 4]
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
       ENV: 'dev'
@@ -47,7 +47,7 @@ jobs:
           extra-dependencies: "scraping"
 
       - name: Run Retrieval Tests
-        run: uv run pytest cognee/tests/integration/retrieval/ --splits 3 --group ${{ matrix.split-group }}
+        run: uv run pytest cognee/tests/integration/retrieval/ --splits 4 --group ${{ matrix.split-group }}
 
   integration-documents-tasks:
     name: Integration - Documents & Tasks (${{ matrix.split-group }}/2)
@@ -86,12 +86,12 @@ jobs:
         run: uv run pytest cognee/tests/integration/documents/ cognee/tests/integration/tasks/ --splits 2 --group ${{ matrix.split-group }}
 
   integration-infra:
-    name: Integration - Infrastructure (${{ matrix.split-group }}/2)
+    name: Integration - Infrastructure (${{ matrix.split-group }}/3)
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
-        split-group: [1, 2]
+        split-group: [1, 2, 3]
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
       ENV: 'dev'
@@ -119,7 +119,7 @@ jobs:
           extra-dependencies: "scraping"
 
       - name: Run Infrastructure Tests
-        run: uv run pytest cognee/tests/integration/infrastructure/ --splits 2 --group ${{ matrix.split-group }}
+        run: uv run pytest cognee/tests/integration/infrastructure/ --splits 3 --group ${{ matrix.split-group }}
 
   integration-web:
     name: Integration - Web
