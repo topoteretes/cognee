@@ -11,7 +11,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.modules.search.operations import get_history
+from cognee.modules.search.operations import get_history, get_sessions
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
@@ -37,6 +37,7 @@ class SearchPayloadDTO(InDTO):
     skills: Optional[list[str]] = Field(default=None, examples=[None])
     tools: Optional[list[str]] = Field(default=None, examples=[None])
     max_iter: Optional[int] = Field(default=None, examples=[None])
+    session_id: Optional[str] = Field(default=None, examples=[None])
 
 
 def get_search_router() -> APIRouter:
@@ -48,6 +49,48 @@ def get_search_router() -> APIRouter:
         user: str
         created_at: datetime
 
+    class SessionItem(OutDTO):
+        session_id: str
+        title: str
+        created_at: datetime
+        query_count: int
+
+    @router.get(
+        "/sessions",
+        response_model=List[SessionItem],
+        responses={
+            403: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
+    async def get_search_sessions(user: User = Depends(get_authenticated_user)):
+        """
+        List all search sessions for the authenticated user.
+
+        Returns one entry per unique session_id, with the text of the first query
+        as the session title, the session creation time, and the total query count.
+
+        ## Response
+        - **session_id**: The client-provided session identifier
+        - **title**: Text of the first query in the session
+        - **created_at**: When the session was started
+        - **query_count**: Number of queries in the session
+
+        ## Error Codes
+        - **500 Internal Server Error**: Error retrieving sessions
+        """
+        try:
+            sessions = await get_sessions(user.id)
+            return sessions
+        except Exception as error:
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    detail=str(error),
+                ).model_dump(),
+            )
+
     @router.get(
         "",
         response_model=List[SearchHistoryItem],
@@ -57,12 +100,18 @@ def get_search_router() -> APIRouter:
             500: {"model": ErrorResponse},
         },
     )
-    async def get_search_history(user: User = Depends(get_authenticated_user)):
+    async def get_search_history(
+        session_id: Optional[str] = None, user: User = Depends(get_authenticated_user)
+    ):
         """
         Get search history for the authenticated user.
 
         This endpoint retrieves the search history for the authenticated user,
         returning a list of previously executed searches with their timestamps.
+        Optionally filter by session_id to get history for a specific session.
+
+        ## Query Parameters
+        - **session_id** (optional): Filter results to a specific session
 
         ## Response
         Returns a list of search history items containing:
@@ -81,7 +130,7 @@ def get_search_router() -> APIRouter:
         )
 
         try:
-            history = await get_history(user.id, limit=0)
+            history = await get_history(user.id, limit=0, session_id=session_id)
 
             return history
         except Exception as error:
@@ -173,6 +222,7 @@ def get_search_router() -> APIRouter:
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
+                session_id=payload.session_id,
             )
 
             return jsonable_encoder(results)

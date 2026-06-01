@@ -70,7 +70,7 @@ async def search(
     Notes:
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
-    query = await log_query(query_text, query_type.value, user.id)
+    query = await log_query(query_text, query_type.value, user.id, session_id=session_id)
     send_telemetry(
         "cognee.search EXECUTION STARTED",
         user.id,
