@@ -63,12 +63,34 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
     if graph and not backend_access_control_enabled():
         graph_engine = await get_graph_engine()
         await graph_engine.delete_graph()
+        # delete_graph() only does a transient drop and leaves any subprocess
+        # worker alive. Close the engine here so the worker is terminated and
+        # its inherited OS handles (e.g. the cognee_db relational file on
+        # Windows, where children inherit handles at multiprocessing 'spawn'
+        # time) are released BEFORE delete_database() removes those files.
+        # Mirrors the awaited per-dataset teardown in
+        # LadybugDatasetDatabaseHandler.delete_dataset (delete_graph ->
+        # evict -> await close()). Without this await the close() scheduled by
+        # cache_clear() below is fire-and-forget and races the file delete,
+        # producing PermissionError [WinError 32] on Windows.
+        # Only the ladybug/kuzu adapter exposes close(); neo4j/networkx don't,
+        # so guard with hasattr to stay provider-agnostic.
+        if hasattr(graph_engine, "close"):
+            await graph_engine.close()  # type: ignore[attr-defined]
     elif graph and backend_access_control_enabled():
         await prune_graph_databases()
 
     if vector and not backend_access_control_enabled():
         vector_engine = get_vector_engine()
         await vector_engine.prune()
+        # Same rationale as the graph engine above: deterministically close
+        # the vector engine (terminating any subprocess worker and releasing
+        # inherited handles) before metadata deletion, instead of relying on
+        # the fire-and-forget close scheduled by cache_clear(). Only the
+        # LanceDB adapter exposes close(); ChromaDB/PGVector don't, so guard
+        # with hasattr to stay provider-agnostic.
+        if hasattr(vector_engine, "close"):
+            await vector_engine.close()
     elif vector and backend_access_control_enabled():
         await prune_vector_databases()
 

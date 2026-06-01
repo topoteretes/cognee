@@ -173,16 +173,37 @@ _SIGNAL_HINTS: Dict[str, str] = {
 def _describe_exitcode(exitcode: Optional[int]) -> str:
     """Render an exitcode for human consumption.
 
-    ``None`` and non-negative codes pass through unchanged; negative codes
-    are decoded into the signal that killed the worker (``-9`` → ``SIGKILL``)
-    with a short hint about the typical cause in production. POSIX exit
-    semantics: ``multiprocessing.Process.exitcode`` is the negated signal
-    number when the child died from an uncaught signal.
+    ``None`` passes through unchanged. POSIX exit semantics:
+    ``multiprocessing.Process.exitcode`` is the negated signal number when the
+    child died from an uncaught signal, so negative codes are decoded into the
+    signal that killed the worker (``-9`` → ``SIGKILL``) with a short hint about
+    the typical cause in production.
+
+    Windows has no POSIX signal-delivery semantics: CPython implements
+    ``os.kill(pid, sig)`` via ``TerminateProcess(pid, sig)``, so a worker
+    "killed" with e.g. SIGTERM exits with a POSITIVE code equal to the signal
+    number (15) rather than ``-15``. On Windows we therefore also decode
+    positive codes that match a known signal so the diagnostic stays readable
+    (``exitcode=15 (SIGTERM …)``). Other non-negative codes pass through.
     """
-    if exitcode is None or exitcode >= 0:
+    if exitcode is None:
         return str(exitcode)
+    if exitcode >= 0:
+        # On Windows a positive exitcode can be a TerminateProcess signal
+        # number (no negative-code POSIX semantics). Decode it the same way
+        # as the negative POSIX path; on POSIX this branch is skipped because
+        # genuine signal deaths surface as negative codes.
+        if os.name == "nt" and exitcode > 0:
+            return _decode_signal_exitcode(exitcode, exitcode)
+        return str(exitcode)
+    return _decode_signal_exitcode(-exitcode, exitcode)
+
+
+def _decode_signal_exitcode(signal_number: int, exitcode: int) -> str:
+    """Render ``exitcode`` annotated with the signal ``signal_number`` names,
+    falling back to the bare exitcode string when it isn't a known signal."""
     try:
-        sig = signal.Signals(-exitcode)
+        sig = signal.Signals(signal_number)
     except (ValueError, AttributeError):
         return str(exitcode)
     hint = _SIGNAL_HINTS.get(sig.name)

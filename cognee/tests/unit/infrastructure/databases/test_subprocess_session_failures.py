@@ -407,11 +407,20 @@ def test_describe_exitcode_decodes_signals():
 
 
 def test_init_signal_killed_worker_surfaces_signal_name():
-    """End-to-end: a worker that dies to SIGTERM before READY surfaces
-    ``exitcode=-15 (SIGTERM …)`` in the error message. Regression guard
-    against the signal-decoding pipeline (faulthandler + ``_describe_exitcode``)
-    silently coming undone.
+    """End-to-end: a worker that dies to SIGTERM before READY surfaces the
+    signal name in the error message. Regression guard against the
+    signal-decoding pipeline (faulthandler + ``_describe_exitcode``) silently
+    coming undone.
+
+    POSIX delivers SIGTERM and the child dies with ``exitcode == -15``
+    (negated signal number), which ``_describe_exitcode`` decodes to
+    ``exitcode=-15 (SIGTERM …)``. On Windows there is no POSIX signal
+    delivery: ``os.kill(pid, SIGTERM)`` maps to ``TerminateProcess`` and the
+    child exits with the POSITIVE code ``15``; ``_describe_exitcode`` decodes
+    that to ``exitcode=15 (SIGTERM …)``. The expected numeric code is therefore
+    platform-dependent, but the decoded ``SIGTERM`` name must appear on both.
     """
+    import os as _os
     import signal as _signal
 
     ctx = mp.get_context("spawn")
@@ -424,7 +433,9 @@ def test_init_signal_killed_worker_surfaces_signal_name():
     with pytest.raises(SubprocessTransportError, match="exited before signalling ready") as excinfo:
         session.wait_for_ready()
     msg = str(excinfo.value)
-    expected_code = -int(_signal.SIGTERM)
+    # Windows TerminateProcess yields a positive exitcode == signal number;
+    # POSIX yields the negated signal number.
+    expected_code = int(_signal.SIGTERM) if _os.name == "nt" else -int(_signal.SIGTERM)
     assert f"exitcode={expected_code}" in msg, msg
     assert "SIGTERM" in msg, f"signal name not decoded into diagnostic: {msg}"
 
