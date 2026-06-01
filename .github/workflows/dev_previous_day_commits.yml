@@ -109,6 +109,7 @@ jobs:
           echo "notes_markdown=${OUTPUT_DIR}/branch_notes.md" >> "${GITHUB_OUTPUT}"
           echo "assessment_json=${OUTPUT_DIR}/docs_assessment.json" >> "${GITHUB_OUTPUT}"
           echo "assessment_markdown=${OUTPUT_DIR}/docs_assessment.md" >> "${GITHUB_OUTPUT}"
+          echo "docs_scope_plan=${OUTPUT_DIR}/docs_scope_plan.md" >> "${GITHUB_OUTPUT}"
 
       - name: Generate branch notes
         env:
@@ -270,18 +271,17 @@ jobs:
               fh.write("EOF\n")
           PY
 
-      - name: Generate docs changes with Claude
+      - name: Plan docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
-        id: claude
+        id: claude_scope
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are a documentation improvement agent for the Cognee project.
+            You are a documentation scope planner for the Cognee project.
 
-            Update the existing Cognee documentation to reflect this merged branch.
-            Your job is to document the actual behavior and API changes introduced by this branch, not to make adjacent or generic documentation improvements.
+            Analyze this merged PR and produce a small documentation edit plan. Do not edit documentation files.
 
             - Branch: `${{ matrix.branch_name }}`
             - PR: `#${{ matrix.pr_number }} ${{ matrix.pr_title }}`
@@ -289,6 +289,7 @@ jobs:
             - Short SHA: `${{ matrix.short_sha }}`
             - First parent: `${{ matrix.first_parent }}`
             - Second parent: `${{ matrix.second_parent }}`
+            - Scope plan output: `./${{ steps.branch_paths.outputs.docs_scope_plan }}`
 
             ## Available resources
 
@@ -305,88 +306,107 @@ jobs:
             Likely documentation targets:
             ${{ steps.docs_scope.outputs.candidate_doc_files }}
 
-            ## Required approach
+            ## Planning task
 
-            Start by reading the branch notes, then inspect the actual code diff for this branch. Use the branch parents above to identify what really changed. Prefer the merge-base-aware diff `git diff ${{ matrix.first_parent }}...${{ matrix.second_parent }}` and read the touched source files before editing docs.
-            Focus on the precomputed source files and likely documentation targets first. Only search outside those targets if they are clearly not sufficient.
-            Document the net-new public-facing delta introduced by this branch, not the full current behavior of the subsystem.
-
-            Before making any docs edits:
-
-            1. List the source files changed by this branch.
-            2. For each changed source file, identify whether it changes:
+            1. Read the branch notes and documentation assessment.
+            2. Inspect the source diff for `${{ matrix.first_parent }}...${{ matrix.second_parent }}` only enough to identify documentation-worthy changes.
+            3. Focus on the precomputed changed source files and likely documentation targets first.
+            4. Ignore tests, generated assets, lockfiles, and unrelated implementation-only changes unless they reveal public behavior.
+            5. For each changed source file you consider, classify whether it changes:
                - public behavior
                - public API / imports / entrypoints
                - documented configuration or defaults
                - developer-facing extension semantics
                - examples or usage patterns
                - or only internal implementation details
-            3. Only edit docs for items that fall into the documented/public categories above.
-            4. If a proposed docs edit cannot be traced back to a concrete source diff in this branch, do not make that edit.
-            5. Check whether the described behavior already existed before this branch. If it did, do not describe it as newly introduced by this merge.
-            6. If the branch fixes migrations, registration, wiring, or visibility for an already-existing feature, document the upgrade or migration impact only. Do not expand into broad subsystem documentation unless it is strictly required to understand the branch.
+            6. Identify the smallest docs edit surface that could cover the public-facing changes.
 
-            ## Instructions
+            Write the final plan to `./${{ steps.branch_paths.outputs.docs_scope_plan }}`.
 
-            1. Read the branch notes and documentation assessment first.
-            2. Inspect the source diff for `${{ matrix.first_parent }}...${{ matrix.second_parent }}` and identify which changes are documentation-worthy.
-            3. Review the touched source files themselves, not just the merge summary.
-            4. Only document user-facing behavior, public API changes, examples, or developer-facing semantics that actually changed in this branch.
-            5. For each proposed docs edit, identify the exact branch delta it documents and which changed source file(s) prove it.
-            6. Check that the target page is the correct page type for the detail level:
-               - concept pages: high-level behavior and mental model
-               - guides: task-oriented usage
-               - API/reference pages: exact signatures, parameters, schemas, env vars, and defaults
-               - migration/changelog pages: upgrade impact and operational notes
-            7. If the content is too detailed for the chosen page, either move it to a more appropriate existing page or reduce it to a short note with a link.
-            8. Do not make unrelated cleanup edits, style edits, or generic improvements to nearby docs sections unless they are strictly required to explain the branch changes.
-            9. Prefer the smallest possible set of docs edits that fully covers the code changes.
-            10. Review the relevant existing documentation pages in `./docs-repo`.
-            11. Search the Cognee source code in the current workspace to verify technical details before editing docs.
-            12. Edit at most 3 documentation files unless the source diff clearly requires more.
-            13. Prefer updating existing pages over creating new ones.
-            14. Do not edit `docs.json` unless you are creating a new docs page that is strictly required by the code diff.
-            15. Do not edit any workflow files, automation files, integration docs, provider docs, or unrelated concept pages unless the changed source files in this branch directly require it.
-            16. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or any non-documentation assets.
-            17. Do NOT create git commits.
+            The plan must be Markdown with these exact sections:
 
-            ## What to prioritize
+            # Documentation Scope Plan
 
-            Give priority to documenting changes like:
+            ## Docs Needed
+            `true` or `false`
 
-            - user-facing behavior changes
-            - public API, CLI, SDK, or configuration changes
-            - example code that is now outdated because of the merged branch
-            - developer-facing semantics that custom integrators or extension authors rely on
-            - changes to documented imports, entrypoints, arguments, defaults, return shapes, or supported options
+            ## Reason
+            One concise paragraph.
 
-            Lower priority or likely no-doc items unless explicitly exposed in public docs:
+            ## Documentation-Worthy Changes
+            Bullets. Each bullet must name the change, the source files proving it, and the recommended docs page type.
 
-            - internal performance optimizations
-            - internal race-condition fixes
-            - private implementation details that users do not interact with directly
+            ## Files To Edit
+            Bullets of existing docs files to edit. Use paths relative to `docs-repo`. Leave empty if none.
 
-            If a change is purely internal and not represented in public docs, leave it undocumented rather than inventing a public-facing explanation.
+            ## Source Files To Inspect During Editing
+            Bullets of source files the editing step should inspect. Keep this list short and exclude tests/assets/lockfiles.
 
-            ## Output discipline
+            ## Out Of Scope
+            Bullets for changes intentionally skipped.
 
-            The resulting docs PR should be easy to justify from the code diff.
+            Do not edit files inside `./docs-repo`.
+            Do not create commits.
+          claude_args: "--allowed-tools Read,Write,Glob,Grep,Bash --max-turns 20"
 
-            - Keep the PR narrowly scoped to this merge.
-            - Do not present pre-existing behavior as if this branch introduced it.
-            - Do not broaden a narrow fix branch into full feature-area documentation.
-            - Do not turn a small migration or registration fix into a large conceptual backfill unless the branch itself changes the public concept.
-            - Avoid adding documentation for features, integrations, or guides that were not touched by this branch.
-            - Do not add new conceptual pages unless the source diff introduces a new public concept that cannot fit into an existing page.
-            - If the branch only warrants one or two doc edits, make only one or two doc edits.
-            - Every edited file must be explainable by pointing to one or more changed source files in this merge.
-            - Every edited paragraph should be defensible from a concrete branch delta, not just from the current state of the codebase.
-            - Prefer precise scope wording. For example:
-              - "for graph node and edge relational upserts" instead of "for all relational writes"
-              - "helps avoid race conditions and contention" instead of "prevents race conditions"
-              - "equivalent configurations now reuse the same adapter instance" instead of "the factory caches adapters"
-            - If you cannot justify an edit from the code diff, skip it.
-            - It is better to produce a very small PR than a broad PR with speculative documentation updates.
+      - name: Validate docs scope plan
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        run: |
+          test -s "${{ steps.branch_paths.outputs.docs_scope_plan }}"
+          if [ -n "$(git -C docs-repo status --short)" ]; then
+            echo "The docs planning step modified docs-repo, but planning must not edit documentation." >&2
+            git -C docs-repo status --short >&2
+            exit 1
+          fi
+
+      - name: Generate docs changes with Claude
+        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are a documentation improvement agent for the Cognee project.
+
+            Update the existing Cognee documentation to reflect this merged PR.
+            Your job is to document the actual behavior and API changes introduced by this PR, not to make adjacent or generic documentation improvements.
+
+            - Branch: `${{ matrix.branch_name }}`
+            - PR: `#${{ matrix.pr_number }} ${{ matrix.pr_title }}`
+            - Merge SHA: `${{ matrix.merge_sha }}`
+            - Short SHA: `${{ matrix.short_sha }}`
+            - First parent: `${{ matrix.first_parent }}`
+            - Second parent: `${{ matrix.second_parent }}`
+
+            ## Required inputs
+
+            Read these first:
+
+            - **Documentation scope plan** (`./${{ steps.branch_paths.outputs.docs_scope_plan }}`)
+            - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`)
+            - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`)
+
+            ## Available resources
+
+            - **Documentation repo** (`./docs-repo`): Contains the documentation pages. Use existing `.md` and `.mdx` pages as the primary targets for edits. Read `./docs-repo/docs.json` only if the scope plan requires navigation context.
+            - **Cognee source code** (current workspace root): Use the source code to verify actual implementation details, defaults, supported options, function signatures, env vars, and behavior.
+
+            ## Editing rules
+
+            1. Follow the documentation scope plan.
+            2. If the scope plan says `Docs Needed` is `false`, make no documentation edits and print the reason.
+            3. Inspect only the source files listed in the scope plan unless they are insufficient to verify a specific planned edit.
+            4. Edit only docs files listed in the scope plan unless they are clearly the wrong target; if so, choose the smallest better existing docs target.
+            5. Document only user-facing behavior, public API changes, examples, or developer-facing semantics that actually changed in this PR.
+            6. If a proposed docs edit cannot be traced back to a concrete source diff in this PR, do not make that edit.
+            7. Do not present pre-existing behavior as if this PR introduced it.
+            8. Do not make unrelated cleanup edits, style edits, or generic improvements.
+            9. Edit at most 3 documentation files unless the scope plan explicitly justifies more.
+            10. Prefer updating existing pages over creating new ones.
+            11. Do not edit `docs.json` unless the scope plan says a new docs page is strictly required.
+            12. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or non-documentation assets.
+            13. Do NOT create git commits.
 
             When done, print a short summary of what you changed and which existing documentation pages you updated.
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 50"
