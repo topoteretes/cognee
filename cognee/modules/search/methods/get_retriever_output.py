@@ -78,32 +78,35 @@ async def get_retriever_output(
                 f"{retriever_class} generated completion",
             )
     elif persist_trace:
-        if hasattr(retriever_instance, "_use_session_cache") and retriever_instance._use_session_cache():
-            from cognee.infrastructure.session.get_session_manager import get_session_manager
-            from cognee.context_global_variables import session_user
-            
-            user = session_user.get()
-            if user and getattr(user, "id", None):
-                sm = get_session_manager()
-                if sm and sm.is_available:
-                    used_graph_element_ids = None
-                    if hasattr(retriever_instance, "_extract_context_object_ids"):
-                        used_graph_element_ids = retriever_instance._extract_context_object_ids(retrieved_objects)
-                    
-                    context_str = ""
-                    if isinstance(context, str):
-                        context_str = context
-                    elif isinstance(context, list):
-                        context_str = "\n\n".join([str(c) for c in context])
-                    
-                    await sm.add_qa(
-                        user_id=str(user.id),
-                        question=query_text,
-                        context=context_str,
-                        answer="",
-                        session_id=getattr(retriever_instance, "session_id", None),
-                        used_graph_element_ids=used_graph_element_ids,
-                    )
+        try:
+            if hasattr(retriever_instance, "_use_session_cache") and retriever_instance._use_session_cache():
+                from cognee.infrastructure.session.get_session_manager import get_session_manager
+                from cognee.context_global_variables import session_user
+                
+                user = session_user.get()
+                if user and getattr(user, "id", None):
+                    sm = get_session_manager()
+                    if sm and sm.is_available:
+                        used_graph_element_ids = None
+                        if hasattr(retriever_instance, "_extract_context_object_ids"):
+                            used_graph_element_ids = retriever_instance._extract_context_object_ids(retrieved_objects)
+                        
+                        context_str = ""
+                        if isinstance(context, str):
+                            context_str = context
+                        elif isinstance(context, list):
+                            context_str = "\n\n".join([str(c) for c in context])
+                        
+                        await sm.add_qa(
+                            user_id=str(user.id),
+                            question=query_text,
+                            context=context_str,
+                            answer="",
+                            session_id=getattr(retriever_instance, "session_id", None),
+                            used_graph_element_ids=used_graph_element_ids,
+                        )
+        except Exception as exc:
+            logger.warning("Failed to persist trace for context-only recall: %s", exc)
 
     search_result = SearchResultPayload(
         result_object=retrieved_objects,
