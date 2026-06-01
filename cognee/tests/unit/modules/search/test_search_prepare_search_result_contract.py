@@ -37,7 +37,7 @@ def _patch_search_side_effects(monkeypatch, search_mod):
     We only patch unavoidable side effects (telemetry + query/result logging).
     """
 
-    async def dummy_log_query(_query_text, _query_type, _user_id):
+    async def dummy_log_query(_query_text, _query_type, _user_id, **_kwargs):
         return types.SimpleNamespace(id="qid-1")
 
     async def dummy_log_result(*_args, **_kwargs):

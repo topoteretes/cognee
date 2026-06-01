@@ -32,7 +32,7 @@ def _patch_side_effect_boundaries(monkeypatch, search_mod):
     Keep production logic; patch only unavoidable side-effect boundaries.
     """
 
-    async def dummy_log_query(_query_text, _query_type, _user_id):
+    async def dummy_log_query(_query_text, _query_type, _user_id, **_kwargs):
         return types.SimpleNamespace(id="qid-1")
 
     async def dummy_log_result(*_args, **_kwargs):

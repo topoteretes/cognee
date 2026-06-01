@@ -11,7 +11,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.modules.search.operations import get_history, get_sessions
+from cognee.modules.search.operations import get_history, get_search_sessions
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
@@ -79,7 +79,7 @@ def get_search_router() -> APIRouter:
         - **500 Internal Server Error**: Error retrieving sessions
         """
         try:
-            sessions = await get_sessions(user.id)
+            sessions = await get_search_sessions(user.id)
             return sessions
         except Exception as error:
             return JSONResponse(

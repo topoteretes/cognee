@@ -17,6 +17,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    """Add nullable session_id column and index to the queries table."""
     conn = op.get_bind()
     inspector = Inspector.from_engine(conn)
 
@@ -30,6 +31,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove session_id index and column from the queries table."""
     conn = op.get_bind()
     inspector = Inspector.from_engine(conn)
 
