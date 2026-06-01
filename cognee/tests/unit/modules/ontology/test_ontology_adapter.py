@@ -1,3 +1,5 @@
+import io
+
 import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
@@ -640,3 +642,22 @@ def test_multifile_ontology_with_overlapping_entities():
 
         os.unlink(file1_path)
         os.unlink(file2_path)
+
+
+def test_file_object_ontology_uses_non_xml_serialization_from_filename():
+    """File-like Turtle ontologies should not be parsed as RDF/XML."""
+    ontology = b"""
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix ex: <http://example.org/test#> .
+
+        ex:Vehicle a owl:Class .
+        ex:Audi a ex:Vehicle .
+    """
+    file_obj = io.BytesIO(ontology)
+    file_obj.name = "vehicles.ttl"
+
+    resolver = RDFLibOntologyResolver(ontology_file=file_obj)
+
+    assert resolver.graph is not None
+    assert "vehicle" in resolver.lookup["classes"]
+    assert "audi" in resolver.lookup["individuals"]

@@ -4,6 +4,7 @@ from cognee.shared.logging_utils import get_logger
 from collections import deque
 from typing import List, Tuple, Dict, Optional, Any, Union, IO
 from rdflib import Graph, URIRef, RDF, RDFS, OWL
+from rdflib.util import guess_format
 
 from cognee.modules.ontology.exceptions import (
     OntologyInitializationError,
@@ -57,7 +58,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     for file_obj in file_objects:
                         try:
                             content = file_obj.read()
-                            self.graph.parse(data=content, format="xml")
+                            self.graph += self._parse_file_object(content, file_obj)
                             loaded_objects.append(file_obj)
                             logger.info("Ontology loaded successfully from file object")
                         except Exception as e:
@@ -106,6 +107,32 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         except Exception as e:
             logger.error("Failed to load ontology", exc_info=e)
             raise OntologyInitializationError() from e
+
+    def _parse_file_object(self, content: Any, file_obj: IO) -> Graph:
+        """Parse an ontology read from a file-like object.
+
+        RDFLib cannot infer the format from raw ``data`` alone. When possible,
+        use the file object's name to guess the RDF serialization format, then
+        fall back through the common formats accepted by uploaded ontologies.
+        """
+        file_name = getattr(file_obj, "name", None)
+        guessed_format = guess_format(file_name) if file_name else None
+        formats_to_try = [guessed_format] if guessed_format else []
+
+        for rdf_format in ("xml", "turtle", "n3", "json-ld", "nt"):
+            if rdf_format not in formats_to_try:
+                formats_to_try.append(rdf_format)
+
+        errors = []
+        for rdf_format in formats_to_try:
+            graph = Graph()
+            try:
+                graph.parse(data=content, format=rdf_format)
+                return graph
+            except Exception as e:
+                errors.append(f"{rdf_format}: {e}")
+
+        raise ValueError("Could not parse ontology file object as RDF: " + "; ".join(errors))
 
     def _uri_to_key(self, uri: URIRef) -> str:
         uri_str = str(uri)
