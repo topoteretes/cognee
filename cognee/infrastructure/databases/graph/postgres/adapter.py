@@ -313,26 +313,34 @@ class PostgresAdapter(GraphDBInterface):
         if not edges:
             return []
 
-        candidates = values(
-            sa_column("src", String),
-            sa_column("tgt", String),
-            sa_column("rel", String),
-            name="q",
-        ).data([(str(s), str(t), str(r)) for s, t, r in edges])
-
-        stmt = select(candidates.c.src, candidates.c.tgt, candidates.c.rel).where(
-            exists(
-                select(text("1"))
-                .select_from(_edge_table)
-                .where(_edge_table.c.source_id == candidates.c.src)
-                .where(_edge_table.c.target_id == candidates.c.tgt)
-                .where(_edge_table.c.relationship_name == candidates.c.rel)
-            )
-        )
+        # asyncpg caps bind parameters at 32767; each edge uses 3 params.
+        CHUNK_SIZE = 10_000
+        found: List[Tuple[str, str, str]] = []
 
         async with self._session() as session:
-            result = await session.execute(stmt)
-            return [(row[0], row[1], row[2]) for row in result.fetchall()]
+            for i in range(0, len(edges), CHUNK_SIZE):
+                chunk = edges[i : i + CHUNK_SIZE]
+                candidates = values(
+                    sa_column("src", String),
+                    sa_column("tgt", String),
+                    sa_column("rel", String),
+                    name="q",
+                ).data([(str(s), str(t), str(r)) for s, t, r in chunk])
+
+                stmt = select(candidates.c.src, candidates.c.tgt, candidates.c.rel).where(
+                    exists(
+                        select(text("1"))
+                        .select_from(_edge_table)
+                        .where(_edge_table.c.source_id == candidates.c.src)
+                        .where(_edge_table.c.target_id == candidates.c.tgt)
+                        .where(_edge_table.c.relationship_name == candidates.c.rel)
+                    )
+                )
+
+                result = await session.execute(stmt)
+                found.extend((row[0], row[1], row[2]) for row in result.fetchall())
+
+        return found
 
     async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
         """Retrieve all edges connected to a node.
