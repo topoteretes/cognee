@@ -37,7 +37,6 @@ class SearchPayloadDTO(InDTO):
     skills: Optional[list[str]] = Field(default=None, examples=[None])
     tools: Optional[list[str]] = Field(default=None, examples=[None])
     max_iter: Optional[int] = Field(default=None, examples=[None])
-    session_id: Optional[str] = Field(default=None, examples=[None])
 
 
 def get_search_router() -> APIRouter:
@@ -222,7 +221,6 @@ def get_search_router() -> APIRouter:
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
-                session_id=payload.session_id,
             )
 
             return jsonable_encoder(results)
