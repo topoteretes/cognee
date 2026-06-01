@@ -574,7 +574,13 @@ jobs:
               pr = github_request(
                   "POST",
                   "/pulls",
-                  {"base": "main", "head": head_branch, "title": pr_title, "body": pr_body},
+                  {
+                      "base": "main",
+                      "head": head_branch,
+                      "title": pr_title,
+                      "body": pr_body,
+                      "draft": True,
+                  },
               )
           else:
               print(
