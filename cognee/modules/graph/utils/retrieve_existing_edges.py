@@ -37,7 +37,7 @@ async def retrieve_existing_edges(
           * Type-entity edges: (entity_node_id, type_node_id, "is_a")
           * Graph node edges: extracted from the knowledge graph relationships
         - Uses generate_node_id() to ensure consistent node ID formatting
-        - Prevents processing the same node multiple times using a processed_nodes tracker
+        - Prevents processing the same edge multiple times using a processed_edges set
         - The returned mapping can be used with expand_with_nodes_and_edges() to avoid duplicates
     """
     processed_edges = set()

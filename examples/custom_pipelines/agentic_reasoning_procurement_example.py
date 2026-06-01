@@ -170,7 +170,7 @@ async def run_procurement_example():
         for q in questions:
             print(f"Question: \n{q}")
             results = await procurement_system.search_memory(q, search_categories=[category])
-            top_answer = results[category][0]
+            top_answer = results.get(category)[0] if results.get(category) and len(results[category]) > 0 else "No recall"
             print(f"Answer: \n{top_answer}\n")
             research_notes[category].append({"question": q, "answer": top_answer})
 

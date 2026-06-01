@@ -101,7 +101,7 @@ async def main():
         print(f"- {result}")
 
     # Clean up (optional)
-    await cognee.forget(everything=True)
+    # await cognee.forget(everything=True)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,11 @@ preparation and manipulation of quantum states.
 
 def get_dataset_id(remember_result):
     """Extract dataset_id from remember output."""
+    if not remember_result or not remember_result.dataset_id:
+        raise ValueError("Dataset ID is missing from remember result.")
+    from uuid import UUID
+    if isinstance(remember_result.dataset_id, UUID):
+        return remember_result.dataset_id
     return UUID(remember_result.dataset_id)
 
 
