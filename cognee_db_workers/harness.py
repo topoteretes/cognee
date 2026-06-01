@@ -7,6 +7,7 @@ Stdlib only. Never import cognee from this module.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import ctypes
 import ctypes.util
 import itertools
@@ -493,6 +494,31 @@ def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
         finally:
             session._rpc_lock.release()
     return collected
+
+
+def _reap_all_sessions_atexit() -> None:
+    """Force-reap any still-live subprocess workers at interpreter exit.
+
+    Workers are normally reaped via ``SubprocessSession.__del__ -> shutdown
+    -> _terminate`` during garbage collection. At interpreter shutdown,
+    however, GC and ``__del__`` ordering is not guaranteed to run — notably
+    on Windows with ``spawn`` daemon processes — which can leave a worker
+    alive and block the parent from exiting until an external timeout (e.g.
+    the 60-minute CI job timeout on ``Custom Graph Delete``). Registering an
+    ``atexit`` reaper makes teardown deterministic: every live session's
+    worker is force-terminated (bounded ``_terminate`` kill chain) before the
+    interpreter exits, regardless of GC timing. Best-effort and idempotent —
+    ``_terminate`` is serialized by ``_terminate_lock`` and safe to call on an
+    already-closed session.
+    """
+    for session in list(_all_sessions):
+        try:
+            session._terminate(timeout=2.0)
+        except Exception:
+            pass
+
+
+atexit.register(_reap_all_sessions_atexit)
 
 
 class SubprocessSession:
