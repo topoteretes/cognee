@@ -26,3 +26,22 @@ jobs:
     name: Llama-cpp Tests
     uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
+
+  notify:
+    name: Test Completion Status
+    needs: [
+      ollama-tests,
+      llamacpp-tests,
+    ]
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Check Status
+        run: |
+          if [[ "${{ needs.ollama-tests.result }}" == "success" &&
+                "${{ needs.llamacpp-tests.result }}" == "success" ]]; then
+            echo "All nightly test suites completed successfully!"
+          else
+            echo "One or more nightly test suites failed."
+            exit 1
+          fi
