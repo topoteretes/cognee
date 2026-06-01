@@ -47,6 +47,7 @@ def get_search_router() -> APIRouter:
         text: str
         user: str
         created_at: datetime
+        query_id: Optional[UUID] = None
 
     class SessionItem(OutDTO):
         session_id: str

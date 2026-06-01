@@ -1,7 +1,7 @@
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import literal, select
+from sqlalchemy import literal, null, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -15,11 +15,19 @@ async def get_history(
     db_engine = get_relational_engine()
 
     queries_query = select(
-        Query.id, Query.text.label("text"), Query.created_at, literal("user").label("user")
+        Query.id,
+        Query.text.label("text"),
+        Query.created_at,
+        literal("user").label("user"),
+        null().label("query_id"),
     ).filter(Query.user_id == user_id)
 
     results_query = select(
-        Result.id, Result.value.label("text"), Result.created_at, literal("system").label("user")
+        Result.id,
+        Result.value.label("text"),
+        Result.created_at,
+        literal("system").label("user"),
+        Result.query_id,
     ).filter(Result.user_id == user_id)
 
     if session_id is not None:
