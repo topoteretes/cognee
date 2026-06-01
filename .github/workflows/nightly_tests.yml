@@ -1,0 +1,28 @@
+name: Nightly Tests
+permissions:
+  contents: read
+  packages: write
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+  ollama-tests:
+    name: Ollama Tests
+    uses: ./.github/workflows/test_ollama.yml
+    secrets: inherit
+
+  llamacpp-tests:
+    name: Llama-cpp Tests
+    uses: ./.github/workflows/test_llamacpp.yml
+    secrets: inherit
