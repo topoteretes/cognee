@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
@@ -62,8 +63,17 @@ def get_schema_router() -> APIRouter:
             )
             return JSONResponse(content=inventory)
 
+        except PermissionDeniedError:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Not authorized to read this dataset"},
+            )
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            # Log the detail server-side; don't leak raw internals to the client.
+            logger.error("schema inventory failed: %s", error, exc_info=True)
+            return JSONResponse(
+                status_code=409, content={"error": "Failed to build schema inventory"}
+            )
 
     @router.get("/provenance", response_model=None)
     async def schema_provenance(
@@ -92,11 +102,30 @@ def get_schema_router() -> APIRouter:
 
         from cognee.api.v1.visualize import visualize_memory_provenance
 
+        # Scope the provenance graph to the caller so it never leaks other
+        # tenants'/users' actors, datasets or files. Prefer the caller's tenant
+        # (multi-tenant SaaS); fall back to the caller's own user id when there
+        # is no tenant (single-user/OSS). Never call it unscoped from HTTP.
+        tenant_id = getattr(user, "tenant_id", None)
+        if tenant_id is not None:
+            scope_tenant_ids = [tenant_id]
+            scope_user_ids = None
+        else:
+            scope_tenant_ids = None
+            scope_user_ids = [user.id]
+
         try:
-            html = await visualize_memory_provenance(include_memory=include_memory)
+            html = await visualize_memory_provenance(
+                include_memory=include_memory,
+                scope_tenant_ids=scope_tenant_ids,
+                scope_user_ids=scope_user_ids,
+            )
             return HTMLResponse(html)
 
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("schema provenance failed: %s", error, exc_info=True)
+            return JSONResponse(
+                status_code=409, content={"error": "Failed to build memory provenance"}
+            )
 
     return router
