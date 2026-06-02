@@ -48,21 +48,30 @@ def representative_records():
     ]
     agents = [
         {
-            "id": "dispatch", "name": "dispatch-copilot", "user_id": "alice", "session_id": "s1",
+            "id": "dispatch",
+            "name": "dispatch-copilot",
+            "user_id": "alice",
+            "session_id": "s1",
             "datasets": [
                 {"dataset_id": "fleet", "role": "read_write"},
                 {"dataset_id": "carrier", "role": "read"},
             ],
         },
         {
-            "id": "research", "name": "carrier-research-agent", "user_id": "bob", "session_id": "s3",
+            "id": "research",
+            "name": "carrier-research-agent",
+            "user_id": "bob",
+            "session_id": "s3",
             "datasets": [
                 {"dataset_id": "carrier", "role": "read_write"},
                 {"dataset_id": "driver", "role": "read"},
             ],
         },
         {
-            "id": "audit", "name": "compliance-auditor", "user_id": "carol", "session_id": "s4",
+            "id": "audit",
+            "name": "compliance-auditor",
+            "user_id": "carol",
+            "session_id": "s4",
             "datasets": [
                 {"dataset_id": "billing", "role": "read_write"},
                 {"dataset_id": "driver", "role": "read"},
@@ -71,10 +80,22 @@ def representative_records():
     ]
     sessions = [
         {"id": "s1", "name": "sess_0521_a1f3", "user_id": "alice", "dataset_id": "fleet"},
-        {"id": "s2", "name": "sess_0521_b7c2", "user_id": "alice", "dataset_id": "fleet", "agent_id": "dispatch"},
+        {
+            "id": "s2",
+            "name": "sess_0521_b7c2",
+            "user_id": "alice",
+            "dataset_id": "fleet",
+            "agent_id": "dispatch",
+        },
         {"id": "s3", "name": "sess_0522_d4e9", "user_id": "bob", "dataset_id": "carrier"},
         {"id": "s4", "name": "sess_0523_f1a8", "user_id": "carol", "dataset_id": "billing"},
-        {"id": "s5", "name": "sess_0524_3b6d", "user_id": "carol", "dataset_id": "driver", "agent_id": "audit"},
+        {
+            "id": "s5",
+            "name": "sess_0524_3b6d",
+            "user_id": "carol",
+            "dataset_id": "driver",
+            "agent_id": "audit",
+        },
     ]
 
     # Memory layer (entities/types) linked back to the files they came from.
@@ -87,7 +108,9 @@ def representative_records():
         "e_landstar": ("Landstar", "Broker", "f_landstar"),
         "e_loadsearch": ("load-search", "Tool", "f_carlos"),
     }
-    mem_nodes = [("et:" + t, {"type": "EntityType", "name": t}) for t in ("Person", "Broker", "Tool")]
+    mem_nodes = [
+        ("et:" + t, {"type": "EntityType", "name": t}) for t in ("Person", "Broker", "Tool")
+    ]
     mem_edges = []
     mem_links = []
     for eid, (ename, etype, src) in entities.items():
@@ -103,8 +126,13 @@ def representative_records():
     memory = {"nodes": mem_nodes, "edges": mem_edges, "links": mem_links}
 
     return dict(
-        tenants=tenants, users=users, datasets=datasets, files=files,
-        agents=agents, sessions=sessions, memory=memory,
+        tenants=tenants,
+        users=users,
+        datasets=datasets,
+        files=files,
+        agents=agents,
+        sessions=sessions,
+        memory=memory,
     )
 
 
