@@ -1,7 +1,7 @@
 import asyncio
 
 import cognee
-from cognee.api.v1.search import SearchType
+from cognee import SearchType
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
@@ -54,17 +54,15 @@ Each of these companies has significantly impacted the technology landscape, dri
 
 
 async def main():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
-    await cognee.add([TEXT_1, TEXT_2])
-    await cognee.cognify()
+    await cognee.remember([TEXT_1, TEXT_2], self_improvement=False)
 
     user = await get_default_user()
     session_id = "feedback_influence_minimal_demo"
 
     print("Step 1: Ask cars-specific question and give positive feedback (5).")
-    await cognee.search(
+    await cognee.recall(
         query_text="Which German car manufacturers are described and what are they known for?",
         query_type=SearchType.GRAPH_COMPLETION,
         user=user,
@@ -81,7 +79,7 @@ async def main():
     print("  Added feedback score=5 for cars context.\n")
 
     print("Step 2: Ask companies-specific question and give negative feedback (1).")
-    await cognee.search(
+    await cognee.recall(
         query_text="Which technology companies are described and what are their products?",
         query_type=SearchType.GRAPH_COMPLETION,
         user=user,
@@ -108,7 +106,7 @@ async def main():
     )
     final_query = "List the companies in the context"
     for beta in [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]:
-        answer = await cognee.search(
+        answer = await cognee.recall(
             query_text=final_query,
             query_type=SearchType.GRAPH_COMPLETION,
             user=user,
