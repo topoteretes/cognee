@@ -90,7 +90,9 @@ def _entry_field(entry, name: str):
     return getattr(entry, name, None)
 
 
-async def _label_and_query_count(sm, owner_user_id: str, session_id: str) -> tuple[Optional[str], int]:
+async def _label_and_query_count(
+    sm, owner_user_id: str, session_id: str
+) -> tuple[Optional[str], int]:
     """Derive ``(label, query_count)`` for one session from the session cache.
 
     Mirrors how GET /v1/sessions/{session_id} derives ``label``/``msg_count``
