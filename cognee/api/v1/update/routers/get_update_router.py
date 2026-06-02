@@ -50,7 +50,7 @@ def get_update_router() -> APIRouter:
 
         ## Request Parameters
         - **data_id** (UUID): UUID of the document to update in Cognee memory
-        - **data** (List[UploadFile]): List of files to upload.
+        - **data** (Optional[List[UploadFile]]): List of files to upload.
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
