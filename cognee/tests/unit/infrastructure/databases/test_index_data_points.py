@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock, call
+from unittest.mock import AsyncMock, patch, MagicMock
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.infrastructure.engine import DataPoint
 
@@ -70,5 +70,5 @@ async def test_index_data_points_all_fields_indexed_independently():
     for field_name, index_fields in indexed_calls:
         assert index_fields == [field_name], (
             f"Metadata for field '{field_name}' had index_fields={index_fields!r}; "
-            "expected [{field_name!r}]. Shallow-copy mutation bug still present."
+            f"expected [{field_name!r}]. Shallow-copy mutation bug still present."
         )
