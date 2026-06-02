@@ -8,6 +8,10 @@ on:
         type: string
         default: "local" # local - Installing Cognee from local source
         description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
+
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   test-mcp:
     name: Run MCP Test
