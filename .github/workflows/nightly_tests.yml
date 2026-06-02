@@ -55,6 +55,7 @@ jobs:
             echo "emoji=❌" >> "$GITHUB_OUTPUT"
             echo "summary=One or more nightly test suites failed." >> "$GITHUB_OUTPUT"
           fi
+          echo "ran_at=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
 
       - name: Post status to Slack
         uses: slackapi/slack-github-action@v2.1.0
@@ -63,14 +64,14 @@ jobs:
           token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}
           payload: |
             channel: ${{ secrets.SLACK_NIGHTLY_CHANNEL_ID }}
-            text: "${{ steps.status.outputs.emoji }} Nightly Tests on `${{ github.ref_name }}`: ${{ steps.status.outputs.summary }}"
+            text: "${{ steps.status.outputs.emoji }} Nightly Tests (${{ steps.status.outputs.ran_at }}): ${{ steps.status.outputs.summary }}"
             blocks:
               - type: "section"
                 text:
                   type: "mrkdwn"
                   text: |
                     ${{ steps.status.outputs.emoji }} *Nightly Tests* — ${{ steps.status.outputs.summary }}
-                    *Branch:* `${{ github.ref_name }}`  •  *Trigger:* `${{ github.event_name }}`
+                    *Ran at:* `${{ steps.status.outputs.ran_at }}`
                     *Ollama:* `${{ needs.ollama-tests.result }}`  •  *Llama-cpp:* `${{ needs.llamacpp-tests.result }}`
                     <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
 
