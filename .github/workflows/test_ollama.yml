@@ -10,10 +10,8 @@ jobs:
 
   run_ollama_test:
 
-    # needs 32 Gb RAM for phi4 in a container — GitHub-hosted larger runner
-    # (8 vCPU / 32 GB). ubuntu-latest (16 GB) is not enough.
-    runs-on: ubuntu-latest-8-cores
-
+    # TODO: needs 32 Gb RAM for phi4 in a container — GitHub-hosted larger runner
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
