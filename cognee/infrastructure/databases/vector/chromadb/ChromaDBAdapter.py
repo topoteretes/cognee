@@ -355,7 +355,7 @@ class ChromaDBAdapter(VectorDBInterface):
     @staticmethod
     def _build_where_filter(
         node_name: Optional[List[str]],
-        node_name_filter_operator: "Literal['OR', 'AND']",
+        node_name_filter_operator: Literal["OR", "AND"],
     ) -> Optional[dict]:
         """Build a ChromaDB ``where`` filter dict from node_name constraints."""
         if node_name_filter_operator not in ("OR", "AND"):
@@ -366,10 +366,10 @@ class ChromaDBAdapter(VectorDBInterface):
         if not node_name:
             return None
         if len(node_name) == 1:
-            return {"belongs_to_set": {"$eq": node_name[0]}}
+            return {"belongs_to_set": {"$contains": node_name[0]}}
         if node_name_filter_operator == "AND":
-            return {"$and": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
-        return {"$or": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
+            return {"$and": [{"belongs_to_set": {"$contains": name}} for name in node_name]}
+        return {"$or": [{"belongs_to_set": {"$contains": name}} for name in node_name]}
 
     @staticmethod
     def _build_include_list(include_payload: bool, with_vector: bool) -> List[str]:
