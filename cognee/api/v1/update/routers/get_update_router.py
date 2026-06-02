@@ -1,9 +1,8 @@
 from fastapi.responses import JSONResponse
 from fastapi import File, UploadFile as UF, Depends, Form, status
-from typing import Optional, Annotated
+from typing import List, Optional, Annotated
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
-from typing import List
 from uuid import UUID
 from pydantic import WithJsonSchema
 from cognee.shared.logging_utils import get_logger
@@ -38,7 +37,7 @@ def get_update_router() -> APIRouter:
     async def update(
         data_id: UUID,
         dataset_id: UUID,
-        data: List[UploadFile] = File(default=None),
+        data: Optional[List[UploadFile]] = File(default=None),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         user: User = Depends(get_authenticated_user),
     ):
