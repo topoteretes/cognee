@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import uuid
 from typing import Any, Callable, Optional
 
 from cognee.exceptions import CogneeValidationError
@@ -18,10 +19,16 @@ from cognee.modules.agent_memory.runtime import (
     set_current_agent_memory_context,
     validate_agent_memory_config,
 )
+from cognee.modules.agents.registry import (
+    deactivate_agent_connection,
+    derive_memory_mode,
+    register_agent_connection,
+)
 
 
 def agent_memory(
     *,
+    agent_session_name: Optional[str] = None,
     with_memory: bool = True,
     with_session_memory: bool = False,
     save_session_traces: bool = False,
@@ -98,6 +105,43 @@ def agent_memory(
                 user=resolved_user,
                 scope=scope,
             )
+            connection_name = agent_session_name or str(uuid.uuid4())
+            connection = await register_agent_connection(
+                agent_session_name=connection_name,
+                connection_type="sdk",
+                memory_mode=derive_memory_mode(
+                    with_memory=config.with_memory,
+                    with_session_memory=config.with_session_memory,
+                    save_session_traces=config.save_session_traces,
+                ),
+                source="agent_memory",
+                origin_function=fn.__qualname__,
+                user_id=resolved_user.id if resolved_user is not None else None,
+                tenant_id=(
+                    getattr(resolved_user, "tenant_id", None) if resolved_user is not None else None
+                ),
+                session_id=config.session_id,
+                datasets=[
+                    {
+                        "id": str(scope.dataset_id),
+                        "name": scope.dataset_name,
+                        "role": "read_write",
+                    }
+                ]
+                if scope is not None
+                else (
+                    [{"name": config.dataset_name, "role": "read_write"}]
+                    if config.dataset_name
+                    else []
+                ),
+                metadata={
+                    "memory_top_k": config.memory_top_k,
+                    "memory_only_context": config.memory_only_context,
+                    "save_session_traces": config.save_session_traces,
+                    "with_session_memory": config.with_session_memory,
+                    "with_memory": config.with_memory,
+                },
+            )
             token = set_current_agent_memory_context(context)
 
             try:
@@ -113,6 +157,8 @@ def agent_memory(
             finally:
                 reset_current_agent_memory_context(token)
                 await persist_trace(context)
+                if resolved_user is not None and resolved_user.id is not None:
+                    await deactivate_agent_connection(resolved_user.id, connection.id)
 
         return wrapper
 

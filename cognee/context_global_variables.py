@@ -173,7 +173,11 @@ class DatabaseContextManager:
             "graph_database_host": dataset_database.graph_database_connection_info.get(
                 "graph_database_host", ""
             ),
-            "graph_dataset_database_handler": "",
+            "graph_database_allow_anonymous": dataset_database.graph_database_connection_info.get(
+                "graph_database_allow_anonymous",
+                get_graph_config().graph_database_allow_anonymous,
+            ),
+            "graph_dataset_database_handler": dataset_database.graph_dataset_database_handler,
             "graph_database_port": dataset_database.graph_database_connection_info.get(
                 "graph_database_port", ""
             ),

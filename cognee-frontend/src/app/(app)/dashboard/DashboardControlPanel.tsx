@@ -6,6 +6,7 @@ import {
   Flex,
   Select,
   Text,
+  Tooltip,
 } from "@mantine/core";
 import { tokens } from "@/ui/theme/tokens";
 import type { Dataset } from "@/modules/ingestion/useDatasets";
@@ -61,7 +62,7 @@ export default function DashboardControlPanel({
     >
       {/* ── Dataset ─────────────────────────────────────────────────────── */}
       <DatasetSelect
-        label="Dataset"
+        label="Brain"
         datasets={datasets}
         addDataset={addDataset}
         refreshDatasets={refreshDatasets}
@@ -74,8 +75,9 @@ export default function DashboardControlPanel({
 
       {/* ── Graph Model ─────────────────────────────────────────────────── */}
       <Flex align="center" gap="0.5rem">
-        <Text size="sm" c={tokens.textMuted} className="whitespace-nowrap">
+        <Text size="sm" c={tokens.textMuted} className="whitespace-nowrap" style={{ display: "flex", alignItems: "center", gap: 4 }}>
           Graph Model
+          <Tooltip label="Define entity types and relationships to control how Cognee structures your knowledge graph." withArrow multiline w={240} position="top"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><circle cx="8" cy="8" r="7" stroke="#A1A1AA" strokeWidth="1.5" /><text x="8" y="12" textAnchor="middle" fontSize="10" fontWeight="700" fill="#A1A1AA" fontFamily="sans-serif">i</text></svg></Tooltip>
         </Text>
         <Select
           allowDeselect={false}
@@ -145,8 +147,9 @@ export default function DashboardControlPanel({
 
       {/* ── Prompt ──────────────────────────────────────────────────────── */}
       <Flex align="center" gap="0.5rem">
-        <Text size="sm" c={tokens.textMuted} className="whitespace-nowrap">
+        <Text size="sm" c={tokens.textMuted} className="whitespace-nowrap" style={{ display: "flex", alignItems: "center", gap: 4 }}>
           Prompt
+          <Tooltip label="Custom instructions that guide how Cognee extracts entities and relationships from your data." withArrow multiline w={240} position="top"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}><circle cx="8" cy="8" r="7" stroke="#A1A1AA" strokeWidth="1.5" /><text x="8" y="12" textAnchor="middle" fontSize="10" fontWeight="700" fill="#A1A1AA" fontFamily="sans-serif">i</text></svg></Tooltip>
         </Text>
         <Select
           placeholder="Default"

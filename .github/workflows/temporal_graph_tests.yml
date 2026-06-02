@@ -18,6 +18,9 @@ on:
         default: ''
         description: "Optional container image for CI"
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   run_temporal_graph_kuzu_lance_sqlite:
     name: Temporal Graph test Kuzu (lancedb + sqlite)
@@ -44,6 +47,7 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
@@ -84,6 +88,7 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
@@ -138,6 +143,7 @@ jobs:
             LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
             LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
             LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+            LLM_ARGS: ${{ secrets.LLM_ARGS }}
             EMBEDDING_DIMENSIONS: 300
             EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
             EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
@@ -206,6 +212,7 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}

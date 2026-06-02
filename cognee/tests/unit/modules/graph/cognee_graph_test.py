@@ -254,8 +254,16 @@ async def test_project_graph_from_db_stores_feedback_influence_on_graph(mock_ada
 
 
 @pytest.mark.asyncio
-async def test_project_graph_from_db_missing_nodes(setup_graph, mock_adapter):
-    """Test that edges referencing missing nodes raise error."""
+async def test_project_graph_from_db_missing_nodes_are_skipped(setup_graph, mock_adapter, caplog):
+    """Edges referencing missing nodes are skipped (logged at debug), not raised.
+
+    Real-world graphs frequently have edges that reference nodes filtered out
+    by node_properties_to_project or label filters. Raising would abort the
+    entire projection. We skip the edge and continue, mirroring the pattern
+    introduced for duplicate nodes in PR #2485. See issue #2897.
+    """
+    import logging
+
     graph = setup_graph
 
     nodes_data = [
@@ -263,16 +271,24 @@ async def test_project_graph_from_db_missing_nodes(setup_graph, mock_adapter):
     ]
     edges_data = [
         ("1", "999", "CONNECTS_TO", {"relationship_name": "connects"}),
+        ("1", "1", "SELF", {"relationship_name": "self"}),
     ]
 
     mock_adapter.get_graph_data = AsyncMock(return_value=(nodes_data, edges_data))
 
-    with pytest.raises(EntityNotFoundError, match="Edge references nonexistent nodes"):
+    with caplog.at_level(logging.DEBUG, logger="CogneeGraph"):
         await graph.project_graph_from_db(
             adapter=mock_adapter,
             node_properties_to_project=["name"],
             edge_properties_to_project=["relationship_name"],
         )
+
+    # The valid self-edge survives; the dangling edge is dropped.
+    assert len(graph.edges) == 1
+    assert any(
+        "Skipping edge with unprojectable endpoints" in rec.message and "999" in rec.message
+        for rec in caplog.records
+    ), "expected a debug log entry for the skipped dangling edge"
 
 
 @pytest.mark.asyncio

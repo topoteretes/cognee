@@ -1,8 +1,9 @@
+import asyncio
 import os
 import pathlib
-import asyncio
+
 import cognee
-from cognee.modules.search.types import SearchType
+from cognee import SearchType
 
 
 async def main():
@@ -12,14 +13,18 @@ async def main():
     This example:
     1. Configures Cognee to use PostgreSQL with PGVector extension as vector database
     2. Sets up data directories
-    3. Adds sample data to Cognee
-    4. Processes (cognifies) the data
-    5. Performs different types of searches
+    3. Stores sample data with remember to Cognee
+    4. Performs different types of searches
     """
     # Configure PGVector as the vector database provider
     cognee.config.set_vector_db_config(
         {
             "vector_db_provider": "pgvector",  # Specify PGVector as provider
+            "vector_db_name": "cognee_db",
+            "vector_db_host": os.environ.get("DB_HOST", "127.0.0.1"),
+            "vector_db_port": "5432",
+            "vector_db_username": "cognee",
+            "vector_db_password": "cognee",
         }
     )
 
@@ -47,8 +52,7 @@ async def main():
     cognee.config.system_root_directory(cognee_directory_path)
 
     # Clean any existing data (optional)
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    # await cognee.forget(everything=True)
 
     # Create a dataset
     dataset_name = "pgvector_example"
@@ -62,14 +66,11 @@ async def main():
     The extension is often used for applications like semantic search, recommendations, and image similarity."""
 
     # Add the sample text to the dataset
-    await cognee.add([sample_text], dataset_name)
-
-    # Process the added document to extract knowledge
-    await cognee.cognify([dataset_name])
+    await cognee.remember([sample_text], dataset_name=dataset_name, self_improvement=False)
 
     # Now let's perform some searches
     # 1. Search for insights related to "PGVector"
-    insights_results = await cognee.search(
+    insights_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text="PGVector"
     )
     print("\nInsights about PGVector:")
@@ -77,7 +78,7 @@ async def main():
         print(f"- {result}")
 
     # 2. Search for text chunks related to "vector similarity"
-    chunks_results = await cognee.search(
+    chunks_results = await cognee.recall(
         query_type=SearchType.CHUNKS, query_text="vector similarity", datasets=[dataset_name]
     )
     print("\nChunks about vector similarity:")
@@ -85,7 +86,7 @@ async def main():
         print(f"- {result}")
 
     # 3. Get graph completion related to databases
-    graph_completion_results = await cognee.search(
+    graph_completion_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text="database"
     )
     print("\nGraph completion for databases:")
@@ -93,8 +94,7 @@ async def main():
         print(f"- {result}")
 
     # Clean up (optional)
-    # await cognee.prune.prune_data()
-    # await cognee.prune.prune_system(metadata=True)
+    # await cognee.forget(everything=True)
 
 
 if __name__ == "__main__":

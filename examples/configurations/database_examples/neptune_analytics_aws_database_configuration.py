@@ -1,11 +1,11 @@
-import base64
-import json
+import asyncio
 import os
 import pathlib
-import asyncio
-import cognee
-from cognee.modules.search.types import SearchType
+
 from dotenv import load_dotenv
+
+import cognee
+from cognee import SearchType
 
 load_dotenv()
 
@@ -17,9 +17,8 @@ async def main():
     This example:
     1. Configures Cognee to use Neptune Analytics as graph database
     2. Sets up data directories
-    3. Adds sample data to Cognee
-    4. Processes/cognifies the data
-    5. Performs different types of searches
+    3. Stores sample data with remember to Cognee
+    4. Performs different types of searches
     """
 
     # Set up Amazon credentials in .env file and get the values from environment variables
@@ -49,8 +48,7 @@ async def main():
     cognee.config.system_root_directory(cognee_directory_path)
 
     # Clean any existing data (optional)
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    # await cognee.forget(everything=True)
 
     # Create a dataset
     dataset_name = "neptune_example"
@@ -70,15 +68,16 @@ async def main():
     stored in Amazon S3.
     """
 
-    # Add the sample text to the dataset
-    await cognee.add([sample_text_1, sample_text_2], dataset_name)
-
-    # Process the added document to extract knowledge
-    await cognee.cognify([dataset_name])
+    # Remember the sample text in the dataset
+    await cognee.remember(
+        [sample_text_1, sample_text_2],
+        dataset_name=dataset_name,
+        self_improvement=False,
+    )
 
     # Now let's perform some searches
     # 1. Search for insights related to "Neptune Analytics"
-    insights_results = await cognee.search(
+    insights_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text="Neptune Analytics"
     )
     print("\n========Insights about Neptune Analytics========:")
@@ -86,7 +85,7 @@ async def main():
         print(f"- {result}")
 
     # 2. Search for text chunks related to "graph database"
-    chunks_results = await cognee.search(
+    chunks_results = await cognee.recall(
         query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name]
     )
     print("\n========Chunks about graph database========:")
@@ -94,7 +93,7 @@ async def main():
         print(f"- {result}")
 
     # 3. Get graph completion related to databases
-    graph_completion_results = await cognee.search(
+    graph_completion_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text="database"
     )
     print("\n========Graph completion for databases========:")
@@ -102,8 +101,7 @@ async def main():
         print(f"- {result}")
 
     # Clean up (optional)
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
 
 if __name__ == "__main__":

@@ -74,7 +74,11 @@ async def get_search_type_retriever_instance(
         SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
         SearchType.CHUNKS: (
             ChunksRetriever,
-            {"top_k": top_k},
+            {
+                "top_k": top_k,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+            },
         ),
         SearchType.RAG_COMPLETION: (
             CompletionRetriever,

@@ -1,13 +1,12 @@
 import asyncio
 import os
+from pathlib import Path
 
 import cognee
-from cognee.api.v1.search import SearchType
-from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.shared.logging_utils import setup_logging
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee import SearchType, visualize_graph
 from cognee.modules.ontology.ontology_config import Config
-from pathlib import Path
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.shared.logging_utils import setup_logging
 
 with open(
     os.path.join(Path(__file__).resolve().parent, "data", "text_1.txt"), "r", encoding="utf-8"
@@ -22,14 +21,7 @@ with open(
 
 async def main():
     # Step 1: Reset data and system state
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    # Step 2: Add text
-    text_list = [text_1, text_2]
-    await cognee.add(text_list)
-
-    # Step 3: Create knowledge graph
+    await cognee.forget(everything=True)
 
     ontology_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "data", "basic_ontology.owl"
@@ -42,11 +34,13 @@ async def main():
         }
     }
 
-    await cognee.cognify(config=config)
+    # Step 2: Remember text using the ontology-backed graph config.
+    text_list = [text_1, text_2]
+    await cognee.remember(text_list, config=config, self_improvement=False)
     print("Knowledge with ontology created.")
 
-    # Step 4: Query insights
-    search_results = await cognee.search(
+    # Step 3: Query insights
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What are the exact cars and their types produced by Audi?",
     )
