@@ -13,6 +13,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/nightly_tests.yml'
+      - '.github/workflows/performance_report.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,11 +34,27 @@ jobs:
     uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
 
+  performance-llm:
+    name: Performance (real LLM)
+    uses: ./.github/workflows/performance_report.yml
+    with:
+      mode: llm
+    secrets: inherit
+
+  performance-mock:
+    name: Performance (mock LLM)
+    uses: ./.github/workflows/performance_report.yml
+    with:
+      mode: mock_llm
+    secrets: inherit
+
   notify:
     name: Test Completion Status
     needs: [
       ollama-tests,
       llamacpp-tests,
+      performance-llm,
+      performance-mock,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -73,6 +90,15 @@ jobs:
                     ${{ steps.status.outputs.emoji }} *Nightly Tests* — ${{ steps.status.outputs.summary }}
                     *Ran at:* `${{ steps.status.outputs.ran_at }}`
                     *Ollama:* `${{ needs.ollama-tests.result }}`  •  *Llama-cpp:* `${{ needs.llamacpp-tests.result }}`
+
+                    *📊 Performance — Real LLM* (`${{ needs.performance-llm.result }}`)  •  runs `${{ needs.performance-llm.outputs.success }}`
+                    Total ingest:  p50 `${{ needs.performance-llm.outputs.p50 }}s`  •  p90 `${{ needs.performance-llm.outputs.p90 }}s`  •  p99 `${{ needs.performance-llm.outputs.p99 }}s`
+                    <${{ needs.performance-llm.outputs.report_url }}|HTML report>
+
+                    *📊 Performance — Mock LLM* (`${{ needs.performance-mock.result }}`)  •  runs `${{ needs.performance-mock.outputs.success }}`
+                    Total ingest:  p50 `${{ needs.performance-mock.outputs.p50 }}s`  •  p90 `${{ needs.performance-mock.outputs.p90 }}s`  •  p99 `${{ needs.performance-mock.outputs.p99 }}s`
+                    <${{ needs.performance-mock.outputs.report_url }}|HTML report>
+
                     <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
 
       - name: Fail if any suite failed

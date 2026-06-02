@@ -1,0 +1,105 @@
+name: performance report
+
+# Reusable workflow: runs the percentile performance report once, uploads the
+# JSON + HTML artifacts to S3, presigns a (7-day) link to the HTML report, and
+# exposes the headline metrics as outputs for the caller (e.g. the Slack bot).
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "Run mode: 'mock_llm' (no API calls) or 'llm' (real OpenAI)."
+        required: true
+        type: string
+    outputs:
+      success:
+        description: "Succeeded/total runs, e.g. 5/5."
+        value: ${{ jobs.performance.outputs.success }}
+      p50:
+        description: "Total-ingest p50 (seconds)."
+        value: ${{ jobs.performance.outputs.p50 }}
+      p90:
+        description: "Total-ingest p90 (seconds)."
+        value: ${{ jobs.performance.outputs.p90 }}
+      p99:
+        description: "Total-ingest p99 (seconds)."
+        value: ${{ jobs.performance.outputs.p99 }}
+      report_url:
+        description: "Presigned (7-day) URL to the HTML report."
+        value: ${{ jobs.performance.outputs.report_url }}
+
+env:
+  ENV: 'dev'
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+  RUNTIME__LOG_LEVEL: ERROR
+
+jobs:
+  performance:
+    name: Performance (${{ inputs.mode }})
+    runs-on: ubuntu-22.04
+    outputs:
+      success: ${{ steps.parse.outputs.success }}
+      p50: ${{ steps.parse.outputs.p50 }}
+      p90: ${{ steps.parse.outputs.p90 }}
+      p99: ${{ steps.parse.outputs.p99 }}
+      report_url: ${{ steps.upload.outputs.report_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run performance report
+        id: run
+        env:
+          PYTHONFAULTHANDLER: 1
+          # Used only when mode == 'llm'; harmless (ignored) for the mock run.
+          LLM_PROVIDER: "openai"
+          LLM_MODEL: "openai/gpt-4o-mini"
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          TS="$(date -u '+%Y-%m-%d_%H-%M-%SZ')"
+          mkdir -p performance_results
+          JSON_PATH="performance_results/${{ inputs.mode }}_${TS}.json"
+          HTML_PATH="performance_results/${{ inputs.mode }}_${TS}.html"
+          echo "JSON_PATH=$JSON_PATH" >> "$GITHUB_ENV"
+          echo "HTML_PATH=$HTML_PATH" >> "$GITHUB_ENV"
+
+          MOCK=""
+          if [ "${{ inputs.mode }}" = "mock_llm" ]; then
+            MOCK="--mock-llm"
+          fi
+
+          uv run python cognee/tests/performance/statistics_percentile_report.py \
+            --runs 10 \
+            --num-memories 50 \
+            $MOCK \
+            --output "$JSON_PATH" \
+            --html "$HTML_PATH"
+
+      - name: Upload reports to S3 and presign HTML
+        id: upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+        run: |
+          set -euo pipefail
+          aws s3 cp "$JSON_PATH" "s3://$BUCKET/$JSON_PATH" --content-type application/json
+          aws s3 cp "$HTML_PATH" "s3://$BUCKET/$HTML_PATH" --content-type text/html
+          # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
+          URL="$(aws s3 presign "s3://$BUCKET/$HTML_PATH" --expires-in 604800)"
+          echo "report_url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Parse headline metrics
+        id: parse
+        run: |
+          set -euo pipefail
+          echo "success=$(jq -r '"\(.succeeded)/\(.num_runs)"' "$JSON_PATH")" >> "$GITHUB_OUTPUT"
+          echo "p50=$(jq -r '.stats.total_ingest_time_s.p50' "$JSON_PATH")" >> "$GITHUB_OUTPUT"
+          echo "p90=$(jq -r '.stats.total_ingest_time_s.p90' "$JSON_PATH")" >> "$GITHUB_OUTPUT"
+          echo "p99=$(jq -r '.stats.total_ingest_time_s.p99' "$JSON_PATH")" >> "$GITHUB_OUTPUT"
