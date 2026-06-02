@@ -257,18 +257,27 @@ async def _read_memory_relational(limit: int = 5000) -> Optional[Dict[str, Any]]
         async with db_engine.get_async_session() as session:
             for row in (await session.execute(select(NodeRow).limit(limit))).scalars().all():
                 node_id = str(row.id)
-                nodes.append((node_id, {"type": row.type or "Node", "name": row.label or str(row.slug)}))
+                nodes.append(
+                    (node_id, {"type": row.type or "Node", "name": row.label or str(row.slug)})
+                )
                 if row.data_id is not None:
                     links.append(
                         {
                             "node_id": node_id,
                             "data_id": str(row.data_id),
-                            "dataset_id": str(row.dataset_id) if row.dataset_id is not None else None,
+                            "dataset_id": str(row.dataset_id)
+                            if row.dataset_id is not None
+                            else None,
                         }
                     )
             for row in (await session.execute(select(EdgeRow).limit(limit * 4))).scalars().all():
                 edges.append(
-                    (str(row.source_node_id), str(row.destination_node_id), row.relationship_name or "related", {})
+                    (
+                        str(row.source_node_id),
+                        str(row.destination_node_id),
+                        row.relationship_name or "related",
+                        {},
+                    )
                 )
     except Exception as error:  # pragma: no cover - defensive
         logger.debug(f"relational memory read skipped: {error}")
@@ -310,8 +319,10 @@ async def get_memory_provenance_graph(
             tenants.append({"id": str(tenant.id), "name": tenant.name})
 
         user_rows = (
-            await session.execute(select(User).options(selectinload(User.tenants)))
-        ).scalars().all()
+            (await session.execute(select(User).options(selectinload(User.tenants))))
+            .scalars()
+            .all()
+        )
         for user in user_rows:
             tenant_ids = [str(t.id) for t in (user.tenants or [])]
             if getattr(user, "tenant_id", None):
@@ -319,7 +330,7 @@ async def get_memory_provenance_graph(
             users.append(
                 {
                     "id": str(user.id),
-                    "name": getattr(user, "email", None) or str(user.id),
+                    "name": getattr(user, "name", None) or f"user:{str(user.id)[:8]}",
                     "tenant_ids": sorted(set(tenant_ids)),
                 }
             )
@@ -343,7 +354,12 @@ async def get_memory_provenance_graph(
                 file_id = str(data.id)
                 record = files.setdefault(
                     file_id,
-                    {"id": file_id, "name": data.name, "dataset_ids": [], "dataset_name": dataset.name},
+                    {
+                        "id": file_id,
+                        "name": data.name,
+                        "dataset_ids": [],
+                        "dataset_name": dataset.name,
+                    },
                 )
                 record["dataset_ids"].append(str(dataset.id))
 

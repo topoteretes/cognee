@@ -20,6 +20,7 @@ a present schema type exactly. ``target_node_set`` additionally loose-matches a
 present type of the same name.
 """
 
+from copy import deepcopy
 from typing import Any, Dict, List
 
 # effect ∈ {"produces", "enriches", "modifies", "removes"}
@@ -60,8 +61,16 @@ _OPERATIONS: List[Dict[str, Any]] = [
         "pipeline_name": "memify_pipeline",
         "summary": "Cognifies cached user Q&A sessions into the graph.",
         "effects": [
-            {"effect": "produces", "target_type": "Session", "target_node_set": "user_sessions_from_cache"},
-            {"effect": "produces", "target_type": "Entity", "target_node_set": "user_sessions_from_cache"},
+            {
+                "effect": "produces",
+                "target_type": "Session",
+                "target_node_set": "user_sessions_from_cache",
+            },
+            {
+                "effect": "produces",
+                "target_type": "Entity",
+                "target_node_set": "user_sessions_from_cache",
+            },
         ],
     },
     {
@@ -72,7 +81,11 @@ _OPERATIONS: List[Dict[str, Any]] = [
         "pipeline_name": "memify_pipeline",
         "summary": "Cognifies agent trace feedback into the graph.",
         "effects": [
-            {"effect": "produces", "target_type": "Entity", "target_node_set": "agent_trace_feedbacks"},
+            {
+                "effect": "produces",
+                "target_type": "Entity",
+                "target_node_set": "agent_trace_feedbacks",
+            },
         ],
     },
     {
@@ -137,7 +150,11 @@ _OPERATIONS: List[Dict[str, Any]] = [
         "summary": "Self-improvement loop: feedback weighting + persisting sessions/traces.",
         "effects": [
             {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
-            {"effect": "produces", "target_type": "Session", "target_node_set": "user_sessions_from_cache"},
+            {
+                "effect": "produces",
+                "target_type": "Session",
+                "target_node_set": "user_sessions_from_cache",
+            },
         ],
     },
     {
@@ -180,4 +197,4 @@ _OPERATIONS: List[Dict[str, Any]] = [
 
 def get_operations_catalog() -> List[Dict[str, Any]]:
     """Return the operation catalog (list of operation dicts)."""
-    return _OPERATIONS
+    return deepcopy(_OPERATIONS)

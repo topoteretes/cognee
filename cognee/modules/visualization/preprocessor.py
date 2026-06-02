@@ -28,7 +28,11 @@ SCHEMA_GRAPH_NODE_TYPES = {
 }
 
 # Maximum sample instance names attached to each schema type node.
-SCHEMA_SAMPLES_PER_TYPE = 5
+SCHEMA_SAMPLES_PER_TYPE: int = 5
+
+# Internal graph taxonomy types that must not appear as separate type groups
+# in the schema view (they are resolved away by resolve_semantic_types).
+_INTERNAL_TYPES: frozenset = frozenset({"EntityType"})
 
 
 # Stage assignment by node type — drives the left-to-right Story layout.
@@ -392,10 +396,10 @@ def _relationship_label(relation_counts):
 
 # Relationship name of the Entity -> EntityType edge used to resolve the
 # semantic type of extracted entities (mirrors get_schema_inventory).
-ENTITY_TYPE_RELATION = "is_a"
+ENTITY_TYPE_RELATION: str = "is_a"
 
 
-def _link_relation(link):
+def _link_relation(link: Dict[str, Any]) -> str:
     """Read a link's relation name across the shapes the preprocessor emits."""
     edge_info = link.get("edge_info") or {}
     return (
@@ -407,7 +411,9 @@ def _link_relation(link):
     )
 
 
-def resolve_semantic_types(nodes_list, links_list):
+def resolve_semantic_types(
+    nodes_list: List[Dict[str, Any]], links_list: List[Dict[str, Any]]
+) -> Dict[str, str]:
     """Map each node id to its semantic type name.
 
     Non-Entity nodes keep their raw ``type`` property. Entity nodes (``type ==
@@ -437,7 +443,9 @@ def resolve_semantic_types(nodes_list, links_list):
     return node_type
 
 
-def extract_type_schema_graph_data(nodes_list, links_list):
+def extract_type_schema_graph_data(
+    nodes_list: List[Dict[str, Any]], links_list: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     """Fallback schema view: collapse the graph to one node per semantic type."""
     node_type_by_id = resolve_semantic_types(nodes_list, links_list)
 
@@ -459,18 +467,27 @@ def extract_type_schema_graph_data(nodes_list, links_list):
 
     nodes_by_type: Dict[str, List[Dict]] = defaultdict(list)
     for node in nodes_list:
-        nodes_by_type[node_type_by_id[node["id"]]].append(node)
+        type_name = node_type_by_id[node["id"]]
+        if type_name not in _INTERNAL_TYPES:
+            nodes_by_type[type_name].append(node)
 
     # Aggregate the full per-source-type relationship distribution keyed by
     # (relation, target_type). Built once and shared with the per-type "samples"
     # records and the lossy pair-edge labels below.
+    # Track both outgoing AND incoming so types like DocumentChunk whose primary
+    # connections are incoming (TextDocument→contains→DocumentChunk) are not
+    # shown as isolated nodes.
     relationships_by_type: Dict[str, Counter] = defaultdict(Counter)
     for link in links_list:
         source_type = node_type_by_id.get(str(link["source"]))
         target_type = node_type_by_id.get(str(link["target"]))
         if source_type is None or target_type is None:
             continue
-        relationships_by_type[source_type][(_link_relation(link), target_type)] += 1
+        if source_type in _INTERNAL_TYPES or target_type in _INTERNAL_TYPES:
+            continue
+        relation = _link_relation(link)
+        relationships_by_type[source_type][(relation, target_type)] += 1
+        relationships_by_type[target_type][(f"\u2190 {relation}", source_type)] += 1
 
     schema_nodes = []
     for node_type_name, type_nodes in sorted(nodes_by_type.items()):
@@ -537,6 +554,8 @@ def extract_type_schema_graph_data(nodes_list, links_list):
         target_type = node_type_by_id.get(str(link["target"]))
         if source_type is None or target_type is None:
             continue
+        if source_type in _INTERNAL_TYPES or target_type in _INTERNAL_TYPES:
+            continue
         relation_counts_by_pair[(source_type, target_type)][_link_relation(link)] += 1
 
     schema_links: List[Dict[str, Any]] = []
@@ -601,6 +620,8 @@ def extract_type_schema_graph_data(nodes_list, links_list):
     for node in nodes_list:
         nid = str(node["id"])
         type_name = node_type_by_id[node["id"]]
+        if type_name in _INTERNAL_TYPES:
+            continue
         display_name = node.get("name") or nid
         instances_by_type[type_name].append({"id": nid, "name": display_name})
         instance_index[nid] = {
@@ -629,7 +650,11 @@ def extract_type_schema_graph_data(nodes_list, links_list):
     }
 
 
-def build_operation_layer(schema_graph, nodes_list, links_list):
+def build_operation_layer(
+    schema_graph: Dict[str, Any],
+    nodes_list: List[Dict[str, Any]],
+    links_list: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     """Attach a transformation impact-layer to ``schema_graph`` in place.
 
     For each catalog operation whose effects touch a schema type present in the
@@ -658,7 +683,7 @@ def build_operation_layer(schema_graph, nodes_list, links_list):
         names = set()
         target_type = effect.get("target_type")
         if target_type == "Entity":
-            names |= (semantic_entity_types & present)
+            names |= semantic_entity_types & present
             if "Entity" in present:
                 names.add("Entity")
         elif target_type and target_type in present:
@@ -679,10 +704,9 @@ def build_operation_layer(schema_graph, nodes_list, links_list):
                 if key in seen:
                     continue
                 seen.add(key)
-                observed = (
-                    op.get("pipeline_name") is not None
-                    and pipeline_by_type.get(type_name) == op.get("pipeline_name")
-                )
+                observed = op.get("pipeline_name") is not None and pipeline_by_type.get(
+                    type_name
+                ) == op.get("pipeline_name")
                 links_for_op.append(
                     {
                         "source": "op:" + op["name"],

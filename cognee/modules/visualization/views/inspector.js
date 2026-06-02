@@ -53,7 +53,7 @@
           '<div class="si-rel">' +
           '<span class="si-rel-name">' + esc(r.relation) + "</span>" +
           '<span class="si-rel-to">&rarr; ' + esc(r.to_type) + "</span>" +
-          '<span class="si-rel-count">' + (r.count != null ? r.count : 0) + "</span>" +
+          '<span class="si-rel-count">' + Number(r.count ?? 0) + "</span>" +
           "</div>"
         );
       })
@@ -64,7 +64,7 @@
     var t = typeIndex()[name];
     if (!t) { window._hideSchemaInspector(); return; }
     var insts = instancesByType()[name] || [];
-    var count = t.instance_count != null ? t.instance_count : insts.length;
+    var count = Number(t.instance_count ?? insts.length);
 
     var chipsHtml;
     if (insts.length) {
