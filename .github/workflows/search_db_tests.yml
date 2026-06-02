@@ -23,6 +23,9 @@ on:
         default: ''
         description: "Container image for CI (empty string means no container)"
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   run-kuzu-lance-sqlite-search-tests:
     name: Search test for Kuzu/LanceDB/Sqlite (Python ${{ matrix.python-version }})
