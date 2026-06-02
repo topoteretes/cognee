@@ -233,11 +233,18 @@ async def _read_sessions(user_ids: List[str], agents: List[Dict[str, Any]]) -> L
     return sessions
 
 
-async def _read_memory_relational(limit: int = 5000) -> Optional[Dict[str, Any]]:
+async def _read_memory_relational(
+    limit: int = 5000, dataset_ids: Optional[List[str]] = None
+) -> Optional[Dict[str, Any]]:
     """Read extracted memory from the relational ``nodes``/``edges`` tables.
 
     Avoids the knowledge-graph backend entirely, so it works when that backend
     is unavailable. Returns None when there is no memory to show.
+
+    When ``dataset_ids`` is provided, only memory nodes belonging to those
+    datasets are returned, and edges are kept only when BOTH endpoints are
+    in-scope — so a scoped provenance graph never folds in another tenant's
+    extracted memory.
     """
     try:
         from sqlalchemy import select
@@ -252,24 +259,37 @@ async def _read_memory_relational(limit: int = 5000) -> Optional[Dict[str, Any]]
     nodes: List[Node] = []
     edges: List[EdgeData] = []
     links: List[Dict[str, Any]] = []
+    node_ids: set = set()
     try:
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
-            for row in (await session.execute(select(NodeRow).limit(limit))).scalars().all():
+            node_stmt = select(NodeRow)
+            if dataset_ids is not None:
+                # Scope to the in-scope datasets. An empty list yields no rows,
+                # which is the correct fail-closed behaviour.
+                node_stmt = node_stmt.where(NodeRow.dataset_id.in_(dataset_ids))
+            for row in (await session.execute(node_stmt.limit(limit))).scalars().all():
                 node_id = str(row.id)
-                nodes.append((node_id, {"type": row.type or "Node", "name": row.label or str(row.slug)}))
+                node_ids.add(node_id)
+                nodes.append(
+                    (node_id, {"type": row.type or "Node", "name": row.label or str(row.slug)})
+                )
                 if row.data_id is not None:
                     links.append(
                         {
                             "node_id": node_id,
                             "data_id": str(row.data_id),
-                            "dataset_id": str(row.dataset_id) if row.dataset_id is not None else None,
+                            "dataset_id": str(row.dataset_id)
+                            if row.dataset_id is not None
+                            else None,
                         }
                     )
             for row in (await session.execute(select(EdgeRow).limit(limit * 4))).scalars().all():
-                edges.append(
-                    (str(row.source_node_id), str(row.destination_node_id), row.relationship_name or "related", {})
-                )
+                src, dst = str(row.source_node_id), str(row.destination_node_id)
+                if dataset_ids is not None and (src not in node_ids or dst not in node_ids):
+                    # Drop edges that reach outside the scoped node set.
+                    continue
+                edges.append((src, dst, row.relationship_name or "related", {}))
     except Exception as error:  # pragma: no cover - defensive
         logger.debug(f"relational memory read skipped: {error}")
         return None
@@ -281,16 +301,22 @@ async def _read_memory_relational(limit: int = 5000) -> Optional[Dict[str, Any]]
 
 async def get_memory_provenance_graph(
     include_memory: bool = False,
+    scope_tenant_ids: Optional[List[Any]] = None,
+    scope_user_ids: Optional[List[Any]] = None,
 ) -> Tuple[List[Node], List[EdgeData]]:
     """Read live relational data and project it into a provenance ``(nodes, edges)``.
 
     Args:
         include_memory: when True, fold in the extracted memory from the
             relational ``nodes``/``edges`` tables and link it to source files.
-
-    Returns:
-        ``(nodes, edges)`` in ``get_graph_data()`` shape. Empty-ish when the
-        database has no actor/ownership rows yet.
+        scope_tenant_ids: when set, restrict the graph to these tenants (and the
+            users/datasets/agents/sessions/memory within them). REQUIRED in
+            multi-tenant deployments — without a scope this reads EVERY tenant's
+            actors, datasets and files, leaking data across tenants.
+        scope_user_ids: alternative scope used when there is no tenant context
+            (single-user/OSS installs): restrict to these users and what they own.
+        When neither scope is given the read is global — the OSS local default,
+        where the single user owns everything.
     """
     from sqlalchemy import select
     from sqlalchemy.orm import joinedload, selectinload
@@ -299,6 +325,8 @@ async def get_memory_provenance_graph(
     from cognee.modules.data.models import Dataset
     from cognee.modules.users.models import Tenant, User
 
+    scoped = scope_tenant_ids is not None or scope_user_ids is not None
+
     tenants: List[Dict[str, Any]] = []
     users: List[Dict[str, Any]] = []
     datasets: List[Dict[str, Any]] = []
@@ -306,12 +334,18 @@ async def get_memory_provenance_graph(
 
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        for tenant in (await session.execute(select(Tenant))).scalars().all():
+        tenant_stmt = select(Tenant)
+        if scope_tenant_ids is not None:
+            tenant_stmt = tenant_stmt.where(Tenant.id.in_(scope_tenant_ids))
+        for tenant in (await session.execute(tenant_stmt)).scalars().all():
             tenants.append({"id": str(tenant.id), "name": tenant.name})
 
-        user_rows = (
-            await session.execute(select(User).options(selectinload(User.tenants)))
-        ).scalars().all()
+        user_stmt = select(User).options(selectinload(User.tenants))
+        if scope_tenant_ids is not None:
+            user_stmt = user_stmt.where(User.tenant_id.in_(scope_tenant_ids))
+        elif scope_user_ids is not None:
+            user_stmt = user_stmt.where(User.id.in_(scope_user_ids))
+        user_rows = (await session.execute(user_stmt)).scalars().all()
         for user in user_rows:
             tenant_ids = [str(t.id) for t in (user.tenants or [])]
             if getattr(user, "tenant_id", None):
@@ -324,12 +358,12 @@ async def get_memory_provenance_graph(
                 }
             )
 
-        dataset_rows = (
-            (await session.execute(select(Dataset).options(joinedload(Dataset.data))))
-            .unique()
-            .scalars()
-            .all()
-        )
+        dataset_stmt = select(Dataset).options(joinedload(Dataset.data))
+        if scope_tenant_ids is not None:
+            dataset_stmt = dataset_stmt.where(Dataset.tenant_id.in_(scope_tenant_ids))
+        elif scope_user_ids is not None:
+            dataset_stmt = dataset_stmt.where(Dataset.owner_id.in_(scope_user_ids))
+        dataset_rows = (await session.execute(dataset_stmt)).unique().scalars().all()
         for dataset in dataset_rows:
             datasets.append(
                 {
@@ -343,14 +377,31 @@ async def get_memory_provenance_graph(
                 file_id = str(data.id)
                 record = files.setdefault(
                     file_id,
-                    {"id": file_id, "name": data.name, "dataset_ids": [], "dataset_name": dataset.name},
+                    {
+                        "id": file_id,
+                        "name": data.name,
+                        "dataset_ids": [],
+                        "dataset_name": dataset.name,
+                    },
                 )
                 record["dataset_ids"].append(str(dataset.id))
 
     user_ids = [u["id"] for u in users]
+    dataset_ids = [d["id"] for d in datasets]
     agents = await _read_agents(user_ids)
+    if scoped:
+        # _read_agents also folds in globally-registered (in-process) agent
+        # connections; drop any that don't belong to an in-scope user so the
+        # scoped graph can't surface another user's agent.
+        allowed_user_ids = set(user_ids)
+        agents = [a for a in agents if a.get("user_id") in allowed_user_ids]
     sessions = await _read_sessions(user_ids, agents)
-    memory = await _read_memory_relational() if include_memory else None
+    # Scope memory to the in-scope datasets so it never leaks across tenants.
+    memory = (
+        await _read_memory_relational(dataset_ids=dataset_ids if scoped else None)
+        if include_memory
+        else None
+    )
 
     return build_provenance_graph(
         tenants=tenants,
@@ -366,13 +417,24 @@ async def get_memory_provenance_graph(
 async def visualize_memory_provenance(
     destination_file_path: Optional[str] = None,
     include_memory: bool = False,
+    scope_tenant_ids: Optional[List[Any]] = None,
+    scope_user_ids: Optional[List[Any]] = None,
 ) -> str:
-    """Render the live memory-provenance graph to a self-contained HTML file."""
+    """Render the live memory-provenance graph to a self-contained HTML file.
+
+    ``scope_tenant_ids`` / ``scope_user_ids`` restrict the graph to a tenant or
+    user (see ``get_memory_provenance_graph``); pass them in multi-tenant
+    deployments to avoid leaking other tenants' data.
+    """
     from cognee.modules.visualization.cognee_network_visualization import (
         cognee_network_visualization,
     )
 
-    graph_data = await get_memory_provenance_graph(include_memory=include_memory)
+    graph_data = await get_memory_provenance_graph(
+        include_memory=include_memory,
+        scope_tenant_ids=scope_tenant_ids,
+        scope_user_ids=scope_user_ids,
+    )
     html = await cognee_network_visualization(graph_data, destination_file_path)
     if destination_file_path:
         logger.info(f"Memory provenance visualization saved at: {destination_file_path}")
