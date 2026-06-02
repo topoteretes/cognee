@@ -8,6 +8,7 @@ within pipeline operations, supporting both incremental and regular processing m
 import os
 from typing import Any, Dict, AsyncGenerator, Optional
 from sqlalchemy import select
+from sqlalchemy.orm import noload
 
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -85,7 +86,9 @@ async def run_tasks_data_item_incremental(
     # Check pipeline status, if Data already processed for pipeline before skip current processing
     async with db_engine.get_async_session() as session:
         data_point = (
-            await session.execute(select(Data).filter(Data.id == data_id))
+            await session.execute(
+                select(Data).filter(Data.id == data_id).options(noload(Data.datasets))
+            )
         ).scalar_one_or_none()
         if data_point:
             if (
@@ -121,7 +124,9 @@ async def run_tasks_data_item_incremental(
         # Update pipeline status for Data element
         async with db_engine.get_async_session() as session:
             data_point = (
-                await session.execute(select(Data).filter(Data.id == data_id))
+                await session.execute(
+                    select(Data).filter(Data.id == data_id).options(noload(Data.datasets))
+                )
             ).scalar_one_or_none()
             status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
             status_for_pipeline[str(dataset.id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
