@@ -84,6 +84,8 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       availableTenants: [],
       switchTenant: () => {},
       planType: null,
+      hasAccess: true,
+      requestCreateWorkspace: () => {},
     }}>
       {children}
     </TenantContext.Provider>

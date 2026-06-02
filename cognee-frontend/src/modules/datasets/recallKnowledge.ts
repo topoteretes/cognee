@@ -45,6 +45,15 @@ export default function recallKnowledge(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
-    .then((r) => (r.ok ? r.json() : []))
-    .catch(() => []);
+    .then(async (r) => {
+      if (r.ok) return r.json();
+      // Extract error detail from response body
+      let errorMsg = `Recall failed (${r.status})`;
+      try {
+        const body = await r.json();
+        if (body.error) errorMsg = body.error;
+        if (body.hint) errorMsg += ` — ${body.hint}`;
+      } catch { /* no JSON body */ }
+      throw new Error(errorMsg);
+    });
 }

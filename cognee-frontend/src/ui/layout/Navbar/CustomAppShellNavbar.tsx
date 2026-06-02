@@ -3,9 +3,10 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useNavbar } from "../NavbarContext";
 import NavbarIconLink from "./NavbarIconLink";
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { isCloudEnvironment } from "@/utils";
 import { useTenant } from "@/modules/tenant/TenantContext";
+import { useFilter } from "../FilterContext";
 
 const PLAN_LABELS: Record<string, string> = {
   developer: "Developer",
@@ -81,15 +82,6 @@ function KeyIcon({ active }: { active: boolean }) {
   );
 }
 
-function ActivityIcon({ active }: { active: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={active ? "#7C5CFC" : "#6B7280"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="16 18 22 12 16 6" />
-      <polyline points="8 6 2 12 8 18" />
-    </svg>
-  );
-}
-
 // -- Navigation data --
 
 interface NavItem {
@@ -108,7 +100,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: "DATA",
     items: [
       { text: "Overview", link: "/dashboard", icon: HouseIcon },
-      { text: "Datasets", link: "/datasets", icon: DatabaseIcon },
+      { text: "Brains", link: "/datasets", icon: DatabaseIcon },
     ],
   },
   {
@@ -129,17 +121,59 @@ const NAV_SECTIONS: NavSection[] = [
     label: "DEVELOP",
     items: [
       { text: "API Keys", link: "/api-keys", icon: KeyIcon },
-      { text: "Activity", link: "/activity", icon: ActivityIcon },
     ],
   },
 ];
+
+function GraphDot({ navActive }: { navActive: boolean }) {
+  return (
+    <span
+      className="ml-auto inline-block rounded-full"
+      style={{
+        width: 7,
+        height: 7,
+        background: "#6510F4",
+        boxShadow: navActive ? "0 0 0 1.5px #F0EDFF" : "0 0 0 1.5px #ffffff",
+        animation: "graph-pulse 1.8s ease-in-out infinite",
+        flexShrink: 0,
+      }}
+    />
+  );
+}
 
 export default function CustomAppShellNavbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { isOpen, close } = useNavbar();
   const { planType } = useTenant();
-  const planLabel = planType ? PLAN_LABELS[planType] ?? "Developer" : "Free";
+  const { datasets } = useFilter();
+  const planLabel = planType ? PLAN_LABELS[planType] ?? "Developer" : "No plan";
+
+  const [kgSeenCount, setKgSeenCount] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    return parseInt(localStorage.getItem("kg-seen-count") ?? "0", 10);
+  });
+
+  const [kgNewData, setKgNewData] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("kg-new-data") === "1";
+  });
+
+  useEffect(() => {
+    const visitedHandler = (e: Event) => {
+      setKgSeenCount((e as CustomEvent<{ count: number }>).detail.count);
+      setKgNewData(false);
+    };
+    const newDataHandler = () => setKgNewData(true);
+    window.addEventListener("kg-visited", visitedHandler);
+    window.addEventListener("kg-data-updated", newDataHandler);
+    return () => {
+      window.removeEventListener("kg-visited", visitedHandler);
+      window.removeEventListener("kg-data-updated", newDataHandler);
+    };
+  }, []);
+
+  const graphReady = datasets.length > kgSeenCount || kgNewData;
 
   return (
     <>
@@ -158,7 +192,7 @@ export default function CustomAppShellNavbar() {
           transition-transform sm:translate-x-0
           ${isOpen ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}
         `}
-        style={{ width: 240 }}
+        style={{ width: 240, maxHeight: "100vh", overflow: "hidden" }}
       >
         {/* Close button on mobile */}
         <div className="flex sm:hidden justify-end p-2">
@@ -173,6 +207,7 @@ export default function CustomAppShellNavbar() {
         </div>
 
         {/* Nav sections */}
+        <style>{`@keyframes graph-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.35;transform:scale(0.85)} }`}</style>
         <nav className="flex-1 overflow-y-auto px-3 py-2">
           {NAV_SECTIONS.map((section) => (
             <div key={section.label} className="mb-4">
@@ -190,6 +225,7 @@ export default function CustomAppShellNavbar() {
               </div>
               {section.items.map((item) => {
                 const isActive = pathname === item.link || pathname.startsWith(item.link + "/");
+                const isKnowledgeGraph = item.link === "/knowledge-graph";
                 return (
                   <NavbarIconLink
                     key={item.link}
@@ -197,6 +233,7 @@ export default function CustomAppShellNavbar() {
                     link={item.link}
                     isActive={isActive}
                     icon={item.icon({ active: isActive })}
+                    badge={isKnowledgeGraph && graphReady ? <GraphDot navActive={isActive} /> : undefined}
                   />
                 );
               })}
@@ -206,7 +243,7 @@ export default function CustomAppShellNavbar() {
 
         {/* Bottom upgrade section (cloud only) */}
         {isCloudEnvironment() && (
-          <div className="px-3 pb-4 mt-auto">
+          <div className="px-3 pb-4 mt-auto flex-shrink-0">
             <div className="flex items-center justify-center gap-[6px] mb-2">
               <span
                 className="rounded-[4px]"
@@ -222,7 +259,7 @@ export default function CustomAppShellNavbar() {
               </span>
             </div>
             <button
-              onClick={() => router.push("/plan")}
+              onClick={() => router.push("/setup")}
               className="w-full rounded-[6px] text-white cursor-pointer"
               style={{
                 background: "#6510F4",
