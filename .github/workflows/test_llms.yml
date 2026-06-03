@@ -15,6 +15,7 @@ on:
 env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
   test-gemini:

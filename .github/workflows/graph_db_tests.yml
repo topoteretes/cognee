@@ -22,6 +22,9 @@ on:
         type: string
         default: ''
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   run-kuzu-tests:
     name: Kuzu Tests
