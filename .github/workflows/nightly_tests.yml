@@ -7,13 +7,6 @@ on:
   schedule:
     - cron: '0 3 * * *'
   workflow_dispatch:
-  # TODO: REMOVE BEFORE MERGE — temporary trigger to validate the Slack
-  # notification on a PR. Scoped to this file so it only runs on PRs that touch
-  # the nightly workflow. Delete this `pull_request` block once Slack is verified.
-  pull_request:
-    paths:
-      - '.github/workflows/nightly_tests.yml'
-      - '.github/workflows/performance_report.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
