@@ -11,8 +11,15 @@ from uuid import uuid4
 chromadb = pytest.importorskip("chromadb", reason="ChromaDB tests require chromadb")
 
 from cognee.infrastructure.databases.vector.chromadb.ChromaDBAdapter import (  # noqa: E402
+    BELONGS_TO_SET_MEMBER_PREFIX,
     ChromaDBAdapter,
+    process_data_for_chroma,
+    restore_data_from_chroma,
 )
+
+
+def _member_key(name):
+    return f"{BELONGS_TO_SET_MEMBER_PREFIX}{name}"
 
 
 def _make_chroma_result(ids, distances, metadatas=None, embeddings=None):
@@ -114,7 +121,44 @@ async def test_search_node_name_single_applies_eq_filter():
 
     call_kwargs = collection.query.call_args[1]
     assert "where" in call_kwargs
-    assert call_kwargs["where"] == {"belongs_to_set": {"$eq": "Alice"}}
+    assert call_kwargs["where"] == {_member_key("Alice"): {"$eq": True}}
+
+
+def test_belongs_to_set_is_flattened_into_boolean_membership_keys():
+    """Regression for #2353/#2947/#2948: belongs_to_set must be stored as
+    queryable per-tag boolean keys, not only a JSON-encoded list that the
+    where filter can never match."""
+    stored = process_data_for_chroma(
+        {"id": "n1", "belongs_to_set": ["Alice", "Bob"], "text": "hello"}
+    )
+
+    # Each tag gets a boolean membership marker that an $eq True filter targets.
+    assert stored[_member_key("Alice")] is True
+    assert stored[_member_key("Bob")] is True
+    # The original list is preserved so payloads round-trip unchanged.
+    assert "belongs_to_set__list" in stored
+
+
+def test_where_filter_targets_stored_membership_key():
+    """The where filter key produced for a node_name must be a key that
+    process_data_for_chroma actually writes, otherwise the filter is silently
+    dropped (the original #2353 bug)."""
+    stored = process_data_for_chroma({"belongs_to_set": ["Alice"]})
+    where = ChromaDBAdapter._build_where_filter(["Alice"], "OR")
+
+    (filter_key,) = where.keys()
+    assert filter_key in stored
+    assert where[filter_key] == {"$eq": True}
+
+
+def test_belongs_to_set_round_trips_without_membership_markers():
+    """restore_data_from_chroma must drop the internal membership markers and
+    rebuild belongs_to_set from its JSON list."""
+    stored = process_data_for_chroma({"id": "n1", "belongs_to_set": ["Alice", "Bob"]})
+    restored = restore_data_from_chroma(stored)
+
+    assert restored["belongs_to_set"] == ["Alice", "Bob"]
+    assert not any(k.startswith(BELONGS_TO_SET_MEMBER_PREFIX) for k in restored)
 
 
 @pytest.mark.asyncio
@@ -137,8 +181,10 @@ async def test_search_node_name_or_operator_uses_dollar_or():
     assert "where" in call_kwargs
     where = call_kwargs["where"]
     assert "$or" in where
-    names = {clause["belongs_to_set"]["$eq"] for clause in where["$or"]}
-    assert names == {"Alice", "Bob"}
+    assert where["$or"] == [
+        {_member_key("Alice"): {"$eq": True}},
+        {_member_key("Bob"): {"$eq": True}},
+    ]
 
 
 @pytest.mark.asyncio
@@ -161,8 +207,10 @@ async def test_search_node_name_and_operator_uses_dollar_and():
     assert "where" in call_kwargs
     where = call_kwargs["where"]
     assert "$and" in where
-    names = {clause["belongs_to_set"]["$eq"] for clause in where["$and"]}
-    assert names == {"Alice", "Bob"}
+    assert where["$and"] == [
+        {_member_key("Alice"): {"$eq": True}},
+        {_member_key("Bob"): {"$eq": True}},
+    ]
 
 
 @pytest.mark.asyncio
@@ -228,4 +276,4 @@ async def test_batch_search_node_name_filter_is_forwarded():
 
     call_kwargs = collection.query.call_args[1]
     assert "where" in call_kwargs
-    assert call_kwargs["where"] == {"belongs_to_set": {"$eq": "Alice"}}
+    assert call_kwargs["where"] == {_member_key("Alice"): {"$eq": True}}

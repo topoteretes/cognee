@@ -18,6 +18,15 @@ from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("ChromaDBAdapter")
 
+# ChromaDB metadata values must be scalars (str/int/float/bool); arrays are not
+# supported and its ``where`` filter has no native "array contains" operator.
+# To make ``belongs_to_set`` membership queryable, each tag is flattened into a
+# dedicated boolean metadata key ``belongs_to_set::<tag>`` so an ``$eq True``
+# filter matches a single membership. The original list is also preserved as a
+# JSON string under ``belongs_to_set__list`` so payloads round-trip unchanged.
+BELONGS_TO_SET_KEY = "belongs_to_set"
+BELONGS_TO_SET_MEMBER_PREFIX = "belongs_to_set::"
+
 
 class IndexSchema(DataPoint):
     """
@@ -83,6 +92,13 @@ def process_data_for_chroma(data):
         elif isinstance(value, list):
             # Store lists as JSON strings with special prefix
             processed_data[f"{key}__list"] = json.dumps(value)
+            # belongs_to_set is filtered on at query time; ChromaDB cannot match
+            # against a JSON-encoded list, so additionally flatten each tag into a
+            # boolean membership key that an $eq filter can target.
+            if key == BELONGS_TO_SET_KEY:
+                for tag in value:
+                    if isinstance(tag, str):
+                        processed_data[f"{BELONGS_TO_SET_MEMBER_PREFIX}{tag}"] = True
         elif isinstance(value, (str, int, float, bool)):
             processed_data[key] = value
         else:
@@ -121,6 +137,10 @@ def restore_data_from_chroma(data):
             dict_keys.append(key)
         elif key.endswith("__list"):
             list_keys.append(key)
+        elif key.startswith(BELONGS_TO_SET_MEMBER_PREFIX):
+            # Flattened membership markers are an internal query aid; the original
+            # belongs_to_set list is restored from its __list entry.
+            continue
         else:
             restored_data[key] = data[key]
 
@@ -365,11 +385,18 @@ class ChromaDBAdapter(VectorDBInterface):
             )
         if not node_name:
             return None
+
+        def _member_clause(name: str) -> dict:
+            # Match the flattened boolean membership key written by
+            # process_data_for_chroma; belongs_to_set is stored as a JSON list
+            # which ChromaDB's where filter cannot match directly.
+            return {f"{BELONGS_TO_SET_MEMBER_PREFIX}{name}": {"$eq": True}}
+
         if len(node_name) == 1:
-            return {"belongs_to_set": {"$eq": node_name[0]}}
+            return _member_clause(node_name[0])
         if node_name_filter_operator == "AND":
-            return {"$and": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
-        return {"$or": [{"belongs_to_set": {"$eq": name}} for name in node_name]}
+            return {"$and": [_member_clause(name) for name in node_name]}
+        return {"$or": [_member_clause(name) for name in node_name]}
 
     @staticmethod
     def _build_include_list(include_payload: bool, with_vector: bool) -> List[str]:
