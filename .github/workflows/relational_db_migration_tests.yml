@@ -35,6 +35,9 @@ on:
       EMBEDDING_API_VERSION:
         required: true
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   run-relational-db-migration-test-networkx:
     name: NetworkX Relational DB Migration Test

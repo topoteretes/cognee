@@ -353,7 +353,7 @@ async def get_memory_provenance_graph(
             users.append(
                 {
                     "id": str(user.id),
-                    "name": getattr(user, "email", None) or str(user.id),
+                    "name": getattr(user, "name", None) or f"user:{str(user.id)[:8]}",
                     "tenant_ids": sorted(set(tenant_ids)),
                 }
             )

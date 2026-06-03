@@ -1,4 +1,5 @@
 import asyncio
+
 import cognee
 
 
@@ -16,7 +17,7 @@ async def main():
         self_improvement=False,
     )
 
-    from cognee.api.v1.search import SearchType
+    from cognee import SearchType
 
     # Before / after queries
     result = await cognee.recall(

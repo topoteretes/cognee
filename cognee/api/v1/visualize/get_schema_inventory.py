@@ -11,7 +11,7 @@ resolved by following the ``is_a`` edge (Entity -> EntityType) to the target
 EntityType node's ``name``.
 """
 
-from typing import Optional, Union
+from typing import Any
 from uuid import UUID
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -21,7 +21,17 @@ from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_eng
 ENTITY_TYPE_RELATION = "is_a"
 
 
-def _resolve_node_types(nodes, edges):
+# EntityType nodes are internal taxonomy labels (Entity → is_a → EntityType).
+# They are resolved away by _resolve_node_types and must not appear as a
+# separate type group in the inventory — doing so creates phantom "duplicate"
+# entries (e.g. an EntityType named "TextDocument" next to real TextDocument nodes).
+_INTERNAL_TYPES: frozenset[str] = frozenset({"EntityType"})
+
+
+def _resolve_node_types(
+    nodes: list[tuple[str, dict[str, Any]]],
+    edges: list[tuple[str, str, str, dict[str, Any]]],
+) -> dict[str, str | None]:
     """Map each node id to its semantic type name.
 
     Non-Entity nodes keep their ``type`` property. Entity nodes (``type ==
@@ -30,12 +40,12 @@ def _resolve_node_types(nodes, edges):
     node_props = {node_id: props for node_id, props in nodes}
 
     # Collect EntityType target name for each Entity source via the is_a edge
-    entity_type_name = {}
+    entity_type_name: dict[str, str | None] = {}
     for source_id, target_id, relation, _ in edges:
         if relation == ENTITY_TYPE_RELATION and target_id in node_props:
             entity_type_name[source_id] = node_props[target_id].get("name")
 
-    node_type = {}
+    node_type: dict[str, str | None] = {}
     for node_id, props in nodes:
         raw_type = props.get("type")
         if raw_type == "Entity" and node_id in entity_type_name:
@@ -45,9 +55,12 @@ def _resolve_node_types(nodes, edges):
     return node_type
 
 
-def _compute_degrees(node_ids, edges):
+def _compute_degrees(
+    node_ids: list[str] | set[str],
+    edges: list[tuple[str, str, str, dict[str, Any]]],
+) -> dict[str, int]:
     """Count edges touching each node (undirected degree) from the edge list."""
-    degree = {node_id: 0 for node_id in node_ids}
+    degree: dict[str, int] = {node_id: 0 for node_id in node_ids}
     for source_id, target_id, _, _ in edges:
         if source_id in degree:
             degree[source_id] += 1
@@ -57,10 +70,10 @@ def _compute_degrees(node_ids, edges):
 
 
 async def get_schema_inventory(
-    dataset: Optional[Union[str, UUID]] = None,
+    dataset: str | UUID | None = None,
     samples_per_type: int = 5,
     sort: str = "count",
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Summarize the knowledge graph by semantic type.
 
     Parameters:
@@ -75,6 +88,9 @@ async def get_schema_inventory(
         ``sample_size``, and ``relationships``. Each ``relationships`` entry is
         ``{"to_type", "relation", "count"}`` aggregated over edges.
     """
+    if samples_per_type < 0:
+        raise ValueError("samples_per_type must be non-negative")
+
     if dataset is not None:
         # Scope graph databases to the dataset, mirroring the visualize router.
         # String dataset names cannot resolve to an owner_id; skip scoping for them
@@ -86,7 +102,7 @@ async def get_schema_inventory(
     return await _build_inventory(samples_per_type, sort)
 
 
-async def _resolve_dataset_owner(dataset):
+async def _resolve_dataset_owner(dataset: str | UUID) -> UUID | None:
     """Return the owner id for a dataset, or None when it cannot be resolved."""
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Dataset
@@ -100,7 +116,7 @@ async def _resolve_dataset_owner(dataset):
         return record.owner_id if record else None
 
 
-async def _build_inventory(samples_per_type, sort):
+async def _build_inventory(samples_per_type: int, sort: str) -> list[dict[str, Any]]:
     """Fetch graph data and assemble the per-type inventory."""
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
@@ -109,25 +125,34 @@ async def _build_inventory(samples_per_type, sort):
     node_name = {node_id: props.get("name") for node_id, props in nodes}
     degree = _compute_degrees(node_type.keys(), edges)
 
-    # Group node ids by semantic type
-    ids_by_type = {}
+    # Group node ids by semantic type, skipping internal taxonomy types
+    ids_by_type: dict[str, list[str]] = {}
     for node_id, type_name in node_type.items():
+        if type_name in _INTERNAL_TYPES:
+            continue
         ids_by_type.setdefault(type_name, []).append(node_id)
 
-    # Aggregate relationship counts keyed by (source_type, target_type, relation)
-    relation_counts = {}
+    # Aggregate relationship counts keyed by (source_type, target_type, relation).
+    # Skip edges where either endpoint is an internal type.
+    relation_counts: dict[tuple[str, str, str], int] = {}
     for source_id, target_id, relation, _ in edges:
         source_type = node_type.get(source_id)
         target_type = node_type.get(target_id)
         if source_type is None or target_type is None:
             continue
+        if source_type in _INTERNAL_TYPES or target_type in _INTERNAL_TYPES:
+            continue
         key = (source_type, relation, target_type)
         relation_counts[key] = relation_counts.get(key, 0) + 1
 
-    relationships_by_type = {}
+    # Build outgoing relationships per type AND incoming (so types like DocumentChunk
+    # whose primary connections are incoming are not shown as isolated nodes).
+    relationships_by_type: dict[str, list[dict[str, Any]]] = {}
     for (source_type, relation, target_type), count in relation_counts.items():
-        entry = {"to_type": target_type, "relation": relation, "count": count}
-        relationships_by_type.setdefault(source_type, []).append(entry)
+        outgoing = {"to_type": target_type, "relation": relation, "count": count}
+        relationships_by_type.setdefault(source_type, []).append(outgoing)
+        incoming = {"to_type": source_type, "relation": f"\u2190 {relation}", "count": count}
+        relationships_by_type.setdefault(target_type, []).append(incoming)
 
     # Build one inventory record per semantic type
     inventory = []

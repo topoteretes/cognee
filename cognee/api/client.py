@@ -42,12 +42,12 @@ from cognee.api.v1.users.routers import (
     get_verify_router,
     get_users_router,
     get_visualize_router,
-    get_schema_router,
     get_configuration_router,
     get_user_id_by_email_router,
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.agents.routers import get_agents_router
+from cognee.api.v1.visualize.get_schema_router import get_schema_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
