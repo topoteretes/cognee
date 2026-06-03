@@ -49,9 +49,13 @@ def get_schema_router() -> APIRouter:
             )
             return result
         except ValueError as exc:
+            # Controlled validation messages only (e.g. samples_per_type bounds);
+            # never raw internal exception text.
             return JSONResponse(status_code=422, content={"error": str(exc)})
-        except Exception as exc:
-            logger.error(f"Schema inventory failed: {exc}")
-            return JSONResponse(status_code=500, content={"error": str(exc)})
+        except Exception:
+            # Log the detail server-side; return a generic message so internal
+            # exception text / stack info is not exposed to the client (CodeQL).
+            logger.exception("Schema inventory failed")
+            return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
     return router
