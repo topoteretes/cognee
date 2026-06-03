@@ -46,8 +46,10 @@ logger = get_logger("run_tasks(tasks: [Task], data)")
 
 def override_run_tasks(new_gen):
     """Decorator factory that conditionally routes pipeline execution between distributed and local modes."""
+
     def decorator(original_gen):
         """Wraps the original generator to add distributed execution routing."""
+
         @wraps(original_gen)
         async def wrapper(*args, distributed=None, **kwargs):
             """Routes execution based on COGNEE_DISTRIBUTED env var or explicit distributed parameter."""

@@ -516,6 +516,7 @@ class _AdaptivePool:
 
     def start_ticker(self, in_queue: "InstrumentedQueue") -> None:
         """Start the background ticker task that adjusts concurrency."""
+
         async def _ticker():
             """Periodically sample queue depth and adjust target workers."""
             loop = asyncio.get_running_loop()
@@ -788,6 +789,7 @@ _DEFAULT_STRATEGY = FixedWorkers(num_workers=1)
 @dataclass
 class _StageConfig:
     """Configuration for a single pipeline stage (task) including queue and worker settings."""
+
     queue_maxsize: int
     num_workers: int
     next_batch_size: int

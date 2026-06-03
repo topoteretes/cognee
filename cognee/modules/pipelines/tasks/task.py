@@ -256,6 +256,7 @@ class Task:
     Supports functions, coroutines, generators, and async generators, with automatic
     batching of results based on configured batch size.
     """
+
     executable: Union[
         Callable[..., Any],
         Callable[..., Coroutine[Any, Any, Any]],
