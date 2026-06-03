@@ -36,7 +36,7 @@ artifacts = ["src/app_bundles/**/*"]
 [dependency-groups]
 dev = [
     "debugpy>=1.8.12,<2.0.0",
-    "pytest>=7.4.0,<9",
+    "pytest>=7.4.0,<10",
     "pytest-asyncio>=0.21.1,<2",
 ]
 
