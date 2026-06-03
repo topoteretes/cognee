@@ -11,7 +11,7 @@ resolved by following the ``is_a`` edge (Entity -> EntityType) to the target
 EntityType node's ``name``.
 """
 
-from typing import Any, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -70,12 +70,10 @@ def _compute_degrees(
 
 
 async def get_schema_inventory(
-    dataset: Optional[Union[str, UUID]] = None,
+    dataset: str | UUID | None = None,
     samples_per_type: int = 5,
     sort: str = "count",
 ) -> list[dict[str, Any]]:
-    if samples_per_type < 0:
-        raise ValueError("samples_per_type must be non-negative")
     """Summarize the knowledge graph by semantic type.
 
     Parameters:
@@ -90,6 +88,9 @@ async def get_schema_inventory(
         ``sample_size``, and ``relationships``. Each ``relationships`` entry is
         ``{"to_type", "relation", "count"}`` aggregated over edges.
     """
+    if samples_per_type < 0:
+        raise ValueError("samples_per_type must be non-negative")
+
     if dataset is not None:
         # Scope graph databases to the dataset, mirroring the visualize router.
         # String dataset names cannot resolve to an owner_id; skip scoping for them
@@ -101,7 +102,7 @@ async def get_schema_inventory(
     return await _build_inventory(samples_per_type, sort)
 
 
-async def _resolve_dataset_owner(dataset: Union[str, UUID]) -> Optional[str]:
+async def _resolve_dataset_owner(dataset: str | UUID) -> UUID | None:
     """Return the owner id for a dataset, or None when it cannot be resolved."""
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Dataset

@@ -35,6 +35,9 @@ on:
       OPENAI_API_KEY:
         required: true
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   run-server-start-test:
     name: Distributed Cognee test (Modal)

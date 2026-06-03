@@ -42,7 +42,6 @@ from cognee.api.v1.users.routers import (
     get_verify_router,
     get_users_router,
     get_visualize_router,
-    get_schema_router,
     get_configuration_router,
     get_user_id_by_email_router,
 )

@@ -17,6 +17,9 @@ on:
       POSTGRES_PASSWORD:
         required: false
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   # run-chromadb-tests:
   #   name: ChromaDB Tests

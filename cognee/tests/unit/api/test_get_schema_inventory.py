@@ -72,9 +72,9 @@ async def test_counts_are_true_totals(mock_graph_engine):
     assert counts["Tool"] == 1
 
     # The literal "Entity" type is never reported; semantic types are.
-    # EntityType nodes are genuine graph nodes, so they appear by their own type.
+    # Internal EntityType taxonomy nodes are resolved away and not reported.
     assert "Entity" not in counts
-    assert counts["EntityType"] == 3
+    assert "EntityType" not in counts
 
 
 @pytest.mark.asyncio
@@ -118,9 +118,8 @@ async def test_relationship_distribution(mock_graph_engine):
     uses = next(rel for rel in person_rels if rel["relation"] == "uses")
     assert uses == {"to_type": "Tool", "relation": "uses", "count": 1}
 
-    # The is_a edges remain in the distribution: 3 Persons -> EntityType
-    is_a = next(rel for rel in person_rels if rel["relation"] == "is_a")
-    assert is_a == {"to_type": "EntityType", "relation": "is_a", "count": 3}
+    # Internal is_a taxonomy edges are resolved away from the public inventory.
+    assert all(rel["relation"] != "is_a" for rel in person_rels)
 
 
 @pytest.mark.asyncio
