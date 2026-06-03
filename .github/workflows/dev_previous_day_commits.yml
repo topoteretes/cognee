@@ -1,6 +1,7 @@
 name: automation | Draft Docs PRs For Previous Day Dev PRs
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       lookback_days:
