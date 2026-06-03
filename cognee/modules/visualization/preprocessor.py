@@ -30,9 +30,13 @@ SCHEMA_GRAPH_NODE_TYPES = {
 # Maximum sample instance names attached to each schema type node.
 SCHEMA_SAMPLES_PER_TYPE: int = 5
 
-# Internal graph taxonomy types that must not appear as separate type groups
-# in the schema view (they are resolved away by resolve_semantic_types).
-_INTERNAL_TYPES: frozenset = frozenset({"EntityType"})
+# Internal graph taxonomy types that must not appear as separate type groups in
+# the schema view. EntityType is now surfaced as its own schema type group
+# alongside the resolved semantic entity types (Person/Field/...); Entity
+# instances still collapse to their semantic type via the is_a edge. This set is
+# kept (currently empty) so future genuinely-internal types can be added without
+# re-plumbing the guards that reference it.
+_INTERNAL_TYPES: frozenset = frozenset()
 
 
 # Stage assignment by node type — drives the left-to-right Story layout.
