@@ -7,7 +7,7 @@ on:
       lookback_days:
         description: Number of UTC calendar days to look back when scanning merged PRs
         required: false
-        default: "1"
+        default: "3"
       anchor_date:
         description: Optional UTC date to scan, in YYYY-MM-DD format
         required: false
