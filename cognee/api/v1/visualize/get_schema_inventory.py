@@ -71,6 +71,9 @@ def _compute_degrees(
     return degree
 
 
+VALID_SORTS: frozenset[str] = frozenset({"count", "none"})
+
+
 async def get_schema_inventory(
     dataset: str | UUID | None = None,
     samples_per_type: int = 5,
@@ -83,7 +86,9 @@ async def get_schema_inventory(
             When set, scoping mirrors the visualize router via
             ``set_database_global_context_variables``.
         samples_per_type: maximum number of sample instance names per type.
-        sort: ``"count"`` orders types by descending count, then type name.
+        sort: one of ``VALID_SORTS``. ``"count"`` (default) orders types by
+            descending count, then type name; ``"none"`` preserves discovery
+            order. Any other value raises ``ValueError``.
 
     Returns:
         A list of dicts with keys ``type``, ``count``, ``samples``,
@@ -92,6 +97,8 @@ async def get_schema_inventory(
     """
     if samples_per_type < 0:
         raise ValueError("samples_per_type must be non-negative")
+    if sort not in VALID_SORTS:
+        raise ValueError(f"sort must be one of {sorted(VALID_SORTS)}, got {sort!r}")
     if dataset is not None:
         # Scope graph databases to the dataset, mirroring the visualize router.
         # String dataset names cannot resolve to an owner_id; skip scoping for them

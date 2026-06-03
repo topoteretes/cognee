@@ -47,7 +47,7 @@ from cognee.api.v1.users.routers import (
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.agents.routers import get_agents_router
-from cognee.api.v1.visualize.get_schema_router import get_schema_router
+from cognee.api.v1.visualize.routers import get_schema_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
