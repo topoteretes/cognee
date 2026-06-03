@@ -50,7 +50,7 @@ jobs:
       - name: Pull required Ollama models
         run: |
           curl -X POST http://localhost:11434/api/pull -d '{"name": "phi4"}'
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
+          curl -X POST http://localhost:11434/api/pull -d '{"name": "qwen3-embedding:latest"}'
 
       - name: Call ollama API
         run: |
@@ -67,7 +67,7 @@ jobs:
           curl -X POST http://127.0.0.1:11434/api/embed \
             -H "Content-Type: application/json" \
              -d '{
-              "model": "avr/sfr-embedding-mistral:latest",
+              "model": "qwen3-embedding:latest",
             "input": "This is a test sentence to generate an embedding."
             }'
 
@@ -86,8 +86,8 @@ jobs:
           LLM_ENDPOINT: "http://localhost:11434/v1/"
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
-          EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
+          EMBEDDING_MODEL: "qwen3-embedding:latest"
           EMBEDDING_ENDPOINT: "http://localhost:11434/api/embed"
           EMBEDDING_DIMENSIONS: "4096"
-          HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
+          HUGGINGFACE_TOKENIZER: "Qwen/Qwen3-Embedding-8B"
         run: uv run python ./examples/demos/simple_cognee_example.py
