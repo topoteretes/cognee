@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check:build-invariants": "node scripts/check-build-invariants.mjs"
   },
   "dependencies": {
     "@mantine/core": "^8.3.13",

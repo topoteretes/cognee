@@ -1,0 +1,70 @@
+name: Frontend Build
+
+# Gate the cognee-frontend Next.js app at PR time so build-breaking
+# regressions are caught before release. Historically the frontend has
+# broken at release due to: missing npm dependencies (#2413), a
+# package-lock.json out of sync with package.json so `npm ci` fails
+# (#2832), import path casing not matching the on-disk PascalCase
+# directories on case-sensitive filesystems / Turbopack (#2605, #2709),
+# a missing bundled module (#2442), and eval-based edge middleware
+# blocked under Docker CSP (#1869). Running `npm ci` + `npm run build`
+# here reproduces all of those failure modes deterministically.
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'cognee-frontend/**'
+      - '.github/workflows/frontend_build.yml'
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - 'cognee-frontend/**'
+      - '.github/workflows/frontend_build.yml'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: npm ci + next build
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: cognee-frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Matches cognee-frontend/Dockerfile (node:22-alpine).
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: cognee-frontend/package-lock.json
+
+      # `npm ci` requires package-lock.json to be in sync with package.json.
+      # This fails the build if the lockfile drifts (#2832) or a dependency
+      # imported in source is not declared (#2413, #2442).
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      # Fast, dependency-free assertions of the file-level invariants that
+      # have broken releases before (lockfile sync, declared deps, import
+      # casing, no eval middleware). Gives a clear error before the slower
+      # `next build`. See scripts/check-build-invariants.mjs.
+      - name: Check build invariants
+        run: npm run check:build-invariants
+
+      # `next build` performs a full type-check and module resolution pass,
+      # which catches import path casing mismatches (#2605, #2709), missing
+      # modules, and middleware that fails to compile (#1869).
+      - name: Build (next build)
+        run: npm run build
