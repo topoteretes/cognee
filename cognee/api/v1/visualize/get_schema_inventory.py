@@ -21,11 +21,13 @@ from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_eng
 ENTITY_TYPE_RELATION = "is_a"
 
 
-# EntityType nodes are internal taxonomy labels (Entity → is_a → EntityType).
-# They are resolved away by _resolve_node_types and must not appear as a
-# separate type group in the inventory — doing so creates phantom "duplicate"
-# entries (e.g. an EntityType named "TextDocument" next to real TextDocument nodes).
-_INTERNAL_TYPES: frozenset[str] = frozenset({"EntityType"})
+# Internal graph taxonomy types that must not appear as separate type groups in
+# the inventory. EntityType nodes are genuine graph nodes grouped under their own
+# "EntityType" type (their ``name`` — Person/Tool/... — is surfaced as samples),
+# while Entity instances still collapse to their semantic type via the is_a edge,
+# so they are intentionally NOT internal. This set is kept (currently empty) so
+# future genuinely-internal types can be added without re-plumbing the guards.
+_INTERNAL_TYPES: frozenset[str] = frozenset()
 
 
 def _resolve_node_types(
@@ -74,8 +76,6 @@ async def get_schema_inventory(
     samples_per_type: int = 5,
     sort: str = "count",
 ) -> list[dict[str, Any]]:
-    if samples_per_type < 0:
-        raise ValueError("samples_per_type must be non-negative")
     """Summarize the knowledge graph by semantic type.
 
     Parameters:
@@ -90,6 +90,8 @@ async def get_schema_inventory(
         ``sample_size``, and ``relationships``. Each ``relationships`` entry is
         ``{"to_type", "relation", "count"}`` aggregated over edges.
     """
+    if samples_per_type < 0:
+        raise ValueError("samples_per_type must be non-negative")
     if dataset is not None:
         # Scope graph databases to the dataset, mirroring the visualize router.
         # String dataset names cannot resolve to an owner_id; skip scoping for them
