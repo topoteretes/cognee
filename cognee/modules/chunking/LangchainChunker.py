@@ -22,14 +22,21 @@ class LangchainChunker(Chunker):
         document,
         get_text: callable,
         max_chunk_size: int,
-        chunk_size: int = 1024,
+        chunk_size: int | None = None,
         chunk_overlap=10,
     ):
         super().__init__(document, get_text, max_chunk_size)
 
+        # Every Document.read call passes only max_chunk_size and lets chunk_size
+        # default, so the splitter must honor that budget. Otherwise it keeps
+        # emitting ~1024-word chunks that then trip the size guard in read().
+        effective_chunk_size = (
+            max_chunk_size if chunk_size is None else min(chunk_size, max_chunk_size)
+        )
+
         self.splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
+            chunk_size=effective_chunk_size,
+            chunk_overlap=min(chunk_overlap, max(effective_chunk_size - 1, 0)),
             length_function=lambda text: len(text.split()),
         )
 
