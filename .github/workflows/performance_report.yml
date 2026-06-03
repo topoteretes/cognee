@@ -11,21 +11,12 @@ on:
         required: true
         type: string
     outputs:
-      success:
-        description: "Succeeded/total runs, e.g. 5/5."
-        value: ${{ jobs.performance.outputs.success }}
-      p50:
-        description: "Total-ingest p50 (seconds)."
-        value: ${{ jobs.performance.outputs.p50 }}
-      p90:
-        description: "Total-ingest p90 (seconds)."
-        value: ${{ jobs.performance.outputs.p90 }}
-      p99:
-        description: "Total-ingest p99 (seconds)."
-        value: ${{ jobs.performance.outputs.p99 }}
-      report_url:
-        description: "Presigned (7-day) URL to the HTML report."
-        value: ${{ jobs.performance.outputs.report_url }}
+      metrics:
+        description: "Compact JSON: success + add/cognify/search/total p50/p90/p99."
+        value: ${{ jobs.performance.outputs.metrics }}
+      html_key:
+        description: "S3 object key of the HTML report (the caller presigns it)."
+        value: ${{ jobs.performance.outputs.html_key }}
 
 env:
   ENV: 'dev'
@@ -37,11 +28,8 @@ jobs:
     name: Performance (${{ inputs.mode }})
     runs-on: ubuntu-22.04
     outputs:
-      success: ${{ steps.parse.outputs.success }}
-      p50: ${{ steps.parse.outputs.p50 }}
-      p90: ${{ steps.parse.outputs.p90 }}
-      p99: ${{ steps.parse.outputs.p99 }}
-      report_url: ${{ steps.upload.outputs.report_url }}
+      metrics: ${{ steps.parse.outputs.metrics }}
+      html_key: ${{ steps.upload.outputs.html_key }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -80,7 +68,7 @@ jobs:
             --output "$JSON_PATH" \
             --html "$HTML_PATH"
 
-      - name: Upload reports to S3 and presign HTML
+      - name: Upload reports to S3
         id: upload
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
@@ -91,15 +79,21 @@ jobs:
           set -euo pipefail
           aws s3 cp "$JSON_PATH" "s3://$BUCKET/$JSON_PATH" --content-type application/json
           aws s3 cp "$HTML_PATH" "s3://$BUCKET/$HTML_PATH" --content-type text/html
-          # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
-          URL="$(aws s3 presign "s3://$BUCKET/$HTML_PATH" --expires-in 604800)"
-          echo "report_url=$URL" >> "$GITHUB_OUTPUT"
+          # Presigning is done by the caller (the Slack job), NOT here: a presigned URL
+          # embeds the AWS access key id, and GitHub scrubs registered secrets from
+          # reusable-workflow outputs — which would blank the link. Pass only the
+          # (non-secret) object key across the boundary.
+          echo "html_key=$HTML_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Parse headline metrics
         id: parse
         run: |
           set -euo pipefail
-          echo "success=$(jq -r '"\(.succeeded)/\(.num_runs)"' "$JSON_PATH")" >> "$GITHUB_OUTPUT"
-          echo "p50=$(jq -r '.stats.total_ingest_time_s.p50' "$JSON_PATH")" >> "$GITHUB_OUTPUT"
-          echo "p90=$(jq -r '.stats.total_ingest_time_s.p90' "$JSON_PATH")" >> "$GITHUB_OUTPUT"
-          echo "p99=$(jq -r '.stats.total_ingest_time_s.p99' "$JSON_PATH")" >> "$GITHUB_OUTPUT"
+          METRICS="$(jq -c '{
+            success: "\(.succeeded)/\(.num_runs)",
+            add:     {p50: .stats.add_time_s.p50,          p90: .stats.add_time_s.p90,          p99: .stats.add_time_s.p99},
+            cognify: {p50: .stats.cognify_time_s.p50,      p90: .stats.cognify_time_s.p90,      p99: .stats.cognify_time_s.p99},
+            search:  {p50: .stats.search_time.p50,         p90: .stats.search_time.p90,         p99: .stats.search_time.p99},
+            total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
+          }' "$JSON_PATH")"
+          echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"

@@ -74,6 +74,26 @@ jobs:
           fi
           echo "ran_at=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
 
+      - name: Presign performance report links
+        id: presign
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+          LLM_KEY: ${{ needs.performance-llm.outputs.html_key }}
+          MOCK_KEY: ${{ needs.performance-mock.outputs.html_key }}
+        run: |
+          set -euo pipefail
+          # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
+          # Guard for empty keys (a failed perf job produces no report).
+          if [ -n "${LLM_KEY:-}" ]; then
+            echo "url_llm=$(aws s3 presign "s3://$BUCKET/$LLM_KEY" --expires-in 604800)" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${MOCK_KEY:-}" ]; then
+            echo "url_mock=$(aws s3 presign "s3://$BUCKET/$MOCK_KEY" --expires-in 604800)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Post status to Slack
         uses: slackapi/slack-github-action@v2.1.0
         with:
@@ -91,13 +111,19 @@ jobs:
                     *Ran at:* `${{ steps.status.outputs.ran_at }}`
                     *Ollama:* `${{ needs.ollama-tests.result }}`  •  *Llama-cpp:* `${{ needs.llamacpp-tests.result }}`
 
-                    *📊 Performance — Real LLM* (`${{ needs.performance-llm.result }}`)  •  runs `${{ needs.performance-llm.outputs.success }}`
-                    Total ingest:  p50 `${{ needs.performance-llm.outputs.p50 }}s`  •  p90 `${{ needs.performance-llm.outputs.p90 }}s`  •  p99 `${{ needs.performance-llm.outputs.p99 }}s`
-                    <${{ needs.performance-llm.outputs.report_url }}|HTML report>
+                    *📊 Performance — Real LLM* (`${{ needs.performance-llm.result }}`)  •  runs `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').success }}`
+                    add()      p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p99 }}s`
+                    cognify()  p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_llm }}|HTML report>
 
-                    *📊 Performance — Mock LLM* (`${{ needs.performance-mock.result }}`)  •  runs `${{ needs.performance-mock.outputs.success }}`
-                    Total ingest:  p50 `${{ needs.performance-mock.outputs.p50 }}s`  •  p90 `${{ needs.performance-mock.outputs.p90 }}s`  •  p99 `${{ needs.performance-mock.outputs.p99 }}s`
-                    <${{ needs.performance-mock.outputs.report_url }}|HTML report>
+                    *📊 Performance — Mock LLM* (`${{ needs.performance-mock.result }}`)  •  runs `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').success }}`
+                    add()      p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p99 }}s`
+                    cognify()  p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_mock }}|HTML report>
 
                     <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
 
