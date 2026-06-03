@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
@@ -19,6 +20,25 @@ def _inject_agent_memory(text_input: str) -> str:
         return text_input
 
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
+
+
+async def _with_call_timeout(coro: Coroutine) -> T:
+    """Bound a single LLM structured-output call so a non-responsive endpoint
+    cannot hang cognify/search/remember indefinitely.
+
+    A non-positive configured timeout disables the bound (back-compat escape hatch).
+    """
+    timeout = get_llm_config().llm_call_timeout_seconds
+    if not timeout or timeout <= 0:
+        return await coro
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError as error:
+        raise TimeoutError(
+            f"LLM call did not complete within {timeout}s. The endpoint accepted the "
+            "connection but never responded. Check that your LLM endpoint is reachable "
+            "and responsive, or raise LLM_CALL_TIMEOUT_SECONDS."
+        ) from error
 
 
 async def _record_session_usage_after(
@@ -87,9 +107,10 @@ class LLMGateway:
                 **kwargs,
             )
 
-        # Wrap so usage is recorded against any active session tracker.
-        # No-op when no tracker is installed.
-        return _record_session_usage_after(inner, text_input=text_input)
+        # Bound the call so an unresponsive endpoint cannot hang forever, then
+        # wrap so usage is recorded against any active session tracker.
+        # The usage wrapper is a no-op when no tracker is installed.
+        return _record_session_usage_after(_with_call_timeout(inner), text_input=text_input)
 
     @staticmethod
     def create_transcript(input) -> Coroutine[Any, Any, TranscriptionReturnType | None]:

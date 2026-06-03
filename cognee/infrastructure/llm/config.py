@@ -49,6 +49,11 @@ class LLMConfig(BaseSettings):
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
+    # Hard upper bound (seconds) on a single structured-output LLM call. Prevents
+    # cognify/search/remember from hanging indefinitely when an endpoint (vLLM,
+    # Ollama, custom OpenAI-compatible servers, etc.) accepts the connection but
+    # never responds. See issues #2456, #2796, #2902.
+    llm_call_timeout_seconds: int = 300
 
     baml_llm_provider: str = "openai"
     baml_llm_model: str = "gpt-5-mini"

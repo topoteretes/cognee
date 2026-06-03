@@ -81,6 +81,14 @@ def get_model_max_completion_tokens(model_name: str) -> int | None:
 async def test_llm_connection() -> None:
     """
     Test connectivity to the LLM endpoint using a simple completion call.
+
+    The goal of this preflight is to verify *reachability* and credentials, not to
+    validate that the provider can emit a particular structured-output schema. Some
+    healthy non-OpenAI / local providers (vLLM, Ollama, custom OpenAI-compatible
+    servers) cannot reliably coerce a bare ``str`` response model and would otherwise
+    fail this check even though the endpoint is fully reachable (issue #2752).
+    Therefore a structured-output / parse failure is treated as a *successful*
+    reachability result, while only timeouts and auth/connection errors are fatal.
     """
     try:
         logger.info("Testing connection to LLM endpoint...")
@@ -92,7 +100,7 @@ async def test_llm_connection() -> None:
             ),
             timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
         )
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):
         msg = (
             f"LLM connection test timed out after {CONNECTION_TEST_TIMEOUT_SECONDS}s. "
             "Check that your LLM endpoint is reachable and responding. "
@@ -107,10 +115,25 @@ async def test_llm_connection() -> None:
         )
         logger.error(msg)
         raise e
-    except Exception as e:
+    except (
+        litellm.exceptions.APIConnectionError,
+        litellm.exceptions.ServiceUnavailableError,
+        litellm.exceptions.Timeout,
+        ConnectionError,
+    ) as e:
+        # Endpoint is genuinely unreachable / not responding -> fatal.
         logger.error(e)
         logger.error("Connection to LLM could not be established.")
         raise e
+    except Exception as e:
+        # The endpoint responded but the structured-output round-trip failed
+        # (e.g. the provider can't coerce the response model, validation/parse
+        # error). That still proves reachability, so don't fail the preflight.
+        logger.warning(
+            "LLM endpoint is reachable but the structured-output test did not return a "
+            "valid schema (%s). Treating the connection as healthy.",
+            type(e).__name__,
+        )
 
 
 async def test_embedding_connection() -> int:
