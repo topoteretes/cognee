@@ -28,7 +28,9 @@ async def _with_call_timeout(coro: Coroutine) -> T:
 
     A non-positive configured timeout disables the bound (back-compat escape hatch).
     """
-    timeout = get_llm_config().llm_call_timeout_seconds
+    # Defensive getattr: callers (and tests) may supply a partial/mock config
+    # that predates this field; fall back to the LLMConfig default (300s).
+    timeout = getattr(get_llm_config(), "llm_call_timeout_seconds", 300)
     if not timeout or timeout <= 0:
         return await coro
     try:
