@@ -5,6 +5,7 @@ by model. Effective status is computed in SQL with the
 abandonment-by-idle rule so no sweeper is needed.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID as UUIDType
@@ -77,6 +78,80 @@ async def _visible_user_ids(user: User) -> list[UUIDType]:
     return ids
 
 
+def _entry_field(entry, name: str):
+    """Read a field from a QA/trace entry whether it's a dict or an object.
+
+    ``get_session(formatted=False)`` returns SessionQAEntry *objects* (not
+    dicts), so a dict-only lookup silently misses every field — which is why
+    the session label came back empty. Handle both shapes.
+    """
+    if isinstance(entry, dict):
+        return entry.get(name)
+    return getattr(entry, name, None)
+
+
+async def _generated_by_for_user_ids(owner_user_ids: list[str]) -> dict[str, str]:
+    """Return whether each owner user is a human user or an agent user."""
+    parsed_ids: list[UUIDType] = []
+    for owner_user_id in owner_user_ids:
+        try:
+            parsed_ids.append(UUIDType(str(owner_user_id)))
+        except (TypeError, ValueError):
+            continue
+
+    if not parsed_ids:
+        return {}
+
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        from cognee.modules.users.models import User as UserModel
+
+        rows = (
+            await session.execute(
+                select(UserModel.id, UserModel.parent_user_id, UserModel.email).where(
+                    UserModel.id.in_(parsed_ids)
+                )
+            )
+        ).all()
+
+    generated_by: dict[str, str] = {}
+    for row in rows:
+        email = getattr(row, "email", "") or ""
+        is_agent = getattr(row, "parent_user_id", None) is not None or email.endswith(
+            "@cognee.agent"
+        )
+        generated_by[str(row.id)] = "agent" if is_agent else "user"
+    return generated_by
+
+
+async def _label_and_query_count(
+    sm, owner_user_id: str, session_id: str
+) -> tuple[Optional[str], int]:
+    """Derive ``(label, query_count)`` for one session from the session cache.
+
+    Mirrors how GET /v1/sessions/{session_id} derives ``label``/``msg_count``
+    from the cache QAs, so the list and detail views agree. Best-effort: cache
+    entries are keyed by the session OWNER (not the caller), and any cache miss
+    / unavailability degrades to ``(None, 0)`` rather than failing the list.
+    """
+    if not (sm.is_available and owner_user_id and session_id):
+        return None, 0
+    try:
+        qas_raw = await sm.get_session(
+            user_id=owner_user_id, session_id=session_id, formatted=False
+        )
+    except Exception:
+        return None, 0
+    qas = qas_raw if isinstance(qas_raw, list) else []
+    label = None
+    for entry in qas:
+        question = _entry_field(entry, "question")
+        if question:
+            label = str(question)[:120]
+            break
+    return label, len(qas)
+
+
 def get_sessions_router() -> APIRouter:
     router = APIRouter()
 
@@ -116,9 +191,33 @@ def get_sessions_router() -> APIRouter:
                 order_by=order_by,
                 descending=descending,
             )
+            records = [r.to_dict() for r in page.sessions]
+            # Enrich each row with a human label (first QA question) and
+            # query_count, derived from the session cache the same way the
+            # detail endpoint does — so the list view shows a meaningful title
+            # and size without a second round trip. Reuses the existing
+            # session_id/cache concept (no new store). Bounded by the page
+            # size; reads run concurrently and degrade to (None, 0) on miss.
+            from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+            sm = get_session_manager()
+            owner_types = await _generated_by_for_user_ids(
+                [rec.get("user_id", "") for rec in records]
+            )
+            enrichments = await asyncio.gather(
+                *(
+                    _label_and_query_count(sm, rec.get("user_id", ""), rec.get("session_id", ""))
+                    for rec in records
+                )
+            )
+            for rec, (label, query_count) in zip(records, enrichments):
+                rec["label"] = label
+                rec["query_count"] = query_count
+                rec["generated_by"] = owner_types.get(rec.get("user_id", ""), "unknown")
+
             return jsonable_encoder(
                 {
-                    "sessions": [r.to_dict() for r in page.sessions],
+                    "sessions": records,
                     "total": page.total,
                     "limit": page.limit,
                     "offset": page.offset,
@@ -313,17 +412,21 @@ def get_sessions_router() -> APIRouter:
                 pass
 
         record = row.to_dict()
+        owner_types = await _generated_by_for_user_ids([owner_user_id])
+        record["generated_by"] = owner_types.get(owner_user_id, "unknown")
         # Label = first QA's question, else first trace's origin_function
         # (so trace-only sessions — the plugin case — still have a label).
         label = None
         for entry in qas:
-            if isinstance(entry, dict) and entry.get("question"):
-                label = str(entry["question"])[:120]
+            question = _entry_field(entry, "question")
+            if question:
+                label = str(question)[:120]
                 break
         if label is None:
             for entry in traces:
-                if isinstance(entry, dict) and entry.get("origin_function"):
-                    label = str(entry["origin_function"])
+                origin_function = _entry_field(entry, "origin_function")
+                if origin_function:
+                    label = str(origin_function)
                     break
         record["label"] = label
         record["msg_count"] = len(qas)
