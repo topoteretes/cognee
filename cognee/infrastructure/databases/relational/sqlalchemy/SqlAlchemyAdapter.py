@@ -1,4 +1,5 @@
 import os
+import gc
 import asyncio
 from os import path
 import tempfile
@@ -578,12 +579,23 @@ class SQLAlchemyAdapter:
         try:
             if self.engine.dialect.name == "sqlite":
                 await self.engine.dispose(close=True)
-                # Wait for the database connections to close and release the file (Windows)
-                await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
                 file_name = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
-                await file_storage.remove(file_name)
+                # On Windows the SQLite file handle can linger briefly after
+                # dispose() (aiosqlite closes the connection on a background
+                # thread), so os.remove fails with WinError 32. Retry with short
+                # backoff and force a GC pass to finalize any lingering
+                # connection objects, instead of a single fixed-duration sleep.
+                for attempt in range(10):
+                    try:
+                        await file_storage.remove(file_name)
+                        break
+                    except (PermissionError, OSError):
+                        if attempt == 9:
+                            raise
+                        gc.collect()
+                        await asyncio.sleep(0.5)
             else:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information
