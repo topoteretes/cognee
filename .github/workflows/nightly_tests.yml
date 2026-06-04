@@ -97,7 +97,11 @@ jobs:
         id: status
         run: |
           if [[ "${{ needs.ollama-tests.result }}" == "success" &&
-                "${{ needs.llamacpp-tests.result }}" == "success" ]]; then
+                "${{ needs.llamacpp-tests.result }}" == "success" &&
+                "${{ needs.performance-small-llm.result }}" == "success" &&
+                "${{ needs.performance-small-mock.result }}" == "success" &&
+                "${{ needs.performance-wap-llm.result }}" == "success" &&
+                "${{ needs.performance-wap-mock.result }}" == "success" ]]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
             echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
