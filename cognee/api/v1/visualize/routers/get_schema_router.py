@@ -81,7 +81,8 @@ def get_schema_router() -> APIRouter:
         Query parameters:
             dataset_id: dataset UUID to scope the graph databases.
             samples_per_type: max sample instance names per type (default 5).
-            sort: ``"count"`` (default) orders types by descending count.
+            sort: ``"count"`` (default) orders types by descending count;
+                ``"none"`` preserves discovery order.
         """
         send_telemetry(
             "Schema Inventory API Endpoint Invoked",

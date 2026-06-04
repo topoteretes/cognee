@@ -19,25 +19,98 @@ Two entry points:
       from the relational layer and calls the builder.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, TypedDict, cast
 
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-Node = Tuple[str, Dict[str, Any]]
-EdgeData = Tuple[str, str, str, Dict[str, Any]]
+
+class Node(NamedTuple):
+    """A graph node in ``get_graph_data()`` shape: ``(id, properties)``.
+
+    A ``NamedTuple`` (not a dataclass) so the projection stays interchangeable
+    with the raw ``GraphDBInterface.get_graph_data()`` output the renderer and
+    preprocessor already consume, while still naming what each position means.
+    """
+
+    id: str
+    properties: Dict[str, Any]
+
+
+class EdgeData(NamedTuple):
+    """A graph edge in ``get_graph_data()`` shape: ``(source, target, relation, properties)``."""
+
+    source: str
+    target: str
+    relation: str
+    properties: Dict[str, Any]
+
+
+# ── Input record shapes (relational projection inputs) ───────────────────────
+# TypedDicts make the expected keys explicit. ``id`` is required on each record;
+# the remaining keys are optional (read via ``.get(...)``), hence ``total=False``.
+
+
+class _HasId(TypedDict):
+    id: str
+
+
+class TenantRecord(_HasId, total=False):
+    name: Optional[str]
+
+
+class UserRecord(_HasId, total=False):
+    name: Optional[str]
+    tenant_ids: List[str]
+
+
+class DatasetRecord(_HasId, total=False):
+    name: Optional[str]
+    owner_id: Optional[str]
+    tenant_id: Optional[str]
+
+
+class FileRecord(_HasId, total=False):
+    name: Optional[str]
+    dataset_ids: List[str]
+    dataset_name: Optional[str]
+
+
+class AgentDatasetRef(TypedDict, total=False):
+    dataset_id: str
+    role: str  # "read" | "read_write"
+
+
+class AgentRecord(_HasId, total=False):
+    name: Optional[str]
+    user_id: Optional[str]
+    session_id: Optional[str]
+    datasets: List[AgentDatasetRef]
+
+
+class SessionRecord(_HasId, total=False):
+    name: Optional[str]
+    user_id: Optional[str]
+    dataset_id: Optional[str]
+    agent_id: Optional[str]
+
+
+class MemoryPayload(TypedDict, total=False):
+    nodes: List[Tuple[str, Dict[str, Any]]]
+    edges: List[Tuple[str, str, str, Dict[str, Any]]]
+    links: List[Dict[str, Any]]
 
 
 def build_provenance_graph(
     *,
-    tenants: Optional[List[Dict[str, Any]]] = None,
-    users: Optional[List[Dict[str, Any]]] = None,
-    datasets: Optional[List[Dict[str, Any]]] = None,
-    files: Optional[List[Dict[str, Any]]] = None,
-    agents: Optional[List[Dict[str, Any]]] = None,
-    sessions: Optional[List[Dict[str, Any]]] = None,
-    memory: Optional[Dict[str, Any]] = None,
+    tenants: Optional[List[TenantRecord]] = None,
+    users: Optional[List[UserRecord]] = None,
+    datasets: Optional[List[DatasetRecord]] = None,
+    files: Optional[List[FileRecord]] = None,
+    agents: Optional[List[AgentRecord]] = None,
+    sessions: Optional[List[SessionRecord]] = None,
+    memory: Optional[MemoryPayload] = None,
 ) -> Tuple[List[Node], List[EdgeData]]:
     """Assemble actor/ownership/session records into a ``(nodes, edges)`` graph.
 
@@ -70,14 +143,14 @@ def build_provenance_graph(
         if node_id not in nodes:
             props = {"type": node_type, "name": name}
             props.update({k: v for k, v in extra.items() if v is not None})
-            nodes[node_id] = (node_id, props)
+            nodes[node_id] = Node(node_id, props)
 
     def add_edge(source: str, target: str, relation: str) -> None:
         if source in nodes and target in nodes:
             key = (source, target, relation)
             if key not in seen_edges:
                 seen_edges.add(key)
-                edges.append((source, target, relation, {}))
+                edges.append(EdgeData(source, target, relation, {}))
 
     # ── Actor / ownership nodes ──────────────────────────────────────
     for tenant in tenants:
@@ -104,16 +177,18 @@ def build_provenance_graph(
             add_edge(f"tenant:{tenant_id}", f"user:{user['id']}", "has_member")
 
     for dataset in datasets:
-        if dataset.get("owner_id"):
-            add_edge(f"user:{dataset['owner_id']}", f"dataset:{dataset['id']}", "owns")
+        owner_id = dataset.get("owner_id")
+        if owner_id:
+            add_edge(f"user:{owner_id}", f"dataset:{dataset['id']}", "owns")
 
     for file in files:
         for dataset_id in file.get("dataset_ids") or []:
             add_edge(f"dataset:{dataset_id}", f"file:{file['id']}", "contains")
 
     for agent in agents:
-        if agent.get("user_id"):
-            add_edge(f"user:{agent['user_id']}", f"agent:{agent['id']}", "operates")
+        agent_user_id = agent.get("user_id")
+        if agent_user_id:
+            add_edge(f"user:{agent_user_id}", f"agent:{agent['id']}", "operates")
         for ref in agent.get("datasets") or []:
             dataset_id = ref.get("dataset_id")
             if not dataset_id:
@@ -121,28 +196,31 @@ def build_provenance_graph(
             add_edge(f"agent:{agent['id']}", f"dataset:{dataset_id}", "reads")
             if ref.get("role") == "read_write":
                 add_edge(f"agent:{agent['id']}", f"dataset:{dataset_id}", "writes")
-        if agent.get("session_id"):
-            add_edge(f"agent:{agent['id']}", f"session:{agent['session_id']}", "wrote")
+        agent_session_id = agent.get("session_id")
+        if agent_session_id:
+            add_edge(f"agent:{agent['id']}", f"session:{agent_session_id}", "wrote")
 
     for sess in sessions:
-        if sess.get("agent_id"):
-            add_edge(f"agent:{sess['agent_id']}", f"session:{sess['id']}", "wrote")
-        if sess.get("dataset_id"):
-            add_edge(f"session:{sess['id']}", f"dataset:{sess['dataset_id']}", "recorded_in")
+        sess_agent_id = sess.get("agent_id")
+        if sess_agent_id:
+            add_edge(f"agent:{sess_agent_id}", f"session:{sess['id']}", "wrote")
+        sess_dataset_id = sess.get("dataset_id")
+        if sess_dataset_id:
+            add_edge(f"session:{sess['id']}", f"dataset:{sess_dataset_id}", "recorded_in")
 
     # ── Optional memory layer ────────────────────────────────────────
     if memory:
         for node_id, props in memory.get("nodes") or []:
             nid = str(node_id)
             if nid not in nodes:
-                nodes[nid] = (nid, dict(props))
+                nodes[nid] = Node(nid, dict(props))
         for source, target, relation, eprops in memory.get("edges") or []:
             s, t = str(source), str(target)
             if s in nodes and t in nodes:
                 key = (s, t, relation)
                 if key not in seen_edges:
                     seen_edges.add(key)
-                    edges.append((s, t, relation or "related", dict(eprops or {})))
+                    edges.append(EdgeData(s, t, relation or "related", dict(eprops or {})))
         for link in memory.get("links") or []:
             file_id = f"file:{link['data_id']}" if link.get("data_id") else None
             node_id = str(link["node_id"]) if link.get("node_id") else None
@@ -155,7 +233,7 @@ def build_provenance_graph(
 # ── Live relational readers ──────────────────────────────────────────────────
 
 
-async def _read_agents(user_ids: List[str]) -> List[Dict[str, Any]]:
+async def _read_agents(user_ids: List[str]) -> List[AgentRecord]:
     """Best-effort enumeration of agent connections (registered + persisted)."""
     from uuid import UUID
 
@@ -183,13 +261,13 @@ async def _read_agents(user_ids: List[str]) -> List[Dict[str, Any]]:
         logger.debug(f"agent registry unavailable: {error}")
         return []
 
-    agents: List[Dict[str, Any]] = []
+    agents: List[AgentRecord] = []
     seen = set()
     for conn in connections:
         if conn.id in seen:
             continue
         seen.add(conn.id)
-        refs = [
+        refs: List[AgentDatasetRef] = [
             {"dataset_id": str(ref.id), "role": ref.role or "read"}
             for ref in (conn.datasets or [])
             if getattr(ref, "id", None)
@@ -206,12 +284,12 @@ async def _read_agents(user_ids: List[str]) -> List[Dict[str, Any]]:
     return agents
 
 
-async def _read_sessions(user_ids: List[str], agents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def _read_sessions(user_ids: List[str], agents: List[AgentRecord]) -> List[SessionRecord]:
     """Best-effort enumeration of session records."""
     from uuid import UUID
 
-    agent_by_session = {a["session_id"]: a["id"] for a in agents if a.get("session_id")}
-    sessions: List[Dict[str, Any]] = []
+    agent_by_session = {sid: a["id"] for a in agents if (sid := a.get("session_id"))}
+    sessions: List[SessionRecord] = []
     try:
         from cognee.modules.session_lifecycle.metrics import list_session_rows
 
@@ -235,7 +313,7 @@ async def _read_sessions(user_ids: List[str], agents: List[Dict[str, Any]]) -> L
 
 async def _read_memory_relational(
     limit: int = 5000, dataset_ids: Optional[List[str]] = None
-) -> Optional[Dict[str, Any]]:
+) -> Optional[MemoryPayload]:
     """Read extracted memory from the relational ``nodes``/``edges`` tables.
 
     Avoids the knowledge-graph backend entirely, so it works when that backend
@@ -256,8 +334,8 @@ async def _read_memory_relational(
         logger.debug(f"relational memory models unavailable: {error}")
         return None
 
-    nodes: List[Node] = []
-    edges: List[EdgeData] = []
+    nodes: List[Tuple[str, Dict[str, Any]]] = []
+    edges: List[Tuple[str, str, str, Dict[str, Any]]] = []
     links: List[Dict[str, Any]] = []
     node_ids: set = set()
     try:
@@ -272,7 +350,7 @@ async def _read_memory_relational(
                 node_id = str(row.id)
                 node_ids.add(node_id)
                 nodes.append(
-                    (node_id, {"type": row.type or "Node", "name": row.label or str(row.slug)})
+                    Node(node_id, {"type": row.type or "Node", "name": row.label or str(row.slug)})
                 )
                 if row.data_id is not None:
                     links.append(
@@ -289,7 +367,7 @@ async def _read_memory_relational(
                 if dataset_ids is not None and (src not in node_ids or dst not in node_ids):
                     # Drop edges that reach outside the scoped node set.
                     continue
-                edges.append((src, dst, row.relationship_name or "related", {}))
+                edges.append(EdgeData(src, dst, row.relationship_name or "related", {}))
     except Exception as error:  # pragma: no cover - defensive
         logger.debug(f"relational memory read skipped: {error}")
         return None
@@ -326,6 +404,7 @@ async def get_memory_provenance_graph(
     from cognee.modules.users.models import Tenant, User
 
     scoped = scope_tenant_ids is not None or scope_user_ids is not None
+
 
     tenants: List[Dict[str, Any]] = []
     users: List[Dict[str, Any]] = []
@@ -404,10 +483,10 @@ async def get_memory_provenance_graph(
     )
 
     return build_provenance_graph(
-        tenants=tenants,
-        users=users,
-        datasets=datasets,
-        files=list(files.values()),
+        tenants=cast(List[TenantRecord], tenants),
+        users=cast(List[UserRecord], users),
+        datasets=cast(List[DatasetRecord], datasets),
+        files=cast(List[FileRecord], list(files.values())),
         agents=agents,
         sessions=sessions,
         memory=memory,

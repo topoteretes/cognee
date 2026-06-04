@@ -21,11 +21,13 @@ from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_eng
 ENTITY_TYPE_RELATION = "is_a"
 
 
-# EntityType nodes are internal taxonomy labels (Entity → is_a → EntityType).
-# They are resolved away by _resolve_node_types and must not appear as a
-# separate type group in the inventory — doing so creates phantom "duplicate"
-# entries (e.g. an EntityType named "TextDocument" next to real TextDocument nodes).
-_INTERNAL_TYPES: frozenset[str] = frozenset({"EntityType"})
+# Internal graph taxonomy types that must not appear as separate type groups in
+# the inventory. EntityType nodes are genuine graph nodes grouped under their own
+# "EntityType" type (their ``name`` — Person/Tool/... — is surfaced as samples),
+# while Entity instances still collapse to their semantic type via the is_a edge,
+# so they are intentionally NOT internal. This set is kept (currently empty) so
+# future genuinely-internal types can be added without re-plumbing the guards.
+_INTERNAL_TYPES: frozenset[str] = frozenset()
 
 
 def _resolve_node_types(
@@ -69,6 +71,9 @@ def _compute_degrees(
     return degree
 
 
+VALID_SORTS: frozenset[str] = frozenset({"count", "none"})
+
+
 async def get_schema_inventory(
     dataset: str | UUID | None = None,
     samples_per_type: int = 5,
@@ -81,7 +86,9 @@ async def get_schema_inventory(
             When set, scoping mirrors the visualize router via
             ``set_database_global_context_variables``.
         samples_per_type: maximum number of sample instance names per type.
-        sort: ``"count"`` orders types by descending count, then type name.
+        sort: one of ``VALID_SORTS``. ``"count"`` (default) orders types by
+            descending count, then type name; ``"none"`` preserves discovery
+            order. Any other value raises ``ValueError``.
 
     Returns:
         A list of dicts with keys ``type``, ``count``, ``samples``,
@@ -90,7 +97,8 @@ async def get_schema_inventory(
     """
     if samples_per_type < 0:
         raise ValueError("samples_per_type must be non-negative")
-
+    if sort not in VALID_SORTS:
+        raise ValueError(f"sort must be one of {sorted(VALID_SORTS)}, got {sort!r}")
     if dataset is not None:
         # Scope graph databases to the dataset, mirroring the visualize router.
         # String dataset names cannot resolve to an owner_id; skip scoping for them
