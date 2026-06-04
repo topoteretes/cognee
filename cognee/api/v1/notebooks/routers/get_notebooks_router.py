@@ -22,8 +22,14 @@ from cognee.modules.notebooks.methods import (
 
 
 class NotebookData(InDTO):
-    name: Optional[str] = Field(...)
+    name: str = Field(..., min_length=1)
     cells: Optional[List[NotebookCell]] = Field(default=[])
+    deletable: bool = Field(default=True)
+
+
+class NotebookUpdateData(InDTO):
+    name: Optional[str] = Field(default=None, min_length=1)
+    cells: Optional[List[NotebookCell]] = Field(default=None)
 
 
 def get_notebooks_router():
@@ -39,12 +45,14 @@ def get_notebooks_router():
         notebook_data: NotebookData, user: User = Depends(get_authenticated_user)
     ):
         return await create_notebook(
-            user.id, notebook_data.name, notebook_data.cells, deletable=True
+            user.id, notebook_data.name, notebook_data.cells, deletable=notebook_data.deletable
         )
 
     @router.put("/{notebook_id}")
     async def update_notebook_endpoint(
-        notebook_id: UUID, notebook_data: NotebookData, user: User = Depends(get_authenticated_user)
+        notebook_id: UUID,
+        notebook_data: NotebookUpdateData,
+        user: User = Depends(get_authenticated_user),
     ):
         async with get_async_session(auto_commit=True) as session:
             notebook: Notebook = await get_notebook(notebook_id, user.id, session)
@@ -55,7 +63,7 @@ def get_notebooks_router():
             if notebook_data.name and notebook_data.name != notebook.name:
                 notebook.name = notebook_data.name
 
-            if notebook_data.cells:
+            if notebook_data.cells is not None:
                 notebook.cells = notebook_data.cells
 
             return await update_notebook(notebook, session)

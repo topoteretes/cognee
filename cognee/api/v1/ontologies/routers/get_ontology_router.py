@@ -1,5 +1,6 @@
 from fastapi import APIRouter, File, Form, UploadFile, Depends, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from typing import Optional, List
 
 from cognee.modules.users.models import User
@@ -9,11 +10,34 @@ from cognee import __version__ as cognee_version
 from ..ontologies import OntologyService
 
 
+class UploadedOntology(BaseModel):
+    """Metadata for a single uploaded ontology (mirrors OntologyMetadata)."""
+
+    ontology_key: str
+    filename: str
+    size_bytes: int
+    uploaded_at: str
+    description: Optional[str] = None
+
+
+class UploadOntologyResponse(BaseModel):
+    """Response model for the ontology upload endpoint."""
+
+    uploaded_ontologies: List[UploadedOntology]
+
+
+class DeleteOntologyResponse(BaseModel):
+    """Response model for the ontology delete endpoint."""
+
+    status: str
+    ontology_key: str
+
+
 def get_ontology_router() -> APIRouter:
     router = APIRouter()
     ontology_service = OntologyService()
 
-    @router.post("", response_model=dict)
+    @router.post("", response_model=UploadOntologyResponse)
     async def upload_ontology(
         request: Request,
         ontology_key: str = Form(...),
@@ -64,23 +88,23 @@ def get_ontology_router() -> APIRouter:
                 description=description,
             )
 
-            return {
-                "uploaded_ontologies": [
-                    {
-                        "ontology_key": result.ontology_key,
-                        "filename": result.filename,
-                        "size_bytes": result.size_bytes,
-                        "uploaded_at": result.uploaded_at,
-                        "description": result.description,
-                    }
+            return UploadOntologyResponse(
+                uploaded_ontologies=[
+                    UploadedOntology(
+                        ontology_key=result.ontology_key,
+                        filename=result.filename,
+                        size_bytes=result.size_bytes,
+                        uploaded_at=result.uploaded_at,
+                        description=result.description,
+                    )
                 ]
-            }
+            )
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
-    @router.delete("/{ontology_key}", response_model=dict)
+    @router.delete("/{ontology_key}", response_model=DeleteOntologyResponse)
     async def delete_ontology(
         ontology_key: str,
         user: User = Depends(get_authenticated_user),
@@ -106,7 +130,7 @@ def get_ontology_router() -> APIRouter:
 
         try:
             ontology_service.delete_ontology(ontology_key=ontology_key, user=user)
-            return {"status": "success", "ontology_key": ontology_key}
+            return DeleteOntologyResponse(status="success", ontology_key=ontology_key)
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
         except Exception as e:

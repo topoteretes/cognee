@@ -26,7 +26,7 @@ class SyncRequest(InDTO):
 def get_sync_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict[str, SyncResponse])
+    @router.post("", response_model=SyncResponse)
     async def sync_to_cloud(
         request: SyncRequest,
         user: User = Depends(get_authenticated_user),

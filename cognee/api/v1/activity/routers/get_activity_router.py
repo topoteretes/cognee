@@ -4,9 +4,10 @@ Exposes pipeline run history and in-memory OTEL spans so the frontend
 can render an activity timeline and trace viewer.
 """
 
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Query, Depends
+from pydantic import BaseModel
 from cognee.modules.users.models import User
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -15,10 +16,24 @@ from cognee.modules.users.permissions.methods.get_specific_user_permission_datas
 )
 
 
+class PipelineRunActivity(BaseModel):
+    """A single pipeline run with dataset owner info for agent attribution."""
+
+    id: str
+    pipeline_name: Optional[str] = None
+    status: Optional[str] = None
+    dataset_id: Optional[str] = None
+    dataset_name: Optional[str] = None
+    owner_id: Optional[str] = None
+    owner_email: Optional[str] = None
+    created_at: Optional[str] = None
+    pipeline_run_id: Optional[str] = None
+
+
 def get_activity_router() -> APIRouter:
     router = APIRouter()
 
-    @router.get("/pipeline-runs")
+    @router.get("/pipeline-runs", response_model=List[PipelineRunActivity])
     async def get_pipeline_runs(
         dataset_id: Optional[UUID] = Query(None), user: User = Depends(get_authenticated_user)
     ):
