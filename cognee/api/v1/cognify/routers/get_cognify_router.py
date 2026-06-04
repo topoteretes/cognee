@@ -2,8 +2,7 @@ import os
 import asyncio
 from uuid import UUID
 from pydantic import Field
-from typing import List, Optional
-from fastapi.encoders import jsonable_encoder
+from typing import Dict, List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
@@ -73,7 +72,7 @@ def get_cognify_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=dict,
+        response_model=Dict[UUID, PipelineRunInfo],
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
