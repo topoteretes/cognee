@@ -21,6 +21,56 @@ from .npm_utils import run_npm_command
 logger = get_logger()
 
 
+def _check_docker_available() -> Tuple[bool, str]:
+    """
+    Check if the Docker daemon is reachable by running `docker info`.
+
+    Returns:
+        Tuple of (is_available: bool, message: str) where message provides
+        actionable guidance when Docker is not available.
+    """
+    docker_path = shutil.which("docker")
+    if docker_path is None:
+        return False, (
+            "Docker CLI not found on PATH.\n"
+            "Install Docker Desktop (https://www.docker.com/products/docker-desktop/) "
+            "or Colima (https://github.com/abiosoft/colima) and ensure the `docker` "
+            "binary is on your PATH."
+        )
+
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            return True, "Docker daemon is running."
+
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        return False, (
+            f"Docker CLI is installed but the daemon is not responding.\n"
+            f"  docker info stderr: {stderr}\n\n"
+            f"Possible fixes:\n"
+            f"  - Docker Desktop: open the Docker Desktop application and wait for it to start.\n"
+            f"  - Colima: run `colima start` (add `--network-address` for host.docker.internal support).\n"
+            f"  - Linux: run `sudo systemctl start docker` or `sudo service docker start`."
+        )
+    except subprocess.TimeoutExpired:
+        return False, (
+            "Docker daemon did not respond within 15 seconds.\n"
+            "The daemon may be starting up. Wait a moment and try again, or:\n"
+            "  - Docker Desktop: open the Docker Desktop application.\n"
+            "  - Colima: run `colima start`."
+        )
+    except FileNotFoundError:
+        return False, (
+            "Docker CLI not found.\n"
+            "Install Docker Desktop (https://www.docker.com/products/docker-desktop/) "
+            "or Colima (https://github.com/abiosoft/colima)."
+        )
+
+
 def _stream_process_output(
     process: subprocess.Popen, stream_name: str, prefix: str, color_code: str = ""
 ) -> threading.Thread:
@@ -445,6 +495,19 @@ def start_ui(
 
     if start_mcp:
         logger.info("Starting Cognee MCP server with Docker...")
+
+        # Preflight: verify the Docker daemon is reachable before pulling images
+        docker_ok, docker_msg = _check_docker_available()
+        if not docker_ok:
+            logger.error(f"Docker preflight check failed:\n{docker_msg}")
+            logger.error(
+                "The MCP server requires a running Docker (or Colima) daemon. "
+                "Skipping MCP server startup."
+            )
+            # Continue without MCP — the UI and backend can still work
+            start_mcp = False
+
+    if start_mcp:
         try:
             image = "cognee/cognee-mcp:main"
             subprocess.run(["docker", "pull", image], check=True)
