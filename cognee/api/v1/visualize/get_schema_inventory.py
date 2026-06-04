@@ -11,7 +11,7 @@ resolved by following the ``is_a`` edge (Entity -> EntityType) to the target
 EntityType node's ``name``.
 """
 
-from typing import Any, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -75,7 +75,7 @@ VALID_SORTS: frozenset[str] = frozenset({"count", "none"})
 
 
 async def get_schema_inventory(
-    dataset: Optional[Union[str, UUID]] = None,
+    dataset: str | UUID | None = None,
     samples_per_type: int = 5,
     sort: str = "count",
 ) -> list[dict[str, Any]]:
@@ -110,7 +110,7 @@ async def get_schema_inventory(
     return await _build_inventory(samples_per_type, sort)
 
 
-async def _resolve_dataset_owner(dataset: Union[str, UUID]) -> Optional[str]:
+async def _resolve_dataset_owner(dataset: str | UUID) -> UUID | None:
     """Return the owner id for a dataset, or None when it cannot be resolved."""
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Dataset
