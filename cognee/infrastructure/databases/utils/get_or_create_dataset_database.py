@@ -12,6 +12,10 @@ from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.modules.users.models import DatasetDatabase
 from cognee.modules.users.models import User
+from cognee.version import get_cognee_version
+from cognee.modules.migrations.migration import head_revision
+from cognee.modules.migrations.graph_migrations import GRAPH_MIGRATIONS
+from cognee.modules.migrations.vector_migrations import VECTOR_MIGRATIONS
 
 
 async def _get_vector_db_info(dataset_id: UUID, user: User) -> dict:
@@ -101,10 +105,15 @@ async def get_or_create_dataset_database(
     vector_config_dict = await _get_vector_db_info(dataset_id, user)
 
     async with db_engine.get_async_session() as session:
-        # If there are no existing rows build a new row
+        # If there are no existing rows build a new row. A freshly created
+        # database is stamped at the current migration head so it skips all
+        # existing migrations; cognee_version is recorded for audit only.
         record = DatasetDatabase(
             owner_id=user.id,
             dataset_id=dataset_id,
+            cognee_version=get_cognee_version(),
+            graph_migration_revision=head_revision(GRAPH_MIGRATIONS),
+            vector_migration_revision=head_revision(VECTOR_MIGRATIONS),
             **graph_config_dict,  # Unpack graph db config
             **vector_config_dict,  # Unpack vector db config
         )

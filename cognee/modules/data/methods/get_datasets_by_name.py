@@ -2,6 +2,7 @@ from typing import Union
 from uuid import UUID
 from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.migrations.constants import GLOBAL_DATASET_ID
 from ..models import Dataset
 
 
@@ -18,6 +19,8 @@ async def get_datasets_by_name(
                 select(Dataset)
                 .filter(Dataset.owner_id == user_id)
                 .filter(Dataset.name.in_(dataset_names))
+                # Exclude the reserved global dataset.
+                .filter(Dataset.id != GLOBAL_DATASET_ID)
             )
         ).all()
 

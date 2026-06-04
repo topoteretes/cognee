@@ -163,8 +163,13 @@ async def run_vector_migrations():
 async def run_startup_migrations():
     """
     Run all startup migrations:
-    1. relational schema (Alembic)
+    1. relational schema (Alembic) — also creates the version/revision columns
     2. vector schema (adapter-specific)
+    3. version-keyed graph + vector script migrations (revision chain)
     """
+    # Imported lazily to avoid import cycles during ``cognee`` package import.
+    from cognee.modules.migrations.runner import run_database_migrations
+
     await run_migrations()
     await run_vector_migrations()
+    await run_database_migrations()
