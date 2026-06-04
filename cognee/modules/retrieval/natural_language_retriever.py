@@ -107,14 +107,15 @@ class NaturalLanguageRetriever(BaseRetriever):
     async def get_retrieved_objects(self, query: str) -> Any:
         graph_engine = await get_graph_engine()
 
-        # Postgres backends do not support Cypher generation/execution
+        # Postgres and HelixDB backends do not support Cypher generation/execution
         from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
         from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
+        from cognee.infrastructure.databases.graph.helix_driver.adapter import HelixGraphDB
 
-        if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter)):
+        if isinstance(graph_engine, (PostgresAdapter, PostgresHybridAdapter, HelixGraphDB)):
             raise SearchTypeNotSupported(
-                "Natural language search is not supported with the Postgres graph backend. "
-                "This retriever generates and executes Cypher queries, which require a "
+                "Natural language search is not supported with the Postgres or HelixDB graph "
+                "backend. This retriever generates and executes Cypher queries, which require a "
                 "graph-native backend (Neo4j, Ladybug)."
             )
 

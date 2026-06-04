@@ -47,6 +47,8 @@ class VectorConfig(BaseSettings):
         self.vector_dataset_database_handler = vector_dataset_database_handler
         if provider == "pgvector" and vector_dataset_database_handler in ("lancedb", "pgvector"):
             self.vector_dataset_database_handler = "pgvector"
+        if provider == "helix" and vector_dataset_database_handler in ("lancedb", "helix"):
+            self.vector_dataset_database_handler = "helix_vector"
         return self
 
     @pydantic.model_validator(mode="after")

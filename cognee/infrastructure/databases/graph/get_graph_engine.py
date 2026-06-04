@@ -459,6 +459,16 @@ def _create_graph_engine(
             graph_id=graph_identifier,
         )
 
+    elif graph_database_provider == "helix":
+        from ..hybrid.helix.HelixHybridAdapter import HelixHybridAdapter
+
+        # Row-level tenancy: the dataset's tenant id arrives via graph_database_name.
+        return HelixHybridAdapter(
+            base_url=graph_database_url,
+            api_key=graph_database_key,
+            tenant_id=graph_database_name or None,
+        )
+
     all_providers = list(supported_databases.keys()) + [
         "neo4j",
         "ladybug",
@@ -468,6 +478,7 @@ def _create_graph_engine(
         "postgres",
         "neptune",
         "neptune_analytics",
+        "helix",
     ]
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "

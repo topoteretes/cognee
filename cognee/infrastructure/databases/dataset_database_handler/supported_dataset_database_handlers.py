@@ -16,6 +16,12 @@ from cognee.infrastructure.databases.vector.pgvector.PGVectorDatasetDatabaseHand
 from cognee.infrastructure.databases.graph.postgres.PostgresGraphDatasetDatabaseHandler import (
     PostgresGraphDatasetDatabaseHandler,
 )
+from cognee.infrastructure.databases.hybrid.helix.HelixGraphDatasetDatabaseHandler import (
+    HelixGraphDatasetDatabaseHandler,
+)
+from cognee.infrastructure.databases.hybrid.helix.HelixVectorDatasetDatabaseHandler import (
+    HelixVectorDatasetDatabaseHandler,
+)
 
 supported_dataset_database_handlers = {
     "neo4j_aura_dev": {
@@ -40,4 +46,12 @@ supported_dataset_database_handlers = {
         "handler_provider": "ladybug",
     },
     "kuzu": {"handler_instance": LadybugDatasetDatabaseHandler, "handler_provider": "kuzu"},
+    "helix_graph": {
+        "handler_instance": HelixGraphDatasetDatabaseHandler,
+        "handler_provider": "helix",
+    },
+    "helix_vector": {
+        "handler_instance": HelixVectorDatasetDatabaseHandler,
+        "handler_provider": "helix",
+    },
 }
