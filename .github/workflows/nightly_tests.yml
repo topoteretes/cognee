@@ -156,35 +156,50 @@ jobs:
                     ${{ steps.status.outputs.emoji }} *Nightly Tests* — ${{ steps.status.outputs.summary }}
                     *Ran at:* `${{ steps.status.outputs.ran_at }}`
                     *Ollama:* `${{ needs.ollama-tests.result }}`  •  *Llama-cpp:* `${{ needs.llamacpp-tests.result }}`
-
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
                     *📊 Performance 50 Small Documents — Real LLM* (`${{ needs.performance-small-llm.result }}`)  •  runs `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').success }}`
                     add      p50 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').add.p99 }}s`
                     cognify  p50 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').cognify.p99 }}s`
                     search     p50 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').search.p99 }}s`
                     total      p50 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-small-llm.outputs.metrics || '{}').total.p99 }}s`
                     <${{ steps.presign.outputs.url_small_llm }}|HTML report>
-
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
                     *📊 Performance 50 Small Documents — Mock LLM* (`${{ needs.performance-small-mock.result }}`)  •  runs `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').success }}`
                     add      p50 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').add.p99 }}s`
                     cognify  p50 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').cognify.p99 }}s`
                     search     p50 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').search.p99 }}s`
                     total      p50 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-small-mock.outputs.metrics || '{}').total.p99 }}s`
                     <${{ steps.presign.outputs.url_small_mock }}|HTML report>
-
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
                     *📚 Performance War and Peace — Real LLM* (`${{ needs.performance-wap-llm.result }}`)  •  runs `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').success }}`
                     add      p50 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').add.p99 }}s`
                     cognify  p50 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').cognify.p99 }}s`
                     search     p50 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').search.p99 }}s`
                     total      p50 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-wap-llm.outputs.metrics || '{}').total.p99 }}s`
                     <${{ steps.presign.outputs.url_wap_llm }}|HTML report>
-
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
                     *📚 Performance War and Peace — Mock LLM* (`${{ needs.performance-wap-mock.result }}`)  •  runs `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').success }}`
                     add      p50 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').add.p99 }}s`
                     cognify  p50 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').cognify.p99 }}s`
                     search     p50 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').search.p99 }}s`
                     total      p50 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-wap-mock.outputs.metrics || '{}').total.p99 }}s`
                     <${{ steps.presign.outputs.url_wap_mock }}|HTML report>
-
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
                     <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
 
       - name: Fail if any suite failed
