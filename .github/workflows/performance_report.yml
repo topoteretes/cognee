@@ -1,8 +1,12 @@
 name: performance report
 
-# Reusable workflow: runs the percentile performance report once, uploads the
-# JSON + HTML artifacts to S3, presigns a (7-day) link to the HTML report, and
-# exposes the headline metrics as outputs for the caller (e.g. the Slack bot).
+# Reusable workflow: runs the percentile performance report once for a given
+# dataset + mode, uploads the JSON + HTML artifacts to S3, and exposes the
+# headline metrics + HTML object key as outputs for the caller (e.g. the Slack
+# bot in nightly_tests.yml).
+#
+# The dataset (memories + mock memories) is downloaded from S3; the caller picks
+# which files via memories_key / mock_memories_key.
 on:
   workflow_call:
     inputs:
@@ -10,6 +14,29 @@ on:
         description: "Run mode: 'mock_llm' (no API calls) or 'llm' (real OpenAI)."
         required: true
         type: string
+      label:
+        description: "Dataset label, used in the S3 output path and display name."
+        required: true
+        type: string
+      runs:
+        description: "Number of sequential benchmark runs."
+        required: false
+        type: string
+        default: '10'
+      num_memories:
+        description: "If set, forwarded as --num-memories (limit input documents)."
+        required: false
+        type: string
+        default: ''
+      memories_key:
+        description: "S3 object key (under the bucket) downloaded and used as --memories."
+        required: true
+        type: string
+      mock_memories_key:
+        description: "If set, S3 object key downloaded and used as --mock-memories."
+        required: false
+        type: string
+        default: ''
     outputs:
       metrics:
         description: "Compact JSON: success + add/cognify/search/total p50/p90/p99."
@@ -22,10 +49,11 @@ env:
   ENV: 'dev'
   COGNEE_SKIP_CONNECTION_TEST: 'true'
   RUNTIME__LOG_LEVEL: ERROR
+  BUCKET: github-runner-cognee-tests
 
 jobs:
   performance:
-    name: Performance (${{ inputs.mode }})
+    name: ${{ inputs.label }} (${{ inputs.mode }})
     runs-on: ubuntu-22.04
     outputs:
       metrics: ${{ steps.parse.outputs.metrics }}
@@ -39,32 +67,55 @@ jobs:
         with:
           python-version: '3.11.x'
 
+      - name: Download dataset from S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          MEMORIES_KEY: ${{ inputs.memories_key }}
+          MOCK_MEMORIES_KEY: ${{ inputs.mock_memories_key }}
+        run: |
+          set -euo pipefail
+          mkdir -p performance_datasets
+          aws s3 cp "s3://$BUCKET/$MEMORIES_KEY" performance_datasets/memories.json
+          echo "MEMORIES_FILE=$PWD/performance_datasets/memories.json" >> "$GITHUB_ENV"
+          if [ -n "$MOCK_MEMORIES_KEY" ]; then
+            aws s3 cp "s3://$BUCKET/$MOCK_MEMORIES_KEY" performance_datasets/mock_memories.json
+            echo "MOCK_MEMORIES_FILE=$PWD/performance_datasets/mock_memories.json" >> "$GITHUB_ENV"
+          fi
+
       - name: Run performance report
         id: run
         env:
           PYTHONFAULTHANDLER: 1
           # Used only when mode == 'llm'; harmless (ignored) for the mock run.
           LLM_PROVIDER: "openai"
-          LLM_MODEL: "openai/gpt-4o-mini"
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
         run: |
           set -euo pipefail
           TS="$(date -u '+%Y-%m-%d_%H-%M-%SZ')"
           mkdir -p performance_results
-          JSON_PATH="performance_results/${{ inputs.mode }}_${TS}.json"
-          HTML_PATH="performance_results/${{ inputs.mode }}_${TS}.html"
+          JSON_PATH="performance_results/${{ inputs.label }}/${{ inputs.mode }}_${TS}.json"
+          HTML_PATH="performance_results/${{ inputs.label }}/${{ inputs.mode }}_${TS}.html"
+          mkdir -p "$(dirname "$JSON_PATH")"
           echo "JSON_PATH=$JSON_PATH" >> "$GITHUB_ENV"
           echo "HTML_PATH=$HTML_PATH" >> "$GITHUB_ENV"
 
-          MOCK=""
+          ARGS=(--runs "${{ inputs.runs }}" --memories "$MEMORIES_FILE")
+          if [ -n "${MOCK_MEMORIES_FILE:-}" ]; then
+            ARGS+=(--mock-memories "$MOCK_MEMORIES_FILE")
+          fi
           if [ "${{ inputs.mode }}" = "mock_llm" ]; then
-            MOCK="--mock-llm"
+            ARGS+=(--mock-llm)
+          fi
+          if [ -n "${{ inputs.num_memories }}" ]; then
+            ARGS+=(--num-memories "${{ inputs.num_memories }}")
           fi
 
           uv run python cognee/tests/performance/statistics_percentile_report.py \
-            --runs 10 \
-            --num-memories 50 \
-            $MOCK \
+            "${ARGS[@]}" \
             --output "$JSON_PATH" \
             --html "$HTML_PATH"
 
@@ -74,7 +125,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
           AWS_DEFAULT_REGION: eu-west-1
-          BUCKET: github-runner-cognee-tests
         run: |
           set -euo pipefail
           aws s3 cp "$JSON_PATH" "s3://$BUCKET/$JSON_PATH" --content-type application/json
