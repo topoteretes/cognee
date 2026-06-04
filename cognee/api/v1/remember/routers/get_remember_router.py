@@ -2,10 +2,9 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import Form, File, UploadFile as UF, Depends
-from typing import List, Optional, Union, Literal, Annotated
+from typing import Any, Dict, List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
 from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
@@ -23,10 +22,32 @@ logger = get_logger()
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 
+class RememberResultDTO(BaseModel):
+    """Response body for the remember endpoints.
+
+    Mirrors ``cognee.api.v1.remember.remember.RememberResult.to_dict()``.
+    All fields except ``status`` and ``dataset_name`` are optional because
+    ``to_dict()`` only includes them when populated.
+    """
+
+    status: str
+    dataset_name: str
+    dataset_id: Optional[str] = None
+    pipeline_run_id: Optional[str] = None
+    items_processed: int = 0
+    elapsed_seconds: Optional[float] = None
+    session_ids: Optional[List[str]] = None
+    content_hash: Optional[str] = None
+    items: Optional[List[Dict[str, Any]]] = None
+    entry_type: Optional[str] = None
+    entry_id: Optional[str] = None
+    error: Optional[str] = None
+
+
 def get_remember_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post("", response_model=RememberResultDTO)
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: List[UploadFile] = File(default=None),
@@ -36,7 +57,7 @@ def get_remember_router() -> APIRouter:
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         run_in_background: Optional[bool] = Form(default=False),
         custom_prompt: Optional[str] = Form(default=""),
-        chunk_size: Optional[int] = Form(default=4096),
+        chunk_size: Optional[int] = Form(default=None),
         chunks_per_batch: Optional[int] = Form(default=36),
         ontology_key: Optional[List[str]] = Form(
             default=None,
@@ -139,7 +160,7 @@ def get_remember_router() -> APIRouter:
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
             )
 
-            return jsonable_encoder(result.to_dict())
+            return RememberResultDTO(**result.to_dict())
         except ValueError as error:
             logger.error("Remember endpoint validation error: %s", error, exc_info=True)
             return JSONResponse(
@@ -169,7 +190,7 @@ def get_remember_router() -> APIRouter:
         session_id: Optional[str] = None
         skill_improvement: Optional[dict] = None
 
-    @router.post("/entry", response_model=dict)
+    @router.post("/entry", response_model=RememberResultDTO)
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
     async def remember_entry(
         payload: RememberEntryRequest,
@@ -208,7 +229,7 @@ def get_remember_router() -> APIRouter:
                 user=user,
                 skill_improvement=payload.skill_improvement,
             )
-            return jsonable_encoder(result.to_dict())
+            return RememberResultDTO(**result.to_dict())
         except ValueError as error:
             # Known validation errors: missing session_id, user not found, etc.
             return JSONResponse(status_code=400, content={"error": str(error)})

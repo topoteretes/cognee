@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any
 import openai
 from fastapi import APIRouter, Depends
 from cognee.api.v1.responses.models import (
+    CogneeModel,
     ResponseRequest,
     ResponseBody,
     ResponseToolCall,
@@ -35,6 +36,16 @@ def get_responses_router() -> APIRouter:
     router = APIRouter()
     logger = logging.getLogger(__name__)
 
+    # Maps the public CogneeModel enum to the concrete backing model string
+    # forwarded to the OpenAI SDK.
+    _MODEL_MAP = {
+        CogneeModel.COGNEEV1: "gpt-4o",
+    }
+
+    def _resolve_model(model: CogneeModel) -> str:
+        """Resolve a CogneeModel enum to a concrete backing model string."""
+        return _MODEL_MAP.get(model, "gpt-4o")
+
     def _get_model_client():
         """
         Get appropriate client based on model name
@@ -51,11 +62,10 @@ def get_responses_router() -> APIRouter:
     ) -> Dict[str, Any]:
         """
         Call appropriate model API based on model name
+
+        ``model`` is the concrete backing model string already resolved from
+        the CogneeModel enum by the caller via ``_resolve_model``.
         """
-
-        # TODO: Support other models (e.g. cognee-v1-openai-gpt-3.5-turbo, etc.)
-        model = "gpt-4o"
-
         client = _get_model_client()
 
         logger.debug(f"Using model: {model}")
@@ -100,13 +110,18 @@ def get_responses_router() -> APIRouter:
         - Supports function calling with Cognee tools
         - Uses default tools if none provided
         """
-        # Use default tools if none provided
-        tools = request.tools or DEFAULT_TOOLS
+        # Use default tools if none provided. ``request.tools`` is a list of
+        # ``ToolFunction`` Pydantic models; the OpenAI SDK expects plain dicts,
+        # so convert at the call site. ``DEFAULT_TOOLS`` is already dict-shaped.
+        tools = [t.model_dump() for t in request.tools] if request.tools else DEFAULT_TOOLS
+
+        # Map the CogneeModel enum to a concrete backing model string.
+        model = _resolve_model(request.model)
 
         # Call the API
         response = await call_openai_api_for_model(
             input_text=request.input,
-            model=request.model,
+            model=model,
             tools=tools,
             tool_choice=request.tool_choice,
             temperature=request.temperature,
