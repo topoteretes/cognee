@@ -47,22 +47,22 @@ class DataDTO(OutDTO):
     name: str
     created_at: datetime
     updated_at: Optional[datetime] = None
-    extension: str
-    mime_type: str
-    raw_data_location: str
+    extension: Optional[str] = None
+    mime_type: Optional[str] = None
+    raw_data_location: Optional[str] = None
     dataset_id: UUID
 
 
 class GraphNodeDTO(OutDTO):
-    id: UUID
+    id: str
     label: str
     type: str
     properties: dict
 
 
 class GraphEdgeDTO(OutDTO):
-    source: UUID
-    target: UUID
+    source: str
+    target: str
     label: str
 
 

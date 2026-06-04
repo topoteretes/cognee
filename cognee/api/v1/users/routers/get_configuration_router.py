@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from fastapi import Form, Depends
+from fastapi import Depends
 from uuid import UUID
 
 from cognee.api.DTO import InDTO
@@ -19,8 +19,8 @@ logger = get_logger()
 
 
 class StorePrincipalConfigurationPayloadDTO(InDTO):
-    name: str = (Form(..., description="Name of the configuration to store"),)
-    config: dict = (Form(..., description="The configuration data to store as a JSON object"),)
+    name: str
+    config: dict
 
 
 def get_configuration_router() -> APIRouter:
