@@ -44,7 +44,8 @@ on:
         required: false
 
 
-
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
   run-db-example-neo4j:

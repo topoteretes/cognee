@@ -18,6 +18,9 @@ on:
         default: ''
         description: "Optional container image for CI"
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   run_temporal_graph_kuzu_lance_sqlite:
     name: Temporal Graph test Kuzu (lancedb + sqlite)

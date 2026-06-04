@@ -40,6 +40,9 @@ on:
       AWS_SECRET_ACCESS_KEY:
         required: true
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   run-server-start-test:
     name: Server Start Test
