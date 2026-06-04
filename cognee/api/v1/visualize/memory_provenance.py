@@ -405,7 +405,6 @@ async def get_memory_provenance_graph(
 
     scoped = scope_tenant_ids is not None or scope_user_ids is not None
 
-
     tenants: List[Dict[str, Any]] = []
     users: List[Dict[str, Any]] = []
     datasets: List[Dict[str, Any]] = []
