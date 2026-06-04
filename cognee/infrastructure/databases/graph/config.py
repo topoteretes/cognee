@@ -80,6 +80,8 @@ class GraphConfig(BaseSettings):
             self.graph_dataset_database_handler = "postgres_graph"
         if provider == "neo4j" and graph_dataset_database_handler in ("ladybug", "neo4j"):
             self.graph_dataset_database_handler = "neo4j"
+        if provider == "helix" and graph_dataset_database_handler in ("ladybug", "helix"):
+            self.graph_dataset_database_handler = "helix_graph"
         base_config = get_base_config()
 
         databases_directory_path = os.path.join(base_config.system_root_directory, "databases")

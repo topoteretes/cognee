@@ -325,8 +325,25 @@ def _create_vector_engine(
             embedding_engine=embedding_engine,
         )
 
+    elif vector_db_provider.lower() == "helix":
+        from cognee.infrastructure.databases.hybrid.helix.HelixHybridAdapter import (
+            HelixHybridAdapter,
+        )
+
+        tenant_partitioned = (
+            os.environ.get("HELIX_TENANT_PARTITIONED_VECTORS", "false").lower() == "true"
+        )
+        # Row-level tenancy: the dataset's tenant id arrives via vector_db_name.
+        return HelixHybridAdapter(
+            base_url=vector_db_url,
+            api_key=vector_db_key,
+            embedding_engine=embedding_engine,
+            tenant_id=vector_db_name or None,
+            tenant_partitioned_vectors=tenant_partitioned,
+        )
+
     else:
         raise EnvironmentError(
             f"Unsupported vector database provider: {vector_db_provider}. "
-            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'ChromaDB'])}"
+            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'ChromaDB', 'helix'])}"
         )

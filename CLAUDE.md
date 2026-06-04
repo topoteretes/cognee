@@ -265,7 +265,7 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres
+Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres, helix
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -284,6 +284,19 @@ GRAPH_DATABASE_PASSWORD=your_password
 # Does not support raw Cypher queries, natural language search, or Graphiti.
 GRAPH_DATABASE_PROVIDER=postgres
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+
+# HelixDB — unified graph + vector backend (one instance backs BOTH stores).
+# Set the same provider for graph and vector. Talks to the v2 gateway over HTTP
+# (dynamic JSON queries); embeddings are computed client-side by Cognee.
+# Does not support raw Cypher queries or natural language search (Postgres parity).
+# Multi-tenancy is row-level (tenant_id = dataset id); no per-dataset provisioning.
+# Local: docker run -p 6969:6969 ghcr.io/helixdb/database-dev
+GRAPH_DATABASE_PROVIDER=helix
+VECTOR_DB_PROVIDER=helix
+GRAPH_DATABASE_URL=http://localhost:6969   # cloud: https://your-helix-host
+VECTOR_DB_URL=http://localhost:6969
+# GRAPH_DATABASE_KEY / VECTOR_DB_KEY  — Bearer token for Helix Cloud
+# HELIX_TENANT_PARTITIONED_VECTORS=true  — per-dataset vector index partitions
 ```
 
 ### LLM Provider Configuration

@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
 
-HYBRID_PROVIDERS = {}
+HYBRID_PROVIDERS = {"helix"}
 UNIFIED_PROVIDERS = {"pghybrid"}
 
 
@@ -59,6 +59,34 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
         return NeptuneAnalyticsAdapter(
             graph_id=graph_identifier,
             embedding_engine=embedding_engine,
+        )
+
+    if provider == "helix":
+        from cognee.infrastructure.databases.hybrid.helix.HelixHybridAdapter import (
+            HelixHybridAdapter,
+        )
+        from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+
+        base_url = graph_config.get("graph_database_url", "") or vector_config.get(
+            "vector_db_url", ""
+        )
+        if not base_url:
+            raise EnvironmentError(
+                "Missing HelixDB endpoint. Set GRAPH_DATABASE_URL / VECTOR_DB_URL."
+            )
+
+        tenant_partitioned = (
+            os.environ.get("HELIX_TENANT_PARTITIONED_VECTORS", "false").lower() == "true"
+        )
+        return HelixHybridAdapter(
+            base_url=base_url,
+            api_key=graph_config.get("graph_database_key", "")
+            or vector_config.get("vector_db_key", ""),
+            embedding_engine=get_embedding_engine(),
+            tenant_id=graph_config.get("graph_database_name")
+            or vector_config.get("vector_db_name")
+            or None,
+            tenant_partitioned_vectors=tenant_partitioned,
         )
 
     if provider == "pghybrid":

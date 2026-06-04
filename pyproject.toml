@@ -96,6 +96,9 @@ fastembed = [
 
 neo4j = ["neo4j>=5.28.0,<6"]
 neptune = ["langchain_aws>=0.2.22"]
+# HelixDB unified graph + vector backend. Talks to the v2 gateway over HTTP via
+# httpx (already a core dependency); listed here as an explicit, discoverable extra.
+helix = ["httpx>=0.28.1"]
 postgres = [
     "psycopg2>=2.9.10,<3",
     "pgvector>=0.3.5,<0.4",
