@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import BinaryIO
 from urllib.parse import urlparse
 
-from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
-
 from .FileBufferedReader import FileBufferedReader
 from .storage import Storage
 
@@ -69,27 +67,35 @@ class LocalFileStorage(Storage):
         self.storage_path = storage_path
 
     def _storage_root(self) -> str:
-        return os.fspath(resolve_local_path(get_parsed_path(self.storage_path)))
+        # The local-file allowlist is enforced at user-input ingestion entry points
+        # (resolve_data_directories / save_data_item_to_storage), not here:
+        # LocalFileStorage is also used internally with trusted storage roots and to
+        # open arbitrary user-referenced file:// paths, so applying the allowlist to
+        # every storage root breaks those legitimate uses. Intra-root traversal is
+        # still blocked by _resolve_storage_path below. resolve(strict=False)
+        # canonicalizes symlinks without requiring the path to exist.
+        return os.fspath(
+            Path(os.path.expanduser(get_parsed_path(self.storage_path))).resolve(strict=False)
+        )
 
     def _resolve_storage_path(self, file_path: str | Path | None = "") -> Path:
-        root_path = self._storage_root()
+        root_path = Path(self._storage_root())
         if file_path is None or not str(file_path).strip():
-            return Path(root_path)
+            return root_path
 
         parsed_path = os.path.expanduser(get_parsed_path(str(file_path)))
-        full_file_path = os.path.normpath(
-            os.path.abspath(
-                parsed_path if os.path.isabs(parsed_path) else os.path.join(root_path, parsed_path)
-            )
-        )
-        if full_file_path == root_path:
-            return Path(root_path)
+        candidate = Path(parsed_path) if os.path.isabs(parsed_path) else root_path / parsed_path
+        # resolve(strict=False) follows symlinks, so a symlink inside the storage
+        # root cannot be used to escape it.
+        full_file_path = candidate.resolve(strict=False)
 
-        root_prefix = root_path if root_path.endswith(os.sep) else f"{root_path}{os.sep}"
-        if full_file_path.startswith(root_prefix):
-            return Path(full_file_path)
+        if full_file_path != root_path:
+            try:
+                full_file_path.relative_to(root_path)
+            except ValueError:
+                raise ValueError("File path is outside the configured storage root.")
 
-        raise ValueError("File path is outside the configured storage root.")
+        return full_file_path
 
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
@@ -330,9 +336,9 @@ class LocalFileStorage(Storage):
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
-        root_path = self._resolve_storage_path(root_path)
+        resolved_root_path = self._resolve_storage_path(root_path)
 
         try:
-            shutil.rmtree(root_path)
+            shutil.rmtree(resolved_root_path)
         except FileNotFoundError:
             pass

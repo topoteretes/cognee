@@ -13,6 +13,14 @@ from cognee.base_config import get_base_config
 _ONTOLOGY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
+class DuplicateOntologyKeyError(ValueError):
+    """Raised when an ontology key already exists for the user.
+
+    A dedicated type lets the router surface a safe, literal client message
+    without echoing the exception text (avoids stack-trace exposure).
+    """
+
+
 @dataclass
 class OntologyMetadata:
     ontology_key: str
@@ -81,7 +89,7 @@ class OntologyService:
         metadata = self._load_metadata(user_dir)
 
         if ontology_key in metadata:
-            raise ValueError(f"Ontology key '{ontology_key}' already exists")
+            raise DuplicateOntologyKeyError(f"Ontology key '{ontology_key}' already exists")
 
         content = await file.read()
 

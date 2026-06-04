@@ -2,7 +2,22 @@ import hashlib
 import os
 
 HASH_API_KEY = os.getenv("HASH_API_KEY", "false").lower() == "true"
-API_KEY_HASH_ITERATIONS = int(os.getenv("API_KEY_HASH_ITERATIONS", "600000"))
+
+
+def _load_hash_iterations() -> int:
+    raw_value = os.getenv("API_KEY_HASH_ITERATIONS", "600000")
+    try:
+        iterations = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(
+            f"API_KEY_HASH_ITERATIONS must be a positive integer, got {raw_value!r}"
+        ) from exc
+    if iterations <= 0:
+        raise ValueError(f"API_KEY_HASH_ITERATIONS must be greater than 0, got {iterations}")
+    return iterations
+
+
+API_KEY_HASH_ITERATIONS = _load_hash_iterations()
 API_KEY_HASH_SALT = os.getenv("API_KEY_HASH_SALT", "cognee-api-key-v1").encode("utf-8")
 
 

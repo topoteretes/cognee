@@ -24,9 +24,13 @@ def test_resolve_local_path_rejects_outside_allowed_roots(monkeypatch, tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_local_file_storage_rejects_storage_root_outside_allowed_roots(
+async def test_local_file_storage_does_not_enforce_allowed_roots_on_storage_root(
     monkeypatch, tmp_path: Path
 ):
+    # The allowlist is a user-input control enforced at ingestion entry points, not on
+    # every LocalFileStorage instance (which is also used internally with trusted roots
+    # and to open arbitrary user-referenced file:// paths). A storage root outside the
+    # allowlist must NOT raise; missing files simply report as absent.
     allowed_root = tmp_path / "allowed"
     storage_root = tmp_path / "storage"
     allowed_root.mkdir()
@@ -35,8 +39,7 @@ async def test_local_file_storage_rejects_storage_root_outside_allowed_roots(
 
     storage = LocalFileStorage(str(storage_root))
 
-    with pytest.raises(ValueError, match="outside allowed roots"):
-        await storage.file_exists("file.txt")
+    assert await storage.file_exists("file.txt") is False
 
 
 @pytest.mark.asyncio

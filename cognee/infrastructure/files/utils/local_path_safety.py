@@ -24,9 +24,9 @@ def get_allowed_local_file_roots() -> tuple[Path, ...]:
             ]
         )
 
-    return tuple(
-        Path(os.path.normpath(os.path.abspath(os.path.expanduser(root)))) for root in root_values
-    )
+    # resolve(strict=False) canonicalizes symlinks (and e.g. macOS /tmp -> /private/tmp)
+    # without requiring the path to exist, so containment checks below are symlink-safe.
+    return tuple(Path(os.path.expanduser(root)).resolve(strict=False) for root in root_values)
 
 
 def _is_path_under_root(path: Path, root: Path) -> bool:
@@ -38,19 +38,14 @@ def _is_path_under_root(path: Path, root: Path) -> bool:
 
 
 def resolve_local_path(path: str | Path, *, must_exist: bool = False) -> Path:
-    resolved_path = os.path.normpath(os.path.abspath(os.path.expanduser(os.fspath(path))))
+    # resolve(strict=False) follows symlinks, so a path cannot escape an allowed
+    # root through a symlink that points outside it (a lexical abspath check would
+    # accept such a path).
+    resolved_path = Path(os.path.expanduser(os.fspath(path))).resolve(strict=False)
     for root in get_allowed_local_file_roots():
-        root_path = os.fspath(root)
-
-        if resolved_path == root_path:
-            if must_exist and not os.path.exists(root_path):
+        if _is_path_under_root(resolved_path, root):
+            if must_exist and not resolved_path.exists():
                 raise FileNotFoundError(path)
-            return Path(root_path)
-
-        root_prefix = root_path if root_path.endswith(os.sep) else f"{root_path}{os.sep}"
-        if resolved_path.startswith(root_prefix):
-            if must_exist and not os.path.exists(resolved_path):
-                raise FileNotFoundError(path)
-            return Path(resolved_path)
+            return resolved_path
 
     raise ValueError("Local file path is outside allowed roots.")

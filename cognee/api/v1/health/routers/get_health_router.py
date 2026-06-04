@@ -2,6 +2,9 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from cognee.api.v1.health import health_checker, HealthStatus
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_health_router():
@@ -25,6 +28,7 @@ def get_health_router():
                 },
             )
         except Exception:
+            logger.exception("Health check failed")
             return JSONResponse(
                 status_code=503,
                 content={"status": "not ready", "reason": "health check failed"},
@@ -45,6 +49,7 @@ def get_health_router():
 
             return JSONResponse(status_code=status_code, content=health_status.model_dump())
         except Exception:
+            logger.exception("Detailed health check failed")
             return JSONResponse(
                 status_code=503,
                 content={"status": "unhealthy", "error": "Health check system failure"},
