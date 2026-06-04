@@ -196,4 +196,4 @@ async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_b
     assert result["applied"] == 0
 
     entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
-    assert entries[0]["memify_metadata"][MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
