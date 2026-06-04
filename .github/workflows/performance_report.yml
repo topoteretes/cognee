@@ -1,0 +1,99 @@
+name: performance report
+
+# Reusable workflow: runs the percentile performance report once, uploads the
+# JSON + HTML artifacts to S3, presigns a (7-day) link to the HTML report, and
+# exposes the headline metrics as outputs for the caller (e.g. the Slack bot).
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "Run mode: 'mock_llm' (no API calls) or 'llm' (real OpenAI)."
+        required: true
+        type: string
+    outputs:
+      metrics:
+        description: "Compact JSON: success + add/cognify/search/total p50/p90/p99."
+        value: ${{ jobs.performance.outputs.metrics }}
+      html_key:
+        description: "S3 object key of the HTML report (the caller presigns it)."
+        value: ${{ jobs.performance.outputs.html_key }}
+
+env:
+  ENV: 'dev'
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+  RUNTIME__LOG_LEVEL: ERROR
+
+jobs:
+  performance:
+    name: Performance (${{ inputs.mode }})
+    runs-on: ubuntu-22.04
+    outputs:
+      metrics: ${{ steps.parse.outputs.metrics }}
+      html_key: ${{ steps.upload.outputs.html_key }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run performance report
+        id: run
+        env:
+          PYTHONFAULTHANDLER: 1
+          # Used only when mode == 'llm'; harmless (ignored) for the mock run.
+          LLM_PROVIDER: "openai"
+          LLM_MODEL: "openai/gpt-4o-mini"
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          TS="$(date -u '+%Y-%m-%d_%H-%M-%SZ')"
+          mkdir -p performance_results
+          JSON_PATH="performance_results/${{ inputs.mode }}_${TS}.json"
+          HTML_PATH="performance_results/${{ inputs.mode }}_${TS}.html"
+          echo "JSON_PATH=$JSON_PATH" >> "$GITHUB_ENV"
+          echo "HTML_PATH=$HTML_PATH" >> "$GITHUB_ENV"
+
+          MOCK=""
+          if [ "${{ inputs.mode }}" = "mock_llm" ]; then
+            MOCK="--mock-llm"
+          fi
+
+          uv run python cognee/tests/performance/statistics_percentile_report.py \
+            --runs 10 \
+            --num-memories 50 \
+            $MOCK \
+            --output "$JSON_PATH" \
+            --html "$HTML_PATH"
+
+      - name: Upload reports to S3
+        id: upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+        run: |
+          set -euo pipefail
+          aws s3 cp "$JSON_PATH" "s3://$BUCKET/$JSON_PATH" --content-type application/json
+          aws s3 cp "$HTML_PATH" "s3://$BUCKET/$HTML_PATH" --content-type text/html
+          # Presigning is done by the caller (the Slack job), NOT here: a presigned URL
+          # embeds the AWS access key id, and GitHub scrubs registered secrets from
+          # reusable-workflow outputs — which would blank the link. Pass only the
+          # (non-secret) object key across the boundary.
+          echo "html_key=$HTML_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Parse headline metrics
+        id: parse
+        run: |
+          set -euo pipefail
+          METRICS="$(jq -c '{
+            success: "\(.succeeded)/\(.num_runs)",
+            add:     {p50: .stats.add_time_s.p50,          p90: .stats.add_time_s.p90,          p99: .stats.add_time_s.p99},
+            cognify: {p50: .stats.cognify_time_s.p50,      p90: .stats.cognify_time_s.p90,      p99: .stats.cognify_time_s.p99},
+            search:  {p50: .stats.search_time.p50,         p90: .stats.search_time.p90,         p99: .stats.search_time.p99},
+            total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
+          }' "$JSON_PATH")"
+          echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"

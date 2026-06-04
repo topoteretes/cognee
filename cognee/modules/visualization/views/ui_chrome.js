@@ -1,8 +1,9 @@
 // Theme toggle
 (function(){
   const btn = document.getElementById('theme-toggle');
-  // Expose for canvas draw() to read
-  window._isLightMode = false;
+  // Expose for canvas draw() to read. Default light so the Graph view matches
+  // the (always-light) Schema view instead of opening dark.
+  window._isLightMode = true;
   btn.addEventListener('click', () => {
     document.documentElement.classList.toggle('light');
     const isLight = document.documentElement.classList.contains('light');
@@ -26,7 +27,7 @@
   tabs.forEach(btn => {
     btn.addEventListener('click', () => {
       tabs.forEach(t => { t.style.background='transparent'; t.style.color='var(--text2)'; t.classList.remove('active'); });
-      btn.style.background='var(--accent)'; btn.style.color='#fff'; btn.classList.add('active');
+      btn.style.background='#1F9E6E'; btn.style.color='#fff'; btn.classList.add('active');
       const view = btn.dataset.view;
       graphView.style.display = view === 'graph' ? '' : 'none';
       schemaView.style.display = view === 'schema' ? '' : 'none';
