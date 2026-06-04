@@ -579,14 +579,19 @@ class SQLAlchemyAdapter:
         try:
             if self.engine.dialect.name == "sqlite":
                 await self.engine.dispose(close=True)
+                # Wait for the database connections to close and release the file.
+                # This settle also preserves teardown timing other resources
+                # (e.g. the graph DB) rely on between tests, so keep it
+                # unconditional.
+                await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
                 file_name = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
-                # On Windows the SQLite file handle can linger briefly after
-                # dispose() (aiosqlite closes the connection on a background
+                # On Windows the SQLite file handle can still linger after the
+                # settle above (aiosqlite closes the connection on a background
                 # thread), so os.remove fails with WinError 32. Retry with short
-                # backoff and force a GC pass to finalize any lingering
-                # connection objects, instead of a single fixed-duration sleep.
+                # backoff and force a GC pass to finalize lingering connection
+                # objects.
                 for attempt in range(10):
                     try:
                         await file_storage.remove(file_name)
