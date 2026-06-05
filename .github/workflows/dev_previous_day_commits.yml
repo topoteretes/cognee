@@ -7,7 +7,7 @@ on:
       lookback_days:
         description: Number of UTC calendar days to look back when scanning merged PRs
         required: false
-        default: "3"
+        default: "1"
       anchor_date:
         description: Optional UTC date to scan, in YYYY-MM-DD format
         required: false
@@ -20,7 +20,7 @@ permissions:
   pull-requests: read
 
 env:
-  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '3' }}
+  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
 
 jobs:
   prepare-merged-branches:
