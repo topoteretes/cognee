@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import datetime
 from typing import Any
 
 from cognee.context_global_variables import session_user
@@ -101,6 +102,35 @@ def _validate_session_params(
         raise SessionParameterValidationError(message="last_n must be a positive integer")
 
 
+class _PositionalSessionContextAdapter:
+    """Thin positional shim over SessionManager's keyword-only session-context methods.
+
+    The deterministic builder/applier (session_context_builder) invokes the session-context
+    CRUD methods positionally (``get_session_context_entries(user_id, session_id)`` etc.), while
+    SessionManager exposes them as keyword-only. This adapter bridges the two without leaking the
+    builder's calling convention into the public SessionManager surface. Every method is fail-open
+    (the underlying SessionManager wrappers already swallow errors).
+    """
+
+    def __init__(self, manager: "SessionManager") -> None:
+        self._manager = manager
+
+    async def get_session_context_entries(self, user_id, session_id):
+        return await self._manager.get_session_context_entries(
+            user_id=user_id, session_id=session_id
+        )
+
+    async def create_session_context_entry(self, user_id, session_id, entry_dump):
+        return await self._manager.create_session_context_entry(
+            user_id=user_id, entry_dump=entry_dump, session_id=session_id
+        )
+
+    async def update_session_context_entry(self, user_id, session_id, entry_id, merge):
+        return await self._manager.update_session_context_entry(
+            user_id=user_id, entry_id=entry_id, merge=merge, session_id=session_id
+        )
+
+
 class SessionManager:
     """
     Manages session QA entries.
@@ -149,10 +179,12 @@ class SessionManager:
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> str | None:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id)
@@ -190,6 +222,7 @@ class SessionManager:
                 feedback_text=feedback_text,
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
+                used_session_context_ids=used_session_context_ids,
             )
             await _record_session_activity(user_id, session_id)
             return qa_id
@@ -431,29 +464,15 @@ class SessionManager:
         resolved_session_id = self._resolve_session_id(session_id)
         conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
 
-        # Prepend graph knowledge snapshot (from improve() sync) if available
-        graph_context = await self.get_graph_context(
-            user_id=str(user_id), session_id=resolved_session_id
-        )
-        if graph_context:
-            # Apply context char limit: explicit param > config > unlimited
-            char_limit = max_context_chars
-            if char_limit is None:
-                char_limit = CacheConfig().max_session_context_chars
-            if char_limit is not None:
-                graph_context = graph_context[:char_limit]
-            conversation_history = (
-                "Background knowledge from the knowledge graph:\n"
-                + graph_context
-                + "\n\n"
-                + conversation_history
-            )
-
         cache_config = CacheConfig()
         run_auto_feedback = cache_config.caching and cache_config.auto_feedback
+        session_context_on = cache_config.caching and cache_config.session_context_enabled
 
+        # Resolve the previous QA id (needed both for auto-feedback attachment and for loading
+        # the session-context entries that were served to the previous answer).
         last_qa_id: str | None = None
-        if run_auto_feedback:
+        last_served_context_ids: list[str] = []
+        if run_auto_feedback or session_context_on:
             entries = await self.get_session(
                 user_id=str(user_id),
                 session_id=resolved_session_id,
@@ -465,6 +484,52 @@ class SessionManager:
                 last_qa_id = getattr(last_entry, "qa_id", None) or (
                     last_entry.get("qa_id") if isinstance(last_entry, dict) else None
                 )
+                prev_served = getattr(last_entry, "used_session_context_ids", None)
+                if prev_served is None and isinstance(last_entry, dict):
+                    prev_served = last_entry.get("used_session_context_ids")
+                if isinstance(prev_served, list):
+                    last_served_context_ids = [str(cid) for cid in prev_served]
+
+        # Build the served-context payload (entries shown to the PREVIOUS answer) for rating, and
+        # the active-context guidance block. The block is prepended ABOVE the graph snapshot below,
+        # so the final assembled order is: session_context_block + graph_snapshot + history.
+        served_context = None
+        served_ids: list[str] = []
+        active_context_block = ""
+        if session_context_on:
+            served_context = await self._load_served_context_payload(
+                user_id=str(user_id),
+                session_id=resolved_session_id,
+                served_ids=last_served_context_ids,
+            )
+            active_context_block, served_ids = await self._build_active_context_block_safe(
+                user_id=str(user_id),
+                session_id=resolved_session_id,
+                query=query,
+            )
+
+        # Prepend graph knowledge snapshot (from improve() sync) if available
+        graph_context = await self.get_graph_context(
+            user_id=str(user_id), session_id=resolved_session_id
+        )
+        if graph_context:
+            # Apply context char limit: explicit param > config > unlimited
+            char_limit = max_context_chars
+            if char_limit is None:
+                char_limit = cache_config.max_session_context_chars
+            if char_limit is not None:
+                graph_context = graph_context[:char_limit]
+            conversation_history = (
+                "Background knowledge from the knowledge graph:\n"
+                + graph_context
+                + "\n\n"
+                + conversation_history
+            )
+
+        # Finally, prepend the active session-context block ABOVE the graph snapshot so it is the
+        # very first segment of the assembled prompt.
+        if active_context_block:
+            conversation_history = active_context_block + "\n\n" + conversation_history
 
         (
             completion,
@@ -480,6 +545,7 @@ class SessionManager:
             response_model=response_model,
             summarize_context=summarize_context,
             run_feedback_detection=run_auto_feedback,
+            served_context=served_context,
         )
 
         feedback_detected = (
@@ -511,9 +577,27 @@ class SessionManager:
                     e,
                     exc_info=False,
                 )
-            if not feedback_result.contains_followup_question:
-                response = (feedback_result.response_to_user or "").strip()
-                return response if response else "Thanks for your feedback."
+
+        # Session-context layer: record the feedback entry, apply candidate guidance updates, and
+        # update helpful/harmful counters. Candidates influence the NEXT turn (we keep the gather).
+        # Fail-open: any error here must never block the answer that was already generated.
+        if (
+            session_context_on
+            and feedback_result is not None
+            and getattr(feedback_result, "feedback_detected", False)
+        ):
+            await self._apply_session_context_feedback(
+                user_id=str(user_id),
+                session_id=resolved_session_id,
+                query=query,
+                feedback_result=feedback_result,
+                last_qa_id=last_qa_id,
+                served_ids=last_served_context_ids,
+            )
+
+        if feedback_detected and not feedback_result.contains_followup_question:
+            response = (feedback_result.response_to_user or "").strip()
+            return response if response else "Thanks for your feedback."
 
         await self.add_qa(
             user_id=str(user_id),
@@ -522,11 +606,173 @@ class SessionManager:
             answer=str(completion),
             session_id=resolved_session_id,
             used_graph_element_ids=used_graph_element_ids,
+            used_session_context_ids=served_ids or None,
         )
         if feedback_detected and feedback_result.contains_followup_question:
             thanks = (feedback_result.response_to_user or "").strip()
             return f"{thanks}\n\n{completion}" if thanks else completion
         return completion
+
+    async def _build_active_context_block_safe(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        query: str,
+    ) -> tuple[str, list[str]]:
+        """Render the active session-context guidance block. Fail-open -> ("", [])."""
+        try:
+            from cognee.infrastructure.session.session_context_builder import (
+                build_active_context_block,
+            )
+
+            return await build_active_context_block(
+                session_manager=_PositionalSessionContextAdapter(self),
+                user_id=user_id,
+                session_id=session_id,
+                query=query,
+            )
+        except Exception as e:
+            logger.warning("SessionManager: build_active_context_block failed: %s", e)
+            return "", []
+
+    async def _load_served_context_payload(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        served_ids: list[str],
+    ) -> list[dict]:
+        """Resolve the context entries served to the previous answer into {id, content} dicts.
+
+        These are fed to detect_feedback so the single feedback call can rate them. Fail-open -> [].
+        """
+        if not served_ids:
+            return []
+        try:
+            entries = await self.get_session_context_entries(user_id=user_id, session_id=session_id)
+            by_id = {}
+            for raw in entries or []:
+                row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
+                entry_id = row.get("id")
+                if entry_id is not None and row.get("kind", "context") == "context":
+                    by_id[str(entry_id)] = row.get("content", "")
+            return [{"id": cid, "content": by_id[cid]} for cid in served_ids if cid in by_id]
+        except Exception as e:
+            logger.warning("SessionManager: load served context failed: %s", e)
+            return []
+
+    async def _apply_session_context_feedback(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        query: str,
+        feedback_result: Any,
+        last_qa_id: str | None,
+        served_ids: list[str],
+    ) -> None:
+        """Persist a feedback entry, apply candidate updates, and bump helpful/harmful counters.
+
+        Fully fail-open: candidates affect the NEXT turn, never the answer already produced.
+        """
+        try:
+            from cognee.infrastructure.session.session_context_builder import (
+                apply_candidate_updates,
+            )
+            from cognee.infrastructure.session.session_context_models import (
+                SessionFeedbackEntry,
+            )
+
+            score: int | None = None
+            try:
+                if feedback_result.feedback_score is not None:
+                    score = int(round(min(5, max(1, float(feedback_result.feedback_score)))))
+            except (TypeError, ValueError):
+                score = None
+
+            ratings = list(getattr(feedback_result, "served_context_ratings", []) or [])
+            candidates = list(getattr(feedback_result, "candidate_context_updates", []) or [])
+
+            feedback_entry = SessionFeedbackEntry(
+                id=str(uuid.uuid4()),
+                created_at=datetime.utcnow().isoformat(),
+                raw_text=query,
+                feedback_text=(getattr(feedback_result, "feedback_text", None) or None),
+                feedback_score=score,
+                referenced_qa_ids=[last_qa_id] if last_qa_id else [],
+                influencing_context_ids=list(served_ids or []),
+                candidate_context_entries=[
+                    c.model_dump() if hasattr(c, "model_dump") else dict(c) for c in candidates
+                ],
+            )
+            await self.create_session_context_entry(
+                user_id=user_id,
+                entry_dump=feedback_entry.model_dump(),
+                session_id=session_id,
+            )
+
+            await apply_candidate_updates(
+                session_manager=_PositionalSessionContextAdapter(self),
+                user_id=user_id,
+                session_id=session_id,
+                feedback_entry_id=feedback_entry.id,
+                candidates=candidates,
+                served_rating_ids=[getattr(r, "entry_id", None) for r in ratings],
+            )
+
+            await self._apply_served_context_ratings(
+                user_id=user_id,
+                session_id=session_id,
+                ratings=ratings,
+            )
+        except Exception as e:
+            logger.warning("SessionManager: session-context feedback application failed: %s", e)
+
+    async def _apply_served_context_ratings(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        ratings: list,
+    ) -> None:
+        """Increment helpful_count / harmful_count for rated entries. Fail-open per rating."""
+        if not ratings:
+            return
+        try:
+            entries = await self.get_session_context_entries(user_id=user_id, session_id=session_id)
+            counts = {}
+            for raw in entries or []:
+                row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
+                if row.get("kind", "context") != "context":
+                    continue
+                entry_id = row.get("id")
+                if entry_id is not None:
+                    counts[str(entry_id)] = (
+                        int(row.get("helpful_count", 0) or 0),
+                        int(row.get("harmful_count", 0) or 0),
+                    )
+            for rating in ratings:
+                try:
+                    entry_id = str(getattr(rating, "entry_id", None) or "")
+                    verdict = str(getattr(rating, "rating", "") or "").strip().lower()
+                    if entry_id not in counts or verdict not in ("helpful", "harmful"):
+                        continue
+                    helpful, harmful = counts[entry_id]
+                    if verdict == "helpful":
+                        merge = {"helpful_count": helpful + 1}
+                    else:
+                        merge = {"harmful_count": harmful + 1}
+                    await self.update_session_context_entry(
+                        user_id=user_id,
+                        entry_id=entry_id,
+                        merge=merge,
+                        session_id=session_id,
+                    )
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning("SessionManager: served-context rating update failed: %s", e)
 
     @staticmethod
     def format_entries(entries: list[dict], include_context: bool = True) -> str:
@@ -672,6 +918,7 @@ class SessionManager:
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
         session_id: str | None = None,
     ) -> bool:
         """
@@ -681,6 +928,7 @@ class SessionManager:
         Returns True if updated, False if not found or cache unavailable.
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         used_graph_element_ids: Optional dict with "node_ids" and "edge_ids" lists for frequency weights.
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
         from cognee.infrastructure.locks import session_lock
 
@@ -702,6 +950,7 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
+                used_session_context_ids=used_session_context_ids,
             )
 
     async def add_feedback(
@@ -784,6 +1033,114 @@ class SessionManager:
                 qa_id=qa_id,
             )
 
+    # -- Session context entries (active guidance layer) --------------------
+
+    async def create_session_context_entry(
+        self,
+        *,
+        user_id: str,
+        entry_dump: dict,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Append one session-context entry (a plain dict carrying a "kind" field).
+
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            _validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return False
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping create_session_context_entry")
+            return False
+        try:
+            await self._cache.create_session_context_entry(user_id, session_id, entry_dump)
+            return True
+        except Exception as e:
+            logger.warning("SessionManager: create_session_context_entry failed: %s", e)
+            return False
+
+    async def get_session_context_entries(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+    ) -> list[dict]:
+        """
+        Return all stored session-context entries (both "context" and "feedback" kinds).
+
+        Fail-open: returns [] when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            _validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return []
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty session context")
+            return []
+        try:
+            return await self._cache.get_session_context_entries(user_id, session_id)
+        except Exception as e:
+            logger.warning("SessionManager: get_session_context_entries failed: %s", e)
+            return []
+
+    async def update_session_context_entry(
+        self,
+        *,
+        user_id: str,
+        entry_id: str,
+        merge: dict,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Shallow-merge updates into the session-context entry matching entry["id"].
+
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            _validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return False
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping update_session_context_entry")
+            return False
+        try:
+            return await self._cache.update_session_context_entry(
+                user_id, session_id, entry_id, merge
+            )
+        except Exception as e:
+            logger.warning("SessionManager: update_session_context_entry failed: %s", e)
+            return False
+
+    async def delete_session_context(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Delete the entire session-context list for the given session.
+
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            _validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return False
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_session_context")
+            return False
+        try:
+            return await self._cache.delete_session_context(user_id, session_id)
+        except Exception as e:
+            logger.warning("SessionManager: delete_session_context failed: %s", e)
+            return False
+
     # -- Graph knowledge context (separate from QA history) -----------------
 
     @staticmethod
@@ -852,6 +1209,13 @@ class SessionManager:
                 del self._cache._cache[graph_key]
             except Exception:
                 pass
+        except Exception:
+            pass
+
+        # Also clear the active session-context list (fail-open; adapter.delete_session may also
+        # clear it, but this guarantees no leak if the adapter does not).
+        try:
+            await self._cache.delete_session_context(user_id, session_id)
         except Exception:
             pass
 

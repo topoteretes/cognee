@@ -490,6 +490,7 @@ class TestSessionManager:
             feedback_score=None,
             used_graph_element_ids=None,
             memify_metadata=None,
+            used_session_context_ids=None,
         )
 
     @pytest.mark.asyncio

@@ -442,7 +442,7 @@ class TestGenerateSessionCompletionWithOptionalSummary:
         assert feedback_result.feedback_detected is True
         assert feedback_result.feedback_text == "User said thanks."
         mock_llm.assert_awaited_once()
-        mock_detect.assert_awaited_once_with("thanks!")
+        mock_detect.assert_awaited_once_with("thanks!", served_context=None)
 
     @pytest.mark.asyncio
     async def test_summarize_context_true_run_feedback_detection_true_returns_three_tuple(self):
@@ -497,4 +497,4 @@ class TestGenerateSessionCompletionWithOptionalSummary:
         assert feedback_result is not None
         assert feedback_result.feedback_detected is False
         mock_summarize.assert_awaited_once()
-        mock_detect.assert_awaited_once_with("Q?")
+        mock_detect.assert_awaited_once_with("Q?", served_context=None)

@@ -75,6 +75,7 @@ async def generate_session_completion_with_optional_summary(
     response_model: Type = str,
     summarize_context: bool = False,
     run_feedback_detection: bool = False,
+    served_context: list | str | None = None,
 ) -> Tuple[Any, str, Any]:
     """
     Run LLM completion (and optionally summarization) for the session-manager flow.
@@ -82,6 +83,8 @@ async def generate_session_completion_with_optional_summary(
     When summarize_context is True, context_to_store is the summarized context; otherwise "".
     When run_feedback_detection is True, runs feedback detection in parallel; feedback_result
     is the detection result, otherwise None.
+    When served_context is provided, it is forwarded to detect_feedback so the single feedback
+    call can also rate served session-context entries and propose candidate updates.
     """
     from cognee.infrastructure.session.feedback_detection import detect_feedback
 
@@ -98,7 +101,7 @@ async def generate_session_completion_with_optional_summary(
                     conversation_history=conversation_history,
                     response_model=response_model,
                 ),
-                detect_feedback(query),
+                detect_feedback(query, served_context=served_context),
             )
             return (completion, context_summary, feedback_result)
         context_summary, completion = await asyncio.gather(
@@ -126,7 +129,7 @@ async def generate_session_completion_with_optional_summary(
                 conversation_history=conversation_history,
                 response_model=response_model,
             ),
-            detect_feedback(query),
+            detect_feedback(query, served_context=served_context),
         )
         return (completion, "", feedback_result)
     completion = await generate_completion(

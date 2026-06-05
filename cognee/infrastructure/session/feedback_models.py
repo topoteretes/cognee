@@ -1,6 +1,11 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+from cognee.infrastructure.session.session_context_models import (
+    CandidateContextUpdate,
+    ServedContextRating,
+)
 
 
 class FeedbackDetectionResult(BaseModel):
@@ -28,6 +33,26 @@ class FeedbackDetectionResult(BaseModel):
         default=False,
         description="True if the message contains both feedback and a new or follow-up question that should be answered (e.g. 'that was wrong, but what about X?'). Set to false when the message is only feedback with no question.",
     )
+    followup_question: str | None = Field(
+        default=None,
+        description="The new/follow-up question text when contains_followup_question is true.",
+    )
+    served_context_ratings: List[ServedContextRating] = Field(
+        default_factory=list,
+        description="Up to 3 ratings of session-context entries served to the previous answer.",
+    )
+    candidate_context_updates: List[CandidateContextUpdate] = Field(
+        default_factory=list,
+        description="Up to 3 proposed new guidance entries.",
+    )
+
+    @field_validator("served_context_ratings", "candidate_context_updates", mode="after")
+    @classmethod
+    def cap_three(cls, v: list) -> list:
+        """Truncate the list to the first 3 items; never raises (non-blocking contract)."""
+        if not isinstance(v, list):
+            return []
+        return v[:3]
 
 
 class AgentTraceFeedbackSummary(BaseModel):
