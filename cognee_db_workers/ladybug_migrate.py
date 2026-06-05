@@ -16,6 +16,11 @@ import tempfile
 import warnings
 
 
+# Maps the on-disk storage version code (read from catalog.kz) to a ladybug
+# release that can open that format. The code is shared across patch/minor
+# releases that keep the same on-disk format, so there is one entry per format,
+# not per release: 0.16.0 and 0.16.1 both write code 40; 0.17.0 and 0.17.1 both
+# write code 41. Used by needs_migration() to detect legacy (<0.15.0) databases.
 ladybug_version_mapping: dict[int, str] = {
     34: "0.7.0",
     35: "0.7.1",
@@ -24,6 +29,7 @@ ladybug_version_mapping: dict[int, str] = {
     38: "0.10.1",
     39: "0.11.3",
     40: "0.16.0",
+    41: "0.17.1",
 }
 
 
