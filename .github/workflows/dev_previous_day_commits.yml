@@ -1,6 +1,7 @@
 name: automation | Draft Docs PRs For Previous Day Dev PRs
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       lookback_days:
@@ -142,10 +143,6 @@ jobs:
           NOTES_MARKDOWN: ${{ steps.branch_paths.outputs.notes_markdown }}
           ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
           ASSESSMENT_MARKDOWN: ${{ steps.branch_paths.outputs.assessment_markdown }}
-          BRANCH_NAME: ${{ matrix.branch_name }}
-          BRANCH_SLUG: ${{ matrix.safe_branch }}
-          SHORT_SHA: ${{ matrix.short_sha }}
-          MERGE_SHA: ${{ matrix.merge_sha }}
         run: |
           uv run python tools/assess_branch_notes.py \
             --notes-json "${NOTES_JSON}" \
@@ -153,26 +150,11 @@ jobs:
             --json-output "${ASSESSMENT_JSON}" \
             --markdown-output "${ASSESSMENT_MARKDOWN}"
 
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          assessment = json.loads(Path(os.environ["ASSESSMENT_JSON"]).read_text())
-
-          needs_update = bool(assessment.get("needs_documentation_update"))
-          branch_slug = os.environ["BRANCH_SLUG"]
-          short_sha = os.environ["SHORT_SHA"]
-          pr_number = "${{ matrix.pr_number }}"
-          docs_branch = f"automation/docs-pr-{pr_number}-{branch_slug}-{short_sha}"
-          pr_title = f"docs: draft updates for PR #{pr_number}"
-
-          output_path = Path(os.environ["GITHUB_OUTPUT"])
-          with output_path.open("a", encoding="utf-8") as fh:
-              fh.write(f"needs_update={'true' if needs_update else 'false'}\n")
-              fh.write(f"docs_branch={docs_branch}\n")
-              fh.write(f"pr_title={pr_title}\n")
-          PY
+          python3 tools/write_docs_assessment_outputs.py \
+            --assessment-json "${ASSESSMENT_JSON}" \
+            --branch-slug "${{ matrix.safe_branch }}" \
+            --short-sha "${{ matrix.short_sha }}" \
+            --pr-number "${{ matrix.pr_number }}"
 
       - name: Skip docs PR creation when docs are not needed
         if: ${{ steps.assessment.outputs.needs_update != 'true' }}
@@ -204,71 +186,10 @@ jobs:
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: docs_scope
         run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          from tools.merge_branch_diff import get_branch_changed_files
-
-          first_parent = "${{ matrix.first_parent }}"
-          second_parent = "${{ matrix.second_parent }}"
-          docs_root = Path("docs-repo")
-
-          changed_files = get_branch_changed_files(first_parent, second_parent)
-
-          doc_files = sorted(
-              path.relative_to(docs_root).as_posix()
-              for path in docs_root.rglob("*")
-              if path.is_file() and path.suffix.lower() == ".mdx"
-          )
-
-          ignored_parts = {
-              "cognee",
-              "__init__.py",
-              "models",
-              "operations",
-              "modules",
-              "tasks",
-              "routers",
-              "shared",
-              "infrastructure",
-          }
-
-          keywords: list[str] = []
-          for changed_file in changed_files:
-              path = Path(changed_file)
-              stem = path.stem.lower()
-              if len(stem) >= 3 and stem not in ignored_parts:
-                  keywords.append(stem)
-              for part in path.parts:
-                  token = part.lower()
-                  if len(token) >= 4 and token not in ignored_parts:
-                      keywords.append(token)
-
-          unique_keywords: list[str] = []
-          for keyword in keywords:
-              if keyword not in unique_keywords:
-                  unique_keywords.append(keyword)
-
-          scored: list[tuple[int, str]] = []
-          for doc_file in doc_files:
-              haystack = doc_file.lower()
-              score = sum(1 for keyword in unique_keywords if keyword in haystack)
-              if score > 0:
-                  scored.append((score, doc_file))
-
-          scored.sort(key=lambda item: (-item[0], item[1]))
-          candidate_doc_files = [doc_file for _, doc_file in scored[:5]]
-
-          output_path = Path(os.environ["GITHUB_OUTPUT"])
-          with output_path.open("a", encoding="utf-8") as fh:
-              fh.write("changed_source_files<<EOF\n")
-              fh.write("\n".join(changed_files) + "\n")
-              fh.write("EOF\n")
-              fh.write("candidate_doc_files<<EOF\n")
-              fh.write("\n".join(candidate_doc_files) + "\n")
-              fh.write("EOF\n")
-          PY
+          python3 tools/prepare_docs_edit_scope.py \
+            --first-parent "${{ matrix.first_parent }}" \
+            --second-parent "${{ matrix.second_parent }}" \
+            --docs-root docs-repo
 
       - name: Plan docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
@@ -278,9 +199,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are a documentation scope planner for the Cognee project.
-
-            Analyze this merged PR and produce a small documentation edit plan. Do not edit documentation files.
+            Read and follow `.github/prompts/docs_scope_plan.md`.
 
             - Branch: `${{ matrix.branch_name }}`
             - PR: `#${{ matrix.pr_number }} ${{ matrix.pr_title }}`
@@ -290,10 +209,6 @@ jobs:
             - Second parent: `${{ matrix.second_parent }}`
             - Scope plan output: `./${{ steps.branch_paths.outputs.docs_scope_plan }}`
 
-            ## Available resources
-
-            - **Documentation repo** (`./docs-repo`): Contains the documentation pages. Use existing `.md` and `.mdx` pages as the primary targets for edits. Read `./docs-repo/docs.json` if it exists to understand the documentation structure.
-            - **Cognee source code** (current workspace root): Use the source code to verify actual implementation details, defaults, supported options, function signatures, env vars, and behavior.
             - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`): Summary of the merged branch.
             - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`): Candidate docs areas and rationale for the update.
 
@@ -304,49 +219,6 @@ jobs:
 
             Likely documentation targets:
             ${{ steps.docs_scope.outputs.candidate_doc_files }}
-
-            ## Planning task
-
-            1. Read the branch notes and documentation assessment.
-            2. Use the branch notes, documentation assessment, changed source file list, and likely documentation targets as your primary evidence.
-            3. Read at most 8 source files and at most 5 documentation files. Prefer files that are clearly public API, CLI, configuration, examples, or user-facing docs targets.
-            4. Do not run shell commands or inspect the full diff. If the inputs are too broad, produce a conservative small plan instead of exploring further.
-            5. Ignore tests, generated assets, lockfiles, and unrelated implementation-only changes unless they reveal public behavior.
-            6. For each changed source file you consider, classify whether it changes:
-               - public behavior
-               - public API / imports / entrypoints
-               - documented configuration or defaults
-               - developer-facing extension semantics
-               - examples or usage patterns
-               - or only internal implementation details
-            7. Identify the smallest docs edit surface that could cover the public-facing changes.
-
-            Write the final plan to `./${{ steps.branch_paths.outputs.docs_scope_plan }}`.
-
-            The plan must be Markdown with these exact sections:
-
-            # Documentation Scope Plan
-
-            ## Docs Needed
-            `true` or `false`
-
-            ## Reason
-            One concise paragraph.
-
-            ## Documentation-Worthy Changes
-            Bullets. Each bullet must name the change, the source files proving it, and the recommended docs page type.
-
-            ## Files To Edit
-            Bullets of existing docs files to edit. Use paths relative to `docs-repo`. Leave empty if none.
-
-            ## Source Files To Inspect During Editing
-            Bullets of source files the editing step should inspect. Keep this list short and exclude tests/assets/lockfiles.
-
-            ## Out Of Scope
-            Bullets for changes intentionally skipped.
-
-            Do not edit files inside `./docs-repo`.
-            Do not create commits.
           claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 35"
 
       - name: Validate docs scope plan
@@ -367,10 +239,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are a documentation improvement agent for the Cognee project.
-
-            Update the existing Cognee documentation to reflect this merged PR.
-            Your job is to document the actual behavior and API changes introduced by this PR, not to make adjacent or generic documentation improvements.
+            Read and follow `.github/prompts/docs_edit.md`.
 
             - Branch: `${{ matrix.branch_name }}`
             - PR: `#${{ matrix.pr_number }} ${{ matrix.pr_title }}`
@@ -386,99 +255,25 @@ jobs:
             - **Documentation scope plan** (`./${{ steps.branch_paths.outputs.docs_scope_plan }}`)
             - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`)
             - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`)
-
-            ## Available resources
-
-            - **Documentation repo** (`./docs-repo`): Contains the documentation pages. Use existing `.md` and `.mdx` pages as the primary targets for edits. Read `./docs-repo/docs.json` only if the scope plan requires navigation context.
-            - **Cognee source code** (current workspace root): Use the source code to verify actual implementation details, defaults, supported options, function signatures, env vars, and behavior.
-
-            ## Editing rules
-
-            1. Follow the documentation scope plan.
-            2. If the scope plan says `Docs Needed` is `false`, make no documentation edits and print the reason.
-            3. Inspect only the source files listed in the scope plan unless they are insufficient to verify a specific planned edit.
-            4. Edit only docs files listed in the scope plan unless they are clearly the wrong target; if so, choose the smallest better existing docs target.
-            5. Document only user-facing behavior, public API changes, examples, or developer-facing semantics that actually changed in this PR.
-            6. If a proposed docs edit cannot be traced back to a concrete source diff in this PR, do not make that edit.
-            7. Do not present pre-existing behavior as if this PR introduced it.
-            8. Do not make unrelated cleanup edits, style edits, or generic improvements.
-            9. Edit at most 3 documentation files unless the scope plan explicitly justifies more.
-            10. Prefer updating existing pages over creating new ones.
-            11. Do not edit `docs.json` unless the scope plan says a new docs page is strictly required.
-            12. Only edit documentation files inside `./docs-repo`. Do NOT modify the source repository files, workflow files, or non-documentation assets.
-            13. Do NOT create git commits.
-
-            When done, print a short summary of what you changed and which existing documentation pages you updated.
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 50"
 
       - name: Prepare docs PR content
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: pr_content
         env:
-          BRANCH_NAME: ${{ matrix.branch_name }}
-          SHORT_SHA: ${{ matrix.short_sha }}
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
           ASSESSMENT_JSON: ${{ steps.branch_paths.outputs.assessment_json }}
+          BRANCH_NAME: ${{ matrix.branch_name }}
+          SHORT_SHA: ${{ matrix.short_sha }}
           DEFAULT_PR_TITLE: ${{ steps.assessment.outputs.pr_title }}
         run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import subprocess
-          from pathlib import Path
-
-          notes = json.loads(Path(os.environ["NOTES_JSON"]).read_text())
-          assessment = json.loads(Path(os.environ["ASSESSMENT_JSON"]).read_text())
-          summary = notes.get("summary", "").strip()
-          highlights = notes.get("highlights", [])
-          reason = assessment.get("reason", "")
-
-          changed_files = [
-              line.rstrip()
-              for line in subprocess.check_output(
-                  ["git", "-C", "docs-repo", "status", "--short"],
-                  text=True,
-              ).splitlines()
-              if line.strip()
-          ]
-          normalized_files = [entry[3:] if len(entry) > 3 else entry for entry in changed_files]
-
-          pr_title = os.environ["DEFAULT_PR_TITLE"]
-          pr_body_lines = [
-              "## Summary",
-              "",
-              f"Automated documentation draft for merged branch `{os.environ['BRANCH_NAME']}` (`{os.environ['SHORT_SHA']}`).",
-              "",
-              summary
-              or "This PR updates existing docs to reflect the branch's user-facing documentation impact based on the source diff and current docs structure.",
-              "",
-              "## Why This PR Exists",
-              "",
-              reason
-              or "The merged branch appears to change behavior, configuration, API usage, or developer-facing semantics that are represented in the docs.",
-              "",
-              "## Source",
-              "",
-              f"- Branch: `{os.environ['BRANCH_NAME']}`",
-              f"- Merge short SHA: `{os.environ['SHORT_SHA']}`",
-          ]
-          if highlights:
-              pr_body_lines.extend(["", "## Branch Highlights", ""])
-              pr_body_lines.extend([f"- {item}" for item in highlights])
-          if normalized_files:
-              pr_body_lines.extend(["", "## Documentation Files Updated", ""])
-              pr_body_lines.extend([f"- `{item}`" for item in normalized_files])
-
-          output_path = Path(os.environ["GITHUB_OUTPUT"])
-          with output_path.open("a", encoding="utf-8") as fh:
-              fh.write(f"pr_title={pr_title}\n")
-              fh.write("pr_body<<EOF\n")
-              fh.write("\n".join(pr_body_lines) + "\n")
-              fh.write("EOF\n")
-              fh.write("changed_files<<EOF\n")
-              fh.write("\n".join(normalized_files) + "\n")
-              fh.write("EOF\n")
-          PY
+          python3 tools/prepare_docs_pr_content.py \
+            --notes-json "${NOTES_JSON}" \
+            --assessment-json "${ASSESSMENT_JSON}" \
+            --branch-name "${BRANCH_NAME}" \
+            --short-sha "${SHORT_SHA}" \
+            --default-pr-title "${DEFAULT_PR_TITLE}" \
+            --docs-root docs-repo
 
       - name: Create docs draft commit
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
@@ -503,101 +298,19 @@ jobs:
       - name: Create or update docs pull request
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: manage_pr
-        working-directory: docs-repo
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
-          TARGET_REPO: topoteretes/cognee-docs
           HEAD_BRANCH: ${{ steps.assessment.outputs.docs_branch }}
           PR_TITLE: ${{ steps.pr_content.outputs.pr_title }}
           PR_BODY: ${{ steps.pr_content.outputs.pr_body }}
           CHANGES_MADE: ${{ steps.commit_docs.outputs.changes_made }}
         run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.error
-          import urllib.parse
-          import urllib.request
-
-          token = os.environ["GH_TOKEN"]
-          target_repo = os.environ["TARGET_REPO"]
-          head_branch = os.environ["HEAD_BRANCH"]
-          pr_title = os.environ["PR_TITLE"]
-          pr_body = os.environ["PR_BODY"]
-          changes_made = os.environ["CHANGES_MADE"] == "true"
-          owner = target_repo.split("/", 1)[0]
-
-          def github_request(method, path, payload=None, query=None):
-              url = f"https://api.github.com/repos/{target_repo}{path}"
-              if query:
-                  url = f"{url}?{urllib.parse.urlencode(query)}"
-              data = None
-              if payload is not None:
-                  data = json.dumps(payload).encode("utf-8")
-              request = urllib.request.Request(
-                  url,
-                  data=data,
-                  method=method,
-                  headers={
-                      "Accept": "application/vnd.github+json",
-                      "Authorization": f"Bearer {token}",
-                      "Content-Type": "application/json",
-                      "X-GitHub-Api-Version": "2022-11-28",
-                  },
-              )
-              try:
-                  with urllib.request.urlopen(request, timeout=20) as response:
-                      content = response.read().decode("utf-8")
-              except urllib.error.HTTPError as exc:
-                  print(exc.read().decode("utf-8"), flush=True)
-                  raise
-              return json.loads(content) if content else None
-
-          existing_prs = github_request(
-              "GET",
-              "/pulls",
-              query={
-                  "head": f"{owner}:{head_branch}",
-                  "base": "main",
-                  "state": "open",
-                  "per_page": "1",
-              },
-          )
-
-          if existing_prs:
-              pr = github_request(
-                  "PATCH",
-                  f"/pulls/{existing_prs[0]['number']}",
-                  {"title": pr_title, "body": pr_body},
-              )
-          elif changes_made:
-              pr = github_request(
-                  "POST",
-                  "/pulls",
-                  {
-                      "base": "main",
-                      "head": head_branch,
-                      "title": pr_title,
-                      "body": pr_body,
-                      "draft": True,
-                  },
-              )
-          else:
-              print(
-                  f"Assessment expected documentation changes for {head_branch}, "
-                  "but Claude made no docs edits and no open PR exists. Skipping PR creation."
-              )
-              pr = None
-
-          output_path = os.environ["GITHUB_OUTPUT"]
-          with open(output_path, "a", encoding="utf-8") as fh:
-              if pr is None:
-                  fh.write("pr_number=\n")
-                  fh.write("pr_url=\n")
-              else:
-                  fh.write(f"pr_number={pr['number']}\n")
-                  fh.write(f"pr_url={pr['html_url']}\n")
-          PY
+          python3 tools/manage_docs_pr.py \
+            --target-repo topoteretes/cognee-docs \
+            --head-branch "${HEAD_BRANCH}" \
+            --pr-title "${PR_TITLE}" \
+            --pr-body "${PR_BODY}" \
+            --changes-made "${CHANGES_MADE}"
 
       - name: Summarize docs PR result
         env:

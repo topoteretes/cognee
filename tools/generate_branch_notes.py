@@ -29,6 +29,10 @@ except ModuleNotFoundError:
     )
 
 
+def read_tool_prompt(prompt_name: str) -> str:
+    return (Path(__file__).parent / "prompts" / prompt_name).read_text(encoding="utf-8")
+
+
 def collect_branch_payload(
     first_parent: str,
     second_parent: str,
@@ -80,12 +84,7 @@ async def generate_notes_with_llm(payload: dict[str, Any]) -> Any:
             description="What documentation areas may be affected"
         )
 
-    system_prompt = """You are a technical writer creating notes for a single merged branch in Cognee.
-
-Focus on user-facing changes, APIs, integrations, setup, and operational impact.
-Keep the output concise and concrete.
-"""
-
+    system_prompt = read_tool_prompt("branch_notes_system.txt")
     user_prompt = (
         f"Generate notes for this merged branch.\n\nBranch data:\n{json.dumps(payload, indent=2)}\n"
     )
