@@ -276,7 +276,12 @@ class ChromaDBAdapter(VectorDBInterface):
         metadatas = []
         for data_point in data_points:
             metadata = get_own_properties(data_point)
-            metadatas.append(process_data_for_chroma(metadata))
+            processed = process_data_for_chroma(metadata)
+            # belongs_to_set is serialized as a JSON string by process_data_for_chroma,
+            # but ChromaDB's $contains operator requires a native array. Restore it here.
+            if "belongs_to_set__list" in processed:
+                processed["belongs_to_set"] = json.loads(processed.pop("belongs_to_set__list"))
+            metadatas.append(processed)
 
         await collection.upsert(
             ids=ids, embeddings=embeddings, metadatas=metadatas, documents=texts

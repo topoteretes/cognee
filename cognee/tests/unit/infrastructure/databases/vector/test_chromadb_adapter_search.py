@@ -1,11 +1,12 @@
-"""Unit tests for ChromaDBAdapter.search() and batch_search().
+"""Unit tests for ChromaDBAdapter.search(), batch_search(), and create_data_points().
 
 Covers the include_payload flag (omit metadatas when False) and the
 node_name filtering support added in issue #2353.
 """
 
+import json
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 chromadb = pytest.importorskip("chromadb", reason="ChromaDB tests require chromadb")
@@ -114,7 +115,7 @@ async def test_search_node_name_single_applies_eq_filter():
 
     call_kwargs = collection.query.call_args[1]
     assert "where" in call_kwargs
-    assert call_kwargs["where"] == {"belongs_to_set": {"$eq": "Alice"}}
+    assert call_kwargs["where"] == {"belongs_to_set": {"$contains": "Alice"}}
 
 
 @pytest.mark.asyncio
@@ -137,7 +138,7 @@ async def test_search_node_name_or_operator_uses_dollar_or():
     assert "where" in call_kwargs
     where = call_kwargs["where"]
     assert "$or" in where
-    names = {clause["belongs_to_set"]["$eq"] for clause in where["$or"]}
+    names = {clause["belongs_to_set"]["$contains"] for clause in where["$or"]}
     assert names == {"Alice", "Bob"}
 
 
@@ -161,7 +162,7 @@ async def test_search_node_name_and_operator_uses_dollar_and():
     assert "where" in call_kwargs
     where = call_kwargs["where"]
     assert "$and" in where
-    names = {clause["belongs_to_set"]["$eq"] for clause in where["$and"]}
+    names = {clause["belongs_to_set"]["$contains"] for clause in where["$and"]}
     assert names == {"Alice", "Bob"}
 
 
@@ -228,4 +229,34 @@ async def test_batch_search_node_name_filter_is_forwarded():
 
     call_kwargs = collection.query.call_args[1]
     assert "where" in call_kwargs
-    assert call_kwargs["where"] == {"belongs_to_set": {"$eq": "Alice"}}
+    assert call_kwargs["where"] == {"belongs_to_set": {"$contains": "Alice"}}
+
+
+@pytest.mark.asyncio
+async def test_create_data_points_stores_belongs_to_set_as_native_list():
+    """belongs_to_set must be stored as a native array so $contains works in ChromaDB."""
+    from cognee.infrastructure.engine import DataPoint
+    from typing import Optional, List
+
+    class SampleDataPoint(DataPoint):
+        name: str
+        belongs_to_set: Optional[List[str]] = None
+        metadata: dict = {"index_fields": ["name"]}
+
+    adapter, collection = _make_adapter()
+
+    dp = SampleDataPoint(name="alice", belongs_to_set=["set_a", "set_b"])
+
+    collection.upsert = AsyncMock()
+
+    await adapter.create_data_points("test_col", [dp])
+
+    upsert_kwargs = collection.upsert.call_args[1]
+    stored_metadata = upsert_kwargs["metadatas"][0]
+
+    assert "belongs_to_set__list" not in stored_metadata, (
+        "belongs_to_set must not be stored as a JSON string — $contains requires a native array"
+    )
+    assert stored_metadata["belongs_to_set"] == ["set_a", "set_b"], (
+        "belongs_to_set must be stored as a native Python list for $contains filtering"
+    )
