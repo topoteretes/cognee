@@ -362,7 +362,29 @@ class ChromaDBAdapter(VectorDBInterface):
         node_name: Optional[List[str]],
         node_name_filter_operator: Literal["OR", "AND"],
     ) -> Optional[dict]:
-        """Build a ChromaDB ``where`` filter dict from node_name constraints."""
+        """
+        Build a ChromaDB ``where`` filter dict from node_name constraints.
+
+        Parameters:
+        -----------
+
+            - node_name (Optional[List[str]]): List of node names to filter by.
+              When None or empty, no filter is applied.
+            - node_name_filter_operator (Literal["OR", "AND"]): Logical operator
+              to combine multiple node_name entries. "OR" matches any name; "AND"
+              requires all names to be present in the ``belongs_to_set`` field.
+
+        Returns:
+        --------
+
+            Optional[dict]: A ChromaDB where clause dict using the ``$contains``
+            operator on ``belongs_to_set``, or None if no filter is needed.
+
+        Raises:
+        -------
+
+            ValueError: If node_name_filter_operator is not "OR" or "AND".
+        """
         if node_name_filter_operator not in ("OR", "AND"):
             raise ValueError(
                 f"Unsupported node_name_filter_operator: {node_name_filter_operator!r}. "
@@ -378,7 +400,24 @@ class ChromaDBAdapter(VectorDBInterface):
 
     @staticmethod
     def _build_include_list(include_payload: bool, with_vector: bool) -> List[str]:
-        """Build the ChromaDB ``include`` list based on caller requirements."""
+        """
+        Build the ChromaDB ``include`` list based on caller requirements.
+
+        Parameters:
+        -----------
+
+            - include_payload (bool): When True, includes "metadatas" in the result
+              to populate ``ScoredResult.payload``. When False, metadatas are omitted
+              to reduce memory overhead.
+            - with_vector (bool): When True, includes "embeddings" in the result to
+              populate ``ScoredResult.vector``.
+
+        Returns:
+        --------
+
+            List[str]: A list of ChromaDB include directives. Always contains
+            "distances"; conditionally contains "metadatas" and "embeddings".
+        """
         include = ["distances"]
         if include_payload:
             include.append("metadatas")
