@@ -1,31 +1,25 @@
 """Ordered chain of graph-database migrations.
 
-To add a migration, append a ``Migration`` whose ``down_revision`` is the
-previous entry's revision, e.g. ``down_revision=revision_id("previous_slug")``.
-Keep migrations idempotent so they are safe to run against both fresh and
-populated databases.
+To add a migration, implement it as ``async def migrate(graph_engine)`` in its
+own module under ``graph/`` and append a ``Migration`` here whose
+``down_revision`` is the previous entry's revision, e.g.
+``down_revision=revision_id("previous_slug")``. Keep migrations idempotent so
+they are safe to run against both fresh and populated databases.
 """
 
-import logging
-
 from cognee.modules.migrations.migration import Migration
-
-logger = logging.getLogger(__name__)
-
-
-async def _dummy_graph_migration(graph_engine) -> None:
-    """Placeholder graph migration. Swap for a real migration when needed.
-
-    A no-op beyond logging, so it is safe to run on any database.
-    """
-    logger.info("Running dummy graph migration (no-op placeholder).")
+from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
+    migrate as namespace_entity_type_node_ids,
+)
 
 
 GRAPH_MIGRATIONS: list[Migration] = [
+    # PR #2515: Entity/EntityType node IDs gained "type:" / "entity:" namespacing
+    # so Entity("x") and EntityType("x") stop colliding on the same UUID.
     Migration(
-        slug="dummy_graph_migration",
-        cognee_version="1.1.2",
-        up=_dummy_graph_migration,
+        slug="namespace_entity_type_node_ids",
+        cognee_version="1.2.0",
+        up=namespace_entity_type_node_ids,
         down_revision=None,
     ),
 ]

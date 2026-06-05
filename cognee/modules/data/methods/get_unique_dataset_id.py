@@ -12,6 +12,17 @@ async def get_unique_dataset_id(dataset_name: Union[str, UUID], user: User) -> U
     Function returns a unique UUID for dataset based on dataset name, user id and tenant id.
     If dataset with legacy ID exists, return that ID to maintain compatibility.
 
+    IMPORTANT — datasets are shared across users ONLY by dataset ID, never by name.
+    The ID derived from a name is namespaced by ``user.id`` (and ``user.tenant_id``),
+    so the *same* ``dataset_name`` resolves to a *different* UUID for a different
+    user/tenant. Therefore:
+      * To reference another user's (shared) dataset, pass its UUID — passing the
+        name will resolve to (or create) a *different* dataset owned by the caller.
+      * Code that must address a specific existing dataset regardless of caller
+        (migrations, cross-version/backwards-compat checks, background jobs) should
+        use the stored dataset ID (e.g. from the ``dataset_database`` rows), not the
+        name. A ``UUID`` passed here is returned unchanged precisely for this reason.
+
     Args:
         dataset_name: string representing the dataset name
         user: User object adding the dataset

@@ -5,7 +5,6 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import (
     generate_edge_name,
-    generate_node_id,
     generate_node_name,
 )
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
@@ -45,9 +44,9 @@ def _process_ontology_nodes(
     """Process and store ontology nodes"""
     for ontology_node in ontology_nodes:
         ont_node_id = (
-            generate_node_id(f"type:{ontology_node.name}")
+            EntityType.id_for(ontology_node.name)
             if ontology_node.category == "classes"
-            else generate_node_id(f"entity:{ontology_node.name}")
+            else Entity.id_for(ontology_node.name)
         )
         ont_node_name = generate_node_name(ontology_node.name)
 
@@ -84,10 +83,10 @@ def _process_ontology_edges(
     """Process ontology edges and add them if new"""
     node_category = {node.name: node.category for node in ontology_nodes}
     for source, relation, target in ontology_edges:
-        source_prefix = "type" if node_category.get(source) == "classes" else "entity"
-        target_prefix = "type" if node_category.get(target) == "classes" else "entity"
-        source_node_id = generate_node_id(f"{source_prefix}:{source}")
-        target_node_id = generate_node_id(f"{target_prefix}:{target}")
+        source_cls = EntityType if node_category.get(source) == "classes" else Entity
+        target_cls = EntityType if node_category.get(target) == "classes" else Entity
+        source_node_id = source_cls.id_for(source)
+        target_node_id = target_cls.id_for(target)
         relationship_name = generate_edge_name(relation)
         edge_key = _create_edge_key(source_node_id, target_node_id, relationship_name)
 
@@ -120,7 +119,7 @@ def _create_type_node(
     ontology_relationships: list,
 ) -> EntityType:
     """Create or retrieve a type node with ontology validation"""
-    node_id = generate_node_id(f"type:{node_type}")
+    node_id = EntityType.id_for(node_type)
     node_name = generate_node_name(node_type)
     type_node_key = _create_node_key(node_id, "type")
 
@@ -138,7 +137,7 @@ def _create_type_node(
 
     if ontology_validated:
         old_key = type_node_key
-        node_id = generate_node_id(f"type:{closest_class.name}")
+        node_id = EntityType.id_for(closest_class.name)
         type_node_key = _create_node_key(node_id, "type")
         new_node_name = generate_node_name(closest_class.name)
 
@@ -181,7 +180,7 @@ def _create_entity_node(
     ontology_relationships: list,
 ) -> Entity:
     """Create or retrieve an entity node with ontology validation"""
-    generated_node_id = generate_node_id(f"entity:{node_id}")
+    generated_node_id = Entity.id_for(node_id)
     generated_node_name = generate_node_name(node_name)
     entity_node_key = _create_node_key(generated_node_id, "entity")
 
@@ -199,7 +198,7 @@ def _create_entity_node(
 
     if ontology_validated:
         old_key = entity_node_key
-        generated_node_id = generate_node_id(f"entity:{start_ent_ont.name}")
+        generated_node_id = Entity.id_for(start_ent_ont.name)
         entity_node_key = _create_node_key(generated_node_id, "entity")
         new_node_name = generate_node_name(start_ent_ont.name)
 
@@ -301,8 +300,8 @@ def _process_graph_edges(
         source_id = name_mapping.get(generate_node_name(edge.source_node_id), edge.source_node_id)
         target_id = name_mapping.get(generate_node_name(edge.target_node_id), edge.target_node_id)
 
-        source_node_id = generate_node_id(f"entity:{source_id}")
-        target_node_id = generate_node_id(f"entity:{target_id}")
+        source_node_id = Entity.id_for(source_id)
+        target_node_id = Entity.id_for(target_id)
         relationship_name = generate_edge_name(edge.relationship_name)
         edge_key = _create_edge_key(source_node_id, target_node_id, relationship_name)
         edge_text = _strip_nonblank_text(edge.description)

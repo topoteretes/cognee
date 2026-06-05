@@ -15,6 +15,8 @@ from contextlib import nullcontext
 from typing import Any, Optional
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from cognee.version import get_cognee_version
 from cognee.context_global_variables import (
     backend_access_control_enabled,
@@ -106,10 +108,18 @@ async def get_or_create_global_dataset_database() -> DatasetDatabase:
             vector_migration_revision=head_revision(VECTOR_MIGRATIONS) if is_fresh else None,
             cognee_version=get_cognee_version(),
         )
-        session.add(record)
-        await session.commit()
-        await session.refresh(record)
-        return record
+        try:
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+            return record
+        except IntegrityError:
+            # Concurrent startup (e.g. multiple workers) already created it.
+            await session.rollback()
+            existing = await session.get(DatasetDatabase, GLOBAL_DATASET_ID)
+            if existing is None:
+                raise
+            return existing
 
 
 async def _store_revisions(

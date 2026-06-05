@@ -108,6 +108,12 @@ async def get_or_create_dataset_database(
         # If there are no existing rows build a new row. A freshly created
         # database is stamped at the current migration head so it skips all
         # existing migrations; cognee_version is recorded for audit only.
+        #
+        # Assumption: creating the row coincides with creating an EMPTY graph/
+        # vector DB, so head-stamping is correct. If a physical DB can outlive
+        # its dataset_database row and be re-attached (e.g. Neo4j CREATE DATABASE
+        # IF NOT EXISTS), this row would wrongly skip migrations on populated
+        # data — handle that case explicitly if/when that lifecycle is supported.
         record = DatasetDatabase(
             owner_id=user.id,
             dataset_id=dataset_id,

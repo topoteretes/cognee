@@ -79,7 +79,7 @@ async def _run():
         # migration runs, then the revision advances to head.
         await _clear_global_revisions()
         summary2 = await runner.run_database_migrations()
-        assert summary2[0]["graph_migrations_applied"] == ["dummy_graph_migration"]
+        assert summary2[0]["graph_migrations_applied"] == ["namespace_entity_type_node_ids"]
         assert summary2[0]["vector_migrations_applied"] == ["dummy_vector_migration"]
         row2 = await _get_global_row()
         assert row2.graph_migration_revision == head_revision(GRAPH_MIGRATIONS)

@@ -76,9 +76,11 @@ def test_disconnected_chain_raises():
         order_migrations([a, orphan])
 
 
-def test_dummy_migrations_present_and_skipped_at_head():
-    # A version-less database runs the dummy migration...
-    assert [m.slug for m in pending_migrations(GRAPH_MIGRATIONS, None)] == ["dummy_graph_migration"]
+def test_registered_migrations_present_and_skipped_at_head():
+    # A version-less database runs the registered migrations...
+    assert [m.slug for m in pending_migrations(GRAPH_MIGRATIONS, None)] == [
+        "namespace_entity_type_node_ids"
+    ]
     assert [m.slug for m in pending_migrations(VECTOR_MIGRATIONS, None)] == [
         "dummy_vector_migration"
     ]
