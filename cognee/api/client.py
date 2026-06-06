@@ -16,7 +16,6 @@ from fastapi.openapi.utils import get_openapi
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.api.v1.cloud.routers import get_checks_router
-from cognee.api.v1.notebooks.routers import get_notebooks_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -47,6 +46,7 @@ from cognee.api.v1.users.routers import (
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.agents.routers import get_agents_router
+from cognee.api.v1.visualize.routers import get_schema_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
@@ -254,6 +254,8 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
+app.include_router(get_schema_router(), prefix="/api/v1/schema", tags=["schema"])
+
 app.include_router(
     get_configuration_router(),
     prefix="/api/v1/configuration",
@@ -280,12 +282,6 @@ app.include_router(
     get_user_id_by_email_router(),
     prefix="/api/v1/users",
     tags=["users"],
-)
-
-app.include_router(
-    get_notebooks_router(),
-    prefix="/api/v1/notebooks",
-    tags=["notebooks"],
 )
 
 app.include_router(

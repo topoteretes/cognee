@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,7 +65,10 @@ class TestSkillContract(unittest.TestCase):
             skill = skills[0]
             assert skill.name == "code-review"
             assert skill.dataset_scope == [str(dataset.id)]
-            assert skill.source_file.endswith("code-review/SKILL.md")
+            # source_file/source_dir are native normalized paths (see
+            # skill_parser._normalize_path), so use os.sep rather than a
+            # hard-coded "/" — on Windows the separator is "\".
+            assert skill.source_file.endswith(os.path.join("code-review", "SKILL.md"))
             assert skill.source_dir.endswith("code-review")
             assert isinstance(skill.belongs_to_set[0], NodeSet)
             assert skill.belongs_to_set[0].name == "skills"

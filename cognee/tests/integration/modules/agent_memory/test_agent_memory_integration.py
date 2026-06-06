@@ -163,8 +163,8 @@ async def test_agent_memory_save_session_traces_does_not_require_dataset_permiss
         session_id="permissionless-trace",
     )
     assert len(entries) == 1
-    assert entries[0]["status"] == "success"
-    assert entries[0]["method_return_value"] == "ok"
+    assert entries[0].status == "success"
+    assert entries[0].method_return_value == "ok"
 
 
 @pytest.mark.asyncio
@@ -286,10 +286,10 @@ async def test_agent_memory_persists_trace_to_session_store_integration(
     )
 
     assert len(trace_entries) == 1
-    assert trace_entries[0]["origin_function"].endswith("traced_agent")
-    assert trace_entries[0]["status"] == "success"
-    assert trace_entries[0]["method_return_value"] == "agent-memory integration trace"
-    assert trace_entries[0]["session_feedback"] == (
+    assert trace_entries[0].origin_function.endswith("traced_agent")
+    assert trace_entries[0].status == "success"
+    assert trace_entries[0].method_return_value == "agent-memory integration trace"
+    assert trace_entries[0].session_feedback == (
         "test_agent_memory_persists_trace_to_session_store_integration.<locals>.traced_agent "
         "returned: agent-memory integration trace"
     )
@@ -402,7 +402,7 @@ async def test_agent_memory_can_disable_trace_summary_generation_integration(
     )
 
     assert len(trace_entries) == 1
-    assert trace_entries[0]["session_feedback"] == (
+    assert trace_entries[0].session_feedback == (
         "test_agent_memory_can_disable_trace_summary_generation_integration"
         ".<locals>.traced_agent succeeded."
     )
@@ -460,20 +460,20 @@ async def test_agent_memory_persists_full_trace_payload_with_cognee_memory_integ
 
     assert len(trace_entries) == 1
     trace_entry = trace_entries[0]
-    assert trace_entry["origin_function"].endswith("traced_agent")
-    assert trace_entry["status"] == "success"
+    assert trace_entry.origin_function.endswith("traced_agent")
+    assert trace_entry.status == "success"
     assert (
-        trace_entry["memory_query"]
+        trace_entry.memory_query
         == "What is the codename for the trace payload verification project?"
     )
-    assert "Relevant Cognee Memory:" in trace_entry["memory_context"]
-    assert "Aurora Finch" in trace_entry["memory_context"]
-    assert trace_entry["method_params"]["question"] == (
+    assert "Relevant Cognee Memory:" in trace_entry.memory_context
+    assert "Aurora Finch" in trace_entry.memory_context
+    assert trace_entry.method_params["question"] == (
         "What is the codename for the trace payload verification project?"
     )
-    assert trace_entry["method_return_value"] == {"answer": "done"}
-    assert trace_entry["error_message"] == ""
-    assert trace_entry["session_feedback"] == (
+    assert trace_entry.method_return_value == {"answer": "done"}
+    assert trace_entry.error_message == ""
+    assert trace_entry.session_feedback == (
         "test_agent_memory_persists_full_trace_payload_with_cognee_memory_integration"
         ".<locals>.traced_agent returned: {'answer': 'done'}"
     )
@@ -505,9 +505,9 @@ async def test_agent_memory_persists_error_trace_and_reraises_integration(
     )
 
     assert len(trace_entries) == 1
-    assert trace_entries[0]["status"] == "error"
-    assert trace_entries[0]["error_message"] == "integration failure"
-    assert trace_entries[0]["session_feedback"] == (
+    assert trace_entries[0].status == "error"
+    assert trace_entries[0].error_message == "integration failure"
+    assert trace_entries[0].session_feedback == (
         "test_agent_memory_persists_error_trace_and_reraises_integration.<locals>.failing_agent "
         "failed. Reason: integration failure."
     )
