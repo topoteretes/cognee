@@ -82,9 +82,22 @@ if [ -n "$API_URL" ]; then
             HOST_ADDR="host.lima.internal"
             echo "   ✓ Resolved via host.lima.internal (Colima / Lima)"
 
-        # 3. Fallback: default gateway IP (works on plain Linux Docker)
+        # 3. Fallback: default gateway IP (works on plain Linux Docker).
+        # Read it from /proc/net/route, which exists in every Linux container with
+        # no extra package. (The runtime image is debian-slim and does NOT ship the
+        # `ip` binary / iproute2, so `ip route` would fail and leave this empty.)
+        # awk only extracts the little-endian hex gateway of the default route
+        # (destination 00000000) — no gawk-only strtonum, so it works under mawk too.
         else
-            GATEWAY_IP=$(ip route | awk '/default/ {print $3}' 2>/dev/null || true)
+            GATEWAY_HEX=$(awk '$2 == "00000000" { print $3; exit }' /proc/net/route 2>/dev/null || true)
+            GATEWAY_IP=""
+            if [ -n "$GATEWAY_HEX" ]; then
+                # /proc/net/route stores the gateway little-endian, so reverse the
+                # byte pairs to get dotted-decimal (e.g. 010011AC -> 172.17.0.1).
+                GATEWAY_IP=$(printf "%d.%d.%d.%d" \
+                    "0x${GATEWAY_HEX:6:2}" "0x${GATEWAY_HEX:4:2}" \
+                    "0x${GATEWAY_HEX:2:2}" "0x${GATEWAY_HEX:0:2}" 2>/dev/null || true)
+            fi
             if [ -n "$GATEWAY_IP" ]; then
                 HOST_ADDR="$GATEWAY_IP"
                 echo "   ✓ Resolved via default gateway IP: $GATEWAY_IP"

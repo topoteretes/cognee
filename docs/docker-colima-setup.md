@@ -30,15 +30,20 @@ brew install colima docker
 # Basic start
 colima start
 
-# Recommended: enable host.docker.internal hostname resolution
+# Recommended: give the VM a host-reachable network address
 colima start --network-address
 ```
 
-> **Important:** Without `--network-address`, the hostname
-> `host.docker.internal` may not resolve inside containers. The cognee MCP
-> entrypoint includes automatic fallback logic (tries `host.docker.internal`,
-> then `host.lima.internal`, then the container's default gateway IP), but
-> starting Colima with `--network-address` avoids these workarounds entirely.
+> **Important:** `--network-address` does not itself add a `host.docker.internal`
+> DNS entry — it provisions a shared-network IP that is reachable from both the
+> Colima VM and the host. Colima maps `host.docker.internal` →
+> `host.lima.internal` by default (recent versions), so combined with a
+> reachable address `host.docker.internal` generally resolves; directly
+> resolving it to the `--network-address` IP is still an open request
+> ([abiosoft/colima#560](https://github.com/abiosoft/colima/issues/560)). The
+> cognee MCP entrypoint also includes automatic fallback logic (tries
+> `host.docker.internal`, then `host.lima.internal`, then the container's
+> default gateway IP), so the host-API flow works even without this flag.
 
 ### Verify
 
@@ -79,11 +84,25 @@ docker run --network host ...
 
 ### Colima: `host.docker.internal` does not resolve
 
-Start Colima with `--network-address`:
+First, give the VM a host-reachable address (most setups need only this):
 
 ```bash
 colima stop
 colima start --network-address
 ```
 
-This adds the `host.docker.internal` DNS entry inside the VM.
+This provisions a VM IP reachable from the host; `host.docker.internal` then
+typically resolves via Colima's default `host.docker.internal` →
+`host.lima.internal` mapping. Note that `--network-address` does **not** itself
+write a DNS entry.
+
+If the name still does not resolve (e.g. a missing or custom mapping), add it
+explicitly via `network.dnsHosts` in `~/.colima/default/colima.yaml`:
+
+```yaml
+network:
+  dnsHosts:
+    host.docker.internal: host.lima.internal
+```
+
+then `colima restart`.

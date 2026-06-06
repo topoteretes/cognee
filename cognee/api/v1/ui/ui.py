@@ -63,11 +63,16 @@ def _check_docker_available() -> Tuple[bool, str]:
             "  - Docker Desktop: open the Docker Desktop application.\n"
             "  - Colima: run `colima start`."
         )
-    except FileNotFoundError:
+    except (OSError, subprocess.SubprocessError) as e:
+        # Covers FileNotFoundError (binary vanished after the shutil.which check),
+        # PermissionError / "Exec format error" (TOCTOU race, noexec mount, foreign
+        # arch binary), and any other exec-time failure. Returning a tuple here keeps
+        # start_ui's graceful-skip guarantee total instead of crashing the UI launch.
         return False, (
-            "Docker CLI not found.\n"
+            f"Docker CLI could not be executed ({type(e).__name__}: {e}).\n"
             "Install Docker Desktop (https://www.docker.com/products/docker-desktop/) "
-            "or Colima (https://github.com/abiosoft/colima)."
+            "or Colima (https://github.com/abiosoft/colima) and ensure the `docker` "
+            "binary is on your PATH and executable."
         )
 
 
@@ -510,7 +515,18 @@ def start_ui(
     if start_mcp:
         try:
             image = "cognee/cognee-mcp:main"
-            subprocess.run(["docker", "pull", image], check=True)
+            # Bound the pull so a reachable-but-stalled daemon / registry can't hang
+            # start_ui indefinitely. On timeout, degrade to skipping MCP like the
+            # preflight failure path rather than blocking the whole UI launch.
+            try:
+                subprocess.run(["docker", "pull", image], check=True, timeout=300)
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    f"Timed out after 300s pulling Docker image '{image}'. "
+                    "The daemon is reachable but the pull stalled (slow network or "
+                    "registry). Skipping MCP server startup."
+                )
+                raise
 
             import uuid
 

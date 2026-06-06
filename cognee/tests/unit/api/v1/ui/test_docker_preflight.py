@@ -74,7 +74,22 @@ class TestCheckDockerAvailable:
             ok, msg = _check_docker_available()
 
         assert ok is False
-        assert "not found" in msg.lower()
+        # FileNotFoundError is handled by the broadened (OSError, SubprocessError)
+        # branch; the message names the error type and still points at install docs.
+        assert "FileNotFoundError" in msg
+        assert "Colima" in msg
+
+    def test_docker_exec_permission_error(self):
+        """A PermissionError at exec time (OSError subclass) must be caught, not raised."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("subprocess.run", side_effect=PermissionError("[Errno 13] Permission denied")),
+        ):
+            ok, msg = _check_docker_available()
+
+        assert ok is False
+        assert "PermissionError" in msg
+        assert "could not be executed" in msg.lower()
 
 
 class TestStartUiDockerIntegration:
