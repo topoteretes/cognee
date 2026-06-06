@@ -58,6 +58,16 @@ async def upsert_nodes(
 
     for start_index in range(0, len(node_rows), UPSERT_BATCH_SIZE):
         node_batch = node_rows[start_index : start_index + UPSERT_BATCH_SIZE]
+        # on_conflict_do_nothing intentionally preserves the FIRST run's
+        # pipeline_run_id on a re-cognify. The ledger id is keyed by logical
+        # identity (tenant/user/dataset/data_id/node) and NOT by run, so a single
+        # row tracks the run that originally created the node. Overwriting it with
+        # a later run's id would make that later run's rollback delete a node that
+        # an earlier (successful) run created — i.e. destroy pre-existing data.
+        # Keeping the original tag means rollback only removes artifacts the run
+        # actually introduced. (Re-writes of an existing node's attributes by a
+        # later run are not separately rolled back; restoring those would require
+        # per-run snapshots, which is out of scope.)
         upsert_statement = (
             insert(Node).values(node_batch).on_conflict_do_nothing(index_elements=["id"])
         )

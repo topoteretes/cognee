@@ -150,6 +150,19 @@ async def run_tasks(
                     message="Pipeline run failed. Data item could not be processed."
                 )
 
+            # Flush durable storage BEFORE marking the run complete. If a push
+            # fails it must be treated as a failure of this run (rollback +
+            # PipelineRunErrored), not raised after the run has already been
+            # reported as completed — which would both roll back already-completed
+            # data and emit two contradictory terminal events for one run.
+            graph_engine = await get_graph_engine()
+            if hasattr(graph_engine, "push_to_s3"):
+                await graph_engine.push_to_s3()
+
+            relational_engine = get_relational_engine()
+            if hasattr(relational_engine, "push_to_s3"):
+                await relational_engine.push_to_s3()
+
             await log_pipeline_run_complete(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
             )
@@ -160,14 +173,6 @@ async def run_tasks(
                 dataset_name=dataset.name,
                 data_ingestion_info=results,
             )
-
-            graph_engine = await get_graph_engine()
-            if hasattr(graph_engine, "push_to_s3"):
-                await graph_engine.push_to_s3()
-
-            relational_engine = get_relational_engine()
-            if hasattr(relational_engine, "push_to_s3"):
-                await relational_engine.push_to_s3()
 
         except Exception as error:
             if callable(rollback_handler):
