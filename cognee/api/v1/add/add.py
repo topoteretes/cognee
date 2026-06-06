@@ -246,7 +246,7 @@ async def add(
         - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
-        - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
+        - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
