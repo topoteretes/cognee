@@ -56,7 +56,7 @@ async def get_search_type_retriever_instance(
         retriever_specific_config = {}
 
     # Extract common defaults with fallback values from kwargs
-    top_k = kwargs.get("top_k", 10)
+    top_k = kwargs.get("top_k", 15)
     system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
     system_prompt = kwargs.get("system_prompt")
     node_type = kwargs.get("node_type", NodeSet)

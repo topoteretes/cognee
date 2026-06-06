@@ -148,7 +148,7 @@ class CogneeApiClient:
         query: str,
         search_type: str = "GRAPH_COMPLETION",
         datasets: Optional[list[str]] = None,
-        top_k: int = 10,
+        top_k: int = 15,
     ) -> list:
         payload: dict[str, Any] = {
             "query": query,
@@ -287,7 +287,7 @@ class CogneeApiClient:
         query: str,
         search_type: Optional[str] = "GRAPH_COMPLETION",
         datasets: Optional[list[str]] = None,
-        top_k: int = 10,
+        top_k: int = 15,
         system_prompt: Optional[str] = None,
         session_id: Optional[str] = None,
         node_name: Optional[list[str]] = None,
