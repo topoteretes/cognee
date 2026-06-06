@@ -169,9 +169,12 @@ def _create_vector_engine(
     This function initializes and returns a database adapter for vector storage, depending
     on the provided vector database provider. The function checks for required credentials
     for each provider, raising an EnvironmentError if any are missing, or ImportError if the
-    ChromaDB package is not installed.
+    provider's package is not installed.
 
-    Supported providers include: pgvector, ChromaDB, and LanceDB.
+    Built-in providers include: pgvector, LanceDB, and neptune_analytics. Additional
+    providers (e.g. ChromaDB, Qdrant, Weaviate, Milvus) are available as community
+    adapters that register themselves via ``use_vector_adapter`` — see
+    https://github.com/topoteretes/cognee-community.
 
     Parameters:
     -----------
@@ -265,22 +268,6 @@ def _create_vector_engine(
             embedding_engine,
         )
 
-    elif vector_db_provider.lower() == "chromadb":
-        try:
-            import chromadb
-        except ImportError:
-            raise ImportError(
-                "ChromaDB is not installed. Please install it with 'pip install chromadb'"
-            )
-
-        from .chromadb.ChromaDBAdapter import ChromaDBAdapter
-
-        return ChromaDBAdapter(
-            url=vector_db_url,
-            api_key=vector_db_key,
-            embedding_engine=embedding_engine,
-        )
-
     elif vector_db_provider.lower() == "neptune_analytics":
         try:
             from langchain_aws import NeptuneAnalyticsGraph
@@ -328,5 +315,5 @@ def _create_vector_engine(
     else:
         raise EnvironmentError(
             f"Unsupported vector database provider: {vector_db_provider}. "
-            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'ChromaDB'])}"
+            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics'])}"
         )
