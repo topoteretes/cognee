@@ -483,6 +483,83 @@ class PostgresAdapter(GraphDBInterface):
 
             return nodes, edges
 
+    async def get_id_filtered_graph_data(
+        self, target_ids: list[str]
+    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        """Retrieve graph data filtered by specific node IDs, including their direct neighbors
+        and only edges where one endpoint matches those IDs.
+
+        Mirrors the Neo4j/Ladybug implementations so that Postgres-backed graphs
+        also benefit from ID-filtered projection instead of falling back to full-graph
+        retrieval (which silently degrades retrieval quality — see #2720).
+
+        Parameters:
+        -----------
+            target_ids: Node IDs to seed the subgraph. Direct neighbors are included,
+                and only edges with at least one endpoint in target_ids are returned.
+
+        Returns:
+        --------
+            A tuple of (nodes, edges) in the same format as get_graph_data().
+        """
+        import time
+
+        start_time = time.time()
+
+        if not target_ids:
+            logger.warning("No target IDs provided for ID-filtered graph retrieval.")
+            return [], []
+
+        async with self._session() as session:
+            # Fetch nodes that are either in target_ids or are direct neighbors
+            node_result = await session.execute(
+                text("""
+                    SELECT DISTINCT n.id, n.name, n.type, n.properties
+                    FROM graph_node n
+                    WHERE n.id IN :target_ids
+                       OR n.id IN (
+                           SELECT e.source_id FROM graph_edge e WHERE e.target_id IN :target_ids
+                           UNION
+                           SELECT e.target_id FROM graph_edge e WHERE e.source_id IN :target_ids
+                       )
+                """),
+                {"target_ids": tuple(target_ids)},
+            )
+            nodes = []
+            node_ids = set()
+            for row in node_result.fetchall():
+                data = {"name": row[1], "type": row[2]}
+                if row[3]:
+                    data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
+                nodes.append((row[0], data))
+                node_ids.add(row[0])
+
+            if not nodes:
+                return [], []
+
+            # Fetch only edges where at least one endpoint is in target_ids
+            edge_result = await session.execute(
+                text("""
+                    SELECT source_id, target_id, relationship_name, properties
+                    FROM graph_edge
+                    WHERE source_id IN :target_ids OR target_id IN :target_ids
+                """),
+                {"target_ids": tuple(target_ids)},
+            )
+            edges = []
+            for row in edge_result.fetchall():
+                props = {}
+                if row[3]:
+                    props = row[3] if isinstance(row[3], dict) else json.loads(row[3])
+                edges.append((row[0], row[1], row[2], props))
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"ID-filtered retrieval: {len(nodes)} nodes and {len(edges)} edges in {retrieval_time:.2f}s"
+            )
+
+            return nodes, edges
+
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:

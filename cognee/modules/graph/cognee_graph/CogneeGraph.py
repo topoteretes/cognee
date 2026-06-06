@@ -132,7 +132,13 @@ class CogneeGraph(CogneeAbstractGraph):
             logger.info("Retrieving ID-filtered graph from database.")
             nodes_data, edges_data = await get_graph_data_fn(target_ids=relevant_ids_to_filter)
         else:
-            logger.info("Retrieving full graph from database.")
+            logger.warning(
+                "Graph adapter %s does not implement get_id_filtered_graph_data; "
+                "falling back to full graph retrieval. This silently degrades retrieval "
+                "quality because the graph projection is not filtered by vector search hits. "
+                "See issue #2720.",
+                type(adapter).__name__,
+            )
             nodes_data, edges_data = await get_graph_data_fn()
         if hasattr(adapter, "get_id_filtered_graph_data") and (not nodes_data or not edges_data):
             logger.warning(
