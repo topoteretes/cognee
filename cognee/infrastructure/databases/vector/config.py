@@ -1,7 +1,9 @@
+import json
 import os
 import pydantic
 from pathlib import Path
 from functools import lru_cache
+from typing import Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.base_config import get_base_config
@@ -33,6 +35,7 @@ class VectorConfig(BaseSettings):
     vector_db_password: str = ""
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
+    vector_pool_args: Union[str, None] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -47,6 +50,22 @@ class VectorConfig(BaseSettings):
         self.vector_dataset_database_handler = vector_dataset_database_handler
         if provider == "pgvector" and vector_dataset_database_handler in ("lancedb", "pgvector"):
             self.vector_dataset_database_handler = "pgvector"
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def parse_vector_pool_args(self):
+        if self.vector_pool_args and isinstance(self.vector_pool_args, str):
+            try:
+                parsed = json.loads(self.vector_pool_args)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"VECTOR_POOL_ARGS must be valid JSON: {e.msg} (line {e.lineno}, column {e.colno})"
+                ) from e
+            if isinstance(parsed, dict):
+                # Stored as sorted tuple for hashability (cache key compatibility).
+                self.vector_pool_args = tuple(sorted(parsed.items()))
+            else:
+                raise ValueError("VECTOR_POOL_ARGS must be a JSON string representing a dictionary")
         return self
 
     @pydantic.model_validator(mode="after")
