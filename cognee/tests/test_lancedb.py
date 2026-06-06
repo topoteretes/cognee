@@ -332,5 +332,22 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+    import faulthandler
+    import sys
+
+    # Backstop: if the run wedges — e.g. the intermittent subprocess-worker
+    # teardown hang tracked in topoteretes/cognee#2997 — dump every thread's
+    # stack to stderr and exit, instead of silently hanging until the CI/job
+    # timeout fires with no diagnostics. Generous so it never trips a healthy run.
+    faulthandler.dump_traceback_later(30 * 60, exit=True)
 
     asyncio.run(main())
+
+    # All assertions above passed. Subprocess-worker teardown can intermittently
+    # hang the interpreter at exit (#2997); since the functional test has already
+    # succeeded, flush output and exit promptly rather than risk wedging cleanup.
+    # Workers self-reap via their parent-liveness watchdog (harness.py), so this
+    # leaves no orphaned DB processes or held file locks.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
