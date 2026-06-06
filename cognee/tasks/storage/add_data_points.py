@@ -78,9 +78,9 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    edges = ensure_default_edge_properties(edges)
+    edges = ensure_default_edge_properties(edges, nodes=nodes)
     custom_edges = (
-        ensure_default_edge_properties(custom_edges)
+        ensure_default_edge_properties(custom_edges, nodes=nodes)
         if isinstance(custom_edges, list) and custom_edges
         else None
     )
@@ -137,6 +137,8 @@ async def add_data_points(
 
     if custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
+        # Note: custom_edges is already normalized (with nodes) above, before the
+        # rollback-ledger upsert, so no second ensure_default_edge_properties here.
         if use_hybrid:
             await graph_engine.add_edges_with_vectors(custom_edges)
         else:

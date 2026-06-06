@@ -55,6 +55,7 @@ jobs:
       - name: Run COT retriever integration test
         env:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
         run: |
           uv run pytest cognee/tests/integration/retrieval/test_graph_completion_retriever_cot.py -v --timeout=300
 

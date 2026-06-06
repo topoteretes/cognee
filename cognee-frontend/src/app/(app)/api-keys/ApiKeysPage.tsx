@@ -2,9 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
+import UpgradeBanner from "@/ui/elements/UpgradeBanner";
 import getApiKeys from "@/modules/apiKeys/getApiKeys";
 import createApiKey from "@/modules/apiKeys/createAPIKey";
 import deleteApiKey from "@/modules/apiKeys/deleteAPIKey";
+import getMyUserId from "@/modules/apiKeys/getMyUserId";
+import { TrackPageView, trackEvent } from "@/modules/analytics";
 
 interface ApiKey {
   id: string;
@@ -35,7 +38,7 @@ const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8
 
 export default function ApiKeysPage() {
   const { cogniInstance, serviceUrl, isInitializing } = useCogniInstance();
-  const { tenant } = useTenant();
+  const { tenant, hasAccess } = useTenant();
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -53,18 +56,14 @@ export default function ApiKeysPage() {
   useEffect(() => {
     if (isInitializing) return;
     loadKeys();
-    // Fetch user ID (graceful) — only if tenant instance is available
-    if (cogniInstance) {
-      cogniInstance.fetch("/v1/users/me").then((r) => r.ok ? r.json() : null).then((data) => {
-        if (data) setUserId(data.id || null);
-      }).catch(() => {});
-    }
+    // Fetch user ID from control plane (not tenant pod)
+    getMyUserId().then((id) => { if (id) setUserId(id); }).catch(() => {});
   }, [cogniInstance, isInitializing]);
 
   async function loadKeys() {
     try {
       const data = await getApiKeys();
-      setKeys(Array.isArray(data) ? data.map((k) => ({ id: k.id, name: k.name || k.label || "", label: k.label, key: k.api_key, isNew: false })) : []);
+      setKeys(Array.isArray(data) ? data.map((k) => ({ ...k, name: k.name || k.label || "", isNew: false })) : []);
     } catch {
       setKeys([]);
     } finally {
@@ -76,21 +75,20 @@ export default function ApiKeysPage() {
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      const newKey = await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
+      const created = await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
+      trackEvent({ pageName: "API Keys", eventName: "api_key_created", additionalProperties: { key_name: newName.trim() } });
+      setKeys((prev) => [
+        {
+          id: created.id,
+          key: created.key,
+          label: created.label || created.key,
+          name: created.name || newName.trim(),
+          isNew: true,
+        },
+        ...prev.filter((k) => k.id !== created.id),
+      ]);
       setNewName("");
       setShowCreateModal(false);
-      // Reload the list, then mark the new key so the full value is shown once
-      const data = await getApiKeys();
-      const mapped = Array.isArray(data) ? data.map((k) => {
-        const mapped_key = { id: k.id, name: k.name || k.label || "", label: k.label, key: k.api_key, isNew: false };
-        // Match the newly created key and show its full value
-        if (k.api_key === newKey || (newKey && k.api_key.startsWith(newKey.slice(0, 8)))) {
-          mapped_key.key = newKey;
-          mapped_key.isNew = true;
-        }
-        return mapped_key;
-      }) : [];
-      setKeys(mapped);
     } catch (err) {
       console.error("Failed to create key:", err);
     } finally {
@@ -101,6 +99,7 @@ export default function ApiKeysPage() {
   async function handleRevoke(id: string) {
     try {
       await deleteApiKey(id);
+      trackEvent({ pageName: "API Keys", eventName: "api_key_revoked", additionalProperties: { key_id: id } });
       setKeys((prev) => prev.filter((k) => k.id !== id));
     } catch (err) {
       console.error("Failed to revoke key:", err);
@@ -109,30 +108,33 @@ export default function ApiKeysPage() {
 
   function handleCopy(id: string, key: string) {
     navigator.clipboard.writeText(key).catch(() => {});
+    trackEvent({ pageName: "API Keys", eventName: "api_key_copied" });
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1500);
   }
 
   if (loading || isInitializing) {
     return (
-      <div style={{ padding: 32, display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+      <><TrackPageView page="API Keys" /><div style={{ padding: 32, display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
         <span style={{ fontSize: 14, color: "#71717A" }}>Loading API keys...</span>
-      </div>
+      </div></>
     );
   }
 
   return (
     <div style={{ padding: 32, display: "flex", flexDirection: "column", gap: 24, fontFamily: '"Inter", system-ui, sans-serif' }}>
+      {!hasAccess && <UpgradeBanner />}
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 600, color: "#18181B", margin: 0 }}>API Keys</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 300, color: "#18181B", margin: 0, fontFamily: '"TWK Lausanne", system-ui, sans-serif' }}>API Keys</h1>
           <span style={{ fontSize: 14, color: "#71717A" }}>Manage keys for programmatic access to the Cognee API.</span>
         </div>
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={() => { trackEvent({ pageName: "API Keys", eventName: "api_key_create_clicked" }); setShowCreateModal(true); }}
+          disabled={!hasAccess}
           className="cursor-pointer hover:bg-cognee-purple-hover"
-          style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}
+          style={{ background: hasAccess ? "#6510F4" : "#E4E4E7", color: hasAccess ? "#fff" : "#A1A1AA", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, cursor: hasAccess ? "pointer" : "not-allowed" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
           Create new key
@@ -228,6 +230,7 @@ export default function ApiKeysPage() {
           href={isDev ? "https://api.dev-aws.cognee.ai/docs" : "https://api.aws.cognee.ai/docs"}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={() => trackEvent({ pageName: "API Keys", eventName: "click_out", additionalProperties: { target_url: isDev ? "https://api.dev-aws.cognee.ai/docs" : "https://api.aws.cognee.ai/docs" } })}
           style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "1px solid #E4E4E7", borderRadius: 10, padding: "14px 18px", textDecoration: "none", transition: "border-color 150ms" }}
           className="hover:border-cognee-purple"
         >
@@ -243,6 +246,7 @@ export default function ApiKeysPage() {
             href={apiDocsUrl}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => trackEvent({ pageName: "API Keys", eventName: "click_out", additionalProperties: { target_url: apiDocsUrl! } })}
             style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "1px solid #E4E4E7", borderRadius: 10, padding: "14px 18px", textDecoration: "none", transition: "border-color 150ms" }}
             className="hover:border-cognee-purple"
           >
@@ -306,8 +310,9 @@ export default function ApiKeysPage() {
             <div style={{ width: 80, display: "flex", justifyContent: "flex-end" }}>
               <button
                 onClick={() => handleRevoke(k.id)}
+                disabled={!hasAccess}
                 className="cursor-pointer hover:underline"
-                style={{ background: "none", border: "none", fontSize: 13, color: "#EF4444", fontFamily: "inherit" }}
+                style={{ background: "none", border: "none", fontSize: 13, color: hasAccess ? "#EF4444" : "#A1A1AA", fontFamily: "inherit", cursor: hasAccess ? "pointer" : "not-allowed" }}
               >
                 Revoke
               </button>
@@ -323,9 +328,10 @@ export default function ApiKeysPage() {
             <span style={{ fontSize: 14, color: "#71717A" }}>No API keys yet</span>
             <span style={{ fontSize: 13, color: "#A1A1AA" }}>Create one to connect agents or use the API programmatically.</span>
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => { trackEvent({ pageName: "API Keys", eventName: "api_key_create_clicked" }); setShowCreateModal(true); }}
+              disabled={!hasAccess}
               className="cursor-pointer hover:bg-cognee-purple-hover"
-              style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 500, marginTop: 4 }}
+              style={{ background: hasAccess ? "#6510F4" : "#E4E4E7", color: hasAccess ? "#fff" : "#A1A1AA", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 500, marginTop: 4, cursor: hasAccess ? "pointer" : "not-allowed" }}
             >
               Create your first key
             </button>
@@ -336,11 +342,13 @@ export default function ApiKeysPage() {
   );
 }
 
+const COPY_FIELD_MAP: Record<string, string> = { url: "api_base_url", tenant: "tenant_id", user: "user_id", header: "auth_header" };
+
 function CopyBtn({ id, text, copiedField, setCopiedField, light }: { id: string; text: string; copiedField: string | null; setCopiedField: (v: string | null) => void; light?: boolean }) {
   const isCopied = copiedField === id;
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(text); setCopiedField(id); setTimeout(() => setCopiedField(null), 1500); }}
+      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(text); trackEvent({ pageName: "API Keys", eventName: "api_connection_detail_copied", additionalProperties: { field: COPY_FIELD_MAP[id] || id } }); setCopiedField(id); setTimeout(() => setCopiedField(null), 1500); }}
       className="cursor-pointer hover:opacity-80 rounded p-1 active:scale-90 transition-all"
       style={{ background: "none", border: "none", flexShrink: 0, display: "flex" }}
       title="Copy"

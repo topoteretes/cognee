@@ -1,12 +1,14 @@
 import asyncio
 from os import path
 from typing import Any
+
 from pydantic import SkipValidation
-from cognee.api.v1.visualize.visualize import visualize_graph
+
+import cognee
+from cognee import visualize_graph
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.tasks.storage import add_data_points
-import cognee
 
 
 class Employee(DataPoint):
@@ -22,8 +24,7 @@ class Company(DataPoint):
 
 async def main():
     # Clear the database for a clean state
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     # Create employees
     michael = Employee(name="Michael", role="Regional Manager")

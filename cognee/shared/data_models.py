@@ -32,6 +32,10 @@ if get_llm_config().llm_provider.lower() == "gemini":
         source_node_id: str
         target_node_id: str
         relationship_name: str
+        description: str | None = Field(
+            None,
+            description="Concrete one-sentence fact expressed by this edge, using endpoint names.",
+        )
 
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""
@@ -61,6 +65,10 @@ else:
         source_node_id: str
         target_node_id: str
         relationship_name: str
+        description: str | None = Field(
+            None,
+            description="Concrete one-sentence fact expressed by this edge, using endpoint names.",
+        )
 
     class KnowledgeGraph(BaseModel):
         """Knowledge graph."""

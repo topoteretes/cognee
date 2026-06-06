@@ -148,7 +148,7 @@ class CogneeApiClient:
         query: str,
         search_type: str = "GRAPH_COMPLETION",
         datasets: Optional[list[str]] = None,
-        top_k: int = 10,
+        top_k: int = 15,
     ) -> list:
         payload: dict[str, Any] = {
             "query": query,
@@ -287,7 +287,7 @@ class CogneeApiClient:
         query: str,
         search_type: Optional[str] = "GRAPH_COMPLETION",
         datasets: Optional[list[str]] = None,
-        top_k: int = 10,
+        top_k: int = 15,
         system_prompt: Optional[str] = None,
         session_id: Optional[str] = None,
         node_name: Optional[list[str]] = None,
@@ -343,6 +343,7 @@ class CogneeApiClient:
     def forget(
         self,
         dataset: Optional[str] = None,
+        dataset_id: Optional[str] = None,
         data_id: Optional[str] = None,
         everything: bool = False,
         memory_only: bool = False,
@@ -353,6 +354,8 @@ class CogneeApiClient:
         }
         if dataset is not None:
             payload["dataset"] = str(dataset)
+        if dataset_id is not None:
+            payload["dataset_id"] = str(dataset_id)
         if data_id is not None:
             payload["data_id"] = str(data_id)
         r = self._get_client().post(self._url("/api/v1/forget"), json=payload)

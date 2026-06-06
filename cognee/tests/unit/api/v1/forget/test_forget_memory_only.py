@@ -308,7 +308,7 @@ async def test_forget_memory_only_without_dataset_raises(monkeypatch):
             forget_module, "set_database_global_context_variables", return_value=_NoOpAsyncContext()
         ),
     ):
-        with pytest.raises(ValueError, match="memory_only requires dataset"):
+        with pytest.raises(ValueError, match="memory_only requires dataset or dataset_id"):
             await forget_module.forget(memory_only=True)
 
 

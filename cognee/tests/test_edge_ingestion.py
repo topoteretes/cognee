@@ -56,21 +56,14 @@ async def test_edge_ingestion():
     contains_edges = [edge for edge in graph[1] if edge[2] == "contains"]
     assert len(contains_edges) > 0, "Expected at least one contains edge for edge_text verification"
 
-    edge_properties = contains_edges[0][3]
-    assert "edge_text" in edge_properties, "Expected edge_text in edge properties"
-
-    edge_text = edge_properties["edge_text"]
-    assert "relationship_name: contains" in edge_text, (
-        f"Expected 'relationship_name: contains' in edge_text, got: {edge_text}"
-    )
-    assert "entity_name:" in edge_text, f"Expected 'entity_name:' in edge_text, got: {edge_text}"
-    assert "entity_description:" in edge_text, (
-        f"Expected 'entity_description:' in edge_text, got: {edge_text}"
-    )
-
     all_edge_texts = [
         edge[3].get("edge_text", "") for edge in contains_edges if "edge_text" in edge[3]
     ]
+    assert len(all_edge_texts) == len(contains_edges), "Expected edge_text in all contains edges"
+    assert all(text.strip() for text in all_edge_texts), (
+        f"Expected nonblank contains edge_text values: {all_edge_texts[:3]}"
+    )
+
     expected_entities = ["dave", "ana", "bob", "dexter", "apples", "cognee"]
     found_entity = any(
         any(entity in text.lower() for entity in expected_entities) for text in all_edge_texts

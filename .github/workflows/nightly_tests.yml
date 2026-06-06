@@ -1,0 +1,127 @@
+name: Nightly Tests
+permissions:
+  contents: read
+  packages: write
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+  ollama-tests:
+    name: Ollama Tests
+    uses: ./.github/workflows/test_ollama.yml
+    secrets: inherit
+
+  llamacpp-tests:
+    name: Llama-cpp Tests
+    uses: ./.github/workflows/test_llamacpp.yml
+    secrets: inherit
+
+  performance-llm:
+    name: Performance (real LLM)
+    uses: ./.github/workflows/performance_report.yml
+    with:
+      mode: llm
+    secrets: inherit
+
+  performance-mock:
+    name: Performance (mock LLM)
+    uses: ./.github/workflows/performance_report.yml
+    with:
+      mode: mock_llm
+    secrets: inherit
+
+  notify:
+    name: Test Completion Status
+    needs: [
+      ollama-tests,
+      llamacpp-tests,
+      performance-llm,
+      performance-mock,
+    ]
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Determine status
+        id: status
+        run: |
+          if [[ "${{ needs.ollama-tests.result }}" == "success" &&
+                "${{ needs.llamacpp-tests.result }}" == "success" ]]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+            echo "emoji=✅" >> "$GITHUB_OUTPUT"
+            echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+            echo "emoji=❌" >> "$GITHUB_OUTPUT"
+            echo "summary=One or more nightly test suites failed." >> "$GITHUB_OUTPUT"
+          fi
+          echo "ran_at=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+
+      - name: Presign performance report links
+        id: presign
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+          LLM_KEY: ${{ needs.performance-llm.outputs.html_key }}
+          MOCK_KEY: ${{ needs.performance-mock.outputs.html_key }}
+        run: |
+          set -euo pipefail
+          # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
+          # Guard for empty keys (a failed perf job produces no report).
+          if [ -n "${LLM_KEY:-}" ]; then
+            echo "url_llm=$(aws s3 presign "s3://$BUCKET/$LLM_KEY" --expires-in 604800)" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${MOCK_KEY:-}" ]; then
+            echo "url_mock=$(aws s3 presign "s3://$BUCKET/$MOCK_KEY" --expires-in 604800)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post status to Slack
+        uses: slackapi/slack-github-action@v2.1.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}
+          payload: |
+            channel: ${{ secrets.SLACK_NIGHTLY_CHANNEL_ID }}
+            text: "${{ steps.status.outputs.emoji }} Nightly Tests (${{ steps.status.outputs.ran_at }}): ${{ steps.status.outputs.summary }}"
+            blocks:
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    ${{ steps.status.outputs.emoji }} *Nightly Tests* — ${{ steps.status.outputs.summary }}
+                    *Ran at:* `${{ steps.status.outputs.ran_at }}`
+                    *Ollama:* `${{ needs.ollama-tests.result }}`  •  *Llama-cpp:* `${{ needs.llamacpp-tests.result }}`
+
+                    *📊 Performance — Real LLM* (`${{ needs.performance-llm.result }}`)  •  runs `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_llm }}|HTML report>
+
+                    *📊 Performance — Mock LLM* (`${{ needs.performance-mock.result }}`)  •  runs `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_mock }}|HTML report>
+
+                    <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+
+      - name: Fail if any suite failed
+        if: ${{ steps.status.outputs.passed != 'true' }}
+        run: |
+          echo "One or more nightly test suites failed."
+          exit 1

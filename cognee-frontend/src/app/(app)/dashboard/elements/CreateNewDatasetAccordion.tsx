@@ -28,7 +28,7 @@ export default function CreateNewDatasetModal({
     <Modal isOpen={isOpen}>
       <div className="w-full max-w-2xl">
         <div className="flex flex-row items-center justify-between">
-          <span className="text-2xl">Create a new dataset?</span>
+          <span className="text-2xl">Create a new brain?</span>
           <IconButton
             disabled={isNewDatasetPending}
             onClick={closeNewDatasetModal}
@@ -37,7 +37,7 @@ export default function CreateNewDatasetModal({
           </IconButton>
         </div>
         <div className="mt-8 mb-6">
-          Please provide a name for the dataset being created.
+          Please provide a name for the brain being created.
         </div>
         <form onSubmit={handleNewDatasetSubmitConfirm}>
           <div className="max-w-md">

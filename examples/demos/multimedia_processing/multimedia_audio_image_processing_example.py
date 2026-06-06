@@ -1,10 +1,10 @@
-import os
 import asyncio
+import os
 import pathlib
-from cognee.shared.logging_utils import setup_logging, ERROR
 
 import cognee
-from cognee.api.v1.search import SearchType
+from cognee import SearchType
+from cognee.shared.logging_utils import ERROR, setup_logging
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -14,8 +14,7 @@ from cognee.api.v1.search import SearchType
 
 async def main():
     # Create a clean slate for cognee -- reset data and system state
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     # cognee knowledge graph will be created based on the text
     # and description of these files
@@ -28,14 +27,11 @@ async def main():
         "data/example.png",
     )
 
-    # Add the files, and make it available for cognify
-    await cognee.add([mp3_file_path, png_file_path])
-
-    # Use LLMs and cognee to create knowledge graph
-    await cognee.cognify()
+    # Remember the files and create knowledge graph memory
+    await cognee.remember([mp3_file_path, png_file_path], self_improvement=False)
 
     # Query cognee for summaries of the data in the multimedia files
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.SUMMARIES,
         query_text="What is in the multimedia files?",
     )
