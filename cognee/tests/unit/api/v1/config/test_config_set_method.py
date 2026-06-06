@@ -28,7 +28,7 @@ class TestConfigSetMethod:
 
     def test_set_vector_db_provider(self):
         """Test setting vector DB provider through generic set method."""
-        config.set("vector_db_provider", "chromadb")
+        config.set("vector_db_provider", "lancedb")
 
     def test_set_graph_database_subprocess_enabled(self):
         """Test enabling graph subprocess adapters through generic set method."""
