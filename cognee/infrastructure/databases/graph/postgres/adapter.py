@@ -516,11 +516,11 @@ class PostgresAdapter(GraphDBInterface):
                 text("""
                     SELECT DISTINCT n.id, n.name, n.type, n.properties
                     FROM graph_node n
-                    WHERE n.id IN :target_ids
+                    WHERE n.id = ANY(:target_ids)
                        OR n.id IN (
-                           SELECT e.source_id FROM graph_edge e WHERE e.target_id IN :target_ids
+                           SELECT e.source_id FROM graph_edge e WHERE e.target_id = ANY(:target_ids)
                            UNION
-                           SELECT e.target_id FROM graph_edge e WHERE e.source_id IN :target_ids
+                           SELECT e.target_id FROM graph_edge e WHERE e.source_id = ANY(:target_ids)
                        )
                 """),
                 {"target_ids": tuple(target_ids)},
@@ -542,7 +542,7 @@ class PostgresAdapter(GraphDBInterface):
                 text("""
                     SELECT source_id, target_id, relationship_name, properties
                     FROM graph_edge
-                    WHERE source_id IN :target_ids OR target_id IN :target_ids
+                    WHERE source_id = ANY(:target_ids) OR target_id = ANY(:target_ids)
                 """),
                 {"target_ids": tuple(target_ids)},
             )
