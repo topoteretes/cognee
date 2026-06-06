@@ -491,6 +491,24 @@ def test_get_ontology_resolver_from_env_resolver_functionality():
     assert start_node is None
 
 
+def test_file_object_ontology_loading_guesses_turtle_format():
+    """Test loading a Turtle ontology from a file-like object."""
+    import io
+
+    ttl = """
+        @prefix ex: <http://example.org/test#> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+        ex:Car a owl:Class .
+    """
+    ontology_file = io.StringIO(ttl)
+    ontology_file.name = "ontology.ttl"
+
+    resolver = RDFLibOntologyResolver(ontology_file=ontology_file)
+
+    assert resolver.graph is not None
+    assert "car" in resolver.lookup["classes"]
+
 def test_multifile_ontology_loading_success():
     """Test successful loading of multiple ontology files."""
     ns1 = Namespace("http://example.org/cars#")
