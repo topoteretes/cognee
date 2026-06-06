@@ -1244,7 +1244,15 @@ canvas.addEventListener("mousemove",function(ev){
 
 canvas.addEventListener("mouseup",function(){
   if(isDragging&&dragNode){
-    dragNode.fx=null;dragNode.fy=null;
+    // Story mode: restore the layout pin so the node doesn't drift in the
+    // still-warm simulation. Other modes: pin at drop position.
+    if(layoutMode==="story"&&typeof dragNode._targetX==="number"){
+      dragNode.fx=dragNode._targetX;
+      dragNode.fy=dragNode._targetY;
+    }else{
+      dragNode.fx=dragNode.x;
+      dragNode.fy=dragNode.y;
+    }
     simulation.alphaTarget(0);
   }
   isDragging=false;dragNode=null;isPanning=false;
@@ -1252,7 +1260,14 @@ canvas.addEventListener("mouseup",function(){
 });
 
 canvas.addEventListener("mouseleave",function(){
-  if(isDragging&&dragNode){dragNode.fx=null;dragNode.fy=null;simulation.alphaTarget(0)}
+  if(isDragging&&dragNode){
+    if(layoutMode==="story"&&typeof dragNode._targetX==="number"){
+      dragNode.fx=dragNode._targetX;dragNode.fy=dragNode._targetY;
+    }else{
+      dragNode.fx=dragNode.x;dragNode.fy=dragNode.y;
+    }
+    simulation.alphaTarget(0);
+  }
   isDragging=false;dragNode=null;isPanning=false;
   hoveredNode=null;draw();
 });
