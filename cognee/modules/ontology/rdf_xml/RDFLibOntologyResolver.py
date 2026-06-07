@@ -29,6 +29,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         self,
         ontology_file: Optional[Union[str, List[str], IO, List[IO]]] = None,
         matching_strategy: Optional[MatchingStrategy] = None,
+        ontology_format: Optional[str] = None,
     ) -> None:
         super().__init__(matching_strategy)
         self.ontology_file = ontology_file
@@ -58,8 +59,11 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     for file_obj in file_objects:
                         try:
                             content = file_obj.read()
-                            guessed_format = guess_format(getattr(file_obj, "name", ""))
-                            formats = [guessed_format] if guessed_format else []
+                            source_name = getattr(file_obj, "name", "")
+                            guessed_format = guess_format(source_name)
+                            formats = [ontology_format] if ontology_format else []
+                            if guessed_format and guessed_format not in formats:
+                                formats.append(guessed_format)
                             formats.extend(
                                 rdf_format
                                 for rdf_format in ("xml", "turtle", "n3", "json-ld", "nt")
@@ -73,6 +77,11 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                                 except Exception:
                                     continue
                                 self.graph += graph
+                                logger.info(
+                                    "Successfully parsed ontology file object '%s' using format: %s",
+                                    source_name or "<unnamed>",
+                                    rdf_format,
+                                )
                                 break
                             else:
                                 raise ValueError("No supported RDF format could parse file object")
