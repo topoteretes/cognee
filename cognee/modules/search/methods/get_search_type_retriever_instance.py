@@ -68,6 +68,7 @@ async def get_search_type_retriever_instance(
     session_id = kwargs.get("session_id")
     neighborhood_depth = kwargs.get("neighborhood_depth")
     neighborhood_seed_top_k = kwargs.get("neighborhood_seed_top_k")
+    wide_search_max_distance = kwargs.get("wide_search_max_distance", 1.5)
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
@@ -116,6 +117,7 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "include_global_context_index": retriever_specific_config.get(
                     "include_global_context_index", False
                 ),
@@ -140,6 +142,7 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "decomposition_mode": retriever_specific_config.get(
                     "decomposition_mode", "answer_per_subquery"
                 ),
@@ -155,6 +158,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "max_iter": retriever_specific_config.get("max_iter", 4),
@@ -186,6 +190,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "context_extension_rounds": retriever_specific_config.get(
@@ -207,6 +212,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "session_id": session_id,
@@ -242,6 +248,7 @@ async def get_search_type_retriever_instance(
             {
                 "top_k": top_k,
                 "wide_search_top_k": wide_search_top_k,
+                "wide_search_max_distance": wide_search_max_distance,
                 "triplet_distance_penalty": triplet_distance_penalty,
                 "feedback_influence": feedback_influence,
                 "session_id": session_id,
@@ -306,6 +313,7 @@ async def get_search_type_retriever_instance(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             wide_search_top_k=wide_search_top_k,
+            wide_search_max_distance=wide_search_max_distance,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
             session_id=session_id,

@@ -159,6 +159,7 @@ async def authorized_search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
+    wide_search_max_distance: Optional[float] = 1.5,
 ) -> List[SearchResultPayload]:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
@@ -189,6 +190,7 @@ async def authorized_search(
         retriever_specific_config=retriever_specific_config,
         neighborhood_depth=neighborhood_depth,
         neighborhood_seed_top_k=neighborhood_seed_top_k,
+        wide_search_max_distance=wide_search_max_distance,
     )
 
     return search_results
@@ -213,6 +215,7 @@ async def search_in_datasets_context(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
+    wide_search_max_distance: Optional[float] = 1.5,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -237,6 +240,7 @@ async def search_in_datasets_context(
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = None,
+        wide_search_max_distance: Optional[float] = 1.5,
     ) -> SearchResultPayload:
         with new_span("cognee.search.dataset") as span:
             span.set_attribute("cognee.search.dataset_name", dataset.name or "")
