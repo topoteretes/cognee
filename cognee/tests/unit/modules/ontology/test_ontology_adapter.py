@@ -509,6 +509,7 @@ def test_file_object_ontology_loading_guesses_turtle_format():
     assert resolver.graph is not None
     assert "car" in resolver.lookup["classes"]
 
+
 def test_multifile_ontology_loading_success():
     """Test successful loading of multiple ontology files."""
     ns1 = Namespace("http://example.org/cars#")
