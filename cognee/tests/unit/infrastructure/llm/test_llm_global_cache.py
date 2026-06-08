@@ -60,8 +60,10 @@ async def test_set_database_global_context_variables_applies_llm_config(monkeypa
     from uuid import uuid4
 
     # Before the context is applied the active model is the global one, which is
-    # different from the override we are about to set.
-    assert get_llm_client().model != OPENAI_MODEL
+    # different from the override we are about to set. Pass raise_api_key_error=False
+    # so this precondition stays hermetic: it only inspects the model and must not
+    # depend on the ambient .env providing a global LLM_API_KEY.
+    assert get_llm_client(raise_api_key_error=False).model != OPENAI_MODEL
 
     async with set_database_global_context_variables(
         "test_dataset", uuid4(), llm_config=_openai_config()
