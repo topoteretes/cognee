@@ -106,9 +106,7 @@ jobs:
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: |
           set -euo pipefail
           TS="$(date -u '+%Y-%m-%d_%H-%M-%SZ')"
@@ -226,9 +224,7 @@ jobs:
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           # Full Postgres stack (creds match the postgres service above; mirrors e2e_tests.yml).
           DB_PROVIDER: 'postgres'
           DB_HOST: '127.0.0.1'
