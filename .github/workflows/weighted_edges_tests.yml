@@ -74,9 +74,7 @@ jobs:
       LLM_API_VERSION: "2024-02-01"
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -117,9 +115,7 @@ jobs:
       LLM_API_VERSION: "2024-02-01"
       EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
 
     steps:
       - name: Check out repository
