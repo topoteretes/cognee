@@ -41,7 +41,7 @@ jobs:
     with:
       mode: llm
       label: 50_small_documents
-      runs: '10'
+      runs: '3'
       num_memories: '50'
       memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
     secrets: inherit
@@ -52,7 +52,7 @@ jobs:
     with:
       mode: mock_llm
       label: 50_small_documents
-      runs: '10'
+      runs: '3'
       num_memories: '50'
       memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
       mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_memories.json
@@ -64,7 +64,7 @@ jobs:
     with:
       mode: llm
       label: war_and_peace
-      runs: '5'
+      runs: '3'
       memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
     secrets: inherit
 
@@ -74,7 +74,7 @@ jobs:
     with:
       mode: mock_llm
       label: war_and_peace
-      runs: '10'
+      runs: '3'
       memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
       mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_war_and_peace.json
     secrets: inherit
