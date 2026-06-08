@@ -7,6 +7,8 @@ from typing_extensions import TypedDict
 
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.memory.entries import normalize_scope
@@ -334,6 +336,8 @@ async def recall(
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
     user: object | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
 ) -> list[RecallResponse]:
     """Search the knowledge graph for relevant information.
 
@@ -546,6 +550,8 @@ async def recall(
                 retriever_specific_config=retriever_specific_config,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
             )
 
             tagged = []

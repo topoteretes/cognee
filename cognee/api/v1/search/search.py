@@ -4,6 +4,8 @@ from typing import Union, Optional, List, Type
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.models import Skill
 from cognee.modules.users.models import User
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
@@ -49,6 +51,8 @@ async def search(
     skills: Optional[List[Union[str, Skill]]] = None,
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
@@ -322,6 +326,8 @@ async def search(
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
         )
 
         n = len(filtered_search_results) if filtered_search_results else 0

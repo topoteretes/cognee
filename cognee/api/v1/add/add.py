@@ -5,6 +5,8 @@ from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
 
 from cognee.modules.users.models import User
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
@@ -110,6 +112,8 @@ async def add(
     data_per_batch: Optional[int] = 20,
     importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
     **kwargs,
 ):
     """
@@ -322,6 +326,8 @@ async def add(
         use_pipeline_cache=True,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
