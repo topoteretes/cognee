@@ -41,8 +41,16 @@ class Employee(DataPoint):
     metadata: dict = {"index_fields": ["name"]}
 
 
+class MultiFieldNode(DataPoint):
+    name: str
+    primary: List[Any] = None
+    secondary: List[Any] = None
+    metadata: dict = {"index_fields": ["name"]}
+
+
 DocumentChunk.model_rebuild()
 Company.model_rebuild()
+MultiFieldNode.model_rebuild()
 
 
 @pytest.mark.asyncio
@@ -228,3 +236,65 @@ async def test_get_graph_from_model_flexible_edges():
     employee_ids = {str(emp.id) for emp in [manager, sales1, sales2, admin1, admin2]}
     edge_target_ids = {str(edge[1]) for edge in edges}
     assert employee_ids.issubset(edge_target_ids), "Not all employees are connected"
+
+
+@pytest.mark.asyncio
+async def test_same_field_same_target_distinct_relationships_both_survive():
+    """Tests two relationship types to the same target via one field are both kept."""
+    bob = Employee(name="Bob", role="Engineer")
+    company = Company(
+        name="Acme",
+        employees=[
+            (Edge(relationship_type="manages"), bob),
+            (Edge(relationship_type="mentors"), bob),
+        ],
+    )
+
+    nodes, edges = await get_graph_from_model(company, {}, {}, {})
+
+    # company + bob (bob is a single node despite two edges)
+    assert len(nodes) == 2, f"Expected 2 nodes, got {len(nodes)}"
+
+    bob_rels = sorted(edge[2] for edge in edges if str(edge[1]) == str(bob.id))
+    assert bob_rels == ["manages", "mentors"], (
+        f"Expected both 'manages' and 'mentors' edges to Bob, got {bob_rels}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_same_triple_via_two_fields_collapses_to_single_edge():
+    """Tests the same relationship to one target via two fields yields a single edge."""
+    bob = Employee(name="Bob", role="Engineer")
+    node = MultiFieldNode(
+        name="Root",
+        primary=[(Edge(relationship_type="knows"), bob)],
+        secondary=[(Edge(relationship_type="knows"), bob)],
+    )
+
+    nodes, edges = await get_graph_from_model(node, {}, {}, {})
+
+    knows_edges = [edge for edge in edges if edge[2] == "knows" and str(edge[1]) == str(bob.id)]
+    assert len(knows_edges) == 1, f"Expected 1 'knows' edge, got {len(knows_edges)}"
+
+
+@pytest.mark.asyncio
+async def test_distinct_relationships_survive_deduplication():
+    """Tests distinct relationships to the same target survive edge deduplication."""
+    from cognee.modules.graph.utils import deduplicate_nodes_and_edges
+
+    bob = Employee(name="Bob", role="Engineer")
+    company = Company(
+        name="Acme",
+        employees=[
+            (Edge(relationship_type="manages"), bob),
+            (Edge(relationship_type="mentors"), bob),
+        ],
+    )
+
+    nodes, edges = await get_graph_from_model(company, {}, {}, {})
+    _, deduped_edges = deduplicate_nodes_and_edges(nodes, edges)
+
+    bob_rels = sorted(edge[2] for edge in deduped_edges if str(edge[1]) == str(bob.id))
+    assert bob_rels == ["manages", "mentors"], (
+        f"Lost a relationship after deduplication: {bob_rels}"
+    )
