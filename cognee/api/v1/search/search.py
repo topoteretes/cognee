@@ -33,7 +33,7 @@ async def search(
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
     system_prompt: Optional[str] = None,
-    top_k: int = 10,
+    top_k: int = 15,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
@@ -195,7 +195,7 @@ async def search(
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Medium speed, specialized for code understanding
         - **FEELING_LUCKY**: Variable speed, uses LLM + search type selection intelligently
-        - **top_k**: Start with 10, increase for comprehensive analysis (max 100)
+        - **top_k**: Start with 15, increase for comprehensive analysis (max 100)
         - **datasets**: Specify datasets to improve speed and relevance
 
     Next Steps After Search:

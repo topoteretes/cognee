@@ -34,7 +34,7 @@ class RecallPayloadDTO(InDTO):
         default="Answer the question using the provided context. Be as brief as possible."
     )
     node_name: Optional[list[str]] = Field(default=None, example=[])
-    top_k: Optional[int] = Field(default=10)
+    top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
     session_id: Optional[str] = Field(default=None, examples=[None])
@@ -94,7 +94,7 @@ def get_recall_router() -> APIRouter:
         - **query** (str): The search query string
         - **system_prompt** (Optional[str]): System prompt for completion searches
         - **node_name** (Optional[List[str]]): Filter to specific node sets
-        - **top_k** (Optional[int]): Maximum results (default: 10)
+        - **top_k** (Optional[int]): Maximum results (default: 15)
         - **only_context** (bool): Return only the LLM context
         - **verbose** (bool): Verbose output
 

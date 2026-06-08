@@ -11,7 +11,7 @@ class JaccardChunksRetriever(LexicalRetriever):
 
     def __init__(
         self,
-        top_k: int = 10,
+        top_k: int = 15,
         with_scores: bool = False,
         stop_words: Optional[list[str]] = None,
         multiset_jaccard: bool = False,
