@@ -66,6 +66,31 @@ async def test_empty_query_returns_empty_list():
 
 
 @pytest.mark.asyncio
+async def test_stop_words_filtered_by_default():
+    # "the" is a default stop word: it is dropped from both query and corpus, so a
+    # query of only stop words yields no usable tokens and returns nothing.
+    corpus = {"chunk_a": "the the the", "chunk_b": "the project"}
+    retriever = BM25ChunksRetriever(top_k=3)
+
+    with _patch_graph(corpus):
+        results = await retriever.get_retrieved_objects("the")
+
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_stop_words_can_be_disabled():
+    corpus = {"chunk_a": "the the the", "chunk_b": "the project"}
+    retriever = BM25ChunksRetriever(top_k=3, stop_words=[])
+
+    with _patch_graph(corpus):
+        results = await retriever.get_retrieved_objects("the")
+
+    # With filtering disabled, "the" is a real term and both chunks are scorable.
+    assert len(results) == 2
+
+
+@pytest.mark.asyncio
 async def test_no_match_query_returns_zero_scored_chunks():
     corpus = {"chunk_a": "alpha beta", "chunk_b": "gamma delta"}
     retriever = BM25ChunksRetriever(top_k=3, with_scores=True)

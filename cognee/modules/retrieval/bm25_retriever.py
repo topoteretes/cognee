@@ -3,6 +3,7 @@ from collections import Counter
 from typing import Optional
 
 from cognee.modules.retrieval.lexical_retriever import LexicalRetriever, tokenize_words
+from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 
 
 class BM25ChunksRetriever(LexicalRetriever):
@@ -30,13 +31,17 @@ class BM25ChunksRetriever(LexicalRetriever):
         with_scores : bool
             If True, return (payload, score) pairs. Otherwise, only payloads.
         stop_words : list[str], optional
-            Tokens to filter out during tokenization.
+            Tokens to filter out during tokenization. Defaults to DEFAULT_STOP_WORDS;
+            pass an empty list to disable stopword filtering.
         k1 : float
             BM25 term-frequency saturation parameter.
         b : float
             BM25 length-normalization parameter.
         """
-        self.stop_words = {t.lower() for t in stop_words} if stop_words else set()
+        if stop_words is None:
+            self.stop_words = set(DEFAULT_STOP_WORDS)
+        else:
+            self.stop_words = {t.lower() for t in stop_words}
         self.k1 = k1
         self.b = b
 
