@@ -63,9 +63,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: uv run python ./cognee/tests/test_pgvector.py
 
@@ -110,9 +108,7 @@ jobs:
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           VECTOR_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
           VECTOR_DB_PORT: 5432
           VECTOR_DB_USERNAME: cognee
@@ -145,7 +141,5 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_lancedb.py
