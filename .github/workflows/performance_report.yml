@@ -101,10 +101,8 @@ jobs:
           # LLM + embedding config via the standard CI secrets (see e2e_tests.yml).
           # Only exercised for mode == 'llm'; the mock run hits no external APIs.
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: |
@@ -219,10 +217,8 @@ jobs:
           # LLM + embedding config via the standard CI secrets (see e2e_tests.yml).
           # Only exercised for mode == 'llm'; the mock run hits no external APIs.
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           # Full Postgres stack (creds match the postgres service above; mirrors e2e_tests.yml).
