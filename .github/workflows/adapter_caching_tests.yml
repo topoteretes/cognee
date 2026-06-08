@@ -38,9 +38,9 @@ on:
       EMBEDDING_ENDPOINT:
         required: false
       EMBEDDING_API_KEY:
-        required: false
-      EMBEDDING_API_VERSION:
         required: true
+      EMBEDDING_API_VERSION:
+        required: false
 
 jobs:
   run-ladybug-lance-sqlite-caching:
