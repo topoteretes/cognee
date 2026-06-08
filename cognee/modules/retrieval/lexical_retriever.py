@@ -13,7 +13,7 @@ logger = get_logger("LexicalRetriever")
 
 class LexicalRetriever(BaseRetriever):
     def __init__(
-        self, tokenizer: Callable, scorer: Callable, top_k: int = 10, with_scores: bool = False
+        self, tokenizer: Callable, scorer: Callable, top_k: int = 15, with_scores: bool = False
     ):
         if not callable(tokenizer) or not callable(scorer):
             raise TypeError("tokenizer and scorer must be callables")

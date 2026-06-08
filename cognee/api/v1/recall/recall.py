@@ -155,7 +155,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 async def _search_session(
     query_text: str,
     session_id: str,
-    top_k: int = 10,
+    top_k: int = 15,
     user: str | None = None,
     _parent_span=None,
 ) -> list[ResponseQAEntry]:
@@ -213,7 +213,7 @@ async def _search_session(
 async def _search_trace(
     query_text: str,
     session_id: str,
-    top_k: int = 10,
+    top_k: int = 15,
     user: str | None = None,
 ) -> list[ResponseAgentTraceEntry]:
     """Search session-cache agent trace steps by keyword matching.
@@ -317,7 +317,7 @@ async def recall(
     *,
     datasets: list[str] | None = None,
     dataset_ids: list[UUID] | None = None,
-    top_k: int = 10,
+    top_k: int = 15,
     auto_route: bool = True,
     scope: str | list[str] | None = None,
     system_prompt: str | None = None,
@@ -356,7 +356,7 @@ async def recall(
         query_type: Search strategy. When provided, the router is bypassed.
         datasets: Dataset names to search within.
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
-        top_k: Maximum results to return (default *10*).
+        top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to GRAPH_COMPLETION.
 

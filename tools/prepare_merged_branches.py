@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Collect PR-integrated branches from a target branch within a configurable UTC lookback window.
+Collect PRs merged into a target branch within a configurable UTC lookback window.
 
 When GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are present, this script writes the same
 workflow outputs and summary content expected by dev_previous_day_commits.yml.
@@ -9,12 +9,11 @@ workflow outputs and summary content expected by dev_previous_day_commits.yml.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
-import shutil
 import subprocess
-import urllib.error
 import urllib.request
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -26,9 +25,9 @@ def git(*args: str) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Collect merged branches from a git branch")
+    parser = argparse.ArgumentParser(description="Collect PRs merged into a git branch")
     parser.add_argument(
-        "--branch", default="origin/dev", help="Git ref to inspect for merge commits"
+        "--branch", default="origin/dev", help="Target branch to inspect for merged PRs"
     )
     parser.add_argument(
         "--lookback-days",
@@ -88,22 +87,6 @@ def resolve_time_window(
     return start, end, window_label
 
 
-def try_gh_head_ref(pr_number: str) -> str | None:
-    if shutil.which("gh") is None:
-        return None
-
-    try:
-        result = subprocess.check_output(
-            ["gh", "pr", "view", pr_number, "--json", "headRefName", "--jq", ".headRefName"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-    return result or None
-
-
 def parse_github_repo(repo_url: str) -> str | None:
     ssh_match = re.match(r"git@github\.com:([^/]+/[^/]+?)(?:\.git)?$", repo_url)
     if ssh_match:
@@ -128,12 +111,9 @@ def get_github_repo(explicit_repo: str | None) -> str | None:
     return parse_github_repo(remote_url)
 
 
-def try_github_api_head_ref(pr_number: str, repo: str | None) -> str | None:
-    if not repo:
-        return None
-
+def github_api_json(url: str) -> Any:
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{repo}/pulls/{pr_number}",
+        url,
         headers={
             "Accept": "application/vnd.github+json",
             "User-Agent": "prepare_merged_branches.py",
@@ -143,90 +123,74 @@ def try_github_api_head_ref(pr_number: str, repo: str | None) -> str | None:
     if token:
         request.add_header("Authorization", f"Bearer {token}")
 
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
-        return None
-
-    head = payload.get("head")
-    if isinstance(head, dict):
-        ref = head.get("ref")
-        if isinstance(ref, str) and ref.strip():
-            return ref.strip()
-
-    return None
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
-def extract_subject_pr_number(subject: str) -> str | None:
-    merge_subject_match = re.search(r"^Merge pull request #(\d+)\b", subject)
-    if merge_subject_match:
-        return merge_subject_match.group(1)
+def search_merged_pr_numbers(
+    repo: str, base_branch: str, start: datetime, end: datetime
+) -> list[int]:
+    from urllib.parse import quote
 
-    squash_subject_match = re.search(r"\(#(\d+)\)$", subject.strip())
-    if squash_subject_match:
-        return squash_subject_match.group(1)
-
-    return None
-
-
-def extract_pr_number(subject: str, body: str) -> str | None:
-    subject_pr_number = extract_subject_pr_number(subject)
-    if subject_pr_number:
-        return subject_pr_number
-
-    for text in (subject, body):
-        pr_match = re.search(r"#(\d+)", text)
-        if pr_match:
-            return pr_match.group(1)
-    return None
-
-
-def find_branch_ref(text: str) -> str | None:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-
-        pr_match = re.search(
-            r"^Merge pull request #\d+ from [^/\s]+/([A-Za-z0-9._/\-]+)$", stripped
-        )
-        if pr_match:
-            return pr_match.group(1)
-
-        from_match = re.search(r"^from [^/\s]+/([A-Za-z0-9._/\-]+)$", stripped)
-        if from_match:
-            return from_match.group(1)
-
-    return None
-
-
-def get_branch_name(subject: str, body: str, merge_sha: str, repo: str | None) -> str:
-    pr_match = re.search(r"^Merge pull request #\d+ from [^/\s]+/([A-Za-z0-9._/\-]+)$", subject)
-    if pr_match:
-        return pr_match.group(1).strip()
-
-    branch_match = re.search(r"Merge branch '([^']+)'", subject)
-    if branch_match:
-        return branch_match.group(1).strip()
-
-    body_ref = find_branch_ref(body)
-    if body_ref:
-        return body_ref
-
-    pr_number = extract_pr_number(subject, body)
-    if pr_number:
-        api_head_ref = try_github_api_head_ref(pr_number, repo)
-        if api_head_ref:
-            return api_head_ref
-
-        head_ref = try_gh_head_ref(pr_number)
-        if head_ref:
-            return head_ref
-
-    raise RuntimeError(
-        f"Could not resolve branch name for commit {merge_sha} from subject/body metadata."
+    query = " ".join(
+        [
+            f"repo:{repo}",
+            "is:pr",
+            "is:merged",
+            f"base:{base_branch}",
+            f"merged:{start.date().isoformat()}..{end.date().isoformat()}",
+        ]
     )
+    numbers: list[int] = []
+    for page in range(1, 11):
+        url = (
+            "https://api.github.com/search/issues"
+            f"?q={quote(query)}&sort=updated&order=desc&per_page=100&page={page}"
+        )
+        payload = github_api_json(url)
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        if not items:
+            break
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            number = item.get("number")
+            if isinstance(number, int):
+                numbers.append(number)
+
+        if len(items) < 100:
+            break
+
+    return numbers
+
+
+def get_pull_request(repo: str, pr_number: int) -> dict[str, Any]:
+    payload = github_api_json(f"https://api.github.com/repos/{repo}/pulls/{pr_number}")
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Unexpected GitHub API response for PR #{pr_number}.")
+    return payload
+
+
+def parse_github_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def get_commit_parents(commit_sha: str) -> list[str]:
+    line = git("rev-list", "--parents", "-n", "1", commit_sha)
+    parts = line.split()
+    return parts[1:]
+
+
+def resolve_pr_diff_range(merge_sha: str) -> tuple[str, str]:
+    parents = get_commit_parents(merge_sha)
+    if len(parents) >= 2:
+        return parents[0], parents[1]
+    if len(parents) == 1:
+        return parents[0], merge_sha
+    raise RuntimeError(f"Could not resolve parents for merged PR commit {merge_sha}.")
 
 
 def collect_merges(
@@ -235,53 +199,58 @@ def collect_merges(
     effective_lookback = max(1, lookback_days)
     start, end, window_label = resolve_time_window(effective_lookback, anchor_date)
 
-    raw_log = git(
-        "log",
-        branch,
-        "--first-parent",
-        f"--since={start.strftime('%Y-%m-%dT%H:%M:%SZ')}",
-        f"--until={end.strftime('%Y-%m-%dT%H:%M:%SZ')}",
-        "--pretty=format:%H%x1f%P%x1f%s%x1f%b%x1e",
-    )
+    github_repo = get_github_repo(repo)
+    if not github_repo:
+        raise RuntimeError(
+            "Could not determine GitHub repository. Pass --repo owner/repo or configure origin."
+        )
 
+    base_branch = branch.removeprefix("origin/")
     merges = []
-    for record in raw_log.split("\x1e"):
-        if not record.strip():
-            continue
-        merge_sha, parents, subject, body = record.strip().split("\x1f", 3)
-        parent_parts = parents.split()
-        if not parent_parts:
+    for pr_number in search_merged_pr_numbers(github_repo, base_branch, start, end):
+        pr = get_pull_request(github_repo, pr_number)
+        merged_at = parse_github_timestamp(pr.get("merged_at"))
+        if merged_at is None or not (start <= merged_at <= end):
             continue
 
-        pr_number = extract_subject_pr_number(subject)
-        is_merge_commit = len(parent_parts) >= 2
-        is_squash_merged_pr = len(parent_parts) == 1 and pr_number is not None
-        if not is_merge_commit and not is_squash_merged_pr:
+        merge_sha = pr.get("merge_commit_sha")
+        if not isinstance(merge_sha, str) or not merge_sha:
             continue
 
-        branch_name = get_branch_name(subject, body, merge_sha, repo)
+        first_parent, second_parent = resolve_pr_diff_range(merge_sha)
+        head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
+        branch_name = str(head.get("ref") or f"pr-{pr_number}")
         safe_branch = re.sub(r"[^a-z0-9]+", "-", branch_name.lower()).strip("-")
         if not safe_branch:
             raise RuntimeError(
-                f"Could not derive a safe branch slug from branch name {branch_name!r} for merge {merge_sha}."
+                f"Could not derive a safe branch slug from branch name {branch_name!r} for PR #{pr_number}."
             )
 
-        first_parent = parent_parts[0]
-        second_parent = parent_parts[1] if is_merge_commit else merge_sha
+        title = str(pr.get("title") or f"PR #{pr_number}")
+        body = str(pr.get("body") or "")
+        body_b64 = base64.b64encode(body[:4000].encode("utf-8")).decode("ascii")
         merges.append(
             {
+                "pr_number": pr_number,
+                "pr_title": title,
+                "pr_body_b64": body_b64,
+                "pr_url": pr.get("html_url") or "",
+                "merged_at": merged_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "merge_sha": merge_sha,
                 "short_sha": merge_sha[:7],
                 "first_parent": first_parent,
                 "second_parent": second_parent,
                 "branch_name": branch_name,
                 "safe_branch": safe_branch,
-                "subject": subject,
+                "subject": f"PR #{pr_number}: {title}",
             }
         )
 
+    merges.sort(key=lambda item: item["merged_at"])
+
     merge_lines = [
-        f"- {item['branch_name']} ({item['short_sha']}): {item['subject']}" for item in merges
+        f"- #{item['pr_number']} {item['branch_name']} ({item['short_sha']}): {item['pr_title']}"
+        for item in merges
     ]
 
     return {
@@ -306,7 +275,7 @@ def format_time_window(payload: dict[str, Any]) -> str:
 
 def format_no_merges_message(payload: dict[str, Any], markdown_branch: bool = False) -> str:
     branch = f"`{payload['branch']}`" if markdown_branch else payload["branch"]
-    return f"No branches were merged into {branch} during the {payload['window_label']}."
+    return f"No PRs were merged into {branch} during the {payload['window_label']}."
 
 
 def get_merge_summary_lines(payload: dict[str, Any], markdown_branch: bool = False) -> list[str]:
@@ -339,18 +308,18 @@ def write_github_summary(payload: dict[str, Any]) -> None:
 
     summary_path = Path(github_summary)
     with summary_path.open("a", encoding="utf-8") as fh:
-        fh.write("## Merged branches on dev\n\n")
+        fh.write("## Merged PRs on dev\n\n")
         fh.write(f"- Source branch: `{payload['branch']}`\n")
         fh.write(f"- Lookback days: `{payload['lookback_days']}`\n")
         fh.write(f"- Time window (UTC): `{format_time_window(payload)}`\n\n")
         if payload["merge_lines"]:
-            fh.write("### Merged branches\n\n")
+            fh.write("### Merged PRs\n\n")
         fh.write("\n".join(get_merge_summary_lines(payload, markdown_branch=True)))
         fh.write("\n")
 
 
 def print_console_summary(payload: dict[str, Any]) -> None:
-    print(f"Merged branches on {payload['branch']}")
+    print(f"Merged PRs on {payload['branch']}")
     print(f"Lookback days: {payload['lookback_days']}")
     print(f"Time window (UTC): {format_time_window(payload)}")
     for line in get_merge_summary_lines(payload):
