@@ -136,14 +136,15 @@ async def test_chunks_retriever_receives_nodeset_filter_arguments():
 
 
 @pytest.mark.asyncio
-async def test_chunks_lexical_returns_jaccard_tools():
+async def test_chunks_lexical_returns_bm25_retriever():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
-    from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
+    from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 
     retriever_instance = await mod.get_search_type_retriever_instance(
         SearchType.CHUNKS_LEXICAL, query_text="q", top_k=3
     )
-    assert isinstance(retriever_instance, JaccardChunksRetriever)
+    assert isinstance(retriever_instance, BM25ChunksRetriever)
+    assert retriever_instance.top_k == 3
 
 
 @pytest.mark.asyncio

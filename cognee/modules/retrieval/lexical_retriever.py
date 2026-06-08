@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Any, Callable, Optional, List, Union
 from heapq import nlargest
 
@@ -9,6 +10,17 @@ from cognee.shared.logging_utils import get_logger
 
 
 logger = get_logger("LexicalRetriever")
+
+
+def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str]:
+    """Lowercase, split on word characters, and drop any stop words.
+
+    Shared by the lexical retrievers so tokenization stays consistent across scorers.
+    """
+    tokens = re.findall(r"\w+", text.lower())
+    if not stop_words:
+        return tokens
+    return [token for token in tokens if token not in stop_words]
 
 
 class LexicalRetriever(BaseRetriever):
