@@ -243,6 +243,21 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
+    def close(self) -> None:
+        """Close the underlying AsyncOpenAI HTTP client.
+
+        The ``httpx.AsyncClient`` inside ``AsyncOpenAI`` holds a TCP connection
+        pool.  If it is never closed, the non-daemon transport threads and open
+        sockets prevent the Python process from exiting after ``asyncio.run()``
+        returns.
+        """
+        if hasattr(self, "_client") and self._client is not None:
+            try:
+                self._client.close()
+            except Exception:
+                logger.debug("Error closing AsyncOpenAI client", exc_info=True)
+            self._client = None
+
     def get_tokenizer(self):
         """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers."""
         logger.debug("Loading HuggingfaceTokenizer for OpenAICompatibleEmbeddingEngine...")

@@ -390,7 +390,18 @@ def main() -> int:
 
 def _main() -> None:
     """Script entry point"""
-    sys.exit(main())
+    exit_code = main()
+    # Force-exit watchdog: if the process hasn't exited within 10s after
+    # main() returns, force-kill it.  This prevents indefinite hangs from
+    # unclosed ThreadPoolExecutor threads, httpx connection pools, or
+    # pending async close tasks that block Python's atexit sequence.
+    try:
+        from cognee.shutdown import shutdown_sync
+
+        shutdown_sync(force=True, force_timeout=10.0)
+    except Exception:
+        pass
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
