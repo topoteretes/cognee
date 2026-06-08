@@ -1,7 +1,24 @@
-from typing import Union, Callable, Any, Coroutine, Generator, AsyncGenerator
+from typing import (
+    Union,
+    Callable,
+    Any,
+    Coroutine,
+    Generator,
+    AsyncGenerator,
+    Optional,
+    TYPE_CHECKING,
+)
 import inspect
 
 from cognee.pipelines.types import _Drop
+
+if TYPE_CHECKING:
+    from cognee.modules.pipelines.operations.worker_pipeline import WorkerStrategy
+
+
+# Module-level sentinel for distinguishing "kwarg not passed" from
+# "kwarg explicitly None" in TaskSpec.__call__ overrides.
+_UNSET_SENTINEL = object()
 
 
 class BoundTask:
@@ -21,10 +38,12 @@ class BoundTask:
     """
 
     def __init__(self, inner_task: "Task", **kwargs):
+        """Initialize with a Task and pre-bound kwargs."""
         self.task = inner_task
         self.kwargs = kwargs
 
     def __repr__(self):
+        """Return a descriptive representation of the bound task."""
         name = self.task.executable.__name__
         params = ", ".join(f"{k}={v!r}" for k, v in self.kwargs.items())
         bs = self.task.task_config.get("batch_size", 1)
@@ -61,14 +80,34 @@ class TaskSpec:
         result = await extract_graph_task.direct(chunks, graph_model=KnowledgeGraph)
     """
 
-    def __init__(self, fn, batch_size=None, enriches=False, **default_params):
+    def __init__(
+        self,
+        fn,
+        batch_size=None,
+        enriches=False,
+        workers: Optional["WorkerStrategy"] = None,
+        timeout: Optional[float] = None,
+        **default_params,
+    ):
+        """Initialize TaskSpec with function and configuration."""
         self._fn = fn
         self._batch_size = batch_size
         self._enriches = enriches
+        self._workers = workers
+        self._timeout = timeout
         self._default_params = default_params
 
-        # Pre-build the base Task
-        self._base_task = Task(fn, batch_size=batch_size, enriches=enriches, **default_params)
+        # Pre-build the base Task. workers/timeout are Task-level config, not
+        # callable kwargs — keep them out of self._default_params so .direct()
+        # doesn't forward them into the underlying function.
+        self._base_task = Task(
+            fn,
+            batch_size=batch_size,
+            enriches=enriches,
+            workers=workers,
+            timeout=timeout,
+            **default_params,
+        )
 
         # Copy function metadata for introspection
         self.__name__ = fn.__name__
@@ -82,17 +121,41 @@ class TaskSpec:
         Special kwargs:
             batch_size: Override the Task's batch_size for this pipeline step.
             enriches: Override the enriches flag for this pipeline step.
+            workers: Override the WorkerStrategy for this pipeline step.
+            timeout: Override the per-call timeout for this pipeline step.
 
         All other kwargs are passed to the underlying function at execution time.
         """
+        # ``batch_size`` and ``enriches`` use ``None`` as the "not passed"
+        # sentinel: ``_resolve_stage_configs`` later does
+        # ``int(next_cfg.get("batch_size", 1))``, so letting an explicit
+        # ``batch_size=None`` flow into ``task_config`` would turn a harmless
+        # explicit-None into a runtime failure at pipeline setup.
+        # ``workers`` and ``timeout`` use a distinct ``_UNSET`` sentinel so
+        # callers *can* pass an explicit ``None`` to clear a TaskSpec-level
+        # default — those fields tolerate ``None`` downstream.
+        _UNSET = _UNSET_SENTINEL
         batch_size = kwargs.pop("batch_size", None)
         enriches = kwargs.pop("enriches", None)
+        workers = kwargs.pop("workers", _UNSET)
+        timeout = kwargs.pop("timeout", _UNSET)
 
-        if batch_size is not None or enriches is not None:
-            inner = self._base_task.with_config(
-                **({"batch_size": batch_size} if batch_size is not None else {}),
-                **({"enriches": enriches} if enriches is not None else {}),
-            )
+        if (
+            batch_size is not None
+            or enriches is not None
+            or workers is not _UNSET
+            or timeout is not _UNSET
+        ):
+            overrides: dict = {}
+            if batch_size is not None:
+                overrides["batch_size"] = batch_size
+            if enriches is not None:
+                overrides["enriches"] = enriches
+            if workers is not _UNSET:
+                overrides["workers"] = workers
+            if timeout is not _UNSET:
+                overrides["timeout"] = timeout
+            inner = self._base_task.with_config(**overrides)
         else:
             inner = self._base_task
 
@@ -112,11 +175,20 @@ class TaskSpec:
         return self._fn(*args, **merged)
 
     def __repr__(self):
+        """Return a descriptive representation of the task spec."""
         bs = self._batch_size
         return f"TaskSpec({self.__name__}, batch_size={bs})"
 
 
-def task(fn=None, *, batch_size=None, enriches=False, **default_params):
+def task(
+    fn=None,
+    *,
+    batch_size=None,
+    enriches=False,
+    workers: Optional["WorkerStrategy"] = None,
+    timeout: Optional[float] = None,
+    **default_params,
+):
     """Create a TaskSpec from a function.
 
     Can be used as a decorator or as a functional wrapper::
@@ -143,7 +215,15 @@ def task(fn=None, *, batch_size=None, enriches=False, **default_params):
     """
 
     def decorator(func):
-        return TaskSpec(func, batch_size=batch_size, enriches=enriches, **default_params)
+        """Wrap function as a TaskSpec."""
+        return TaskSpec(
+            func,
+            batch_size=batch_size,
+            enriches=enriches,
+            workers=workers,
+            timeout=timeout,
+            **default_params,
+        )
 
     if fn is not None:
         return decorator(fn)
@@ -163,6 +243,7 @@ def task_summary(template: str):
     """
 
     def decorator(func):
+        """Attach summary template to function."""
         func.__task_summary__ = template
         return func
 
@@ -170,6 +251,12 @@ def task_summary(template: str):
 
 
 class Task:
+    """Represents a single operation in a pipeline that can be executed with various types.
+
+    Supports functions, coroutines, generators, and async generators, with automatic
+    batching of results based on configured batch size.
+    """
+
     executable: Union[
         Callable[..., Any],
         Callable[..., Coroutine[Any, Any, Any]],
@@ -185,8 +272,17 @@ class Task:
     _execute_method: Callable = None
 
     def __init__(
-        self, executable, *args, task_config=None, batch_size=None, enriches=False, **kwargs
+        self,
+        executable,
+        *args,
+        task_config=None,
+        batch_size=None,
+        enriches=False,
+        workers: Optional["WorkerStrategy"] = None,
+        timeout: Optional[float] = None,
+        **kwargs,
     ):
+        """Initialize a Task with an executable and configuration."""
         self.executable = executable
         self.default_params = {"args": args, "kwargs": kwargs}
         self.enriches = enriches
@@ -222,6 +318,10 @@ class Task:
 
         if batch_size is not None:
             self.task_config["batch_size"] = batch_size
+        if workers is not None:
+            self.task_config["workers"] = workers
+        if timeout is not None:
+            self.task_config["timeout"] = timeout
 
     def with_config(self, **overrides) -> "Task":
         """Return a new Task with overridden config.
@@ -230,13 +330,21 @@ class Task:
             base = Task(extract_graph, batch_size=20, graph_model=KnowledgeGraph)
             tasks = [base.with_config(batch_size=10)]
         """
-        batch_size = overrides.pop("batch_size", self.task_config["batch_size"])
+        # Start from a copy of the original task_config so unknown extras
+        # (e.g. queue_maxsize set via task_config={...}) survive the clone.
+        merged_config = dict(self.task_config)
+        if "batch_size" in overrides:
+            merged_config["batch_size"] = overrides.pop("batch_size")
+        if "workers" in overrides:
+            merged_config["workers"] = overrides.pop("workers")
+        if "timeout" in overrides:
+            merged_config["timeout"] = overrides.pop("timeout")
         enriches = overrides.pop("enriches", self.enriches)
         merged_kwargs = {**self.default_params["kwargs"], **overrides}
         return Task(
             self.executable,
             *self.default_params["args"],
-            batch_size=batch_size,
+            task_config=merged_config,
             enriches=enriches,
             **merged_kwargs,
         )
