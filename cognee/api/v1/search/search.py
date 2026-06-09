@@ -4,6 +4,8 @@ from typing import Union, Optional, List, Type
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.models import Skill
 from cognee.modules.users.models import User
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
@@ -50,6 +52,8 @@ async def search(
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
     include_references: bool = True,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
@@ -122,7 +126,7 @@ async def search(
             Returns: The results from the automatically selected search type.
 
         **CHUNKS_LEXICAL**:
-            Token-based lexical chunk search (e.g., Jaccard). Best for: exact-term matching, stopword-aware lookups.
+            Token-based lexical chunk search (BM25-style lexical ranking). Best for: exact-term matching, stopword-aware lookups.
             Returns: Ranked text chunks (optionally with scores).
 
     Args:
@@ -325,6 +329,8 @@ async def search(
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
             include_references=include_references,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
         )
 
         n = len(filtered_search_results) if filtered_search_results else 0
