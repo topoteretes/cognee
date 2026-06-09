@@ -18,11 +18,19 @@ from asyncpg import DeadlockDetectedError
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.modules.storage.utils import JSONEncoder
 
 from .tables import _meta, _node_table, _edge_table
 
 logger = get_logger()
+
+# Rows per INSERT statement for bulk node/edge writes. Bounds the size of the
+# compiled SQLAlchemy statement and the asyncpg parameter buffer per execute, so
+# a large single-batch write (e.g. the whole of War and Peace) streams to
+# Postgres in fixed-size chunks instead of materializing one multi-thousand-row
+# statement in memory. Does not change how many data points the pipeline batches.
+_WRITE_CHUNK_SIZE = 1000
 
 
 class PostgresAdapter(GraphDBInterface):
@@ -33,9 +41,26 @@ class PostgresAdapter(GraphDBInterface):
     def __init__(self, connection_string: str) -> None:
         """Create engine and sessionmaker from a Postgres connection string."""
         self.db_uri = connection_string
-        self.engine = create_async_engine(self.db_uri)
+
+        relational_config = get_relational_config()
+        pool_args: dict = dict(relational_config.pool_args) if relational_config.pool_args else {}
+
+        # Serialize JSONB columns once, at execute time, with the UUID/datetime-aware
+        # encoder. This lets add_nodes/add_edges pass raw property dicts straight through
+        # instead of doing a per-row json.loads(json.dumps(...)) round-trip, which on a
+        # large single-batch write (e.g. War and Peace) generated millions of transient
+        # dict/string allocations -> pymalloc arena fragmentation and cyclic-GC thrash.
+        self.engine = create_async_engine(
+            self.db_uri,
+            json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
+            **pool_args,
+        )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
         self._write_lock = asyncio.Lock()
+
+    async def close(self) -> None:
+        """Dispose the connection pool. Called by ``closing_lru_cache`` on eviction."""
+        await self.engine.dispose(close=True)
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
@@ -132,7 +157,7 @@ class PostgresAdapter(GraphDBInterface):
                     "id": str(props.get("id", "")),
                     "name": str(props.get("name", "")),
                     "type": str(props.get("type", "")),
-                    "properties": json.loads(json.dumps(extra, cls=JSONEncoder)),
+                    "properties": extra,
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -141,20 +166,21 @@ class PostgresAdapter(GraphDBInterface):
         # Deduplicate by id (last wins) to avoid ON CONFLICT errors within one batch
         rows = list({r["id"]: r for r in rows}.values())
 
-        stmt = pg_insert(_node_table).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["id"],
-            set_={
-                "name": stmt.excluded.name,
-                "type": stmt.excluded.type,
-                "properties": stmt.excluded.properties,
-                "updated_at": func.now(),
-            },
-        )
-
         async with self._write_lock:
             async with self._session() as session:
-                await session.execute(stmt)
+                for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
+                    chunk = rows[i : i + _WRITE_CHUNK_SIZE]
+                    stmt = pg_insert(_node_table).values(chunk)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={
+                            "name": stmt.excluded.name,
+                            "type": stmt.excluded.type,
+                            "properties": stmt.excluded.properties,
+                            "updated_at": func.now(),
+                        },
+                    )
+                    await session.execute(stmt)
                 await session.commit()
 
     async def delete_node(self, node_id: str) -> None:
@@ -258,7 +284,7 @@ class PostgresAdapter(GraphDBInterface):
                     "source_id": str(edge[0]),
                     "target_id": str(edge[1]),
                     "relationship_name": edge[2],
-                    "properties": json.loads(self._serialize_properties(raw_props)),
+                    "properties": raw_props,
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -269,18 +295,19 @@ class PostgresAdapter(GraphDBInterface):
             {(r["source_id"], r["target_id"], r["relationship_name"]): r for r in rows}.values()
         )
 
-        stmt = pg_insert(_edge_table).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["source_id", "target_id", "relationship_name"],
-            set_={
-                "properties": stmt.excluded.properties,
-                "updated_at": func.now(),
-            },
-        )
-
         async with self._write_lock:
             async with self._session() as session:
-                await session.execute(stmt)
+                for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
+                    chunk = rows[i : i + _WRITE_CHUNK_SIZE]
+                    stmt = pg_insert(_edge_table).values(chunk)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["source_id", "target_id", "relationship_name"],
+                        set_={
+                            "properties": stmt.excluded.properties,
+                            "updated_at": func.now(),
+                        },
+                    )
+                    await session.execute(stmt)
                 await session.commit()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
@@ -313,26 +340,34 @@ class PostgresAdapter(GraphDBInterface):
         if not edges:
             return []
 
-        candidates = values(
-            sa_column("src", String),
-            sa_column("tgt", String),
-            sa_column("rel", String),
-            name="q",
-        ).data([(str(s), str(t), str(r)) for s, t, r in edges])
-
-        stmt = select(candidates.c.src, candidates.c.tgt, candidates.c.rel).where(
-            exists(
-                select(text("1"))
-                .select_from(_edge_table)
-                .where(_edge_table.c.source_id == candidates.c.src)
-                .where(_edge_table.c.target_id == candidates.c.tgt)
-                .where(_edge_table.c.relationship_name == candidates.c.rel)
-            )
-        )
+        # asyncpg caps bind parameters at 32767; each edge uses 3 params.
+        CHUNK_SIZE = 10_000
+        found: List[Tuple[str, str, str]] = []
 
         async with self._session() as session:
-            result = await session.execute(stmt)
-            return [(row[0], row[1], row[2]) for row in result.fetchall()]
+            for i in range(0, len(edges), CHUNK_SIZE):
+                chunk = edges[i : i + CHUNK_SIZE]
+                candidates = values(
+                    sa_column("src", String),
+                    sa_column("tgt", String),
+                    sa_column("rel", String),
+                    name="q",
+                ).data([(str(s), str(t), str(r)) for s, t, r in chunk])
+
+                stmt = select(candidates.c.src, candidates.c.tgt, candidates.c.rel).where(
+                    exists(
+                        select(text("1"))
+                        .select_from(_edge_table)
+                        .where(_edge_table.c.source_id == candidates.c.src)
+                        .where(_edge_table.c.target_id == candidates.c.tgt)
+                        .where(_edge_table.c.relationship_name == candidates.c.rel)
+                    )
+                )
+
+                result = await session.execute(stmt)
+                found.extend((row[0], row[1], row[2]) for row in result.fetchall())
+
+        return found
 
     async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
         """Retrieve all edges connected to a node.

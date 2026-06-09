@@ -1,4 +1,5 @@
 from cognee.shared.logging_utils import get_logger
+from os.path import basename
 
 
 from cognee.tasks.chunks import chunk_by_row
@@ -10,6 +11,8 @@ logger = get_logger()
 
 class CsvChunker(Chunker):
     async def read(self):
+        document_id = str(self.document.id)
+        document_name = self.document.name or basename(self.document.raw_data_location)
         async for content_text in self.get_text():
             if content_text is None:
                 continue
@@ -24,6 +27,8 @@ class CsvChunker(Chunker):
                         chunk_index=self.chunk_index,
                         cut_type=chunk_data["cut_type"],
                         contains=[],
+                        document_id=document_id,
+                        document_name=document_name,
                         metadata={
                             "index_fields": ["text"],
                         },

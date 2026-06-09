@@ -1,4 +1,5 @@
 from cognee.shared.logging_utils import get_logger
+from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.modules.chunking.Chunker import Chunker
@@ -34,6 +35,8 @@ class LangchainChunker(Chunker):
         )
 
     async def read(self):
+        document_id = str(self.document.id)
+        document_name = self.document.name or basename(self.document.raw_data_location)
         async for content_text in self.get_text():
             for chunk in self.splitter.split_text(content_text):
                 embedding_engine = get_vector_engine().embedding_engine
@@ -48,6 +51,8 @@ class LangchainChunker(Chunker):
                         chunk_index=self.chunk_index,
                         cut_type="missing",
                         contains=[],
+                        document_id=document_id,
+                        document_name=document_name,
                         metadata={
                             "index_fields": ["text"],
                         },

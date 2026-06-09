@@ -1,4 +1,5 @@
 from cognee.shared.logging_utils import get_logger
+from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.tasks.chunks import chunk_by_paragraph
@@ -10,6 +11,8 @@ logger = get_logger()
 
 class TextChunker(Chunker):
     async def read(self):
+        document_id = str(self.document.id)
+        document_name = self.document.name or basename(self.document.raw_data_location)
         paragraph_chunks = []
         async for content_text in self.get_text():
             for chunk_data in chunk_by_paragraph(
@@ -31,6 +34,8 @@ class TextChunker(Chunker):
                             cut_type=chunk_data["cut_type"],
                             contains=[],
                             importance_weight=self.document.importance_weight,
+                            document_id=document_id,
+                            document_name=document_name,
                             metadata={
                                 "index_fields": ["text"],
                             },
@@ -51,6 +56,8 @@ class TextChunker(Chunker):
                                 cut_type=paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
                                 contains=[],
                                 importance_weight=self.document.importance_weight,
+                                document_id=document_id,
+                                document_name=document_name,
                                 metadata={
                                     "index_fields": ["text"],
                                 },
@@ -74,6 +81,8 @@ class TextChunker(Chunker):
                     cut_type=paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
                     contains=[],
                     importance_weight=self.document.importance_weight,
+                    document_id=document_id,
+                    document_name=document_name,
                     metadata={"index_fields": ["text"]},
                 )
             except Exception as e:
