@@ -340,6 +340,21 @@ LLM_ENDPOINT="https://openrouter.ai/api/v1"
 LLM_API_KEY="your_api_key"
 ```
 
+#### OrcaRouter (OpenAI-compatible gateway)
+```bash
+LLM_PROVIDER="custom"
+LLM_MODEL="openai/orcarouter/auto"  # "orcarouter/auto" auto-routes to the cheapest capable model; or pin one, e.g. openai/openai/gpt-4o
+LLM_ENDPOINT="https://api.orcarouter.ai/v1"
+LLM_API_KEY="your_orcarouter_api_key"
+
+EMBEDDING_PROVIDER="openai_compatible"
+EMBEDDING_MODEL="openai/text-embedding-3-large"
+EMBEDDING_ENDPOINT="https://api.orcarouter.ai/v1"
+EMBEDDING_API_KEY="your_orcarouter_api_key"
+EMBEDDING_DIMENSIONS=3072
+```
+The leading `openai/` on `LLM_MODEL` tells litellm to use its OpenAI-compatible transport; the remainder (`orcarouter/auto`, `openai/gpt-4o`, ...) is the OrcaRouter model id forwarded to the gateway, which expects the namespace prefix. Embeddings use the `openai_compatible` provider so the namespaced model id is sent to OrcaRouter as-is.
+
 #### AWS Bedrock (requires aws extra)
 ```bash
 LLM_PROVIDER="bedrock"
