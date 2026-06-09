@@ -46,6 +46,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         feedback_influence: float = 0.0,
         session_id: Optional[str] = None,
         response_model: Type = str,
+        include_references: bool = True,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -59,6 +60,7 @@ class TemporalRetriever(GraphCompletionRetriever):
             feedback_influence=feedback_influence,
             session_id=session_id,
             response_model=response_model,
+            include_references=include_references,
         )
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path

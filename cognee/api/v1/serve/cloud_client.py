@@ -153,6 +153,8 @@ class CloudClient:
             payload["session_id"] = kwargs["session_id"]
         if kwargs.get("scope") is not None:
             payload["scope"] = kwargs["scope"]
+        if kwargs.get("include_references") is not None:
+            payload["include_references"] = kwargs["include_references"]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
@@ -284,6 +286,8 @@ class CloudClient:
             payload["tools"] = kwargs["tools"]
         if kwargs.get("max_iter") is not None:
             payload["maxIter"] = kwargs["max_iter"]
+        if kwargs.get("include_references") is not None:
+            payload["includeReferences"] = kwargs["include_references"]
 
         async with session.post(
             f"{self.service_url}/api/v1/search",

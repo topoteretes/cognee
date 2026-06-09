@@ -51,6 +51,7 @@ async def search(
     skills: Optional[List[Union[str, Skill]]] = None,
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
+    include_references: bool = True,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
@@ -239,6 +240,7 @@ async def search(
             node_name=node_name,
             only_context=only_context,
             verbose=verbose,
+            include_references=include_references,
             **{key: value for key, value in agentic_overrides.items() if value is not None},
         )
 
@@ -326,6 +328,7 @@ async def search(
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
             llm_config=llm_config,
             embedding_config=embedding_config,
         )

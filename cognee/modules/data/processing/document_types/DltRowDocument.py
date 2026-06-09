@@ -1,3 +1,5 @@
+from os.path import basename
+
 from cognee.modules.chunking.Chunker import Chunker
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from .Document import Document
@@ -33,4 +35,6 @@ class DltRowDocument(Document):
             cut_type="dlt_row",
             is_part_of=self,
             contains=[],
+            document_id=str(self.id),
+            document_name=self.name or basename(self.raw_data_location),
         )
