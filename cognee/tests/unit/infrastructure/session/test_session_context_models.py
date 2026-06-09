@@ -150,13 +150,10 @@ def test_session_context_entry_negative_count_raises():
 
 def test_session_feedback_entry_kind_default():
     entry = SessionFeedbackEntry(id="f1", created_at="t", raw_text="that was wrong")
+    dump = entry.model_dump()
     assert entry.kind == "feedback"
     assert entry.referenced_qa_ids == []
     assert entry.influencing_context_ids == []
     assert entry.candidate_context_entries == []
-
-
-def test_session_feedback_entry_score_range():
-    SessionFeedbackEntry(id="f1", created_at="t", raw_text="x", feedback_score=5)
-    with pytest.raises(ValidationError):
-        SessionFeedbackEntry(id="f1", created_at="t", raw_text="x", feedback_score=6)
+    assert "feedback_text" not in dump
+    assert "feedback_score" not in dump

@@ -149,7 +149,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     async def _maybe_active_context_block(self, sm, user_id: str, query: Optional[str]) -> str:
         """Render the active session-context block for the CoT intermediate rounds.
 
-        Gated on caching + session_context_enabled. Fully fail-open: returns "" on any error or
+        Gated on caching + auto_feedback. Fully fail-open: returns "" on any error or
         when the layer is disabled, so it can never block chain-of-thought reasoning.
         """
         try:
@@ -157,16 +157,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             from cognee.infrastructure.session.session_context_builder import (
                 build_active_context_block,
             )
-            from cognee.infrastructure.session.session_manager import (
-                _PositionalSessionContextAdapter,
-            )
 
             cache_config = CacheConfig()
-            if not (cache_config.caching and cache_config.session_context_enabled):
+            if not (cache_config.caching and cache_config.auto_feedback):
                 return ""
 
             block, _served_ids = await build_active_context_block(
-                session_manager=_PositionalSessionContextAdapter(sm),
+                session_manager=sm,
                 user_id=user_id,
                 session_id=sm._resolve_session_id(self.session_id),
                 query=query or "",

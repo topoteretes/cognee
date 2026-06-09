@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -129,6 +130,22 @@ class TestDetectFeedback:
 
         assert result.contains_followup_question is True
 
+    def test_prompt_extracts_candidate_updates_without_feedback(self):
+        """Prompt tells the analyzer to extract durable guidance from non-feedback messages."""
+        prompt_path = (
+            Path(__file__).parents[4]
+            / "infrastructure"
+            / "llm"
+            / "prompts"
+            / "feedback_detection_system.txt"
+        )
+        prompt = prompt_path.read_text()
+
+        assert "candidate_context_updates are independent of previous_answer_feedback" in prompt
+        assert "answer style, answer length, or answer format preference" in prompt
+        assert "For now, answer with 2 informative bullet points." in prompt
+        assert "I now prefer 4 concise bullet points" in prompt
+
 
 class TestDetectFeedbackServedContext:
     """Tests for the served_context wiring into the single feedback LLM call."""
@@ -213,7 +230,7 @@ class TestDetectFeedbackServedContext:
             await detect_feedback("  what is X?  ")
 
         text_input = mock_llm.await_args.kwargs["text_input"]
-        assert text_input == "what is X?"
+        assert text_input == "CURRENT USER MESSAGE:\nwhat is X?"
         assert "SESSION CONTEXT ENTRIES" not in text_input
 
     @pytest.mark.asyncio
@@ -234,7 +251,7 @@ class TestDetectFeedbackServedContext:
             await detect_feedback("hello", served_context=[])
 
         text_input = mock_llm.await_args.kwargs["text_input"]
-        assert text_input == "hello"
+        assert text_input == "CURRENT USER MESSAGE:\nhello"
         assert "SESSION CONTEXT ENTRIES" not in text_input
 
 

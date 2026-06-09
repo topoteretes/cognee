@@ -1,15 +1,15 @@
-"""Integration-style tests for the session-context turn flow (Step 8).
+"""Integration-style tests for the session-context turn flow.
 
 These exercise SessionManager._generate_completion_with_session_inner against a REAL FS-backed
-cache (so the session-context CRUD round-trips) while the LLM call is mocked via
-generate_session_completion_with_optional_summary. They cover the four branches:
+cache (so the session-context CRUD round-trips) while the LLM calls are mocked. They cover
+the four branches:
 
   1. first-turn       -> no served context, empty block, served_ids recorded as None
   2. non-feedback     -> active block built + prepended above graph snapshot, served_ids on new QA
   3. feedback-only    -> response_to_user returned, NO new QA, counters bumped, candidate applied
   4. feedback+followup-> thanks prepended, new QA with served_ids, candidate applied
 
-The whole layer is gated on caching AND session_context_enabled.
+The whole session-guidance layer is gated on caching and auto_feedback.
 """
 
 import tempfile
@@ -48,28 +48,32 @@ def session_manager(fs_adapter) -> SessionManager:
     return SessionManager(cache_engine=fs_adapter)
 
 
-def _config(*, session_context_enabled: bool = True, auto_feedback: bool = True):
+def _config(*, auto_feedback: bool = True):
     cfg = MagicMock()
     cfg.caching = True
     cfg.auto_feedback = auto_feedback
-    cfg.session_context_enabled = session_context_enabled
     cfg.max_session_context_chars = None
     return cfg
 
 
-def _patches(session_manager, fb_return):
-    """Patch session_user, CacheConfig, and the orchestrator. Returns the patch context list."""
+def _patches(completion_return, analysis_return=None):
+    """Patch session_user, CacheConfig, turn analysis, and completion."""
     user = MagicMock()
     user.id = "owner-1"  # non-UUID -> skips track_session_usage + session_records side effects
 
     mock_user = patch("cognee.infrastructure.session.session_manager.session_user")
     mock_cfg = patch("cognee.infrastructure.session.session_manager.CacheConfig")
+    mock_analyze = patch(
+        "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+        new_callable=AsyncMock,
+        return_value=analysis_return or FeedbackDetectionResult(feedback_detected=False),
+    )
     mock_gen = patch(
         "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
         new_callable=AsyncMock,
-        return_value=fb_return,
+        return_value=completion_return,
     )
-    return user, mock_user, mock_cfg, mock_gen
+    return user, mock_user, mock_cfg, mock_analyze, mock_gen
 
 
 async def _seed_context_entry(sm, entry_id, section, content):
@@ -91,8 +95,8 @@ async def _seed_context_entry(sm, entry_id, section, content):
 @pytest.mark.asyncio
 async def test_first_turn_no_block_empty_served_ids(session_manager):
     """First turn: no stored context -> empty block, QA stored with no served context ids."""
-    user, mock_user, mock_cfg, mock_gen = _patches(session_manager, ("Answer one", "", None))
-    with mock_user as mu, mock_cfg as mc, mock_gen as mg:
+    user, mock_user, mock_cfg, mock_analyze, mock_gen = _patches(("Answer one", "", None))
+    with mock_user as mu, mock_cfg as mc, mock_analyze as ma, mock_gen as mg:
         mu.get.return_value = user
         mc.return_value = _config()
 
@@ -105,8 +109,8 @@ async def test_first_turn_no_block_empty_served_ids(session_manager):
         )
 
     assert result == "Answer one"
-    served_arg = mg.call_args.kwargs["served_context"]
-    assert served_arg == []  # nothing was served previously
+    assert ma.call_args.kwargs["served_context"] == []
+    assert mg.call_args.kwargs["served_context"] is None
     history = mg.call_args.kwargs["conversation_history"]
     assert "## Active session guidance" not in history
 
@@ -120,10 +124,11 @@ async def test_non_feedback_block_prepended_and_served_ids_recorded(session_mana
     """Non-feedback turn: active block built, precedes graph snapshot, served_ids on new QA."""
     await _seed_context_entry(session_manager, "c-rule", "rules", "Always answer in metric units.")
 
-    user, mock_user, mock_cfg, mock_gen = _patches(session_manager, ("Answer two", "", None))
+    user, mock_user, mock_cfg, mock_analyze, mock_gen = _patches(("Answer two", "", None))
     with (
         mock_user as mu,
         mock_cfg as mc,
+        mock_analyze,
         mock_gen as mg,
         patch.object(
             session_manager, "get_graph_context", new=AsyncMock(return_value="GRAPH FACTS HERE")
@@ -184,8 +189,11 @@ async def test_feedback_only_returns_thanks_no_new_qa_applies_candidate(session_
         ],
     )
 
-    user, mock_user, mock_cfg, mock_gen = _patches(session_manager, ("ignored answer", "", fb))
-    with mock_user as mu, mock_cfg as mc, mock_gen:
+    user, mock_user, mock_cfg, mock_analyze, mock_gen = _patches(
+        ("ignored answer", "", None),
+        analysis_return=fb,
+    )
+    with mock_user as mu, mock_cfg as mc, mock_analyze, mock_gen:
         mu.get.return_value = user
         mc.return_value = _config()
 
@@ -225,6 +233,67 @@ async def test_feedback_only_returns_thanks_no_new_qa_applies_candidate(session_
 
 
 @pytest.mark.asyncio
+async def test_preference_only_turn_answers_and_applies_candidate(session_manager):
+    """Instruction-only turn: no feedback needed; preference is stored and answer is generated."""
+    await session_manager.add_qa(
+        user_id="owner-1",
+        question="prev?",
+        context="",
+        answer="prev answer",
+        session_id="s1",
+    )
+
+    analysis = FeedbackDetectionResult(
+        feedback_detected=False,
+        candidate_context_updates=[
+            CandidateContextUpdate(
+                section="preferences",
+                content="Prefer 2 informative bullet points for answers in this session.",
+                confidence=0.9,
+            )
+        ],
+    )
+
+    user, mock_user, mock_cfg, mock_analyze, mock_gen = _patches(
+        ("Two bullet answer", "", None),
+        analysis_return=analysis,
+    )
+    with mock_user as mu, mock_cfg as mc, mock_analyze, mock_gen as mg:
+        mu.get.return_value = user
+        mc.return_value = _config()
+
+        result = await session_manager.generate_completion_with_session(
+            session_id="s1",
+            query="For now, answer with 2 informative bullet points.",
+            context="ctx",
+            user_prompt_path="user.txt",
+            system_prompt_path="sys.txt",
+        )
+
+    assert result == "Two bullet answer"
+    history = mg.call_args.kwargs["conversation_history"]
+    assert "Prefer 2 informative bullet points for answers in this session." in history
+
+    entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
+    assert len(entries) == 2
+    assert entries[-1].question == "For now, answer with 2 informative bullet points."
+
+    ctx_entries = await session_manager.get_session_context_entries(
+        user_id="owner-1", session_id="s1"
+    )
+    preferences = [
+        e
+        for e in ctx_entries
+        if e.get("kind", "context") == "context" and e.get("section") == "preferences"
+    ]
+    assert any(
+        p["content"] == "Prefer 2 informative bullet points for answers in this session."
+        for p in preferences
+    )
+    assert entries[-1].used_session_context_ids
+
+
+@pytest.mark.asyncio
 async def test_feedback_followup_prepends_thanks_and_stores_qa(session_manager):
     """Feedback+follow-up: thanks prepended to answer, new QA stored with served_ids."""
     await _seed_context_entry(session_manager, "c-goal", "goals", "Help the user ship faster.")
@@ -252,8 +321,11 @@ async def test_feedback_followup_prepends_thanks_and_stores_qa(session_manager):
         ],
     )
 
-    user, mock_user, mock_cfg, mock_gen = _patches(session_manager, ("Here is Y.", "", fb))
-    with mock_user as mu, mock_cfg as mc, mock_gen as mg:
+    user, mock_user, mock_cfg, mock_analyze, mock_gen = _patches(
+        ("Here is Y.", "", None),
+        analysis_return=fb,
+    )
+    with mock_user as mu, mock_cfg as mc, mock_analyze as ma, mock_gen:
         mu.get.return_value = user
         mc.return_value = _config()
 
@@ -268,15 +340,16 @@ async def test_feedback_followup_prepends_thanks_and_stores_qa(session_manager):
     assert result == "Thanks, noted.\n\nHere is Y."
 
     # served_context (the previously-served entry) was passed to the feedback detector.
-    served_arg = mg.call_args.kwargs["served_context"]
+    served_arg = ma.call_args.kwargs["served_context"]
     assert served_arg == [{"id": "c-goal", "content": "Help the user ship faster."}]
 
-    # A new QA was added with this turn's served_ids (the goal block was served again).
+    # A new QA was added with this turn's served_ids. The previous goal and the newly accepted
+    # lesson are both available to the follow-up answer.
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
     assert len(entries) == 2
     new_qa = entries[-1]
     assert new_qa.question == "that was wrong, now what about Y?"
-    assert new_qa.used_session_context_ids == ["c-goal"]
+    assert "c-goal" in new_qa.used_session_context_ids
 
     ctx_entries = await session_manager.get_session_context_entries(
         user_id="owner-1", session_id="s1"
@@ -288,18 +361,20 @@ async def test_feedback_followup_prepends_thanks_and_stores_qa(session_manager):
         for e in ctx_entries
         if e.get("kind", "context") == "context" and e.get("section") == "lessons_learned"
     ]
-    assert any(p["content"] == "Double-check unit conversions." for p in lessons)
+    matching_lessons = [p for p in lessons if p["content"] == "Double-check unit conversions."]
+    assert matching_lessons
+    assert matching_lessons[0]["id"] in new_qa.used_session_context_ids
 
 
 @pytest.mark.asyncio
-async def test_layer_disabled_when_flag_off(session_manager):
-    """With session_context_enabled False, no block, no served_context, no served_ids on QA."""
+async def test_layer_disabled_when_auto_feedback_off(session_manager):
+    """With auto_feedback False, no block, no feedback analysis, no served_ids on QA."""
     await _seed_context_entry(session_manager, "c-rule", "rules", "Always answer in metric units.")
 
-    user, mock_user, mock_cfg, mock_gen = _patches(session_manager, ("Answer", "", None))
-    with mock_user as mu, mock_cfg as mc, mock_gen as mg:
+    user, mock_user, mock_cfg, mock_analyze, mock_gen = _patches(("Answer", "", None))
+    with mock_user as mu, mock_cfg as mc, mock_analyze as ma, mock_gen as mg:
         mu.get.return_value = user
-        mc.return_value = _config(session_context_enabled=False, auto_feedback=False)
+        mc.return_value = _config(auto_feedback=False)
 
         await session_manager.generate_completion_with_session(
             session_id="s1",
@@ -312,6 +387,7 @@ async def test_layer_disabled_when_flag_off(session_manager):
     history = mg.call_args.kwargs["conversation_history"]
     assert "## Active session guidance" not in history
     assert mg.call_args.kwargs["served_context"] is None
+    ma.assert_not_called()
 
     entries = await session_manager.get_session(user_id="owner-1", session_id="s1")
     assert entries[-1].used_session_context_ids is None

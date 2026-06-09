@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import Any, List
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
@@ -8,30 +8,55 @@ from cognee.infrastructure.session.session_context_models import (
 )
 
 
-class FeedbackDetectionResult(BaseModel):
-    """
-    Result of analyzing a user message for feedback about a previous response.
-    """
+class PreviousAnswerFeedback(BaseModel):
+    """Compatibility feedback to persist on the previously stored QA entry."""
 
-    feedback_detected: bool = Field(
-        default=False,
-        description="True if the message is (wholly or partly) feedback about the last answer.",
-    )
-    feedback_text: str | None = Field(
-        default=None,
-        description="When feedback_detected is True: required, must never be empty. Short description that includes or summarizes the user's message (e.g. 'User gave a positive rating' for '5/5').",
+    feedback_text: str = Field(
+        description="Short description that includes or summarizes the user's feedback.",
     )
     feedback_score: float | None = Field(
         default=None,
-        description="When feedback_detected is True: required. Numeric score 1-5 (1=negative, 5=positive); normalized to int when persisting.",
+        description="Numeric score 1-5 (1=negative, 5=positive); normalized when persisting.",
+    )
+
+    @field_validator("feedback_text")
+    @classmethod
+    def feedback_text_non_empty(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("feedback_text must be a string")
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("feedback_text must be a non-empty string")
+        return stripped
+
+    @field_validator("feedback_score")
+    @classmethod
+    def feedback_score_clamp(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("feedback_score must be a number")
+        return max(1.0, min(5.0, score))
+
+
+class SessionTurnAnalysis(BaseModel):
+    """
+    Result of analyzing a user message for session feedback and durable guidance.
+    """
+
+    previous_answer_feedback: PreviousAnswerFeedback | None = Field(
+        default=None,
+        description="Feedback about the previous answer, if the user gave any.",
     )
     response_to_user: str | None = Field(
         default=None,
-        description="When feedback_detected is True: required. Brief, friendly message to show the user (e.g. thanking them for feedback). One sentence; can adapt tone or language to the user's message.",
+        description="Brief acknowledgement to show the user when feedback is detected.",
     )
     contains_followup_question: bool = Field(
         default=False,
-        description="True if the message contains both feedback and a new or follow-up question that should be answered (e.g. 'that was wrong, but what about X?'). Set to false when the message is only feedback with no question.",
+        description="True when the message contains both feedback and a new/follow-up question.",
     )
     followup_question: str | None = Field(
         default=None,
@@ -53,6 +78,46 @@ class FeedbackDetectionResult(BaseModel):
         if not isinstance(v, list):
             return []
         return v[:3]
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_feedback_fields(cls, data: Any) -> Any:
+        """Accept the old FeedbackDetectionResult shape while call sites are being rewired."""
+        if not isinstance(data, dict):
+            return data
+        if "previous_answer_feedback" in data:
+            return data
+        if not data.get("feedback_detected"):
+            return data
+        feedback_text = data.get("feedback_text")
+        if not isinstance(feedback_text, str) or not feedback_text.strip():
+            return data
+        data = dict(data)
+        data["previous_answer_feedback"] = {
+            "feedback_text": feedback_text,
+            "feedback_score": data.get("feedback_score"),
+        }
+        return data
+
+    @property
+    def feedback_detected(self) -> bool:
+        return self.previous_answer_feedback is not None
+
+    @property
+    def feedback_text(self) -> str | None:
+        if self.previous_answer_feedback is None:
+            return None
+        return self.previous_answer_feedback.feedback_text
+
+    @property
+    def feedback_score(self) -> float | None:
+        if self.previous_answer_feedback is None:
+            return None
+        return self.previous_answer_feedback.feedback_score
+
+
+# Backwards-compatible import name while external/internal callers migrate.
+FeedbackDetectionResult = SessionTurnAnalysis
 
 
 class AgentTraceFeedbackSummary(BaseModel):

@@ -19,15 +19,13 @@ class CacheConfig(BaseSettings):
       Positive values enable expiry; 0/None disables expiry.
     - usage_logging: Enable/disable usage logging for API endpoints and MCP tools.
     - usage_logging_ttl: Time-to-live for usage logs in seconds (default: 7 days).
-    - auto_feedback: When caching is True, run automatic feedback detection on each query (default False).
-    - session_context_enabled: When caching is True, build/inject the active session-context
-      guidance block and run the served-context rating / candidate-extraction layer (default False).
+    - auto_feedback: When caching is True, run automatic feedback detection and session-context
+      guidance on each query (default False).
     """
 
     cache_backend: Literal["redis", "fs", "tapes"] = "fs"
     caching: bool = True
     auto_feedback: bool = False
-    session_context_enabled: bool = False
     shared_ladybug_lock: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
@@ -59,7 +57,6 @@ class CacheConfig(BaseSettings):
             "cache_backend": self.cache_backend,
             "caching": self.caching,
             "auto_feedback": self.auto_feedback,
-            "session_context_enabled": self.session_context_enabled,
             "shared_ladybug_lock": self.shared_ladybug_lock,
             "shared_kuzu_lock": self.shared_kuzu_lock,
             "cache_host": self.cache_host,

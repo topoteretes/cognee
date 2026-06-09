@@ -385,7 +385,7 @@ class AgenticRetriever(GraphCompletionRetriever):
     async def _maybe_active_context_block(self, query: Optional[str]) -> tuple[str, list]:
         """Render the active session-context guidance block for the agentic loop.
 
-        Gated on caching + session_context_enabled. Fully fail-open: returns ("", []) on any error
+        Gated on caching + auto_feedback. Fully fail-open: returns ("", []) on any error
         or when the layer is disabled, so it can never block agentic completion.
         """
         if not self._use_session_cache():
@@ -401,12 +401,9 @@ class AgenticRetriever(GraphCompletionRetriever):
             from cognee.infrastructure.session.session_context_builder import (
                 build_active_context_block,
             )
-            from cognee.infrastructure.session.session_manager import (
-                _PositionalSessionContextAdapter,
-            )
 
             cache_config = CacheConfig()
-            if not (cache_config.caching and cache_config.session_context_enabled):
+            if not (cache_config.caching and cache_config.auto_feedback):
                 return "", []
 
             session_manager = get_session_manager()
@@ -414,7 +411,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 return "", []
 
             return await build_active_context_block(
-                session_manager=_PositionalSessionContextAdapter(session_manager),
+                session_manager=session_manager,
                 user_id=str(user_id),
                 session_id=session_manager._resolve_session_id(self.session_id),
                 query=query or "",

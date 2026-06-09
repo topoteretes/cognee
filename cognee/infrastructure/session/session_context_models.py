@@ -1,9 +1,8 @@
 from enum import Enum
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-VALID_SECTIONS = {"goals", "rules", "preferences", "lessons_learned"}
 VALID_RATINGS = {"helpful", "harmful"}
 MAX_CONTEXT_CONTENT_CHARS = 280
 MIN_CANDIDATE_CONFIDENCE = 0.75
@@ -16,6 +15,9 @@ class ContextSection(str, Enum):
     RULES = "rules"
     PREFERENCES = "preferences"
     LESSONS_LEARNED = "lessons_learned"
+
+
+VALID_SECTIONS = {section.value for section in ContextSection}
 
 
 def normalize_content(text: str) -> str:
@@ -95,7 +97,7 @@ class SessionContextEntry(BaseModel):
     id: str
     section: str
     content: str
-    normalized_content: str
+    normalized_content: str = ""
     confidence: float = 0.0
     created_at: str
     source_feedback_ids: List[str] = Field(default_factory=list)
@@ -103,7 +105,17 @@ class SessionContextEntry(BaseModel):
     harmful_count: int = 0
     priority: int = 0
     last_served_at: Optional[str] = None
-    kind: Literal["context", "feedback"] = "context"
+    kind: Literal["context"] = "context"
+
+    @field_validator("id")
+    @classmethod
+    def id_non_empty(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("id must be a string")
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("id must be a non-empty string")
+        return stripped
 
     @field_validator("section")
     @classmethod
@@ -125,6 +137,15 @@ class SessionContextEntry(BaseModel):
             raise ValueError("content must be a non-empty string")
         return stripped[:MAX_CONTEXT_CONTENT_CHARS]
 
+    @field_validator("normalized_content")
+    @classmethod
+    def normalized_content_string(cls, v: str) -> str:
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            raise ValueError("normalized_content must be a string")
+        return normalize_content(v)
+
     @field_validator("confidence")
     @classmethod
     def confidence_clamp(cls, v: float) -> float:
@@ -145,6 +166,26 @@ class SessionContextEntry(BaseModel):
             raise ValueError("count must be >= 0")
         return v
 
+    @field_validator("source_feedback_ids")
+    @classmethod
+    def source_feedback_ids_list_of_strings(cls, v: List[str]) -> List[str]:
+        if not isinstance(v, list):
+            raise ValueError("source_feedback_ids must be a list")
+        normalized = []
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("source_feedback_ids must contain only strings")
+            stripped = item.strip()
+            if stripped:
+                normalized.append(stripped)
+        return normalized
+
+    @model_validator(mode="after")
+    def derive_normalized_content(self):
+        if not self.normalized_content:
+            self.normalized_content = normalize_content(self.content)
+        return self
+
 
 class SessionFeedbackEntry(BaseModel):
     """A stored feedback record describing how a turn rated/extended session context."""
@@ -152,16 +193,31 @@ class SessionFeedbackEntry(BaseModel):
     id: str
     created_at: str
     raw_text: str
-    feedback_text: Optional[str] = None
-    feedback_score: Optional[int] = None
     referenced_qa_ids: List[str] = Field(default_factory=list)
     influencing_context_ids: List[str] = Field(default_factory=list)
     candidate_context_entries: List[dict] = Field(default_factory=list)
-    kind: Literal["context", "feedback"] = "feedback"
+    kind: Literal["feedback"] = "feedback"
 
-    @field_validator("feedback_score")
+    @field_validator("id")
     @classmethod
-    def feedback_score_range(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and (v < 1 or v > 5):
-            raise ValueError("feedback_score must be between 1 and 5")
-        return v
+    def id_non_empty(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("id must be a string")
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("id must be a non-empty string")
+        return stripped
+
+    @field_validator("referenced_qa_ids", "influencing_context_ids")
+    @classmethod
+    def id_lists_only_strings(cls, v: List[str]) -> List[str]:
+        if not isinstance(v, list):
+            raise ValueError("id list must be a list")
+        normalized = []
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("id list must contain only strings")
+            stripped = item.strip()
+            if stripped:
+                normalized.append(stripped)
+        return normalized

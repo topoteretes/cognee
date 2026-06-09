@@ -86,6 +86,10 @@ class TestSessionManager:
         cache.delete_feedback = AsyncMock(return_value=True)
         cache.delete_qa_entry = AsyncMock(return_value=True)
         cache.delete_session = AsyncMock(return_value=True)
+        cache.create_session_context_entry = AsyncMock(return_value=True)
+        cache.get_session_context_entries = AsyncMock(return_value=[])
+        cache.update_session_context_entry = AsyncMock(return_value=True)
+        cache.delete_session_context = AsyncMock(return_value=True)
         return cache
 
     @pytest.fixture
@@ -662,18 +666,14 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User said thanks.",
-                        feedback_score=5.0,
-                        response_to_user="Thanks for your feedback!",
-                        contains_followup_question=False,
-                    ),
+                return_value=FeedbackDetectionResult(
+                    feedback_detected=True,
+                    feedback_text="User said thanks.",
+                    feedback_score=5.0,
+                    response_to_user="Thanks for your feedback!",
+                    contains_followup_question=False,
                 ),
             ),
         ):
@@ -715,19 +715,21 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
+                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                new_callable=AsyncMock,
+                return_value=FeedbackDetectionResult(
+                    feedback_detected=True,
+                    feedback_text="User gave thanks and asked a follow-up.",
+                    feedback_score=5.0,
+                    response_to_user="Thanks for your feedback!",
+                    contains_followup_question=True,
+                    followup_question="What is the capital of France?",
+                ),
+            ),
+            patch(
                 "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Paris is the capital of France.",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User gave thanks and asked a follow-up.",
-                        feedback_score=5.0,
-                        response_to_user="Thanks for your feedback!",
-                        contains_followup_question=True,
-                    ),
-                ),
+                return_value=("Paris is the capital of France.", "", None),
             ),
         ):
             mock_user = MagicMock()
@@ -807,19 +809,20 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
+                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                new_callable=AsyncMock,
+                return_value=FeedbackDetectionResult(
+                    feedback_detected=True,
+                    feedback_text="User said thanks.",
+                    feedback_score=5.0,
+                    response_to_user="Thanks!",
+                    contains_followup_question=False,
+                ),
+            ),
+            patch(
                 "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User said thanks.",
-                        feedback_score=5.0,
-                        response_to_user="Thanks!",
-                        contains_followup_question=False,
-                    ),
-                ),
+                return_value=("Generated answer", "", None),
             ),
         ):
             mock_user = MagicMock()
@@ -857,18 +860,14 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User said thanks.",
-                        feedback_score=5.0,
-                        response_to_user="Thanks for your feedback!",
-                        contains_followup_question=False,
-                    ),
+                return_value=FeedbackDetectionResult(
+                    feedback_detected=True,
+                    feedback_text="User said thanks.",
+                    feedback_score=5.0,
+                    response_to_user="Thanks for your feedback!",
+                    contains_followup_question=False,
                 ),
             ),
         ):
@@ -905,18 +904,14 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User said thanks.",
-                        feedback_score=5.0,
-                        response_to_user="",
-                        contains_followup_question=False,
-                    ),
+                return_value=FeedbackDetectionResult(
+                    feedback_detected=True,
+                    feedback_text="User said thanks.",
+                    feedback_score=5.0,
+                    response_to_user="",
+                    contains_followup_question=False,
                 ),
             ),
         ):
@@ -953,18 +948,14 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=(
-                    "Generated answer",
-                    "",
-                    FeedbackDetectionResult(
-                        feedback_detected=True,
-                        feedback_text="User gave 2.7 stars.",
-                        feedback_score=2.7,
-                        response_to_user="Thanks!",
-                        contains_followup_question=False,
-                    ),
+                return_value=FeedbackDetectionResult(
+                    feedback_detected=True,
+                    feedback_text="User gave 2.7 stars.",
+                    feedback_score=2.7,
+                    response_to_user="Thanks!",
+                    contains_followup_question=False,
                 ),
             ),
         ):

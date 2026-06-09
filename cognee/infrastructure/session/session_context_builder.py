@@ -6,8 +6,8 @@ compact four-heading guidance block. It also houses the deterministic candidate 
 turns ``CandidateContextUpdate`` items into stored entries (validate -> confidence >= 0.75 ->
 normalize -> exact-dup-link-or-create, no LLM / no fuzzy / no auto-delete).
 
-Every public coroutine is fail-open: any exception degrades to a no-op safe default
-(``("", [])`` for the builder, ``[]`` for the applier) so it can never block answer generation.
+Public orchestration coroutines are fail-open so they can never block answer generation. Pure
+helpers are deliberately strict so tests catch malformed stored data and scoring mistakes.
 """
 
 from datetime import datetime
@@ -104,6 +104,53 @@ class DeterministicRanker:
         )
 
 
+def coerce_active_context_entries(raw_entries: list) -> List[SessionContextEntry]:
+    """Validate stored rows and keep only active context entries."""
+    entries: List[SessionContextEntry] = []
+    for raw in raw_entries or []:
+        if isinstance(raw, SessionContextEntry):
+            entry = raw
+        elif isinstance(raw, dict):
+            if raw.get("kind", "context") != "context":
+                continue
+            entry = SessionContextEntry.model_validate(raw)
+        else:
+            continue
+        entries.append(entry)
+    return entries
+
+
+def select_context_entries(
+    *,
+    entries: List[SessionContextEntry],
+    query: str,
+    ranker: ContextRanker,
+    per_section_char_budget: int,
+    total_char_budget: int,
+) -> List[SessionContextEntry]:
+    """Select highest-scoring entries globally while respecting total and per-section budgets."""
+    selected: List[SessionContextEntry] = []
+    section_usage = {key: 0 for key, _ in SECTION_HEADINGS}
+    total_used = 0
+
+    for entry in sorted(entries, key=lambda e: ranker.score(e, query), reverse=True):
+        if entry.section not in section_usage:
+            continue
+        content = entry.content.strip()
+        if not content:
+            continue
+        cost = len(content)
+        if section_usage[entry.section] + cost > per_section_char_budget:
+            continue
+        if total_used + cost > total_char_budget:
+            continue
+        selected.append(entry)
+        section_usage[entry.section] += cost
+        total_used += cost
+
+    return selected
+
+
 def _render_block(grouped_rendered: List[Tuple[str, List[str]]]) -> str:
     """Assemble the final block string from (heading_label, [bullet_lines]) groups."""
     lines: List[str] = [BLOCK_TITLE]
@@ -134,65 +181,37 @@ async def build_active_context_block(
         if ranker is None:
             ranker = DeterministicRanker()
 
-        raw_entries = await session_manager.get_session_context_entries(user_id, session_id)
+        raw_entries = await session_manager.get_session_context_entries(
+            user_id=user_id,
+            session_id=session_id,
+        )
         if not raw_entries:
             return "", []
 
-        # Coerce dict payloads into validated models; skip anything that fails / is feedback.
-        entries: List[SessionContextEntry] = []
-        for raw in raw_entries:
-            try:
-                if isinstance(raw, SessionContextEntry):
-                    entry = raw
-                elif isinstance(raw, dict):
-                    if raw.get("kind", "context") != "context":
-                        continue
-                    entry = SessionContextEntry.model_validate(raw)
-                else:
-                    continue
-            except Exception:
-                continue
-            if entry.kind != "context":
-                continue
-            entries.append(entry)
-
+        entries = coerce_active_context_entries(raw_entries)
         if not entries:
             return "", []
 
-        # Group by section and rank within section (highest score first).
-        by_section = {key: [] for key, _ in SECTION_HEADINGS}
-        for entry in entries:
-            if entry.section in by_section:
-                by_section[entry.section].append(entry)
-        for section_entries in by_section.values():
-            section_entries.sort(key=lambda e: ranker.score(e, query), reverse=True)
-
-        served_ids: List[str] = []
-        grouped_rendered: List[Tuple[str, List[str]]] = []
-        total_used = 0
-
-        for section_key, heading_label in SECTION_HEADINGS:
-            section_used = 0
-            bullets: List[str] = []
-            for entry in by_section.get(section_key, []):
-                bullet = entry.content.strip()
-                if not bullet:
-                    continue
-                cost = len(bullet)
-                if section_used + cost > per_section_char_budget:
-                    continue
-                if total_used + cost > total_char_budget:
-                    continue
-                bullets.append(bullet)
-                served_ids.append(entry.id)
-                section_used += cost
-                total_used += cost
-            grouped_rendered.append((heading_label, bullets))
-
-        if not served_ids:
+        selected = select_context_entries(
+            entries=entries,
+            query=query,
+            ranker=ranker,
+            per_section_char_budget=per_section_char_budget,
+            total_char_budget=total_char_budget,
+        )
+        if not selected:
             return "", []
 
-        return _render_block(grouped_rendered), served_ids
+        by_section = {key: [] for key, _ in SECTION_HEADINGS}
+        for entry in selected:
+            by_section[entry.section].append(entry)
+
+        grouped_rendered: List[Tuple[str, List[str]]] = []
+        for section_key, heading_label in SECTION_HEADINGS:
+            bullets = [entry.content.strip() for entry in by_section.get(section_key, [])]
+            grouped_rendered.append((heading_label, bullets))
+
+        return _render_block(grouped_rendered), [entry.id for entry in selected]
     except Exception:
         # Fail-open: never block answer generation.
         return "", []
@@ -226,7 +245,10 @@ async def _apply_single_candidate(
     normalized = normalize_content(content)
 
     # Look for an existing active entry with the same section + normalized content (exact dup).
-    existing = await session_manager.get_session_context_entries(user_id, session_id)
+    existing = await session_manager.get_session_context_entries(
+        user_id=user_id,
+        session_id=session_id,
+    )
     for raw in existing or []:
         if isinstance(raw, SessionContextEntry):
             row = raw.model_dump()
@@ -242,10 +264,10 @@ async def _apply_single_candidate(
             if feedback_entry_id and feedback_entry_id not in source_ids:
                 source_ids.append(feedback_entry_id)
                 await session_manager.update_session_context_entry(
-                    user_id,
-                    session_id,
-                    entry_id,
-                    {"source_feedback_ids": source_ids},
+                    user_id=user_id,
+                    session_id=session_id,
+                    entry_id=entry_id,
+                    merge={"source_feedback_ids": source_ids},
                 )
             return entry_id
 
@@ -260,7 +282,11 @@ async def _apply_single_candidate(
         source_feedback_ids=[feedback_entry_id] if feedback_entry_id else [],
         kind="context",
     )
-    await session_manager.create_session_context_entry(user_id, session_id, new_entry.model_dump())
+    await session_manager.create_session_context_entry(
+        user_id=user_id,
+        session_id=session_id,
+        entry_dump=new_entry.model_dump(),
+    )
     return new_entry.id
 
 
@@ -271,7 +297,6 @@ async def apply_candidate_updates(
     session_id,
     feedback_entry_id,
     candidates: list,
-    served_rating_ids: list = None,
 ) -> List[str]:
     """Deterministically apply candidate context updates.
 

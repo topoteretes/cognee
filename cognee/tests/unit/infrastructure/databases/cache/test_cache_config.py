@@ -79,7 +79,6 @@ def test_cache_config_to_dict():
         "cache_backend": "fs",
         "caching": True,
         "auto_feedback": False,
-        "session_context_enabled": False,
         "shared_ladybug_lock": True,
         "shared_kuzu_lock": False,
         "cache_host": "test-host",
