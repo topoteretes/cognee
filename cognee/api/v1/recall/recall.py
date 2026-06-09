@@ -333,6 +333,7 @@ async def recall(
     retriever_specific_config: dict | None = None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
+    include_references: bool = True,
     user: object | None = None,
 ) -> list[RecallResponse]:
     """Search the knowledge graph for relevant information.
@@ -410,6 +411,7 @@ async def recall(
             "session_id": session_id or "",
             "datasets": ",".join(datasets) if datasets else "",
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
+            "include_references": include_references,
             "cognee_version": cognee_version,
         },
     )
@@ -437,6 +439,7 @@ async def recall(
                 only_context=only_context,
                 session_id=session_id,
                 verbose=verbose,
+                include_references=include_references,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -546,6 +549,7 @@ async def recall(
                 retriever_specific_config=retriever_specific_config,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                include_references=include_references,
             )
 
             tagged = []
