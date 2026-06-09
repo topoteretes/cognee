@@ -134,6 +134,8 @@ jobs:
       - name: Run LanceDB Tests
         env:
           ENV: 'dev'
+          # Cap cached DB adapters
+          DATABASE_MAX_LRU_CACHE_SIZE: 1
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
