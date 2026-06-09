@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from uuid import UUID
 from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models.Query import Query
@@ -6,11 +7,14 @@ from ..models.Query import Query
 _LOG_ENABLED = os.getenv("COGNEE_LOG_SEARCH_HISTORY", "true").lower() in ("true", "1", "yes")
 
 
-async def log_query(query_text: str, query_type: str, user_id: UUID) -> Query:
+async def log_query(
+    query_text: str, query_type: str, user_id: UUID, conversation_id: Optional[UUID] = None
+) -> Query:
     query = Query(
         text=query_text,
         query_type=query_type,
         user_id=user_id,
+        conversation_id=conversation_id,
     )
 
     if not _LOG_ENABLED:

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, List, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import Field
@@ -11,7 +11,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.modules.search.operations import get_history
+from cognee.modules.search.operations import get_conversations, get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
@@ -37,6 +37,7 @@ class SearchPayloadDTO(InDTO):
     skills: Optional[list[str]] = Field(default=None, examples=[None])
     tools: Optional[list[str]] = Field(default=None, examples=[None])
     max_iter: Optional[int] = Field(default=None, examples=[None])
+    conversation_id: Optional[UUID] = Field(default=None)
 
 
 def get_search_router() -> APIRouter:
@@ -48,6 +49,39 @@ def get_search_router() -> APIRouter:
         user: str
         created_at: datetime
 
+    class ConversationItem(OutDTO):
+        conversation_id: UUID
+        title: str
+        created_at: datetime
+        query_count: int
+
+    @router.get(
+        "/conversations",
+        response_model=List[ConversationItem],
+        responses={
+            403: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
+    async def get_search_conversations(user: User = Depends(get_authenticated_user)):
+        """
+        List all search conversations for the authenticated user.
+
+        Returns one entry per distinct conversation_id, with the first query text
+        used as the conversation title.
+        """
+        try:
+            conversations = await get_conversations(user.id)
+            return conversations
+        except Exception as error:
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=ErrorResponse(
+                    error="Internal server error",
+                    detail=str(error),
+                ).model_dump(),
+            )
+
     @router.get(
         "",
         response_model=List[SearchHistoryItem],
@@ -57,12 +91,18 @@ def get_search_router() -> APIRouter:
             500: {"model": ErrorResponse},
         },
     )
-    async def get_search_history(user: User = Depends(get_authenticated_user)):
+    async def get_search_history(
+        conversation_id: Optional[UUID] = Query(default=None),
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Get search history for the authenticated user.
 
-        This endpoint retrieves the search history for the authenticated user,
-        returning a list of previously executed searches with their timestamps.
+        Optionally filter by conversation_id to retrieve history for a specific
+        conversation.
+
+        ## Query Parameters
+        - **conversation_id** (Optional[UUID]): Filter history to a specific conversation
 
         ## Response
         Returns a list of search history items containing:
@@ -81,7 +121,7 @@ def get_search_router() -> APIRouter:
         )
 
         try:
-            history = await get_history(user.id, limit=0)
+            history = await get_history(user.id, limit=0, conversation_id=conversation_id)
 
             return history
         except Exception as error:
@@ -173,6 +213,7 @@ def get_search_router() -> APIRouter:
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
+                conversation_id=payload.conversation_id,
             )
 
             return jsonable_encoder(results)

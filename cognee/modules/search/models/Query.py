@@ -12,6 +12,7 @@ class Query(Base):
     text = Column(String)
     query_type = Column(String)
     user_id = Column(UUID, index=True)
+    conversation_id = Column(UUID, index=True, nullable=True)
 
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True

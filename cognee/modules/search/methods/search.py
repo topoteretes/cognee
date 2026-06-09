@@ -49,6 +49,7 @@ async def search(
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
+    conversation_id: Optional[UUID] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
@@ -74,7 +75,7 @@ async def search(
     Notes:
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
-    query = await log_query(query_text, query_type.value, user.id)
+    query = await log_query(query_text, query_type.value, user.id, conversation_id=conversation_id)
     send_telemetry(
         "cognee.search EXECUTION STARTED",
         user.id,
