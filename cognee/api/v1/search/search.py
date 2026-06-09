@@ -125,7 +125,7 @@ async def search(
             Returns: The results from the automatically selected search type.
 
         **CHUNKS_LEXICAL**:
-            Token-based lexical chunk search (e.g., Jaccard). Best for: exact-term matching, stopword-aware lookups.
+            Token-based lexical chunk search (BM25-style lexical ranking). Best for: exact-term matching, stopword-aware lookups.
             Returns: Ranked text chunks (optionally with scores).
 
     Args:
