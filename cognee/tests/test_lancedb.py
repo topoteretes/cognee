@@ -180,7 +180,7 @@ async def test_vector_nodeset_filtering_retriever_integration():
 
     # Search with "OR" operator
     retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="OR", top_k=100
+        node_name=node_set, node_name_filter_operator="OR", top_k=10
     )
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
     context = await retriever.get_context_from_objects(
@@ -202,7 +202,7 @@ async def test_vector_nodeset_filtering_retriever_integration():
 
     # Search with "OR" operator
     retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="OR", top_k=100
+        node_name=node_set, node_name_filter_operator="OR", top_k=10
     )
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
     context = await retriever.get_context_from_objects(
@@ -213,7 +213,7 @@ async def test_vector_nodeset_filtering_retriever_integration():
 
     # Search with "AND" operator
     retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="AND", top_k=100
+        node_name=node_set, node_name_filter_operator="AND", top_k=10
     )
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
     context = await retriever.get_context_from_objects(
