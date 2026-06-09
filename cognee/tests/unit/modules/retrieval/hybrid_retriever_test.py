@@ -331,6 +331,58 @@ async def test_entity_fields_fall_back_from_name_to_text_to_id(payload, expected
 
 
 @pytest.mark.asyncio
+async def test_entity_header_omits_index_schema_type():
+    retriever = HybridRetriever()
+
+    context = await retriever.get_context_from_objects(
+        query="q",
+        retrieved_objects={
+            "chunks": [],
+            "entities": [
+                {
+                    "id": "entity-1",
+                    "name": "lisbon office logistics intelligence project",
+                    "type": "IndexSchema",
+                    "edges": [],
+                }
+            ],
+        },
+    )
+
+    assert context == "## Relevant entities\n### lisbon office logistics intelligence project"
+
+
+@pytest.mark.asyncio
+async def test_entity_type_prefers_domain_type_over_index_schema():
+    vector = MagicMock()
+    vector.search = _vector_search(
+        entities=[
+            _result(
+                "entity-1",
+                {
+                    "id": "entity-1",
+                    "name": "Lisbon office",
+                    "type": "IndexSchema",
+                    "is_a": "Office",
+                },
+            )
+        ]
+    )
+    graph = MagicMock()
+    graph.is_empty = AsyncMock(return_value=True)
+    retriever = HybridRetriever()
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert retrieved["entities"][0]["type"] == "Office"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("edge", "expected_text"),
     [
@@ -434,6 +486,42 @@ async def test_same_edge_text_does_not_collapse_distinct_relationships():
         retrieved = await retriever.get_retrieved_objects(query="q")
 
     assert [edge["source_id"] for edge in retrieved["entities"][0]["edges"]] == ["s1", "s2"]
+
+
+@pytest.mark.asyncio
+async def test_is_a_edge_is_prioritized_before_edge_cap():
+    vector = MagicMock()
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
+    )
+    graph = MagicMock()
+    graph.is_empty = AsyncMock(return_value=False)
+    graph.get_connections = AsyncMock(
+        return_value=[
+            (
+                {"id": "entity-1", "name": "Lisbon office"},
+                {"edge_text": "Lisbon office owns HarborLens", "relationship_name": "owns"},
+                {"id": "project-1", "name": "HarborLens"},
+            ),
+            (
+                {"id": "entity-1", "name": "Lisbon office"},
+                {"edge_text": "Lisbon office is a Office", "relationship_name": "is_a"},
+                {"id": "type-1", "name": "Office"},
+            ),
+        ]
+    )
+    retriever = HybridRetriever(max_edges_per_entity=1)
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert [edge["text"] for edge in retrieved["entities"][0]["edges"]] == [
+        "Lisbon office is a Office"
+    ]
 
 
 @pytest.mark.asyncio

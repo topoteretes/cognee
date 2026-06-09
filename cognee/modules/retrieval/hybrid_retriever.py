@@ -364,9 +364,17 @@ def _entity_from_result(result: Any) -> dict:
         "id": entity_id,
         "name": _first_display_value(payload.get("name"), payload.get("text"), entity_id) or "",
         "description": _display_value(payload.get("description")),
-        "type": _first_display_value(payload.get("type"), payload.get("is_a")),
+        "type": _entity_type(payload),
         "edges": [],
     }
+
+
+def _entity_type(payload: dict) -> Optional[str]:
+    for value in (payload.get("is_a"), payload.get("type")):
+        entity_type = _display_value(value)
+        if entity_type and entity_type not in {"IndexSchema"}:
+            return entity_type
+    return None
 
 
 def _edge_bullets_from_connections(connections: List[Any], max_edges: int) -> List[dict]:
@@ -397,9 +405,8 @@ def _edge_bullets_from_connections(connections: List[Any], max_edges: int) -> Li
         else:
             seen_texts.add(bullet["text"])
         edges.append(bullet)
-        if len(edges) >= max_edges:
-            break
-    return edges
+    edges.sort(key=lambda edge: 0 if _is_type_edge(edge) else 1)
+    return edges[:max_edges]
 
 
 def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
@@ -440,6 +447,17 @@ def _edge_dedupe_key(edge: dict) -> Optional[tuple[str, str, str]]:
     return None
 
 
+def _is_type_edge(edge: dict) -> bool:
+    relationship = _display_value(edge.get("relationship"))
+    if relationship:
+        normalized = relationship.lower().replace("_", " ").replace("-", " ").strip()
+        if normalized == "is a":
+            return True
+
+    text = _display_value(edge.get("text"))
+    return bool(text and " is a " in f" {text.lower()} ")
+
+
 def _nested_edge_text(edge: dict) -> Optional[str]:
     properties = edge.get("properties")
     if not isinstance(properties, dict):
@@ -478,7 +496,7 @@ def _format_entity(entity: dict) -> str:
     if not name:
         return ""
 
-    entity_type = _display_value(entity.get("type"))
+    entity_type = _entity_type(entity)
     header = f"### {name} ({entity_type})" if entity_type else f"### {name}"
 
     lines = [header]
