@@ -226,6 +226,12 @@ await cognee.disconnect()
 
 Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations.
 
+**New to knowledge graphs?** Start with the [Beginner-Friendly Knowledge Graph Example](examples/guides/beginner_knowledge_graph.py) — it walks through the full remember → explore → recall workflow, prints every entity and relationship Cognee extracts, and shows how to query the graph with natural-language questions.
+
+```bash
+python examples/guides/beginner_knowledge_graph.py
+```
+
 **Use Case 1 — Customer Support Agent**
 
 ```python
