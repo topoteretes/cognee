@@ -55,6 +55,8 @@ jobs:
       - name: Run PGVector Tests
         env:
           ENV: 'dev'
+          # Limit glibc malloc arenas to curb memory fragmentation
+          MALLOC_ARENA_MAX: '2'
           ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -134,6 +136,8 @@ jobs:
       - name: Run LanceDB Tests
         env:
           ENV: 'dev'
+          # Limit glibc malloc arenas to curb memory fragmentation
+          MALLOC_ARENA_MAX: '2'
           # Cap cached DB adapters
           DATABASE_MAX_LRU_CACHE_SIZE: 1
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
