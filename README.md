@@ -191,7 +191,7 @@ New to knowledge graphs? Here's what happens when you run the quickstart above.
 
 **Sample output** (from [`examples/guides/beginner_knowledge_graph.py`](examples/guides/beginner_knowledge_graph.py)):
 
-```
+```text
 Entities (graph nodes): 8
 ----------------------------------------
   [Person] Marie Curie  --  Physicist and chemist, pioneer in radioactivity
