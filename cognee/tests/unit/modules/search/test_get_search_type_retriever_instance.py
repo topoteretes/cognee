@@ -186,7 +186,10 @@ async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
 
 @pytest.mark.asyncio
 async def test_hybrid_completion_get_retriever_output_smoke():
-    from cognee.modules.search.methods.get_retriever_output import get_retriever_output
+    from cognee.modules.search.methods.get_retriever_output import (
+        _count_retrieved_objects,
+        get_retriever_output,
+    )
 
     chunk = MagicMock()
     chunk.id = "chunk-result"
@@ -196,7 +199,15 @@ async def test_hybrid_completion_get_retriever_output_smoke():
     entity.payload = {"id": "entity-1", "name": "Entity"}
 
     vector = MagicMock()
-    vector.search = AsyncMock(side_effect=[[chunk], [entity]])
+
+    async def search(collection_name, *args, **kwargs):
+        if collection_name == "DocumentChunk_text":
+            return [chunk]
+        if collection_name == "Entity_name":
+            return [entity]
+        return []
+
+    vector.search = AsyncMock(side_effect=search)
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
     graph.get_connections = AsyncMock(return_value=[])
@@ -240,6 +251,7 @@ async def test_hybrid_completion_get_retriever_output_smoke():
         payload.context == "## Relevant passages\nChunk context\n\n## Relevant entities\n### Entity"
     )
     assert payload.completion == ["answer"]
+    assert _count_retrieved_objects(payload.result_object) == 2
 
 
 @pytest.mark.asyncio

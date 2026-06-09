@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, List, Optional, Type
 from uuid import UUID
 
@@ -64,16 +65,18 @@ class HybridRetriever(BaseRetriever):
         validate_retriever_input(query, None, self._use_session_cache())
 
         self._unified_engine = await get_unified_engine()
-        chunks = await self._build_chunks(query)
-        entity_hits = await self._search_collection("Entity_name", query, self.entities_top_k)
+        chunks, entity_hits = await asyncio.gather(
+            self._build_chunks(query),
+            self._search_collection("Entity_name", query, self.entities_top_k),
+        )
         entities = await self._build_entities(entity_hits)
 
         return {"chunks": chunks, "entities": entities}
 
     async def _build_chunks(self, query: str) -> List[Any]:
-        bm25_chunks = await self._search_bm25_chunks(query)
-        vector_chunks = await self._search_collection(
-            "DocumentChunk_text", query, self.chunks_top_k
+        bm25_chunks, vector_chunks = await asyncio.gather(
+            self._search_bm25_chunks(query),
+            self._search_collection("DocumentChunk_text", query, self.chunks_top_k, required=True),
         )
         return _merge_chunks(bm25_chunks, vector_chunks, self.chunks_top_k)
 
@@ -83,22 +86,31 @@ class HybridRetriever(BaseRetriever):
             return []
 
         try:
-            retriever = BM25ChunksRetriever(top_k=bm25_top_k)
-            chunks = await retriever.get_retrieved_objects(query)
+            retriever = BM25ChunksRetriever(top_k=bm25_top_k, with_scores=True)
+            scored_chunks = await retriever.get_retrieved_objects(query)
         except NoDataError:
             return []
         except Exception as error:
             logger.warning("BM25 chunk retrieval failed; using vector chunks only: %s", error)
             return []
 
-        return [
-            chunk
-            for chunk in chunks
-            if isinstance(chunk, dict)
-            and _payload_matches_node_filter(chunk, self.node_name, self.node_name_filter_operator)
-        ]
+        chunks = []
+        for item in scored_chunks:
+            chunk, score = _scored_payload(item)
+            if score <= 0:
+                continue
+            if not isinstance(chunk, dict):
+                continue
+            if not _payload_matches_node_filter(
+                chunk, self.node_name, self.node_name_filter_operator
+            ):
+                continue
+            chunks.append(chunk)
+        return chunks
 
-    async def _search_collection(self, collection_name: str, query: str, limit: int) -> List[Any]:
+    async def _search_collection(
+        self, collection_name: str, query: str, limit: int, *, required: bool = False
+    ) -> List[Any]:
         try:
             return await self._unified_engine.vector.search(
                 collection_name,
@@ -108,7 +120,10 @@ class HybridRetriever(BaseRetriever):
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
             )
-        except CollectionNotFoundError:
+        except CollectionNotFoundError as error:
+            if required:
+                logger.error("%s collection not found", collection_name)
+                raise NoDataError("No data found in the system, please add data first.") from error
             logger.debug("%s collection not found; using empty channel", collection_name)
             return []
 
@@ -116,15 +131,15 @@ class HybridRetriever(BaseRetriever):
         if not entity_hits:
             return []
 
-        graph_is_empty = await self._unified_engine.graph.is_empty()
-        entities = []
-        for result in entity_hits:
-            entity = _entity_from_result(result)
-            connections = []
-            if not graph_is_empty:
-                connections = await self._unified_engine.graph.get_connections(entity["id"])
+        entities = [_entity_from_result(result) for result in entity_hits]
+        if await self._unified_engine.graph.is_empty():
+            return entities
+
+        connections_by_entity = await asyncio.gather(
+            *[self._unified_engine.graph.get_connections(entity["id"]) for entity in entities]
+        )
+        for entity, connections in zip(entities, connections_by_entity):
             entity["edges"] = _edge_bullets_from_connections(connections, self.max_edges_per_entity)
-            entities.append(entity)
         return entities
 
     async def get_context_from_objects(
@@ -181,10 +196,14 @@ class HybridRetriever(BaseRetriever):
                 node_ids.add(result_id)
 
         for entity in retrieved_objects.get("entities", []):
-            entity_id = _display_value(entity.get("id")) if isinstance(entity, dict) else None
+            if not isinstance(entity, dict):
+                continue
+            entity_id = _display_value(entity.get("id"))
             if entity_id:
                 node_ids.add(entity_id)
             for edge in entity.get("edges", []):
+                if not isinstance(edge, dict):
+                    continue
                 for key in ("source_id", "target_id"):
                     edge_node_id = _display_value(edge.get(key))
                     if edge_node_id:
@@ -271,6 +290,15 @@ def _result_id(result: Any) -> Optional[str]:
     return _display_value(payload.get("id")) or _display_value(getattr(result, "id", None))
 
 
+def _scored_payload(item: Any) -> tuple[Any, float]:
+    if not isinstance(item, (list, tuple)) or len(item) != 2:
+        return item, 0.0
+    payload, score = item
+    if not isinstance(score, (int, float)):
+        return payload, 0.0
+    return payload, float(score)
+
+
 def _bm25_chunk_limit(chunks_top_k: int) -> int:
     if chunks_top_k <= 0:
         return 0
@@ -346,6 +374,7 @@ def _edge_bullets_from_connections(connections: List[Any], max_edges: int) -> Li
         return []
 
     edges = []
+    seen_keys = set()
     seen_texts = set()
     for connection in connections or []:
         unpacked = _unpack_connection(connection)
@@ -354,10 +383,19 @@ def _edge_bullets_from_connections(connections: List[Any], max_edges: int) -> Li
 
         source, edge, target = unpacked
         bullet = _edge_bullet(source, edge, target)
-        if not bullet or bullet["text"] in seen_texts:
+        if not bullet:
             continue
 
-        seen_texts.add(bullet["text"])
+        dedupe_key = _edge_dedupe_key(bullet)
+        if dedupe_key and dedupe_key in seen_keys:
+            continue
+        if not dedupe_key and bullet["text"] in seen_texts:
+            continue
+
+        if dedupe_key:
+            seen_keys.add(dedupe_key)
+        else:
+            seen_texts.add(bullet["text"])
         edges.append(bullet)
         if len(edges) >= max_edges:
             break
@@ -388,8 +426,18 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
         "source": source_label,
         "target": target_label,
         "source_id": _display_value(source.get("id")),
+        "relationship": relationship,
         "target_id": _display_value(target.get("id")),
     }
+
+
+def _edge_dedupe_key(edge: dict) -> Optional[tuple[str, str, str]]:
+    source_id = _display_value(edge.get("source_id"))
+    relationship = _display_value(edge.get("relationship"))
+    target_id = _display_value(edge.get("target_id"))
+    if source_id and relationship and target_id:
+        return source_id, relationship, target_id
+    return None
 
 
 def _nested_edge_text(edge: dict) -> Optional[str]:

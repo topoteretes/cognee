@@ -1,9 +1,10 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
 
@@ -19,6 +20,28 @@ def _unified(vector=None, graph=None):
     unified.vector = vector or MagicMock()
     unified.graph = graph or MagicMock()
     return unified
+
+
+def _vector_search(chunks=None, entities=None, missing_collections=None):
+    missing_collections = set(missing_collections or [])
+
+    async def search(collection_name, *args, **kwargs):
+        if collection_name in missing_collections:
+            raise CollectionNotFoundError("missing")
+        if collection_name == "DocumentChunk_text":
+            return chunks or []
+        if collection_name == "Entity_name":
+            return entities or []
+        return []
+
+    return AsyncMock(side_effect=search)
+
+
+def _search_call(vector, collection_name):
+    for call in vector.search.await_args_list:
+        if call.args[:1] == (collection_name,):
+            return call
+    raise AssertionError(f"{collection_name} was not searched")
 
 
 @pytest.mark.asyncio
@@ -53,11 +76,9 @@ async def test_empty_sections_return_empty_context():
 @pytest.mark.asyncio
 async def test_empty_graph_does_not_prevent_chunk_search():
     vector = MagicMock()
-    vector.search = AsyncMock(
-        side_effect=[
-            [_result("chunk-1", {"id": "chunk-1", "text": "Chunk text"})],
-            [_result("entity-1", {"id": "entity-1", "name": "Entity"})],
-        ]
+    vector.search = _vector_search(
+        chunks=[_result("chunk-1", {"id": "chunk-1", "text": "Chunk text"})],
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})],
     )
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=True)
@@ -75,7 +96,7 @@ async def test_empty_graph_does_not_prevent_chunk_search():
     assert retrieved["chunks"][0].payload["text"] == "Chunk text"
     assert retrieved["entities"][0]["name"] == "Entity"
     graph.get_connections.assert_not_awaited()
-    assert vector.search.await_args_list[0].args[:2] == ("DocumentChunk_text", "q")
+    assert _search_call(vector, "DocumentChunk_text").args[:2] == ("DocumentChunk_text", "q")
 
 
 @pytest.mark.asyncio
@@ -93,14 +114,9 @@ async def test_query_batch_is_rejected_before_work_starts():
 
 
 @pytest.mark.asyncio
-async def test_missing_document_chunk_collection_returns_empty_channel():
-    async def search(collection_name, *args, **kwargs):
-        if collection_name == "DocumentChunk_text":
-            raise CollectionNotFoundError("missing")
-        return []
-
+async def test_missing_document_chunk_collection_raises_no_data_error():
     vector = MagicMock()
-    vector.search = AsyncMock(side_effect=search)
+    vector.search = _vector_search(missing_collections={"DocumentChunk_text"})
     graph = MagicMock()
 
     retriever = HybridRetriever()
@@ -110,9 +126,8 @@ async def test_missing_document_chunk_collection_returns_empty_channel():
         new_callable=AsyncMock,
         return_value=_unified(vector=vector, graph=graph),
     ):
-        retrieved = await retriever.get_retrieved_objects(query="q")
-
-    assert retrieved == {"chunks": [], "entities": []}
+        with pytest.raises(NoDataError, match="No data found"):
+            await retriever.get_retrieved_objects(query="q")
 
 
 @pytest.mark.asyncio
@@ -128,7 +143,7 @@ async def test_chunk_search_receives_nodeset_filters():
     ):
         await retriever.get_retrieved_objects(query="q")
 
-    chunk_call = vector.search.await_args_list[0]
+    chunk_call = _search_call(vector, "DocumentChunk_text")
     assert chunk_call.args[:2] == ("DocumentChunk_text", "q")
     assert chunk_call.kwargs["node_name"] == ["KEN"]
     assert chunk_call.kwargs["node_name_filter_operator"] == "AND"
@@ -139,19 +154,16 @@ async def test_chunk_retrieval_uses_bm25_first_then_vector_fill_with_dedupe():
     bm25_retriever = MagicMock()
     bm25_retriever.get_retrieved_objects = AsyncMock(
         return_value=[
-            {"id": "bm25-1", "text": "BM25 first"},
-            {"id": "shared", "text": "BM25 shared"},
+            ({"id": "bm25-1", "text": "BM25 first"}, 2.0),
+            ({"id": "shared", "text": "BM25 shared"}, 1.5),
         ]
     )
     vector = MagicMock()
-    vector.search = AsyncMock(
-        side_effect=[
-            [
-                _result("shared-vector", {"id": "shared", "text": "Vector duplicate"}),
-                _result("semantic-1", {"id": "semantic-1", "text": "Semantic extra"}),
-                _result("semantic-2", {"id": "semantic-2", "text": "Second semantic extra"}),
-            ],
-            [],
+    vector.search = _vector_search(
+        chunks=[
+            _result("shared-vector", {"id": "shared", "text": "Vector duplicate"}),
+            _result("semantic-1", {"id": "semantic-1", "text": "Semantic extra"}),
+            _result("semantic-2", {"id": "semantic-2", "text": "Second semantic extra"}),
         ]
     )
     retriever = HybridRetriever(chunks_top_k=4)
@@ -169,7 +181,7 @@ async def test_chunk_retrieval_uses_bm25_first_then_vector_fill_with_dedupe():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    bm25_cls.assert_called_once_with(top_k=2)
+    bm25_cls.assert_called_once_with(top_k=2, with_scores=True)
     bm25_retriever.get_retrieved_objects.assert_awaited_once_with("q")
     assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == [
         "BM25 first",
@@ -184,8 +196,8 @@ async def test_bm25_chunks_respect_nodeset_filter_before_merge():
     bm25_retriever = MagicMock()
     bm25_retriever.get_retrieved_objects = AsyncMock(
         return_value=[
-            {"id": "keep", "text": "Keep", "belongs_to_set": ["KEN", "src_type:figure"]},
-            {"id": "drop", "text": "Drop", "belongs_to_set": ["KEN"]},
+            ({"id": "keep", "text": "Keep", "belongs_to_set": ["KEN", "src_type:figure"]}, 2.0),
+            ({"id": "drop", "text": "Drop", "belongs_to_set": ["KEN"]}, 1.0),
         ]
     )
     vector = MagicMock()
@@ -213,6 +225,86 @@ async def test_bm25_chunks_respect_nodeset_filter_before_merge():
 
 
 @pytest.mark.asyncio
+async def test_zero_score_bm25_chunks_do_not_reserve_context_slots():
+    bm25_retriever = MagicMock()
+    bm25_retriever.get_retrieved_objects = AsyncMock(
+        return_value=[
+            ({"id": "zero", "text": "Zero lexical score"}, 0.0),
+            ({"id": "positive", "text": "Positive lexical score"}, 3.0),
+        ]
+    )
+    vector = MagicMock()
+    vector.search = _vector_search(
+        chunks=[_result("semantic", {"id": "semantic", "text": "Semantic fallback"})]
+    )
+    retriever = HybridRetriever(chunks_top_k=2)
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(vector=vector),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            return_value=bm25_retriever,
+        ),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == [
+        "Positive lexical score",
+        "Semantic fallback",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_independent_retrieval_channels_run_concurrently():
+    bm25_started = asyncio.Event()
+    chunk_vector_started = asyncio.Event()
+    entity_started = asyncio.Event()
+
+    bm25_retriever = MagicMock()
+
+    async def search_bm25(query):
+        bm25_started.set()
+        await chunk_vector_started.wait()
+        return []
+
+    async def search_vector(collection_name, *args, **kwargs):
+        if collection_name == "DocumentChunk_text":
+            chunk_vector_started.set()
+            await bm25_started.wait()
+            await entity_started.wait()
+            return []
+        if collection_name == "Entity_name":
+            entity_started.set()
+            await chunk_vector_started.wait()
+            return []
+        return []
+
+    bm25_retriever.get_retrieved_objects = AsyncMock(side_effect=search_bm25)
+    vector = MagicMock()
+    vector.search = AsyncMock(side_effect=search_vector)
+    retriever = HybridRetriever()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(vector=vector),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            return_value=bm25_retriever,
+        ),
+    ):
+        retrieved = await asyncio.wait_for(retriever.get_retrieved_objects(query="q"), timeout=1)
+
+    assert retrieved == {"chunks": [], "entities": []}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payload", "expected_name"),
     [
@@ -223,12 +315,7 @@ async def test_bm25_chunks_respect_nodeset_filter_before_merge():
 )
 async def test_entity_fields_fall_back_from_name_to_text_to_id(payload, expected_name):
     vector = MagicMock()
-    vector.search = AsyncMock(
-        side_effect=[
-            [],
-            [_result("fallback-id", payload)],
-        ]
-    )
+    vector.search = _vector_search(entities=[_result("fallback-id", payload)])
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=True)
     retriever = HybridRetriever()
@@ -257,11 +344,8 @@ async def test_entity_fields_fall_back_from_name_to_text_to_id(payload, expected
 )
 async def test_edge_text_fallbacks(edge, expected_text):
     vector = MagicMock()
-    vector.search = AsyncMock(
-        side_effect=[
-            [],
-            [_result("entity-1", {"id": "entity-1", "name": "Entity"})],
-        ]
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
@@ -289,11 +373,8 @@ async def test_edge_text_fallbacks(edge, expected_text):
 @pytest.mark.asyncio
 async def test_duplicate_edges_are_removed_and_max_edges_caps_results():
     vector = MagicMock()
-    vector.search = AsyncMock(
-        side_effect=[
-            [],
-            [_result("entity-1", {"id": "entity-1", "name": "Entity"})],
-        ]
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
@@ -317,14 +398,48 @@ async def test_duplicate_edges_are_removed_and_max_edges_caps_results():
 
 
 @pytest.mark.asyncio
-async def test_missing_entity_collection_returns_empty_channel():
-    async def search(collection_name, *args, **kwargs):
-        if collection_name == "Entity_name":
-            raise CollectionNotFoundError("missing")
-        return []
-
+async def test_same_edge_text_does_not_collapse_distinct_relationships():
     vector = MagicMock()
-    vector.search = AsyncMock(side_effect=search)
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
+    )
+    graph = MagicMock()
+    graph.is_empty = AsyncMock(return_value=False)
+    graph.get_connections = AsyncMock(
+        return_value=[
+            (
+                {"id": "s1", "name": "S1"},
+                {"edge_text": "related", "relationship_name": "REL"},
+                {"id": "t1", "name": "T1"},
+            ),
+            (
+                {"id": "s2", "name": "S2"},
+                {"edge_text": "related", "relationship_name": "REL"},
+                {"id": "t2", "name": "T2"},
+            ),
+            (
+                {"id": "s1", "name": "S1"},
+                {"edge_text": "related", "relationship_name": "REL"},
+                {"id": "t1", "name": "T1"},
+            ),
+        ]
+    )
+    retriever = HybridRetriever(max_edges_per_entity=5)
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert [edge["source_id"] for edge in retrieved["entities"][0]["edges"]] == ["s1", "s2"]
+
+
+@pytest.mark.asyncio
+async def test_missing_entity_collection_returns_empty_channel():
+    vector = MagicMock()
+    vector.search = _vector_search(missing_collections={"Entity_name"})
     retriever = HybridRetriever()
 
     with patch(
@@ -340,11 +455,8 @@ async def test_missing_entity_collection_returns_empty_channel():
 @pytest.mark.asyncio
 async def test_entity_search_receives_nodeset_filters_and_expands_connections():
     vector = MagicMock()
-    vector.search = AsyncMock(
-        side_effect=[
-            [],
-            [_result("entity-1", {"id": "entity-1", "name": "Entity"})],
-        ]
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
@@ -358,7 +470,7 @@ async def test_entity_search_receives_nodeset_filters_and_expands_connections():
     ):
         await retriever.get_retrieved_objects(query="q")
 
-    entity_call = vector.search.await_args_list[1]
+    entity_call = _search_call(vector, "Entity_name")
     assert entity_call.args[:2] == ("Entity_name", "q")
     assert entity_call.kwargs["node_name"] == ["KEN"]
     assert entity_call.kwargs["node_name_filter_operator"] == "AND"
@@ -368,11 +480,8 @@ async def test_entity_search_receives_nodeset_filters_and_expands_connections():
 @pytest.mark.asyncio
 async def test_malformed_connection_rows_are_skipped_without_dropping_entity():
     vector = MagicMock()
-    vector.search = AsyncMock(
-        side_effect=[
-            [],
-            [_result("entity-1", {"id": "entity-1", "name": "Entity"})],
-        ]
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
@@ -522,6 +631,32 @@ async def test_session_path_calls_session_manager_with_used_node_ids():
     assert call_kwargs["used_graph_element_ids"] == {
         "node_ids": ["chunk-1", "entity-1", "source-1", "target-1"]
     }
+
+
+@pytest.mark.asyncio
+async def test_context_object_id_extraction_skips_non_dict_entities():
+    retriever = HybridRetriever(session_id="session-1")
+    session_manager = MagicMock()
+    session_manager.generate_completion_with_session = AsyncMock(return_value="answer")
+
+    with (
+        patch.object(retriever, "_use_session_cache", return_value=True),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_session_manager",
+            return_value=session_manager,
+        ),
+    ):
+        await retriever.get_completion_from_context(
+            query="q",
+            retrieved_objects={
+                "chunks": [_result("chunk-result", {"id": "chunk-1", "text": "Chunk"})],
+                "entities": ["not-a-dict"],
+            },
+            context="context",
+        )
+
+    call_kwargs = session_manager.generate_completion_with_session.call_args.kwargs
+    assert call_kwargs["used_graph_element_ids"] == {"node_ids": ["chunk-1"]}
 
 
 def _payload_text(chunk):

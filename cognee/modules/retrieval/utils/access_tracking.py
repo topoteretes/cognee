@@ -1,8 +1,7 @@
 """Utilities for tracking data access in retrievers."""
 
-import json
 from datetime import datetime, timezone
-from typing import List, Any
+from typing import Any, Optional
 from uuid import UUID
 import os
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -17,36 +16,21 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 logger = get_logger(__name__)
 
 
-async def update_node_access_timestamps(items: List[Edge]):
+async def update_node_access_timestamps(items: Any):
     if os.getenv("ENABLE_LAST_ACCESSED", "false").lower() != "true":
         return
 
-    # In case there are no items or the items are not Edges, we can skip processing
+    # In case there are no retrievable node ids, skip processing.
     if not items:
         return
 
-    items = items if isinstance(items, list) else [items]
-
-    # TODO: Expand support for other result objects like what is returned from RAG_COMPLETION retriever
-    if not all(isinstance(item, Edge) for item in items):
+    node_ids = _extract_access_node_ids(items)
+    if not node_ids:
         logger.debug("No valid items to update access timestamps for.")
         return
 
-    # Transform raw Edges to graph format
-    items = transform_triplets_to_graph(items)
-
     graph_engine = await get_graph_engine()
     timestamp_dt = datetime.now(timezone.utc)
-
-    # Extract node IDs
-    node_ids = []
-    for item in items.get("nodes"):
-        item_id = item.payload.get("id") if hasattr(item, "payload") else item.get("id")
-        if item_id:
-            node_ids.append(str(item_id))
-
-    if not node_ids:
-        return
 
     # Focus on document-level tracking via projection
     try:
@@ -85,6 +69,68 @@ async def _find_origin_documents_via_projection(graph_engine, node_ids):
                     doc_ids.add(neighbor.id)
 
     return list(doc_ids)
+
+
+def _extract_access_node_ids(items: Any) -> list[str]:
+    if isinstance(items, list) and all(isinstance(item, Edge) for item in items):
+        return _extract_node_ids_from_edges(items)
+    if isinstance(items, dict):
+        return _extract_node_ids_from_retrieval_dict(items)
+    return []
+
+
+def _extract_node_ids_from_edges(edges: list[Edge]) -> list[str]:
+    graph_items = transform_triplets_to_graph(edges)
+    node_ids = set()
+    for item in graph_items.get("nodes"):
+        item_id = item.payload.get("id") if hasattr(item, "payload") else item.get("id")
+        item_id = _display_id(item_id)
+        if item_id:
+            node_ids.add(item_id)
+    return sorted(node_ids)
+
+
+def _extract_node_ids_from_retrieval_dict(items: dict) -> list[str]:
+    node_ids = set()
+    for chunk in items.get("chunks", []) or []:
+        chunk_id = _result_id(chunk)
+        if chunk_id:
+            node_ids.add(chunk_id)
+
+    for entity in items.get("entities", []) or []:
+        if not isinstance(entity, dict):
+            continue
+        entity_id = _display_id(entity.get("id"))
+        if entity_id:
+            node_ids.add(entity_id)
+        for edge in entity.get("edges", []) or []:
+            if not isinstance(edge, dict):
+                continue
+            for key in ("source_id", "target_id"):
+                edge_node_id = _display_id(edge.get(key))
+                if edge_node_id:
+                    node_ids.add(edge_node_id)
+
+    return sorted(node_ids)
+
+
+def _result_id(result: Any) -> Optional[str]:
+    payload = _payload(result)
+    return _display_id(payload.get("id")) or _display_id(getattr(result, "id", None))
+
+
+def _payload(result: Any) -> dict:
+    if isinstance(result, dict):
+        return result
+    payload = getattr(result, "payload", None)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _display_id(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 async def _update_sql_records(doc_ids, timestamp_dt):
