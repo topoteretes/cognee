@@ -82,11 +82,21 @@ async def main():
     print("=" * 60)
     print("Stage 2: EXPLORE -- what did Cognee extract?")
     print("=" * 60)
+    print()
+    print("A knowledge graph stores information as:")
+    print("  - NODES (entities): people, places, concepts, events")
+    print("  - EDGES (relationships): how entities relate to each other")
+    print()
+    print("Below is the graph Cognee built from the input text.")
+    print("Compare it to the original paragraph to see how Cognee")
+    print("turned unstructured prose into structured knowledge.")
 
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
     # --- Print nodes (entities) ---
+    # Each node has a type (e.g. Person, Place) and properties like
+    # name and description.  Cognee extracted these using an LLM.
     print(f"\nEntities (graph nodes): {len(nodes)}")
     print("-" * 40)
     for node_id, properties in nodes:
@@ -100,6 +110,8 @@ async def main():
             print(line)
 
     # --- Print edges (relationships) ---
+    # Each edge connects two nodes and has a label describing the
+    # relationship, e.g. "Marie Curie --[born_in]--> Warsaw".
     print(f"\nRelationships (graph edges): {len(edges)}")
     print("-" * 40)
     # Build a lookup so we can show human-readable names instead of UUIDs.
@@ -113,6 +125,9 @@ async def main():
         print(f"  {src}  --[{relationship}]-->  {tgt}")
 
     print()
+    print("Tip: The exact entities and labels depend on the LLM, so your")
+    print("output may differ slightly.  The important thing is that Cognee")
+    print("extracted structured knowledge from plain text automatically.")
 
     # ==================================================================
     # Stage 3: RECALL -- ask questions about the knowledge graph
