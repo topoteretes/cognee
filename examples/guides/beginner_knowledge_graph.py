@@ -56,6 +56,7 @@ SAMPLE_TEXT = (
 
 
 async def main():
+    """Demonstrate the full Cognee workflow: remember text, explore the knowledge graph, and recall answers."""
     # ==================================================================
     # Stage 0: Start fresh (optional -- useful for a clean demo)
     # ==================================================================
