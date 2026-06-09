@@ -13,6 +13,7 @@ from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
@@ -88,6 +89,26 @@ async def get_search_type_retriever_instance(
                 "system_prompt": system_prompt,
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
+            },
+        ),
+        SearchType.HYBRID_COMPLETION: (
+            HybridRetriever,
+            {
+                "chunks_top_k": retriever_specific_config.get("chunks_top_k", top_k),
+                "entities_top_k": retriever_specific_config.get("entities_top_k", top_k),
+                "max_edges_per_entity": retriever_specific_config.get("max_edges_per_entity", 10),
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+                "system_prompt_path": system_prompt_path,
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "include_global_context_index": retriever_specific_config.get(
+                    "include_global_context_index", False
+                ),
+                "global_context_index_top_k": retriever_specific_config.get(
+                    "global_context_index_top_k", 3
+                ),
             },
         ),
         SearchType.TRIPLET_COMPLETION: (
