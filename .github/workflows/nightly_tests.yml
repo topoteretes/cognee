@@ -7,9 +7,7 @@ on:
   schedule:
     - cron: '0 3 * * *'
   workflow_dispatch:
-  # TEMPORARY: run on PRs touching the nightly performance workflows so the new
-  # War and Peace jobs can be tested end-to-end. REMOVE this `pull_request`
-  # trigger before merging the PR — nightly should only run on schedule.
+  # Note: Run Nightly CI on change to any of the following files.
   pull_request:
     paths:
       - '.github/workflows/nightly_tests.yml'
