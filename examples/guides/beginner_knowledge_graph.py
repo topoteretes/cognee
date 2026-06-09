@@ -95,33 +95,45 @@ async def main():
     nodes, edges = await graph_engine.get_graph_data()
 
     # --- Print nodes (entities) ---
-    # Each node has a type (e.g. Person, Place) and properties like
-    # name and description.  Cognee extracted these using an LLM.
-    print(f"\nEntities (graph nodes): {len(nodes)}")
+    # Each node has a type (e.g. Entity, DocumentChunk) and properties
+    # like name and description.  Cognee extracted these using an LLM.
+    # We filter to only show named entities (skipping internal nodes
+    # like DocumentChunk and TextSummary that are part of Cognee's
+    # internal pipeline).
+    entity_nodes = [
+        (nid, props)
+        for nid, props in nodes
+        if props.get("name") and props.get("type") not in ("DocumentChunk", "TextSummary")
+    ]
+    print(f"\nEntities (graph nodes): {len(entity_nodes)}")
     print("-" * 40)
-    for node_id, properties in nodes:
-        name = properties.get("name", properties.get("text", str(node_id)))
-        node_type = properties.get("_type", "unknown")
+    for node_id, properties in entity_nodes:
+        name = properties.get("name", str(node_id))
+        node_type = properties.get("type", "unknown")
         description = properties.get("description", "")
-        if name and node_type:
-            line = f"  [{node_type}] {name}"
-            if description:
-                line += f"  --  {description[:80]}"
-            print(line)
+        line = f"  [{node_type}] {name}"
+        if description:
+            line += f"  --  {description[:80]}"
+        print(line)
 
     # --- Print edges (relationships) ---
     # Each edge connects two nodes and has a label describing the
     # relationship, e.g. "Marie Curie --[born_in]--> Warsaw".
-    print(f"\nRelationships (graph edges): {len(edges)}")
-    print("-" * 40)
-    # Build a lookup so we can show human-readable names instead of UUIDs.
+    # We only show edges where both endpoints have names.
     id_to_name = {}
     for node_id, properties in nodes:
-        id_to_name[str(node_id)] = properties.get("name", properties.get("text", str(node_id)[:8]))
+        name = properties.get("name", "")
+        if name:
+            id_to_name[str(node_id)] = name
 
-    for source_id, target_id, relationship, _props in edges:
-        src = id_to_name.get(str(source_id), str(source_id)[:8])
-        tgt = id_to_name.get(str(target_id), str(target_id)[:8])
+    named_edges = [
+        (id_to_name[str(s)], rel, id_to_name[str(t)])
+        for s, t, rel, _ in edges
+        if str(s) in id_to_name and str(t) in id_to_name
+    ]
+    print(f"\nRelationships (graph edges): {len(named_edges)}")
+    print("-" * 40)
+    for src, relationship, tgt in named_edges:
         print(f"  {src}  --[{relationship}]-->  {tgt}")
 
     print()
@@ -146,7 +158,9 @@ async def main():
         print(f"\nQ: {question}")
         answers = await cognee.recall(question)
         for answer in answers:
-            print(f"A: {answer}")
+            # Each answer has a .text attribute with the human-readable response.
+            text = getattr(answer, "text", str(answer))
+            print(f"A: {text}")
 
     # ==================================================================
     # Cleanup
