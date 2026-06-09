@@ -1,3 +1,4 @@
+import importlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -186,9 +187,8 @@ async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
 
 @pytest.mark.asyncio
 async def test_hybrid_completion_get_retriever_output_smoke():
-    from cognee.modules.search.methods.get_retriever_output import (
-        _count_retrieved_objects,
-        get_retriever_output,
+    retriever_output_module = importlib.import_module(
+        "cognee.modules.search.methods.get_retriever_output"
     )
 
     chunk = MagicMock()
@@ -218,13 +218,15 @@ async def test_hybrid_completion_get_retriever_output_smoke():
     bm25_retriever.get_retrieved_objects = AsyncMock(return_value=[])
 
     with (
-        patch(
-            "cognee.modules.search.methods.get_retriever_output.get_graph_engine",
+        patch.object(
+            retriever_output_module,
+            "get_graph_engine",
             new_callable=AsyncMock,
             return_value=graph,
         ),
-        patch(
-            "cognee.modules.search.methods.get_retriever_output.update_node_access_timestamps",
+        patch.object(
+            retriever_output_module,
+            "update_node_access_timestamps",
             new_callable=AsyncMock,
         ),
         patch(
@@ -242,7 +244,9 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             return_value="answer",
         ),
     ):
-        payload = await get_retriever_output(SearchType.HYBRID_COMPLETION, "q")
+        payload = await retriever_output_module.get_retriever_output(
+            SearchType.HYBRID_COMPLETION, "q"
+        )
 
     assert payload.search_type is SearchType.HYBRID_COMPLETION
     assert payload.result_object["chunks"] == [chunk]
@@ -251,7 +255,7 @@ async def test_hybrid_completion_get_retriever_output_smoke():
         payload.context == "## Relevant passages\nChunk context\n\n## Relevant entities\n### Entity"
     )
     assert payload.completion == ["answer"]
-    assert _count_retrieved_objects(payload.result_object) == 2
+    assert retriever_output_module._count_retrieved_objects(payload.result_object) == 2
 
 
 @pytest.mark.asyncio
