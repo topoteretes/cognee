@@ -135,6 +135,84 @@ async def test_chunk_search_receives_nodeset_filters():
 
 
 @pytest.mark.asyncio
+async def test_chunk_retrieval_uses_bm25_first_then_vector_fill_with_dedupe():
+    bm25_retriever = MagicMock()
+    bm25_retriever.get_retrieved_objects = AsyncMock(
+        return_value=[
+            {"id": "bm25-1", "text": "BM25 first"},
+            {"id": "shared", "text": "BM25 shared"},
+        ]
+    )
+    vector = MagicMock()
+    vector.search = AsyncMock(
+        side_effect=[
+            [
+                _result("shared-vector", {"id": "shared", "text": "Vector duplicate"}),
+                _result("semantic-1", {"id": "semantic-1", "text": "Semantic extra"}),
+                _result("semantic-2", {"id": "semantic-2", "text": "Second semantic extra"}),
+            ],
+            [],
+        ]
+    )
+    retriever = HybridRetriever(chunks_top_k=4)
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(vector=vector),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            return_value=bm25_retriever,
+        ) as bm25_cls,
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    bm25_cls.assert_called_once_with(top_k=2)
+    bm25_retriever.get_retrieved_objects.assert_awaited_once_with("q")
+    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == [
+        "BM25 first",
+        "BM25 shared",
+        "Semantic extra",
+        "Second semantic extra",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bm25_chunks_respect_nodeset_filter_before_merge():
+    bm25_retriever = MagicMock()
+    bm25_retriever.get_retrieved_objects = AsyncMock(
+        return_value=[
+            {"id": "keep", "text": "Keep", "belongs_to_set": ["KEN", "src_type:figure"]},
+            {"id": "drop", "text": "Drop", "belongs_to_set": ["KEN"]},
+        ]
+    )
+    vector = MagicMock()
+    vector.search = AsyncMock(return_value=[])
+    retriever = HybridRetriever(
+        chunks_top_k=4,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(vector=vector),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            return_value=bm25_retriever,
+        ),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == ["Keep"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payload", "expected_name"),
     [
@@ -444,3 +522,9 @@ async def test_session_path_calls_session_manager_with_used_node_ids():
     assert call_kwargs["used_graph_element_ids"] == {
         "node_ids": ["chunk-1", "entity-1", "source-1", "target-1"]
     }
+
+
+def _payload_text(chunk):
+    if isinstance(chunk, dict):
+        return chunk.get("text")
+    return chunk.payload.get("text")

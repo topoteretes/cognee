@@ -7,7 +7,8 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
@@ -63,11 +64,39 @@ class HybridRetriever(BaseRetriever):
         validate_retriever_input(query, None, self._use_session_cache())
 
         self._unified_engine = await get_unified_engine()
-        chunks = await self._search_collection("DocumentChunk_text", query, self.chunks_top_k)
+        chunks = await self._build_chunks(query)
         entity_hits = await self._search_collection("Entity_name", query, self.entities_top_k)
         entities = await self._build_entities(entity_hits)
 
         return {"chunks": chunks, "entities": entities}
+
+    async def _build_chunks(self, query: str) -> List[Any]:
+        bm25_chunks = await self._search_bm25_chunks(query)
+        vector_chunks = await self._search_collection(
+            "DocumentChunk_text", query, self.chunks_top_k
+        )
+        return _merge_chunks(bm25_chunks, vector_chunks, self.chunks_top_k)
+
+    async def _search_bm25_chunks(self, query: str) -> List[dict]:
+        bm25_top_k = _bm25_chunk_limit(self.chunks_top_k)
+        if bm25_top_k <= 0:
+            return []
+
+        try:
+            retriever = BM25ChunksRetriever(top_k=bm25_top_k)
+            chunks = await retriever.get_retrieved_objects(query)
+        except NoDataError:
+            return []
+        except Exception as error:
+            logger.warning("BM25 chunk retrieval failed; using vector chunks only: %s", error)
+            return []
+
+        return [
+            chunk
+            for chunk in chunks
+            if isinstance(chunk, dict)
+            and _payload_matches_node_filter(chunk, self.node_name, self.node_name_filter_operator)
+        ]
 
     async def _search_collection(self, collection_name: str, query: str, limit: int) -> List[Any]:
         try:
@@ -222,6 +251,8 @@ def _reject_query_batch(query_batch: Optional[List[str]]) -> None:
 
 
 def _payload(result: Any) -> dict:
+    if isinstance(result, dict):
+        return result
     payload = getattr(result, "payload", None)
     return payload if isinstance(payload, dict) else {}
 
@@ -238,6 +269,56 @@ def _display_value(value: Any) -> Optional[str]:
 def _result_id(result: Any) -> Optional[str]:
     payload = _payload(result)
     return _display_value(payload.get("id")) or _display_value(getattr(result, "id", None))
+
+
+def _bm25_chunk_limit(chunks_top_k: int) -> int:
+    if chunks_top_k <= 0:
+        return 0
+    return max(1, chunks_top_k // 2)
+
+
+def _merge_chunks(bm25_chunks: List[Any], vector_chunks: List[Any], limit: int) -> List[Any]:
+    if limit <= 0:
+        return []
+
+    chunks = []
+    seen = set()
+    for chunk in [*(bm25_chunks or []), *(vector_chunks or [])]:
+        key = _chunk_key(chunk)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        chunks.append(chunk)
+        if len(chunks) >= limit:
+            break
+    return chunks
+
+
+def _chunk_key(chunk: Any) -> Optional[tuple[str, str]]:
+    chunk_id = _result_id(chunk)
+    if chunk_id:
+        return ("id", chunk_id)
+    text = _display_value(_payload(chunk).get("text"))
+    if text:
+        return ("text", text)
+    return None
+
+
+def _payload_matches_node_filter(
+    payload: dict, node_name: Optional[List[str]], node_name_filter_operator: str
+) -> bool:
+    if not node_name:
+        return True
+
+    belongs_to_set = payload.get("belongs_to_set")
+    if not isinstance(belongs_to_set, list):
+        return False
+
+    payload_sets = {str(name) for name in belongs_to_set}
+    requested_sets = {str(name) for name in node_name}
+    if node_name_filter_operator == "AND":
+        return requested_sets.issubset(payload_sets)
+    return bool(payload_sets & requested_sets)
 
 
 def _first_display_value(*values: Any) -> Optional[str]:

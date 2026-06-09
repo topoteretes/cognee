@@ -203,6 +203,8 @@ async def test_hybrid_completion_get_retriever_output_smoke():
     unified = MagicMock()
     unified.vector = vector
     unified.graph = graph
+    bm25_retriever = MagicMock()
+    bm25_retriever.get_retrieved_objects = AsyncMock(return_value=[])
 
     with (
         patch(
@@ -218,6 +220,10 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
             new_callable=AsyncMock,
             return_value=unified,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            return_value=bm25_retriever,
         ),
         patch(
             "cognee.modules.retrieval.hybrid_retriever.generate_completion",
