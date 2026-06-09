@@ -307,16 +307,10 @@ def print_turn_snapshot(
         print("latest_qa: none", file=sys.stderr)
     else:
         print(f"latest_qa.question: {latest_qa['question']}", file=sys.stderr)
-        print(f"latest_qa.feedback_score: {latest_qa['feedback_score']}", file=sys.stderr)
         print(
             f"latest_qa.used_session_context_ids: {latest_qa['used_session_context_ids']}",
             file=sys.stderr,
         )
-        if latest_qa["feedback_text"]:
-            print(
-                f"latest_qa.feedback_text: {preview_text(latest_qa['feedback_text'], 300)}",
-                file=sys.stderr,
-            )
 
     print_session_context(evidence["session_context_entries"])
 
@@ -404,8 +398,6 @@ def serialize_latest_qa(qa_entries: list) -> dict | None:
         "qa_id": latest.qa_id,
         "question": latest.question,
         "answer": latest.answer,
-        "feedback_text": latest.feedback_text,
-        "feedback_score": latest.feedback_score,
         "used_session_context_ids": latest.used_session_context_ids,
     }
 

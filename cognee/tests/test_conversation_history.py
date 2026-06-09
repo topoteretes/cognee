@@ -422,15 +422,12 @@ async def main():
     )
     entry_autofeedback = entries_autofeedback[0]
     assert entry_autofeedback.question == "What is TechCorp?", (
-        "Single entry must be the first question (feedback was attached to it, not stored as new QA)"
+        "Single entry must be the first question; feedback-only text was not stored as new QA"
     )
-    assert getattr(entry_autofeedback, "feedback_text", None) and getattr(
-        entry_autofeedback, "feedback_score", None
-    ), "Automatic feedback must be stored on the previous QA (feedback_text or feedback_score set)"
+    assert getattr(entry_autofeedback, "feedback_text", None) is None
+    assert getattr(entry_autofeedback, "feedback_score", None) is None
     logger.info(
-        "Automatic feedback detection e2e passed: feedback_text=%s, feedback_score=%s",
-        getattr(entry_autofeedback, "feedback_text", None),
-        getattr(entry_autofeedback, "feedback_score", None),
+        "Automatic feedback detection e2e passed without auto-populating QA feedback fields",
     )
     ###### END E2E: Automatic feedback detection #####
 

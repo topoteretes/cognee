@@ -102,6 +102,8 @@ class CompletionRetriever(BaseRetriever):
         query: str,
         retrieved_objects: Any,
         context: Optional[Any] = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         """
         Generates an LLM completion using the context.
@@ -143,6 +145,8 @@ class CompletionRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
             return [completion]
         return await self._generate_completion_without_session(query, context)

@@ -50,11 +50,11 @@ async def analyze_turn_for_session_context(
     served_context: list | str | None = None,
 ) -> SessionTurnAnalysis:
     """
-    Analyze a user message to detect whether it contains feedback about a previous response.
+    Analyze a user message for answer routing and session-context updates.
 
     When ``served_context`` is provided (a pre-rendered string or a list of session-context
     entries served to the previous answer), it is appended to the LLM input so the single
-    feedback call can additionally produce ``served_context_ratings`` and
+    turn-analysis call can additionally produce ``served_context_ratings`` and
     ``candidate_context_updates``. This adds no extra LLM call.
 
     Returns a SessionTurnAnalysis. On LLM failure or timeout, returns an empty analysis so
@@ -96,7 +96,9 @@ async def analyze_turn_for_session_context(
         return result
     except Exception as e:
         logger.warning(
-            "Feedback detection failed, proceeding with no feedback detected: %s", e, exc_info=False
+            "Session turn analysis failed, proceeding with empty analysis: %s",
+            e,
+            exc_info=False,
         )
         return SessionTurnAnalysis()
 

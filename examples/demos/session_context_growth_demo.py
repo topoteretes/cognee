@@ -54,10 +54,8 @@ def create_demo_turn(
     *,
     user_message: str,
     generated_answer: str | None = None,
-    feedback_text: str | None = None,
-    feedback_score: int | float | None = None,
     response_to_user: str | None = None,
-    followup_question: str | None = None,
+    query_to_answer: str | None = None,
     learned_section: str | None = None,
     learned_content: str | None = None,
     learned_confidence: float = 0.9,
@@ -84,12 +82,8 @@ def create_demo_turn(
         user_message=user_message,
         generated_answer=generated_answer,
         simulated_analysis=FeedbackDetectionResult(
-            feedback_detected=feedback_text is not None,
-            feedback_text=feedback_text,
-            feedback_score=feedback_score,
             response_to_user=response_to_user,
-            contains_followup_question=followup_question is not None,
-            followup_question=followup_question,
+            query_to_answer=query_to_answer,
             candidate_context_updates=candidate_updates,
             served_context_ratings=served_context_ratings,
         ),
@@ -106,17 +100,15 @@ def demo_turns() -> list[DemoTurn]:
         create_demo_turn(
             user_message=user_message,
             generated_answer=answer,
+            query_to_answer=user_message,
         )
     )
 
     user_message = "That was helpful. For future answers, prefer bullet points."
-    feedback_text = "User said the previous answer was helpful."
     learned_preference = "Prefer bullet points in future answers."
     turns.append(
         create_demo_turn(
             user_message=user_message,
-            feedback_text=feedback_text,
-            feedback_score=5,
             response_to_user="Thanks for your feedback.",
             learned_section="preferences",
             learned_content=learned_preference,
@@ -130,22 +122,20 @@ def demo_turns() -> list[DemoTurn]:
         create_demo_turn(
             user_message=user_message,
             generated_answer=answer,
+            query_to_answer=user_message,
         )
     )
 
     user_message = "That answer was too verbose, but what should I test?"
-    feedback_text = "User said the previous answer was too verbose and asked a follow-up."
-    followup_question = "What should I test?"
+    query_to_answer = "What should I test?"
     learned_rule = "Keep implementation plans concise."
     answer = "Test feedback detection, context updates, and served context IDs."
     turns.append(
         create_demo_turn(
             user_message=user_message,
             generated_answer=answer,
-            feedback_text=feedback_text,
-            feedback_score=2,
             response_to_user="Thanks, noted.",
-            followup_question=followup_question,
+            query_to_answer=query_to_answer,
             learned_section="rules",
             learned_content=learned_rule,
             learned_confidence=0.88,
@@ -245,11 +235,8 @@ async def store_demo_answer(
 
 def serialize_analysis(analysis: FeedbackDetectionResult) -> dict:
     return {
-        "feedback_detected": analysis.feedback_detected,
-        "feedback_text": analysis.feedback_text,
-        "feedback_score": analysis.feedback_score,
-        "contains_followup_question": analysis.contains_followup_question,
-        "followup_question": analysis.followup_question,
+        "query_to_answer": analysis.query_to_answer,
+        "response_to_user": analysis.response_to_user,
         "candidate_context_updates": [
             candidate.model_dump() for candidate in analysis.candidate_context_updates
         ],

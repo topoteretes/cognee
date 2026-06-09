@@ -203,6 +203,8 @@ class AgenticRetriever(GraphCompletionRetriever):
         query_batch: Optional[List[str]] = None,
         retrieved_objects=None,
         context: Any = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         if not isinstance(retrieved_objects, dict):
             return await super().get_completion_from_context(
@@ -210,6 +212,8 @@ class AgenticRetriever(GraphCompletionRetriever):
                 query_batch=query_batch,
                 retrieved_objects=retrieved_objects,
                 context=context,
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
 
         skills: List[Skill] = retrieved_objects.get("skills") or []
@@ -224,7 +228,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         try:
             try:
                 final = await self._run_tool_loop(
-                    query=query,
+                    query=effective_query or query,
                     initial_context=context if isinstance(context, str) else "",
                     tool_names=tool_names,
                     tool_trace=tool_trace,

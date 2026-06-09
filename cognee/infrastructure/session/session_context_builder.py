@@ -92,7 +92,7 @@ class DeterministicRanker:
 
     def score(self, entry: SessionContextEntry, query: str) -> float:
         section_priority = self.SECTION_PRIORITY.get(entry.section, 0)
-        net_help = entry.helpful_count - entry.harmful_count
+        net_help = max(-3, min(3, entry.helpful_count - entry.harmful_count))
         overlap = self._query_overlap(entry.content, query)
         return (
             self.W_SECTION * section_priority
@@ -162,6 +162,24 @@ def _render_block(grouped_rendered: List[Tuple[str, List[str]]]) -> str:
     return "\n".join(lines)
 
 
+async def _stamp_served_entries(*, session_manager, user_id, session_id, entry_ids: List[str]):
+    """Best-effort stamp for entries actually rendered into the active context block."""
+    if not entry_ids:
+        return
+
+    served_at = datetime.utcnow().isoformat()
+    for entry_id in entry_ids:
+        try:
+            await session_manager.update_session_context_entry(
+                user_id=user_id,
+                session_id=session_id,
+                entry_id=entry_id,
+                merge={"last_served_at": served_at},
+            )
+        except Exception:
+            continue
+
+
 async def build_active_context_block(
     *,
     session_manager,
@@ -211,7 +229,15 @@ async def build_active_context_block(
             bullets = [entry.content.strip() for entry in by_section.get(section_key, [])]
             grouped_rendered.append((heading_label, bullets))
 
-        return _render_block(grouped_rendered), [entry.id for entry in selected]
+        served_ids = [entry.id for entry in selected]
+        block = _render_block(grouped_rendered)
+        await _stamp_served_entries(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            entry_ids=served_ids,
+        )
+        return block, served_ids
     except Exception:
         # Fail-open: never block answer generation.
         return "", []

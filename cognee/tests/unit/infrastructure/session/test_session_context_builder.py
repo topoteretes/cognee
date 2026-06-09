@@ -68,6 +68,13 @@ class RaisingSessionManager:
         raise RuntimeError("boom")
 
 
+class UpdateRaisingSessionManager(FakeSessionManager):
+    """Loads entries normally but fails when stamping served entries."""
+
+    async def update_session_context_entry(self, user_id, session_id, entry_id, merge):
+        raise RuntimeError("boom")
+
+
 # --------------------------------------------------------------------------- ranker
 
 
@@ -98,6 +105,13 @@ def test_ranker_net_helpfulness():
     helpful = _entry("goals", "g", helpful_count=5, harmful_count=0)
     harmful = _entry("goals", "g", helpful_count=0, harmful_count=5)
     assert ranker.score(helpful, "x") > ranker.score(harmful, "x")
+
+
+def test_ranker_clamps_net_helpfulness_below_section_priority():
+    ranker = DeterministicRanker()
+    rule = _entry("rules", "rule", confidence=0.0)
+    preference = _entry("preferences", "preference", helpful_count=100, confidence=0.0)
+    assert ranker.score(rule, "x") > ranker.score(preference, "x")
 
 
 # --------------------------------------------------------------------------- builder
@@ -131,6 +145,20 @@ async def test_build_renders_sections_and_records_ids():
     assert "### Preferences" in block
     assert "### Lessons learned" in block
     assert set(served) == {"g1", "r1", "p1", "l1"}
+    for row in sm.store:
+        assert row["last_served_at"]
+
+
+@pytest.mark.asyncio
+async def test_build_returns_block_when_served_stamp_fails():
+    entries = [_entry("goals", "Ship the MVP", id="g1")]
+    sm = UpdateRaisingSessionManager(entries)
+    block, served = await build_active_context_block(
+        session_manager=sm, user_id="u", session_id="s", query="anything"
+    )
+    assert "Ship the MVP" in block
+    assert served == ["g1"]
+    assert sm.store[0]["last_served_at"] is None
 
 
 @pytest.mark.asyncio

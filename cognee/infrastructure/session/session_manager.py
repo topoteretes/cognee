@@ -368,9 +368,9 @@ class SessionManager:
     ) -> SessionTurnPreparation:
         """Analyze one user turn before retrieval/answer generation.
 
-        This runs only when caching and auto_feedback are enabled. It records feedback for the
-        previous QA when possible, applies accepted candidate guidance, and returns the effective
-        query that retrieval and answer generation should use.
+        This runs only when caching and auto_feedback are enabled. It applies accepted candidate
+        guidance, rates previously served guidance, and returns the effective query that retrieval
+        and answer generation should use.
         """
         resolved_user_id = user_id
         if resolved_user_id is None:
@@ -434,21 +434,12 @@ class SessionManager:
             logger.warning("SessionManager: turn analysis application failed open: %s", error)
             accepted_context_ids = []
 
-        has_previous_feedback = analysis.feedback_detected and previous_qa_id is not None
-        has_followup = (
-            has_previous_feedback
-            and analysis.contains_followup_question
-            and bool((analysis.followup_question or "").strip())
-        )
-        if has_followup:
-            effective_query = analysis.followup_question.strip()
-        else:
-            effective_query = query
-
-        should_answer = not (has_previous_feedback and not has_followup)
+        query_to_answer = (analysis.query_to_answer or "").strip()
+        should_answer = bool(query_to_answer)
+        effective_query = query_to_answer or query
         response_to_user = (analysis.response_to_user or "").strip() or None
-        if has_previous_feedback and not response_to_user:
-            response_to_user = "Thanks for your feedback."
+        if not should_answer and not response_to_user:
+            response_to_user = "Got it."
 
         return SessionTurnPreparation(
             should_answer=should_answer,
@@ -589,7 +580,6 @@ class SessionManager:
         cache_config = CacheConfig()
         session_context_on = cache_config.caching and cache_config.auto_feedback
 
-        served_context = None
         served_ids: list[str] = []
         active_context_block = ""
         if session_context_on:
@@ -635,8 +625,6 @@ class SessionManager:
             system_prompt=system_prompt,
             response_model=response_model,
             summarize_context=summarize_context,
-            run_feedback_detection=False,
-            served_context=served_context,
         )
 
         await self.add_qa(
@@ -648,14 +636,6 @@ class SessionManager:
             used_graph_element_ids=used_graph_element_ids,
             used_session_context_ids=served_ids or None,
         )
-        analysis = turn_preparation.analysis
-        if (
-            analysis is not None
-            and analysis.feedback_detected
-            and analysis.contains_followup_question
-        ):
-            thanks = (turn_preparation.response_to_user or "").strip()
-            return f"{thanks}\n\n{completion}" if thanks else completion
         return completion
 
     async def _build_active_context_block_safe(
@@ -717,12 +697,8 @@ class SessionManager:
         previous_qa_id: str | None,
         served_ids: list[str],
     ) -> list[str]:
-        """Persist feedback evidence, apply candidate updates, and bump helpful/harmful counters."""
-        if (
-            not analysis.feedback_detected
-            and not analysis.candidate_context_updates
-            and not analysis.served_context_ratings
-        ):
+        """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
+        if not analysis.candidate_context_updates and not analysis.served_context_ratings:
             return []
         try:
             from cognee.infrastructure.session.session_context_builder import (
@@ -731,32 +707,6 @@ class SessionManager:
             from cognee.infrastructure.session.session_context_models import (
                 SessionFeedbackEntry,
             )
-
-            score: int | None = None
-            try:
-                if analysis.feedback_score is not None:
-                    score = int(round(min(5, max(1, float(analysis.feedback_score)))))
-            except (TypeError, ValueError):
-                score = None
-
-            if analysis.feedback_detected and previous_qa_id:
-                feedback_text = (analysis.feedback_text or "").strip()
-                if not feedback_text:
-                    feedback_text = f"User message: {query.strip()}"
-                try:
-                    await self.add_feedback(
-                        user_id=user_id,
-                        session_id=session_id,
-                        qa_id=previous_qa_id,
-                        feedback_text=feedback_text,
-                        feedback_score=score,
-                    )
-                except Exception as error:
-                    logger.warning(
-                        "Auto-feedback persistence failed, proceeding without storing feedback: %s",
-                        error,
-                        exc_info=False,
-                    )
 
             ratings = list(analysis.served_context_ratings or [])
             candidates = list(analysis.candidate_context_updates or [])
@@ -827,14 +777,17 @@ class SessionManager:
                     helpful, harmful = counts[entry_id]
                     if verdict == "helpful":
                         merge = {"helpful_count": helpful + 1}
+                        next_counts = (helpful + 1, harmful)
                     else:
                         merge = {"harmful_count": harmful + 1}
+                        next_counts = (helpful, harmful + 1)
                     await self.update_session_context_entry(
                         user_id=user_id,
                         entry_id=entry_id,
                         merge=merge,
                         session_id=session_id,
                     )
+                    counts[entry_id] = next_counts
                 except Exception:
                     continue
         except Exception as e:
