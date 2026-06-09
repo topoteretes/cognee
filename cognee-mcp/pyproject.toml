@@ -46,6 +46,10 @@ postgres-binary = [
     "asyncpg>=0.30.0,<1.0.0",
 ]
 
+x402 = [
+    "imperial-a2a>=1.0.0",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
