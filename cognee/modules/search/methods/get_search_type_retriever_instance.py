@@ -20,7 +20,7 @@ from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
 )
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
-from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
+from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -281,7 +281,7 @@ async def get_search_type_retriever_instance(
                 "node_name_filter_operator": node_name_filter_operator,
             },
         ),
-        SearchType.CHUNKS_LEXICAL: (JaccardChunksRetriever, {"top_k": top_k}),
+        SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),
         SearchType.CODING_RULES: (
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},
