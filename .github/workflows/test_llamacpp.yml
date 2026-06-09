@@ -26,9 +26,20 @@ jobs:
         run: |
           uv add torch
 
-      - name: Pull required Ollama models
+      - name: Download Phi-3 GGUF model from S3
+        # Mirrored from huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf (MIT)
+        # into our bucket to avoid HuggingFace 429 rate limits in CI.
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+          MODEL_KEY: nightly_ci_artifacts/huggingface_models/Phi-3-mini-4k-instruct-q4.gguf
+          MODEL_SHA256: 8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef
         run: |
-          wget https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf
+          set -euo pipefail
+          aws s3 cp "s3://$BUCKET/$MODEL_KEY" ./Phi-3-mini-4k-instruct-q4.gguf
+          echo "$MODEL_SHA256  ./Phi-3-mini-4k-instruct-q4.gguf" | sha256sum -c -
 
       - name: Run example test
         env:

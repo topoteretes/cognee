@@ -76,6 +76,21 @@ jobs:
           docker ps
           docker logs $(docker ps --filter "ancestor=ollama/ollama" --format "{{.ID}}")
 
+      - name: Download embedding tokenizer from S3
+        # Mirrored from huggingface.co/Qwen/Qwen3-Embedding-8B (Apache-2.0) so the
+        # embedding tokenizer loads offline and never hits HuggingFace 429s in CI.
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+          TOKENIZER_KEY: nightly_ci_artifacts/huggingface_models/qwen3-embedding-tokenizer.tar.gz
+          TOKENIZER_SHA256: 8f5834d8791c8da03220feaccc2fe9c443e23b1092dcd99c576ef613990bbd00
+        run: |
+          set -euo pipefail
+          aws s3 cp "s3://$BUCKET/$TOKENIZER_KEY" tokenizer.tar.gz
+          echo "$TOKENIZER_SHA256  tokenizer.tar.gz" | sha256sum -c -
+          tar -xzf tokenizer.tar.gz -C "$GITHUB_WORKSPACE"
 
       - name: Run example test
         env:
@@ -89,5 +104,8 @@ jobs:
           EMBEDDING_MODEL: "qwen3-embedding:latest"
           EMBEDDING_ENDPOINT: "http://localhost:11434/api/embed"
           EMBEDDING_DIMENSIONS: "4096"
-          HUGGINGFACE_TOKENIZER: "Qwen/Qwen3-Embedding-8B"
+          # Load the tokenizer from the S3-mirrored local dir, fully offline.
+          HUGGINGFACE_TOKENIZER: "${{ github.workspace }}/qwen3-embedding-tokenizer"
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
         run: uv run python ./examples/demos/simple_cognee_example.py
