@@ -12,21 +12,36 @@ REFERENCE_FIELDS = ("document_id", "document_name", "chunk_index")
 
 
 def _index_schema_classes():
+    # LanceDB is the default vector backend and is always installed.
     from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import (
         IndexSchema as LanceDBIndexSchema,
     )
-    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
-        IndexSchema as PGVectorIndexSchema,
-    )
-    from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-        IndexSchema as NeptuneIndexSchema,
-    )
 
-    return [
-        ("lancedb", LanceDBIndexSchema),
-        ("pgvector", PGVectorIndexSchema),
-        ("neptune", NeptuneIndexSchema),
-    ]
+    classes = [("lancedb", LanceDBIndexSchema)]
+
+    # PGVector and Neptune require optional extras (postgres / aws). Importing
+    # their adapters fails when those deps are absent (e.g. the basic CI job),
+    # so include them only when importable — they are covered in the dedicated
+    # DB test jobs where the extras are installed.
+    try:
+        from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
+            IndexSchema as PGVectorIndexSchema,
+        )
+
+        classes.append(("pgvector", PGVectorIndexSchema))
+    except Exception:  # pragma: no cover - depends on optional extras
+        pass
+
+    try:
+        from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
+            IndexSchema as NeptuneIndexSchema,
+        )
+
+        classes.append(("neptune", NeptuneIndexSchema))
+    except Exception:  # pragma: no cover - depends on optional extras
+        pass
+
+    return classes
 
 
 @pytest.mark.parametrize("name, schema_cls", _index_schema_classes())
