@@ -459,6 +459,13 @@ def setup_logging(log_level=None, name=None) -> bool:
         processor=structlog.dev.ConsoleRenderer(
             colors=True,
             force_colors=True,
+            # show_locals=False: the default RichTracebackFormatter renders every
+            # frame's locals, which in the retrieval path include graph objects
+            # carrying embedding vectors and deep node/edge references. Rendering
+            # those recursively builds millions of objects + stringifies the
+            # embeddings, spiking RAM to multiple GB and OOM-killing the process
+            # whenever an exception is logged mid-search. Disable locals rendering.
+            exception_formatter=structlog.dev.RichTracebackFormatter(show_locals=False),
             level_styles={
                 "critical": structlog.dev.RED,
                 "exception": structlog.dev.RED,
