@@ -880,6 +880,15 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
             try:
                 validated = schema_model.model_validate(raw_payload).model_dump()
+                # Re-typing must NOT introduce columns the stored row lacks. The
+                # schema model may have grown optional fields since this
+                # collection was created (e.g. reference scalars added to a text
+                # IndexSchema); model_dump() would emit them as None, and adding
+                # a field absent from the table's Arrow struct makes
+                # `collection.add` reject the row ("field '...' does not exist in
+                # table schema"). Keep exactly the stored key set, coercing the
+                # value where the model provided one.
+                validated = {key: validated.get(key, raw_payload[key]) for key in raw_payload}
             except Exception as e:
                 logger.debug(
                     "_coerce_rows_to_typed_payload: validation fell back for id=%s: %s",
