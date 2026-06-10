@@ -36,6 +36,10 @@ SECTION_HEADINGS: List[Tuple[str, str]] = [
 ]
 
 BLOCK_TITLE = "## Active session guidance"
+CONFLICT_INSTRUCTION = (
+    "Items are listed oldest to newest within each section. "
+    "When guidance conflicts, prefer the later item."
+)
 
 
 class ContextRanker(Protocol):
@@ -151,9 +155,23 @@ def select_context_entries(
     return selected
 
 
+def _time_label(timestamp: str) -> str:
+    """Return a compact HH:MM:SS label from an ISO timestamp; invalid/missing -> unknown."""
+    if not timestamp:
+        return "unknown"
+    try:
+        return datetime.fromisoformat(timestamp).strftime("%H:%M:%S")
+    except (TypeError, ValueError):
+        return "unknown"
+
+
+def _render_entry(entry: SessionContextEntry) -> str:
+    return f"[{_time_label(entry.created_at)}] {entry.content.strip()}"
+
+
 def _render_block(grouped_rendered: List[Tuple[str, List[str]]]) -> str:
     """Assemble the final block string from (heading_label, [bullet_lines]) groups."""
-    lines: List[str] = [BLOCK_TITLE]
+    lines: List[str] = [BLOCK_TITLE, CONFLICT_INSTRUCTION]
     for heading_label, bullets in grouped_rendered:
         if not bullets:
             continue
@@ -226,7 +244,11 @@ async def build_active_context_block(
 
         grouped_rendered: List[Tuple[str, List[str]]] = []
         for section_key, heading_label in SECTION_HEADINGS:
-            bullets = [entry.content.strip() for entry in by_section.get(section_key, [])]
+            entries = sorted(
+                by_section.get(section_key, []),
+                key=lambda entry: entry.created_at or "",
+            )
+            bullets = [_render_entry(entry) for entry in entries]
             grouped_rendered.append((heading_label, bullets))
 
         served_ids = [entry.id for entry in selected]

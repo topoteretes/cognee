@@ -435,9 +435,15 @@ class SessionManager:
             accepted_context_ids = []
 
         query_to_answer = (analysis.query_to_answer or "").strip()
-        should_answer = bool(query_to_answer)
-        effective_query = query_to_answer or query
         response_to_user = (analysis.response_to_user or "").strip() or None
+        has_analysis_signal = bool(
+            query_to_answer
+            or response_to_user
+            or analysis.candidate_context_updates
+            or analysis.served_context_ratings
+        )
+        should_answer = bool(query_to_answer or not has_analysis_signal)
+        effective_query = query_to_answer or query
         if not should_answer and not response_to_user:
             response_to_user = "Got it."
 

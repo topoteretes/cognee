@@ -150,6 +150,35 @@ async def test_build_renders_sections_and_records_ids():
 
 
 @pytest.mark.asyncio
+async def test_build_renders_same_section_oldest_to_newest_with_time_labels():
+    entries = [
+        _entry(
+            "preferences",
+            "Prefer 4 concise bullet points.",
+            id="p-new",
+            created_at="2026-06-10T10:19:08",
+        ),
+        _entry(
+            "preferences",
+            "Prefer 2 informative bullet points.",
+            id="p-old",
+            created_at="2026-06-10T10:14:22",
+        ),
+    ]
+    sm = FakeSessionManager(entries)
+
+    block, served = await build_active_context_block(
+        session_manager=sm, user_id="u", session_id="s", query="bullet points"
+    )
+
+    assert "When guidance conflicts, prefer the later item." in block
+    assert block.index("[10:14:22] Prefer 2 informative bullet points.") < block.index(
+        "[10:19:08] Prefer 4 concise bullet points."
+    )
+    assert set(served) == {"p-old", "p-new"}
+
+
+@pytest.mark.asyncio
 async def test_build_returns_block_when_served_stamp_fails():
     entries = [_entry("goals", "Ship the MVP", id="g1")]
     sm = UpdateRaisingSessionManager(entries)

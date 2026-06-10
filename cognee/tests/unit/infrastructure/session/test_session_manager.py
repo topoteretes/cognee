@@ -603,6 +603,7 @@ class TestSessionManager:
             mock_session_user.get.return_value = mock_user
             mock_config = MagicMock()
             mock_config.caching = True
+            mock_config.auto_feedback = False
             mock_config_cls.return_value = mock_config
 
             used_ids = {"node_ids": ["n1"]}
@@ -868,10 +869,10 @@ class TestSessionManager:
         mock_cache.create_qa_entry.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_generate_completion_with_session_feedback_only_empty_response_to_user_fallback(
+    async def test_generate_completion_with_session_empty_analysis_answers_original_query(
         self, sm, mock_cache
     ):
-        """When no query_to_answer and response_to_user empty: return fallback acknowledgement."""
+        """When analysis has no signals, fail open by answering the original query."""
         mock_cache.get_latest_qa_entries.return_value = [
             SessionQAEntry(qa_id="last-qa-999", question="Q", context="", answer="A", time="t")
         ]
@@ -883,7 +884,19 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
-                return_value=FeedbackDetectionResult(response_to_user=""),
+                return_value=FeedbackDetectionResult(),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                new_callable=AsyncMock,
+                return_value=("Generated answer", "", None),
+            ) as mock_generate,
+            patch.object(sm, "add_qa", new_callable=AsyncMock) as mock_add_qa,
+            patch.object(
+                sm,
+                "_build_active_context_block_safe",
+                new_callable=AsyncMock,
+                return_value=("", []),
             ),
         ):
             mock_user = MagicMock()
@@ -896,14 +909,15 @@ class TestSessionManager:
 
             result = await sm.generate_completion_with_session(
                 session_id="s1",
-                query="thanks!",
+                query="What should I audit?",
                 context="ctx",
                 user_prompt_path="user.txt",
                 system_prompt_path="sys.txt",
             )
 
-        assert result == "Got it."
-        mock_cache.create_qa_entry.assert_not_called()
+        assert result == "Generated answer"
+        assert mock_generate.await_args.kwargs["query"] == "What should I audit?"
+        mock_add_qa.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_does_not_auto_write_qa_feedback(
