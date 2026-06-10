@@ -65,19 +65,27 @@ async def cognee_network_visualization(
             ``~/graph_visualization.html``.
         schema_data: Optional pre-built schema payload.  When absent, the
             preprocessor derives a type-graph from the nodes/links it sees.
-        search_events: Optional list of search/retrieval events shown on the
-            Memory tab's timeline. Each entry is a dict::
+        search_events: Optional list of operation events shown on the Memory
+            tab's timeline. Two kinds::
 
-                {"time": "2026-06-10T10:31:02", "qa_id": "...",
-                 "question": "...", "answer": "...",
+                {"kind": "search", "time": "2026-06-10T10:31:02",
+                 "qa_id": "...", "question": "...", "answer": "...",
                  "node_ids": ["uuid", ...], "edge_ids": ["uuid", ...]}
 
-            This is the documented injection hook — no cache is read here.
-            To capture events from a session: run
-            ``await cognee.search(..., session_id="viz_demo")``, then
-            ``entries = await cognee.session.get_session(session_id="viz_demo")``
-            and map each ``SessionQAEntry`` to the dict above (flattening
-            ``used_graph_element_ids`` into ``node_ids``/``edge_ids``).
+                {"kind": "improve", "time": "...", "qa_id": "...",
+                 "question": "...", "rating": 5, "feedback_text": "...",
+                 "applied": true,
+                 "node_ids": ["uuid", ...], "edge_ids": ["uuid", ...]}
+
+            ``search`` renders a retrieval spotlight; ``improve`` renders a
+            reinforcement overlay (the elements whose feedback_weight the
+            rated answer updated — green for positive ratings, amber for
+            negative). Entries without ``kind`` default to ``search``.
+
+            No cache is read here — ``visualize_graph(include_session_events
+            =True)`` collects these automatically from the session layer via
+            ``cognee.modules.visualization.session_events``; pass them
+            explicitly only for custom pipelines.
 
     Returns:
         The full HTML as a string.

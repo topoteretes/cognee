@@ -463,7 +463,9 @@
   function buildRail() {
     railItems = timelineP.map(function (e) { return { kind: 'run', t: e.t0 || 0, run: e }; })
       .concat((searchEvents || []).map(function (s) {
-        return { kind: 'search', t: Date.parse(s.time) || 0, search: s };
+        // Operation events: kind "search" (retrieval spotlight) or
+        // "improve" (feedback reinforcement). Missing kind = search.
+        return { kind: s.kind === 'improve' ? 'improve' : 'search', t: Date.parse(s.time) || 0, search: s };
       }))
       .sort(function (a, b) { return a.t - b.t || (a.kind === b.kind ? 0 : a.kind === 'run' ? -1 : 1); });
 
@@ -475,12 +477,20 @@
     rail.appendChild(lbl);
     railItems.forEach(function (item, i) {
       const btn = document.createElement('button');
-      btn.className = 'mm-rail-item' + (item.kind === 'search' ? ' mm-rail-search' : '');
+      btn.className = 'mm-rail-item' +
+        (item.kind === 'search' ? ' mm-rail-search' : item.kind === 'improve' ? ' mm-rail-improve' : '');
       if (item.kind === 'run') {
         btn.innerHTML = '<span>' + esc(trunc(item.run.label, 20)) + '</span>' +
           '<span class="t">' + esc(fmtT(item.run.t0)) + ' · ' + item.run.node_count + ' nodes</span>';
         btn.title = 'Show memory state after this run';
         btn.addEventListener('click', function () { applyRun(item.run.index, i); openRunPanel(item.run); });
+      } else if (item.kind === 'improve') {
+        const rating = item.search.rating;
+        const stars = rating != null ? '★' + rating : 'feedback';
+        btn.innerHTML = '<span>↑ improve · ' + esc(stars) + '</span>' +
+          '<span class="t">' + esc(trunc(item.search.question || '', 22)) + '</span>';
+        btn.title = 'Feedback reinforcement: ' + (item.search.question || '');
+        btn.addEventListener('click', function () { applyImprove(item.search, i); });
       } else {
         btn.innerHTML = '<span>⌕ ' + esc(trunc(item.search.question || 'search', 24)) + '</span>' +
           '<span class="t">' + esc(item.search.time || '') + '</span>';
@@ -567,7 +577,7 @@
     const spot = new Set(evt.node_ids || []);
     spot.forEach(function (id) {
       (unitEls[id] || []).forEach(function (el) { el.classList.add('is-spotlit'); });
-      if (!unitEls[id] && groupByMember[id]) promoteCollapsed(id);
+      if (!unitEls[id] && groupByMember[id]) promoteCollapsed(id, 'is-spotlit');
     });
     // Retrieved edges: join edge_ids on edge_object_id; provenance trail =
     // structural edges whose both endpoints were retrieved.
@@ -585,14 +595,45 @@
     updateStatus();
   }
 
+  // The reinforcement overlay: same stable layout, but the rated answer's
+  // elements glow by feedback valence — positive ratings reinforce (green),
+  // negative weaken (amber). This is the visual for apply_feedback_weights.
+  function applyImprove(evt, railIdx) {
+    clearSearch();
+    visibleSet = null;
+    applyVisibility();
+    activeSearch = evt;
+    svgSel.classed('mm-searching', true).classed('mm-reinforcing', true);
+    const rating = evt.rating;
+    const cls = rating == null || rating === 3 ? 'is-spotlit'
+      : rating >= 4 ? 'is-reinforced' : 'is-weakened';
+    const spot = new Set(evt.node_ids || []);
+    spot.forEach(function (id) {
+      (unitEls[id] || []).forEach(function (el) { el.classList.add(cls); });
+      if (!unitEls[id] && groupByMember[id]) promoteCollapsed(id, cls);
+    });
+    (evt.edge_ids || []).forEach(function (oid) {
+      (edgeByObjId[oid] || []).forEach(function (el) { el.classList.add('is-spotlit-edge'); });
+    });
+    edgeEls.forEach(function (e) {
+      if (e.s != null && e.t != null && spot.has(e.s) && spot.has(e.t) &&
+          !e.el.classList.contains('is-spotlit-edge')) {
+        e.el.classList.add('is-trail');
+      }
+    });
+    setActiveRail(railIdx);
+    openImprovePanel(evt);
+    updateStatus();
+  }
+
   // A collapsed retrieved entity is temporarily promoted out of its "+K"
   // pill into an overlay slot below its group — nothing else moves.
   let promotedCount = {};
-  function promoteCollapsed(id) {
+  function promoteCollapsed(id, highlightClass) {
     const grp = groupByMember[id];
     const i = promotedCount[grp.type_id] = (promotedCount[grp.type_id] || 0) + 1;
     const y = grp.y + grp.h + 2 + (i - 1) * ROW_H;
-    const gr = gOverlay.append('g').attr('class', 'mm-unit mm-node mm-row is-spotlit');
+    const gr = gOverlay.append('g').attr('class', 'mm-unit mm-node mm-row ' + (highlightClass || 'is-spotlit'));
     gr.append('rect').attr('class', 'mm-box')
       .attr('x', grp.x + 6).attr('y', y).attr('width', grp.w - 12).attr('height', ROW_H - 2).attr('rx', 3);
     gr.append('circle').attr('class', 'mm-dot').attr('cx', grp.x + 13).attr('cy', y + ROW_H / 2 - 1).attr('r', 2.5);
@@ -602,10 +643,10 @@
 
   function clearSearch() {
     activeSearch = null;
-    if (svgSel) svgSel.classed('mm-searching', false);
-    document.querySelectorAll('#memory-svg .is-spotlit').forEach(function (el) { el.classList.remove('is-spotlit'); });
-    document.querySelectorAll('#memory-svg .is-spotlit-edge').forEach(function (el) { el.classList.remove('is-spotlit-edge'); });
-    document.querySelectorAll('#memory-svg .is-trail').forEach(function (el) { el.classList.remove('is-trail'); });
+    if (svgSel) svgSel.classed('mm-searching', false).classed('mm-reinforcing', false);
+    ['is-spotlit', 'is-spotlit-edge', 'is-trail', 'is-reinforced', 'is-weakened'].forEach(function (cls) {
+      document.querySelectorAll('#memory-svg .' + cls).forEach(function (el) { el.classList.remove(cls); });
+    });
     if (gOverlay) gOverlay.selectAll('*').remove();
     promotedCount = {};
   }
@@ -723,9 +764,26 @@
       (n.description ? '<div class="mm-panel-text">' + esc(trunc(n.description, 320)) + '</div>' : '') +
       row('Degree', n.degree) +
       row('Created', fmtT(n.t_created)) +
+      weightRows(n) +
       (srcChunks.length ? heading('Source chunks') + chips(srcChunks) : '') +
       relHtml
     );
+  }
+
+  // Feedback/importance weights — the self-improvement loop's footprint on a
+  // node. 0.5 is the untouched default; any drift means rated answers have
+  // reinforced or weakened this element via improve().
+  function weightRows(n) {
+    let html = '';
+    if (typeof n.feedback_weight === 'number') {
+      const drift = n.feedback_weight - 0.5;
+      const tag = Math.abs(drift) < 0.005 ? '' : drift > 0 ? ' · reinforced' : ' · weakened';
+      html += row('Feedback weight', n.feedback_weight.toFixed(3) + tag);
+    }
+    if (typeof n.importance_weight === 'number' && n.importance_weight !== 0.5) {
+      html += row('Importance weight', n.importance_weight.toFixed(3));
+    }
+    return html;
   }
 
   function openGroupPanel(grp) {
@@ -795,6 +853,29 @@
       row('Retrieved edges', (evt.edge_ids || []).length) +
       (counts ? heading('Retrieved by stage') + counts : '') +
       (chunksRetrieved.length ? heading('Retrieved chunks') + chips(chunksRetrieved) : '')
+    );
+  }
+
+  function openImprovePanel(evt) {
+    const byStage = {};
+    (evt.node_ids || []).forEach(function (id) {
+      const s = stageOf(id);
+      byStage[s] = (byStage[s] || 0) + 1;
+    });
+    let counts = '';
+    Object.keys(byStage).sort().forEach(function (s) { counts += row(s, byStage[s]); });
+    const rating = evt.rating;
+    const valence = rating == null || rating === 3 ? 'neutral'
+      : rating >= 4 ? 'reinforced (weights up)' : 'weakened (weights down)';
+    showPanel(
+      title('Improve', evt.question || 'feedback') +
+      row('Rating', rating != null ? rating + ' / 5' : '—') +
+      row('Effect', valence) +
+      row('Weights applied', evt.applied ? 'yes' : 'pending (run improve with this session)') +
+      row('Time', evt.time) +
+      (evt.feedback_text ? heading('Feedback') + '<div class="mm-panel-text">' + esc(trunc(evt.feedback_text, 400)) + '</div>' : '') +
+      row('Elements touched', (evt.node_ids || []).length) +
+      (counts ? heading('Touched by stage') + counts : '')
     );
   }
 

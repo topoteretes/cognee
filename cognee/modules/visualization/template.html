@@ -425,6 +425,14 @@ html:not(.light) #memory-view{
 .mm-unit.is-spotlit .mm-box,.mm-unit.is-spotlit .mm-frame{stroke:var(--mm-spot);stroke-width:2;}
 #memory-svg.mm-searching .mm-edge.is-trail{stroke:var(--mm-spot);opacity:0.45;stroke-width:1.4;}
 #memory-svg.mm-searching .mm-edge.is-spotlit-edge{stroke:var(--mm-spot);opacity:0.95;stroke-width:2;}
+/* Reinforcement (improve) overlay: feedback valence on the same layout —
+   green = weights up from a positive rating, amber = weights down. */
+#memory-svg.mm-reinforcing .mm-unit.is-reinforced,
+#memory-svg.mm-reinforcing .mm-unit.is-weakened{opacity:1;}
+.mm-unit.is-reinforced .mm-box,.mm-unit.is-reinforced .mm-frame{stroke:#1F9E6E;stroke-width:2.2;}
+.mm-unit.is-weakened .mm-box,.mm-unit.is-weakened .mm-frame{stroke:#E2A33B;stroke-width:2.2;}
+.mm-rail-improve{border-radius:16px;background:rgba(31,158,110,0.10);}
+html:not(.light) .mm-rail-improve{background:rgba(31,158,110,0.18);}
 /* Memory side panel: dark-theme parity with the schema drawer. */
 html:not(.light) #memory-side-panel{box-shadow:-12px 0 32px rgba(0,0,0,0.45);}
 #memory-side-panel .si-title{color:var(--mm-text);}
