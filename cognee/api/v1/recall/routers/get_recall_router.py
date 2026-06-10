@@ -26,25 +26,60 @@ class RecallPayloadDTO(InDTO):
     # Default preserved as GRAPH_COMPLETION for backward compatibility
     # with existing HTTP clients. Pass ``search_type: null`` explicitly
     # to opt into auto-routing (the new ``cognee.recall`` default).
-    search_type: Optional[SearchType] = Field(default=SearchType.GRAPH_COMPLETION)
-    datasets: Optional[list[str]] = Field(default=None)
-    dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
+    search_type: Optional[SearchType] = Field(
+        default=SearchType.GRAPH_COMPLETION,
+        description=(
+            "Search strategy, e.g. GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES. "
+            "Pass null to let cognee auto-route the query to the best strategy."
+        ),
+    )
+    datasets: Optional[list[str]] = Field(
+        default=None,
+        examples=[["main_dataset"]],
+        description=(
+            "Dataset names to search within. Omit (null) to search all datasets "
+            "you have read access to."
+        ),
+    )
+    dataset_ids: Optional[list[UUID]] = Field(
+        default=None,
+        examples=[[]],
+        description=(
+            "Dataset UUIDs to search within; takes precedence over 'datasets' names "
+            "when both are provided. Leave empty to resolve by name."
+        ),
+    )
     query: str = Field(default="What is in the document?")
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(default=None, example=[])
+    node_name: Optional[list[str]] = Field(
+        default=None,
+        examples=[["tech_docs"]],
+        description=(
+            "Restrict results to these node sets (the node_set values passed to "
+            "/v1/add or /v1/remember). Omit to search all nodes."
+        ),
+    )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
-    session_id: Optional[str] = Field(default=None, examples=[None])
+    session_id: Optional[str] = Field(
+        default=None,
+        examples=["claude-code-1718000000"],
+        description=(
+            "Session whose cached QA and trace entries should be searched. With "
+            "search_type null and no datasets, session hits short-circuit the "
+            "graph search."
+        ),
+    )
     scope: Optional[Union[str, list[str]]] = Field(
         default=None,
         examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'graph_context', 'all', or a list. Defaults to 'auto' (session "
-            "first when session_id is set, else graph)."
+            "'graph_context', 'all', 'auto', or a list of these. Defaults to "
+            "'auto' (session first when session_id is set, else graph)."
         ),
     )
 
@@ -88,19 +123,33 @@ def get_recall_router() -> APIRouter:
         types and options from v1 are supported.
 
         ## Request Parameters
-        - **search_type** (SearchType): Type of search to perform
+        Field names are shown camelCased in the schema (e.g. searchType, datasetIds,
+        topK); both camelCase and snake_case are accepted.
+
+        - **search_type** (Optional[SearchType]): Type of search to perform
+          (default: GRAPH_COMPLETION). Pass null to enable automatic query routing.
         - **datasets** (Optional[List[str]]): Dataset names to search within
-        - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within
+        - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within;
+          take precedence over dataset names when both are provided
         - **query** (str): The search query string
         - **system_prompt** (Optional[str]): System prompt for completion searches
         - **node_name** (Optional[List[str]]): Filter to specific node sets
         - **top_k** (Optional[int]): Maximum results (default: 15)
         - **only_context** (bool): Return only the LLM context
         - **verbose** (bool): Verbose output
+        - **include_references** (bool): Include source/provenance references in
+          completion results (default: true)
+        - **session_id** (Optional[str]): Session whose cached QA and trace entries
+          should be searched
+        - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
+          "session", "trace", "graph_context", "all", "auto", or a list of these
+          (default: "auto" — session first when session_id is set, else graph)
 
         ## Error Codes
         - **409 Conflict**: Error during recall
         - **403 Forbidden**: Permission denied (returns empty list)
+        - **422 Unprocessable Entity**: Recall prerequisites not met — ingest data
+          first (POST /v1/remember or /v1/add followed by /v1/cognify)
         """
         send_telemetry(
             "Recall API Endpoint Invoked",

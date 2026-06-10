@@ -30,10 +30,32 @@ def get_remember_router() -> APIRouter:
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: List[UploadFile] = File(default=None),
-        datasetName: Optional[str] = Form(default=None),
+        datasetName: Optional[str] = Form(
+            default=None,
+            examples=["main_dataset"],
+            description=(
+                "Name of the target dataset (created if it does not exist). "
+                "Required unless datasetId is provided."
+            ),
+        ),
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
-        session_id: Optional[str] = Form(default=None, examples=[""]),
-        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
+        session_id: Optional[str] = Form(
+            default=None,
+            examples=["claude-code-1718000000"],
+            description=(
+                "Session to attribute this memory to. When set, the data is stored in the "
+                "session cache (and bridged into the permanent graph in the background) and "
+                "the session appears in the sessions dashboard. Omit for a direct add+cognify."
+            ),
+        ),
+        node_set: Optional[List[str]] = Form(
+            default=[""],
+            examples=[["claude_code_sessions"]],
+            description=(
+                "Optional node-set tags used to organise the graph (e.g. per-agent or "
+                "per-project). Leave at the default to skip tagging."
+            ),
+        ),
         run_in_background: Optional[bool] = Form(default=False),
         custom_prompt: Optional[str] = Form(default=""),
         chunk_size: Optional[int] = Form(default=4096),
@@ -45,10 +67,24 @@ def get_remember_router() -> APIRouter:
         ),
         graph_model: Optional[str] = Form(
             default=None,
-            examples=[""],
-            description="JSON-serialised graph model schema (same format as the cognify endpoint).",
+            examples=[
+                '{"title": "CompanyGraph", "type": "object", "properties": '
+                '{"companies": {"type": "array", "items": {"type": "string"}}}}'
+            ],
+            description=(
+                "JSON-serialised graph model schema (same format as the cognify endpoint). "
+                "Must include a top-level 'title' key. Invalid JSON is silently ignored "
+                "(not rejected) and the default model is used instead."
+            ),
         ),
-        content_type: Optional[str] = Form(default=None, examples=[""]),
+        content_type: Optional[str] = Form(
+            default=None,
+            examples=["skills"],
+            description=(
+                "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes. "
+                "Only supported value: 'skills'; omit for normal ingestion."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -61,14 +97,19 @@ def get_remember_router() -> APIRouter:
         - **data** (List[UploadFile]): Files to upload and process.
         - **datasetName** (Optional[str]): Name of the target dataset.
         - **datasetId** (Optional[UUID]): UUID of an existing dataset.
+        - **session_id** (Optional[str]): Session to attribute this memory to. When set,
+          data is stored in the session cache and bridged into the permanent graph in the
+          background; the session is tracked in the sessions dashboard. When omitted,
+          data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
-        - **chunk_size** (Optional[int]): Maximum tokens per chunk. Defaults to automatic
-          model-based sizing.
+        - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
         - **graph_model** (Optional[str]): JSON-serialised graph model schema (same dict format accepted by the cognify endpoint).
+        - **content_type** (Optional[str]): Set to "skills" to ingest SKILL.md files as
+          Skill nodes; omit for normal ingestion.
 
         Either datasetName or datasetId must be provided.
 
@@ -166,7 +207,11 @@ def get_remember_router() -> APIRouter:
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
-        session_id: Optional[str] = None
+        session_id: Optional[str] = Field(
+            default=None,
+            examples=["claude-code-1718000000"],
+            description="Required for qa/trace/feedback entries; optional for skill_run entries.",
+        )
         skill_improvement: Optional[dict] = None
 
     @router.post("/entry", response_model=dict)
