@@ -174,9 +174,9 @@ canvas:active{cursor:grabbing}
   <button class="ctrl-btn" data-labelbudget="all" title="Labels: every node">All</button>
   <button class="ctrl-btn" data-labelbudget="off" title="Labels: hidden (hover to peek)">Off</button>
   <div class="ctrl-sep"></div>
-  <button class="ctrl-btn active" data-layout="story" title="Pipeline story: Documents &rarr; Chunks &rarr; Entities &rarr; Types &rarr; Summaries">Story</button>
-  <button class="ctrl-btn" data-layout="ranked" title="Left-to-right by topological rank">Flow</button>
-  <button class="ctrl-btn" data-layout="organic" title="Organic force layout">Force</button>
+  <button class="ctrl-btn active" data-layout="story" title="Story: fixed pipeline columns (Documents &rarr; Chunks &rarr; Entities &rarr; Types &rarr; Summaries). Nodes stay pinned in a readable grid.">Story</button>
+  <button class="ctrl-btn" data-layout="ranked" title="Flow: columns by processing order; vertical position settles by connectivity, so related nodes drift together.">Flow</button>
+  <button class="ctrl-btn" data-layout="organic" title="Force: no columns &mdash; a physics simulation pulls connected nodes together so clusters emerge. Drag nodes to rearrange.">Force</button>
   <div class="ctrl-sep"></div>
   <button class="ctrl-btn active" data-colorby="type" title="Color by node type">Type</button>
   <button class="ctrl-btn" data-colorby="nodeset" title="Color by source node set">Node set</button>
@@ -272,6 +272,32 @@ canvas:active{cursor:grabbing}
 .sd-edge-label.is-dim{opacity:0.3;}
 .sd-edge-count{font-size:9.5px;fill:var(--text2);font-variant-numeric:tabular-nums;}
 .sd-stage-header{font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;fill:#8792A2;}
+
+/* ── Schema dark theme ── card/chip colors come from the JS palette (re-rendered
+   on toggle); these override the CSS-styled and inline-styled chrome. */
+html:not(.light) #schema-view{background:#15181D !important;color:#E4E8EE !important;}
+html:not(.light) #schema-diagram-section{background:#15181D !important;}
+html:not(.light) .sd-edge-label-bg{fill:#23272F;stroke:#3A4049;}
+html:not(.light) .sd-edge-label{fill:#AEB7C2;}
+html:not(.light) .sd-edge-label.is-hot{fill:#3DD68C;}
+html:not(.light) .sd-stage-header{fill:#7E8894;}
+html:not(.light) .sd-node-box:hover{filter:drop-shadow(0 6px 16px rgba(0,0,0,0.55));}
+html:not(.light) .sd-mini-card:hover rect{fill:#1E3A2E;stroke:#2E6B4F;}
+html:not(.light) .sd-mini-card.is-spotlit rect{fill:#1E3A2E;stroke:#1F9E6E;}
+html:not(.light) .sd-mini-card.is-linked rect{fill:#23272F;stroke:#2E6B4F;}
+html:not(.light) .sd-spotlight-label{stroke:#15181D;}
+html:not(.light) #schema-zoom{background:#23272F !important;border-color:#3A4049 !important;}
+html:not(.light) #schema-zoom button{color:#C3CAD4 !important;}
+html:not(.light) #schema-zoom button:hover{background:#2E333C;color:#ECEFF4;}
+html:not(.light) #schema-ops-toggle{background:#23272F !important;border-color:#3A4049 !important;color:#C3CAD4 !important;}
+html:not(.light) #schema-ops-toggle.active{background:#1F9E6E !important;color:#fff !important;border-color:#1F9E6E !important;}
+html:not(.light) #schema-legend{background:#23272F !important;border-color:#3A4049 !important;color:#C3CAD4 !important;}
+html:not(.light) #schema-side-panel{background:#1B1F25 !important;border-left-color:#3A4049 !important;color:#E4E8EE;box-shadow:-12px 0 32px rgba(0,0,0,0.45) !important;}
+html:not(.light) .si-title{color:#ECEFF4;}
+html:not(.light) .si-close:hover{background:#2A2F37;color:#ECEFF4;}
+html:not(.light) .si-chip{background:#2A2F37;border-color:#3A4049;color:#E4E8EE;}
+html:not(.light) .si-chip:hover{background:#1E3A2E;border-color:#2E6B4F;color:#3DD68C;}
+html:not(.light) .si-rel{border-bottom-color:#2E333C;}
 
 /* ── Schema inspector side panel (PR3) — clean & airy Segment style ── */
 #schema-side-panel{font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px;color:#1A1F36;}

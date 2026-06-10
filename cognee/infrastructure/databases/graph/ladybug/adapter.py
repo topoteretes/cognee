@@ -346,8 +346,30 @@ class LadybugAdapter(GraphDBInterface):
             try:
                 self.connection.execute("LOAD EXTENSION JSON;")
                 logger.info("Loaded JSON extension")
-            except Exception as e:
-                logger.info(f"JSON extension already loaded or unavailable: {e}")
+            except Exception:
+                # LOAD failed — the extension is not installed for this
+                # connection's extension dir (the throwaway pre-install above can
+                # miss it when offline, or when it cached to a different path).
+                # Try installing + loading directly on the real connection before
+                # giving up. INSTALL is idempotent and a no-op when already cached.
+                try:
+                    self.connection.execute("INSTALL JSON;")
+                    self.connection.execute("LOAD EXTENSION JSON;")
+                    logger.info("Installed and loaded JSON extension")
+                except Exception as e:
+                    # Surface loudly: queries that use JSON (recall, temporal
+                    # search) will otherwise fail later with a cryptic Binder
+                    # error. This usually means no network access to download the
+                    # extension at startup.
+                    logger.warning(
+                        "Could not install/load the Kuzu/Ladybug JSON extension (%s). "
+                        "Graph queries that use JSON (e.g. recall, temporal search) will "
+                        "fail with 'Extension: json ... has not been installed'. Ensure the "
+                        "process has network access at startup to download the extension, "
+                        "pre-install it in your image, or run `INSTALL json; LOAD json;` "
+                        "once against the database.",
+                        e,
+                    )
 
             # Create node table with essential fields and timestamp
             self.connection.execute("""
