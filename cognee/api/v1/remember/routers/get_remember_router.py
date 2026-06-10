@@ -32,7 +32,7 @@ def get_remember_router() -> APIRouter:
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(
             default=None,
-            examples=["main_dataset"],
+            examples=["default_dataset"],
             description=(
                 "Name of the target dataset (created if it does not exist). "
                 "Required unless datasetId is provided."
@@ -41,19 +41,18 @@ def get_remember_router() -> APIRouter:
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
         session_id: Optional[str] = Form(
             default=None,
-            examples=["claude-code-1718000000"],
             description=(
-                "Session to attribute this memory to. When set, the data is stored in the "
-                "session cache (and bridged into the permanent graph in the background) and "
-                "the session appears in the sessions dashboard. Omit for a direct add+cognify."
+                "Session to attribute this memory to (e.g. claude-code-1718000000). "
+                "When set, the data is stored in the session cache (and bridged into the "
+                "permanent graph in the background) and the session appears in the sessions "
+                "dashboard. Leave empty for a direct add+cognify."
             ),
         ),
         node_set: Optional[List[str]] = Form(
             default=[""],
-            examples=[["claude_code_sessions"]],
             description=(
                 "Optional node-set tags used to organise the graph (e.g. per-agent or "
-                "per-project). Leave at the default to skip tagging."
+                "per-project). Leave empty to skip tagging."
             ),
         ),
         run_in_background: Optional[bool] = Form(default=False),
@@ -67,22 +66,19 @@ def get_remember_router() -> APIRouter:
         ),
         graph_model: Optional[str] = Form(
             default=None,
-            examples=[
-                '{"title": "CompanyGraph", "type": "object", "properties": '
-                '{"companies": {"type": "array", "items": {"type": "string"}}}}'
-            ],
             description=(
-                "JSON-serialised graph model schema (same format as the cognify endpoint). "
-                "Must include a top-level 'title' key. Invalid JSON is silently ignored "
-                "(not rejected) and the default model is used instead."
+                "JSON-serialised graph model schema (same format as the cognify endpoint), "
+                "e.g. {\"title\": \"CompanyGraph\", \"type\": \"object\", \"properties\": {...}}. "
+                "Must include a top-level 'title' key. Leave empty to use the default "
+                "KnowledgeGraph model — a restrictive schema here can produce an empty graph. "
+                "Invalid JSON is silently ignored (not rejected)."
             ),
         ),
         content_type: Optional[str] = Form(
             default=None,
-            examples=["skills"],
             description=(
                 "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes. "
-                "Only supported value: 'skills'; omit for normal ingestion."
+                "Only supported value: 'skills'; leave empty for normal ingestion."
             ),
         ),
         user: User = Depends(get_authenticated_user),
@@ -167,7 +163,7 @@ def get_remember_router() -> APIRouter:
             result = await cognee_remember(
                 data,
                 dataset_name=datasetName,
-                session_id=session_id,
+                session_id=session_id or None,
                 user=user,
                 dataset_id=datasetId if datasetId else None,
                 node_set=node_set if node_set != [""] else None,
@@ -175,7 +171,9 @@ def get_remember_router() -> APIRouter:
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
-                content_type=content_type,
+                # Swagger UI submits every rendered form field, so an untouched
+                # content_type arrives as "" — treat it as omitted.
+                content_type=content_type or None,
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
             )
