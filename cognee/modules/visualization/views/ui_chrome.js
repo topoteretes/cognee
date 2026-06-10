@@ -17,6 +17,10 @@
     if (document.getElementById('schema-view').style.display !== 'none' && window._renderSchemaGraph) {
       window._renderSchemaGraph(true);  // preserve pan/zoom across the re-render
     }
+    const memoryViewEl = document.getElementById('memory-view');
+    if (memoryViewEl && memoryViewEl.style.display !== 'none' && window._renderMemoryView) {
+      window._renderMemoryView(true);  // preserve pan/zoom across the re-render
+    }
   }
 
   // Restore the user's last choice (default light). Syncing the CSS class on
@@ -38,6 +42,7 @@
   const tabs = document.querySelectorAll('.tab-btn');
   const graphView = document.getElementById('graph-view');
   const schemaView = document.getElementById('schema-view');
+  const memoryView = document.getElementById('memory-view');
   tabs.forEach(btn => {
     btn.addEventListener('click', () => {
       tabs.forEach(t => { t.style.background='transparent'; t.style.color='var(--text2)'; t.classList.remove('active'); });
@@ -45,7 +50,9 @@
       const view = btn.dataset.view;
       graphView.style.display = view === 'graph' ? '' : 'none';
       schemaView.style.display = view === 'schema' ? '' : 'none';
+      if (memoryView) memoryView.style.display = view === 'memory' ? '' : 'none';
       if (view === 'schema' && window._renderSchemaGraph) window._renderSchemaGraph();
+      if (view === 'memory' && window._renderMemoryView) window._renderMemoryView();
     });
   });
 })();
