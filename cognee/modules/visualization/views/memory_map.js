@@ -542,8 +542,10 @@
     L.groups.forEach(function (g) { g.memberIds.forEach(function (id) { entSet.add(id); }); });
     const nEnt = entSet.size;
     const nChunks = Object.keys(L.cellRect).length;
+    const nCtx = L.ctxBoxes.length;
     const base = docsP.length + ' documents · ' + nChunks + ' chunks · ' +
-      nEnt + ' entities · ' + sumsP.length + ' summaries';
+      nEnt + ' entities · ' + sumsP.length + ' summaries' +
+      (nCtx ? ' · ' + nCtx + ' context' : '');
     if (activeSearch) {
       el.textContent = base + ' — spotlighting retrieval: “' + trunc(activeSearch.question || '', 60) + '”';
     } else if (visibleSet) {
