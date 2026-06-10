@@ -176,22 +176,16 @@ async def test_vector_nodeset_filtering_retriever_integration():
     node_set = ["NLP", "Quantum"]
     query_text = "Tell me about Quantum computers"
 
-    from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 
     # Search with "OR" operator
-    retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="OR", top_k=100
-    )
+    retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="OR")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
-    context = await retriever.get_context_from_objects(
-        query=query_text, retrieved_objects=retrieved_objects
-    )
 
-    assert "Quantum" in context
-    assert "NLP" in context
+    assert len(retrieved_objects) == 3
 
     # Search with "AND" operator
-    retriever = GraphCompletionRetriever(node_name=node_set, node_name_filter_operator="AND")
+    retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="AND")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
 
     assert len(retrieved_objects) == 0, (
@@ -201,26 +195,16 @@ async def test_vector_nodeset_filtering_retriever_integration():
     node_set = ["Quantum", "Computers"]
 
     # Search with "OR" operator
-    retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="OR", top_k=100
-    )
+    retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="OR")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
-    context = await retriever.get_context_from_objects(
-        query=query_text, retrieved_objects=retrieved_objects
-    )
 
-    assert "Alice" in context
+    assert len(retrieved_objects) == 2
 
     # Search with "AND" operator
-    retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="AND", top_k=100
-    )
+    retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="AND")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
-    context = await retriever.get_context_from_objects(
-        query=query_text, retrieved_objects=retrieved_objects
-    )
 
-    assert "Alice" not in context
+    assert len(retrieved_objects) == 1
 
 
 async def main():
