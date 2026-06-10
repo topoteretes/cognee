@@ -8,8 +8,8 @@ Seeds the database with Lorem Ipsum data: add → cognify → search.
 Phase 2 - run with current Cognee branch
 
 Runs startup migrations (relational + graph + vector), then verifies that the
-legacy-seeded graph AND vector data is actually *accessible and correct* after
-migration, then re-cognifies and verifies again.
+legacy-seeded graph, vector AND relational-ledger data is actually *accessible
+and correct* after migration, then re-cognifies and verifies again.
 
 Why these specific checks?
 --------------------------
@@ -26,6 +26,9 @@ is inaccessible:
 * graph — read the dataset's graph directly and assert it has nodes AND that no
   Entity/EntityType node is still on the pre-#2515 ID scheme (which would mean
   the migration didn't run/complete);
+* ledger — read the relational ``nodes``/``edges`` tables and assert every id
+  the migration could have moved still resolves to a live graph node (a stale
+  ledger id silently orphans nodes on delete);
 * vector — a CHUNKS search (raw vector retrieval) must return results.
 
 Completion searches are still exercised afterwards as a smoke check (must not
@@ -37,12 +40,18 @@ import sys
 from collections import Counter
 
 import cognee
+from sqlalchemy import select
+
 from cognee.api.v1.search import SearchType
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
-from cognee.modules.engine.models import Entity
+from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.graph.models import Edge, Node
 from cognee.modules.migrations.graph.namespace_entity_type_node_ids import build_id_remap
+
+_LEDGER_ENTITY_TYPES = (Entity.__name__, EntityType.__name__)
 
 LOREM_IPSUM = """
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut
@@ -105,7 +114,7 @@ async def _collect_graph() -> tuple[list, list]:
     return all_nodes, all_edges
 
 
-async def _verify_graph_access(stage: str) -> None:
+async def _verify_graph_access(stage: str, nodes: list, edges: list) -> None:
     """Fail unless the migrated graph is non-empty, fully migrated, and intact.
 
     Checks (a) graph is non-empty, (b) no Entity/EntityType node is still on an
@@ -114,8 +123,6 @@ async def _verify_graph_access(stage: str) -> None:
     types (DocumentChunk, TextSummary, EdgeType, …), not just entities, remain
     reachable and connected after the ID remap.
     """
-    nodes, edges = await _collect_graph()
-
     if not nodes:
         _fail(f"[{stage}] graph has no nodes — graph data is not accessible after migration.")
 
@@ -170,16 +177,78 @@ async def _verify_vector_access(stage: str) -> None:
     print(f"  [vector] CHUNKS: {len(results)} result(s) — OK")
 
 
+async def _verify_ledger_access(stage: str, graph_node_ids: set) -> None:
+    """Read the relational delete-ledger (``nodes`` / ``edges``) and verify it
+    still points at the migrated graph.
+
+    The delete system deletes graph nodes by ``nodes.slug`` and references edges
+    by ``edges.source_node_id`` / ``destination_node_id`` — all graph node ids.
+    If the id migration moved graph nodes but left these stale, a later delete
+    silently misses the migrated nodes (orphans). So this asserts every ledger
+    id that the migration could have moved (Entity/EntityType ``slug`` and every
+    edge endpoint) still resolves to a live graph node.
+
+    A legacy seed predating the ledger leaves the tables empty; that is not a
+    failure here (re-cognify on the current branch repopulates them and Step 3
+    re-checks), but reading them still proves the relational store is reachable.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        node_rows = (await session.scalars(select(Node))).all()
+        edge_rows = (await session.scalars(select(Edge))).all()
+
+    if not node_rows and not edge_rows:
+        print("  [ledger] empty (legacy seed predates the node/edge ledger) — read OK, skipped")
+        return
+
+    stale_node_slugs = [
+        str(row.slug)
+        for row in node_rows
+        if row.type in _LEDGER_ENTITY_TYPES and str(row.slug) not in graph_node_ids
+    ]
+    if stale_node_slugs:
+        _fail(
+            f"[{stage}] {len(stale_node_slugs)} ledger Entity/EntityType slug(s) do not resolve "
+            f"to a graph node (e.g. {stale_node_slugs[0]}) — the migration left the relational "
+            "ledger stale; deletes would orphan these nodes in the graph."
+        )
+
+    dangling_edges = [
+        (str(row.source_node_id), str(row.destination_node_id))
+        for row in edge_rows
+        if str(row.source_node_id) not in graph_node_ids
+        or str(row.destination_node_id) not in graph_node_ids
+    ]
+    if dangling_edges:
+        _fail(
+            f"[{stage}] {len(dangling_edges)} ledger edge endpoint(s) do not resolve to a graph "
+            f"node (e.g. {dangling_edges[0]}) — ledger edges desynced from the migrated graph."
+        )
+
+    print(
+        f"  [ledger] {len(node_rows)} node row(s), {len(edge_rows)} edge row(s), "
+        "all ids resolve to the migrated graph — OK"
+    )
+
+
 async def _verify_access(stage: str) -> None:
-    print(f"\n[{stage}] Verifying graph + vector access")
-    await _verify_graph_access(stage)
+    print(f"\n[{stage}] Verifying graph + vector + ledger access")
+    nodes, edges = await _collect_graph()
+    graph_node_ids = {node_id for node_id, _ in nodes}
+    await _verify_graph_access(stage, nodes, edges)
+    await _verify_ledger_access(stage, graph_node_ids)
     await _verify_vector_access(stage)
 
-    # Smoke-check the completion paths (must not raise). Not used as the
-    # accessibility gate: the LLM can answer non-empty even with no context.
-    for query_type in (SearchType.GRAPH_COMPLETION, SearchType.RAG_COMPLETION):
+    # Smoke-check the completion + summaries paths (must not raise). Not used
+    # as the accessibility gate: the LLM can answer non-empty even with no
+    # context.
+    for query_type in (
+        SearchType.GRAPH_COMPLETION,
+        SearchType.RAG_COMPLETION,
+        SearchType.SUMMARIES,
+    ):
         await cognee.search(query_type=query_type, query_text=SEARCH_QUERY)
-    print("  [smoke] GRAPH_COMPLETION + RAG_COMPLETION ran without error — OK")
+    print("  [smoke] GRAPH_COMPLETION + RAG_COMPLETION + SUMMARIES ran without error — OK")
 
 
 async def main():

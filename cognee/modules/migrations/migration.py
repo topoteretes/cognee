@@ -9,12 +9,37 @@ informational metadata on each migration and on the database row.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
-from uuid import NAMESPACE_DNS, uuid5
+from uuid import NAMESPACE_DNS, UUID, uuid5
+
+logger = logging.getLogger(__name__)
 
 # Stable namespace so revision ids are reproducible across machines and runs.
 COGNEE_MIGRATION_NAMESPACE = uuid5(NAMESPACE_DNS, "migrations.cognee.ai")
+
+
+@dataclass(frozen=True)
+class MigrationContext:
+    """Everything a migration needs to touch every store that holds a node id.
+
+    A single Entity/EntityType id is a key in three places — the graph DB, the
+    vector DB (point id), and the relational ledger (``nodes.slug`` /
+    ``edges.source_node_id`` / ``edges.destination_node_id``). A migration that
+    rewrites ids must update all three in lockstep, so it receives all the
+    handles here rather than just one engine.
+
+    Attributes:
+        graph_engine: Resolved graph engine for this dataset's database.
+        vector_engine: Resolved vector engine for this dataset's database.
+        dataset_id: The dataset whose stores this migration touches; ledger
+            updates are filtered to it.
+    """
+
+    graph_engine: Any
+    vector_engine: Any
+    dataset_id: UUID
 
 
 def revision_id(slug: str) -> str:
@@ -29,13 +54,13 @@ class Migration:
     Attributes:
         slug: Human-readable unique identifier; also seeds the revision id.
         cognee_version: Release this migration shipped in (informational only).
-        up: Async callable receiving the resolved graph or vector engine.
+        up: Async callable receiving a :class:`MigrationContext`.
         down_revision: Revision this builds on (``None`` for the first migration).
     """
 
     slug: str
     cognee_version: str
-    up: Callable[[Any], Awaitable[None]]
+    up: Callable[["MigrationContext"], Awaitable[None]]
     down_revision: Optional[str] = None
 
     @property
@@ -92,8 +117,11 @@ def pending_migrations(
     - ``None`` stored revision -> the whole chain (a database with no recorded
       revision runs every migration).
     - stored revision at head -> empty list.
-    - stored revision unknown to this chain (database ahead of, or diverged
-      from, this code) -> empty list (no-op, like Alembic).
+    - stored revision unknown to this chain -> empty list, with a WARNING.
+      Unlike Alembic (which raises), this tolerates a database stamped by newer
+      code (rollback); but the same state also arises from a renamed migration
+      slug or a corrupted revision row — silently disabled migrations — so it
+      must never pass without a trace in the logs.
     """
     ordered = order_migrations(migrations)
 
@@ -104,4 +132,12 @@ def pending_migrations(
         if migration.revision == stored_revision:
             return ordered[index + 1 :]
 
+    logger.warning(
+        "Stored migration revision %r is unknown to this chain (head: %r) — no migrations "
+        "will run for this database. Expected only after a rollback to older code; if no "
+        "rollback happened, a migration slug was renamed or the revision row is corrupted, "
+        "and this database will silently skip all future migrations until fixed.",
+        stored_revision,
+        ordered[-1].revision if ordered else None,
+    )
     return []

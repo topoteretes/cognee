@@ -13,10 +13,11 @@ from cognee.modules.migrations.migration import Migration
 logger = logging.getLogger(__name__)
 
 
-async def _dummy_vector_migration(vector_engine) -> None:
+async def _dummy_vector_migration(context) -> None:
     """Placeholder vector migration. Swap for a real migration when needed.
 
-    A no-op beyond logging, so it is safe to run on any database.
+    A no-op beyond logging, so it is safe to run on any database. Receives a
+    :class:`MigrationContext` (``context.vector_engine`` is the resolved engine).
     """
     logger.info("Running dummy vector migration (no-op placeholder).")
 

@@ -55,9 +55,13 @@ def test_pending_at_head_runs_nothing():
     assert pending_migrations(_chain(), revision_id("m3")) == []
 
 
-def test_pending_unknown_revision_runs_nothing():
-    # Database is ahead of / diverged from this code -> no-op.
-    assert pending_migrations(_chain(), "some-unknown-revision") == []
+def test_pending_unknown_revision_runs_nothing_but_warns(caplog):
+    # Database is ahead of / diverged from this code -> no-op, but NEVER a
+    # silent one: a renamed slug / corrupted revision row looks identical and
+    # would otherwise permanently disable migrations with zero diagnostics.
+    with caplog.at_level("WARNING", logger="cognee.modules.migrations.migration"):
+        assert pending_migrations(_chain(), "some-unknown-revision") == []
+    assert any("unknown to this chain" in record.message for record in caplog.records)
 
 
 def test_branched_chain_raises():
@@ -118,3 +122,18 @@ def test_apply_runs_pending_then_advances_revision():
     assert applied_again == []
     assert revision_again == revision_id("t2")
     assert applied_order == []
+
+
+def test_runner_is_noop_without_access_control(monkeypatch):
+    """Revisions live on per-dataset dataset_database rows; with access control
+    off there are none, so the runner must return without touching anything."""
+    import cognee.modules.migrations.runner as runner
+
+    monkeypatch.setattr(runner, "backend_access_control_enabled", lambda: False)
+
+    async def _explode():
+        raise AssertionError("must not query dataset databases in OFF mode")
+
+    monkeypatch.setattr(runner, "get_dataset_databases", _explode)
+
+    assert asyncio.run(runner.run_database_migrations()) == []
