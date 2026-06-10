@@ -243,7 +243,7 @@ async def run_benchmark(
     print("\nPhase 2: Running cognee.cognify() (knowledge graph build)...")
     try:
         t_cognify_start = time.time()
-        await cognee.cognify(data_per_batch=n)
+        await cognee.cognify(data_per_batch=n, chunks_per_batch=10000)
         t_cognify = time.time() - t_cognify_start
     except Exception as e:
         t_cognify = time.time() - t_cognify_start

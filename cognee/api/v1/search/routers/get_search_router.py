@@ -92,6 +92,10 @@ class SearchPayloadDTO(InDTO):
             " (positive integer; AGENTIC_COMPLETION only)."
         ),
     )
+    include_references: bool = Field(
+        default=True,
+        description="Attach source references to completion-type results.",
+    )
 
 
 def get_search_router() -> APIRouter:
@@ -211,6 +215,7 @@ def get_search_router() -> APIRouter:
                 "skills": payload.skills,
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
+                "include_references": payload.include_references,
                 "cognee_version": cognee_version,
             },
         )
@@ -234,6 +239,7 @@ def get_search_router() -> APIRouter:
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
+                include_references=payload.include_references,
             )
 
             return jsonable_encoder(results)

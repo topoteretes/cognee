@@ -7,6 +7,8 @@ from typing_extensions import TypedDict
 
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.memory.entries import normalize_scope
@@ -333,7 +335,10 @@ async def recall(
     retriever_specific_config: dict | None = None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
+    include_references: bool = True,
     user: object | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
 ) -> list[RecallResponse]:
     """Search the knowledge graph for relevant information.
 
@@ -410,6 +415,7 @@ async def recall(
             "session_id": session_id or "",
             "datasets": ",".join(datasets) if datasets else "",
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
+            "include_references": include_references,
             "cognee_version": cognee_version,
         },
     )
@@ -437,6 +443,7 @@ async def recall(
                 only_context=only_context,
                 session_id=session_id,
                 verbose=verbose,
+                include_references=include_references,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -546,6 +553,9 @@ async def recall(
                 retriever_specific_config=retriever_specific_config,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                include_references=include_references,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
             )
 
             tagged = []

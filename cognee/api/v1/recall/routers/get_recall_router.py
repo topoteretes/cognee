@@ -64,6 +64,10 @@ class RecallPayloadDTO(InDTO):
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
+    include_references: bool = Field(
+        default=True,
+        description="Include source/provenance references in completion results.",
+    )
     session_id: Optional[str] = Field(
         default=None,
         examples=["claude-code-1718000000"],
@@ -177,6 +181,7 @@ def get_recall_router() -> APIRouter:
                 only_context=payload.only_context,
                 session_id=payload.session_id,
                 scope=payload.scope,
+                include_references=payload.include_references,
             )
             return jsonable_encoder(results)
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
