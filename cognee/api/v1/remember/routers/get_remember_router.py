@@ -54,14 +54,47 @@ def get_remember_router() -> APIRouter:
         node_set: Optional[List[str]] = Form(
             default=[""],
             description=(
-                "Optional node-set tags used to organise the graph (e.g. per-agent or "
-                "per-project). Leave empty to skip tagging."
+                "Tags the ingested data with named node sets (e.g. per-agent or per-project "
+                "groups). Extracted graph nodes are linked to these sets, and recall/search "
+                "can later be restricted to them via their node_name parameter. Leave empty "
+                "to skip tagging."
             ),
         ),
-        run_in_background: Optional[bool] = Form(default=False),
-        custom_prompt: Optional[str] = Form(default=""),
-        chunk_size: Optional[int] = Form(default=4096),
-        chunks_per_batch: Optional[int] = Form(default=36),
+        run_in_background: Optional[bool] = Form(
+            default=False,
+            description=(
+                "If true, the request returns immediately (status 'running' with a "
+                "pipeline_run_id) while ingestion and graph building continue server-side — "
+                "poll GET /v1/datasets/status to track completion. If false, the request "
+                "blocks until the knowledge graph is fully built, which can take minutes "
+                "for large files."
+            ),
+        ),
+        custom_prompt: Optional[str] = Form(
+            default="",
+            description=(
+                "Replaces the default entity-extraction prompt used during graph building. "
+                "Use it to steer which entities and relationships get extracted (e.g. focus "
+                "on technical concepts, people, or contracts). Leave empty for the default "
+                "prompt."
+            ),
+        ),
+        chunk_size: Optional[int] = Form(
+            default=4096,
+            description=(
+                "Maximum tokens per text chunk during ingestion (default: 4096). Each chunk "
+                "is processed by the LLM separately for entity extraction: larger chunks give "
+                "more context per extraction but fewer, coarser passes; smaller chunks give "
+                "finer-grained extraction at higher LLM cost."
+            ),
+        ),
+        chunks_per_batch: Optional[int] = Form(
+            default=36,
+            description=(
+                "Number of chunks processed per cognify task batch (default: 36). Controls "
+                "ingestion parallelism/throughput; rarely needs changing."
+            ),
+        ),
         ontology_key: Optional[List[str]] = Form(
             default=None,
             examples=[[]],
