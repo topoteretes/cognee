@@ -36,6 +36,12 @@ class IndexSchema(DataPoint):
 
     id: str
     text: str
+    # Optional reference scalars carried for the search "Evidence" feature.
+    # They stay None for non-chunk data points, so this schema remains
+    # compatible with every indexed DataPoint type.
+    document_id: Optional[str] = None
+    document_name: Optional[str] = None
+    chunk_index: Optional[int] = None
     belongs_to_set: List[str] = []
     metadata: dict = {"index_fields": ["text"]}
 
@@ -465,6 +471,12 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 IndexSchema(
                     id=str(data_point.id),
                     text=getattr(data_point, data_point.metadata["index_fields"][0]),
+                    # Reference scalars for search "Evidence". Pulled via getattr
+                    # so non-chunk data points (which lack these fields) simply
+                    # fall back to None instead of raising.
+                    document_id=getattr(data_point, "document_id", None),
+                    document_name=getattr(data_point, "document_name", None),
+                    chunk_index=getattr(data_point, "chunk_index", None),
                 )
                 for data_point in data_points
             ],

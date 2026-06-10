@@ -37,6 +37,7 @@ class SearchPayloadDTO(InDTO):
     skills: Optional[list[str]] = Field(default=None, examples=[None])
     tools: Optional[list[str]] = Field(default=None, examples=[None])
     max_iter: Optional[int] = Field(default=None, examples=[None])
+    include_references: bool = Field(default=True)
 
 
 def get_search_router() -> APIRouter:
@@ -150,6 +151,7 @@ def get_search_router() -> APIRouter:
                 "skills": payload.skills,
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
+                "include_references": payload.include_references,
                 "cognee_version": cognee_version,
             },
         )
@@ -173,6 +175,7 @@ def get_search_router() -> APIRouter:
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
+                include_references=payload.include_references,
             )
 
             return jsonable_encoder(results)
