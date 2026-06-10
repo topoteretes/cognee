@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
+    CandidateContextUpdateVariant,
     ServedContextRating,
 )
 
@@ -23,9 +24,12 @@ class SessionTurnAnalysis(BaseModel):
         default_factory=list,
         description="Up to 3 ratings of session-context entries served to the previous answer.",
     )
-    candidate_context_updates: list[CandidateContextUpdate] = Field(
+    candidate_context_updates: list[CandidateContextUpdateVariant] = Field(
         default_factory=list,
-        description="Up to 3 proposed new guidance entries.",
+        description=(
+            "Up to 3 proposed session-context updates. Each item must be one of the "
+            "section-specific candidate update types."
+        ),
     )
 
     @field_validator("response_to_user", "query_to_answer")
@@ -37,6 +41,16 @@ class SessionTurnAnalysis(BaseModel):
             raise ValueError("value must be a string")
         stripped = value.strip()
         return stripped or None
+
+    @field_validator("candidate_context_updates", mode="before")
+    @classmethod
+    def normalize_candidate_context_updates(cls, value):
+        if not isinstance(value, list):
+            return []
+        return [
+            item.model_dump() if isinstance(item, CandidateContextUpdate) else item
+            for item in value
+        ]
 
     @field_validator("served_context_ratings", "candidate_context_updates", mode="after")
     @classmethod

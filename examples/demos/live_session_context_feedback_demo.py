@@ -98,13 +98,31 @@ TURNS = [
     {
         "label": "correction_to_route",
         "message": (
-            "Small correction: I need Singapore before Toronto because the APAC audit lead "
-            "is available earlier. Keep the Europe-first preference if possible."
+            "Wait, Singapore can't be flexible. Priya is only free Wednesday morning, "
+            "so Singapore needs to happen before Toronto."
+        ),
+    },
+    {
+        "label": "priya_context_lesson",
+        "message": (
+            "Actually, from past audits, Priya usually has the context Mateo needs. "
+            "It would be useful to talk to Priya before Mateo."
+        ),
+    },
+    {
+        "label": "lisbon_video_call_lesson",
+        "message": (
+            "Also, I know Lisbon is running a good operation, so I probably don't need "
+            "the full site visit there. A video call should be enough unless something "
+            "looks risky."
         ),
     },
     {
         "label": "updated_route_question",
-        "message": "What is the updated audit route and the project focus for each stop?",
+        "message": (
+            "Can you revise the trip plan with the right order, the Lisbon video call, "
+            "and the audit focus for each stop?"
+        ),
     },
     {
         "label": "communication_preference_update",

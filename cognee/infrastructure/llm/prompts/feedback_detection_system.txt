@@ -29,15 +29,21 @@ Extract durable guidance that should shape future answers in this session. Store
 
 Use one of these sections:
 
-- goals: Use this when the user states what they are trying to accomplish. Goals describe the desired outcome or broader purpose behind the conversation. They should help future answers stay oriented around what the user is trying to achieve.
+- goals: Use for the user's broader objective or desired outcome. Goals describe where the session is going, not constraints on how to answer.
 
-- rules: Use this for instructions that change what future answers are allowed to say, assume, rely on, include, exclude, decide, or optimize for. Rules affect the substance of the answer. They set scope, constraints, required sources, business logic, decision criteria, safety boundaries, user-specific facts, or task requirements. If ignoring the instruction could lead to a different answer, classify it as a rule.
+- rules: Use for instructions future answers must follow. Rules change answer substance: what to assume, use, avoid, include, exclude, decide, or optimize for. If a statement acts as a constraint, classify it as a rule even when phrased as a fact.
 
-- preferences: Use this for instructions that change how future answers should be presented without changing the underlying answer. Preferences affect delivery. They cover style, tone, format, length, structure, ordering, level of detail, wording style, example style, terminology style, and whether the answer should be concise, casual, formal, step-by-step, table-based, etc. If ignoring the instruction would produce the same answer in a different shape, classify it as a preference.
+- preferences: Use for presentation only. Preferences change how the same answer is expressed: style, tone, format, length, structure, ordering, examples, wording, or level of detail. If ignoring it would change the answer's substance, it is not a preference.
 
-- lessons_learned: Use this when the current message reveals that something previously assumed, retrieved, inferred, or answered should be changed going forward. Lessons can come from explicit corrections, user feedback, or later context that clarifies earlier ambiguity. A lesson should update, override, or refine prior assumptions, retrieved context, or earlier session guidance.
+- lessons_learned: Use for durable knowledge future answers should reason from. Lessons describe what is true, what changed, what caused something, what failed or worked, or what earlier assumption was corrected. They are not direct instructions.
 
-As a simple test: use rules for what the answer should be based on or include, and use preferences for how the answer should be expressed.
+Simple tests:
+- What is the user trying to achieve? -> goals.
+- What must future answers do, assume, use, or avoid? -> rules.
+- How should future answers look or sound? -> preferences.
+- What should future answers know or reason from? -> lessons_learned.
+
+Rules and lessons_learned can partially overlap. When a message contains an instruction plus reusable context, extract the instruction as a rule and the reusable context as a lesson. The lesson may explain or support the rule, but it should still be useful to reason from later.
 
 Candidate updates are independent of query_to_answer. A correction-only message may have query_to_answer=null and still produce a lessons_learned candidate.
 
@@ -47,7 +53,7 @@ If new guidance replaces older guidance, make the replacement explicit in the ca
 
 Each candidate must contain:
 - section: one of goals, rules, preferences, or lessons_learned
-- content: one short actionable sentence
+- content: one short reusable sentence
 - confidence: number from 0 to 1
 
 Only include candidates with confidence >= 0.75.

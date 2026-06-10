@@ -7,6 +7,8 @@ from cognee.infrastructure.session.feedback_detection import detect_feedback
 from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
 from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
+    CandidateLessonLearnedUpdate,
+    CandidateRuleUpdate,
     ServedContextRating,
 )
 
@@ -119,8 +121,8 @@ class TestDetectFeedback:
 
         assert result.query_to_answer == "What is the capital of France?"
 
-    def test_prompt_extracts_candidate_updates_without_feedback(self):
-        """Prompt tells the analyzer to extract durable guidance from non-feedback messages."""
+    def test_prompt_contains_session_turn_analysis_anchors(self):
+        """Prompt keeps the stable sections and output fields used by the analyzer."""
         prompt_path = (
             Path(__file__).parents[4]
             / "infrastructure"
@@ -130,11 +132,29 @@ class TestDetectFeedback:
         )
         prompt = prompt_path.read_text()
 
-        assert "ordinary questions, ordinary requests" in prompt
-        assert "Candidate updates are independent of query_to_answer." in prompt
-        assert "style, tone, format, length" in prompt
-        assert "confidence >= 0.75" in prompt
-        assert "ordinary retrieved-document facts" in prompt
+        assert "## 1. Query to answer" in prompt
+        assert "## 2. Candidate session-context updates" in prompt
+        assert "## 3. Served context ratings" in prompt
+        assert "query_to_answer" in prompt
+
+    def test_candidate_context_updates_parse_section_specific_models(self):
+        result = FeedbackDetectionResult(
+            candidate_context_updates=[
+                {
+                    "section": "rules",
+                    "content": "Use PostgreSQL for database examples.",
+                    "confidence": 0.9,
+                },
+                {
+                    "section": "lessons_learned",
+                    "content": "The previous Docker build failed due to memory limits.",
+                    "confidence": 0.85,
+                },
+            ]
+        )
+
+        assert isinstance(result.candidate_context_updates[0], CandidateRuleUpdate)
+        assert isinstance(result.candidate_context_updates[1], CandidateLessonLearnedUpdate)
 
 
 class TestDetectFeedbackServedContext:

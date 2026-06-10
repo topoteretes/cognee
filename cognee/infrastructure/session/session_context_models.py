@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -57,9 +57,22 @@ class ServedContextRating(BaseModel):
 class CandidateContextUpdate(BaseModel):
     """A proposed new active session-context guidance entry emitted by feedback detection."""
 
-    section: str
-    content: str
-    confidence: float = 0.0
+    section: str = Field(
+        description=(
+            "One of goals, rules, preferences, or lessons_learned. Choose by whether the "
+            "content is an objective, a constraint, presentation guidance, or durable knowledge."
+        ),
+    )
+    content: str = Field(
+        description=(
+            "One short sentence containing only reusable session guidance, not the full user "
+            "message or a one-off request."
+        ),
+    )
+    confidence: float = Field(
+        default=0.0,
+        description="Confidence from 0 to 1. Only candidates with confidence >= 0.75 are stored.",
+    )
 
     @field_validator("section")
     @classmethod
@@ -89,6 +102,79 @@ class CandidateContextUpdate(BaseModel):
         except (TypeError, ValueError):
             raise ValueError("confidence must be a number")
         return max(0.0, min(1.0, value))
+
+
+class CandidateGoalUpdate(CandidateContextUpdate):
+    """Candidate update for the user's broader session objective."""
+
+    section: Literal["goals"] = Field(
+        default=ContextSection.GOALS.value,
+        description="Fixed section value for goal updates.",
+    )
+    content: str = Field(
+        description=(
+            "The user's broader objective or desired outcome for the session. Use this for where "
+            "the user is trying to get to, not constraints, facts, or answer format."
+        ),
+    )
+
+
+class CandidateRuleUpdate(CandidateContextUpdate):
+    """Candidate update for substantive instructions future answers must follow."""
+
+    section: Literal["rules"] = Field(
+        default=ContextSection.RULES.value,
+        description="Fixed section value for rule updates.",
+    )
+    content: str = Field(
+        description=(
+            "An instruction future answers must obey: a constraint, requirement, assumption, "
+            "source boundary, decision criterion, technical choice, or thing to avoid. Use rules "
+            "for statements that change answer substance, even if phrased as facts."
+        ),
+    )
+
+
+class CandidatePreferenceUpdate(CandidateContextUpdate):
+    """Candidate update for presentation and communication preferences."""
+
+    section: Literal["preferences"] = Field(
+        default=ContextSection.PREFERENCES.value,
+        description="Fixed section value for preference updates.",
+    )
+    content: str = Field(
+        description=(
+            "Presentation guidance only: style, tone, format, length, structure, terminology, "
+            "examples, ordering, or level of detail. Use preferences only when the substantive "
+            "answer would stay the same."
+        ),
+    )
+
+
+class CandidateLessonLearnedUpdate(CandidateContextUpdate):
+    """Candidate update for session knowledge future answers should reason from."""
+
+    section: Literal["lessons_learned"] = Field(
+        default=ContextSection.LESSONS_LEARNED.value,
+        description="Fixed section value for lesson updates.",
+    )
+    content: str = Field(
+        description=(
+            "Durable knowledge future answers should reason from: a correction, clarification, "
+            "discovered fact, cause, outcome, or prior assumption update. It may overlap with a "
+            "rule when it captures reusable context behind that rule, but it must not be only a "
+            "direct instruction or required action."
+        ),
+    )
+
+
+CandidateContextUpdateVariant = Annotated[
+    CandidateGoalUpdate
+    | CandidateRuleUpdate
+    | CandidatePreferenceUpdate
+    | CandidateLessonLearnedUpdate,
+    Field(discriminator="section"),
+]
 
 
 class SessionContextEntry(BaseModel):
