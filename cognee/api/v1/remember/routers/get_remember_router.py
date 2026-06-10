@@ -22,6 +22,11 @@ logger = get_logger()
 #       Once issue is resolved on Swagger side it can be removed.
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
+# Swagger UI prefills newly added array items from the ITEM-level example;
+# without one it inserts the literal "string". An empty item example keeps
+# "Add item" runnable (empty entries are filtered out server-side).
+EmptyExampleStr = Annotated[str, WithJsonSchema({"type": "string", "example": ""})]
+
 
 def get_remember_router() -> APIRouter:
     router = APIRouter()
@@ -51,7 +56,7 @@ def get_remember_router() -> APIRouter:
                 "dashboard. Leave empty for a direct add+cognify."
             ),
         ),
-        node_set: Optional[List[str]] = Form(
+        node_set: Optional[List[EmptyExampleStr]] = Form(
             default=[""],
             description=(
                 "Tags the ingested data with named node sets (e.g. per-agent or per-project "
@@ -95,10 +100,13 @@ def get_remember_router() -> APIRouter:
                 "ingestion parallelism/throughput; rarely needs changing."
             ),
         ),
-        ontology_key: Optional[List[str]] = Form(
+        ontology_key: Optional[List[EmptyExampleStr]] = Form(
             default=None,
             examples=[[]],
-            description="Reference to one or more previously uploaded ontologies",
+            description=(
+                "Keys of previously uploaded ontologies (see /v1/ontologies) to ground "
+                "entity extraction. Leave empty to ingest without an ontology."
+            ),
         ),
         graph_model: Optional[str] = Form(
             default=None,
@@ -182,9 +190,11 @@ def get_remember_router() -> APIRouter:
 
         try:
             config_to_use = None
-            if ontology_key and ontology_key != [""]:
+            # Drop empty entries — Swagger UI submits untouched array items as "".
+            ontology_keys = [key for key in (ontology_key or []) if key]
+            if ontology_keys:
                 ontology_service = OntologyService()
-                ontology_contents = ontology_service.get_ontology_contents(ontology_key, user)
+                ontology_contents = ontology_service.get_ontology_contents(ontology_keys, user)
 
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
@@ -213,7 +223,7 @@ def get_remember_router() -> APIRouter:
                 session_id=session_id or None,
                 user=user,
                 dataset_id=datasetId if datasetId else None,
-                node_set=node_set if node_set != [""] else None,
+                node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
