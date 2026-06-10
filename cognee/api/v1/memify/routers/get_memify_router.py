@@ -25,7 +25,7 @@ class MemifyPayloadDTO(InDTO):
         examples=[[]],
     )
     enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
-    data: Optional[str] = Field(default="")
+    data: Optional[str] = Field(default=None)
     dataset_name: Optional[str] = Field(default=None)
     # Note: Literal is needed for Swagger use
     dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])

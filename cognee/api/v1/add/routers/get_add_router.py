@@ -10,6 +10,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
@@ -27,7 +28,7 @@ def get_add_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=dict,
+        response_model=PipelineRunInfo,
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
@@ -125,7 +126,7 @@ def get_add_router() -> APIRouter:
                         detail=detail or str(add_run),
                     ).model_dump(),
                 )
-            return add_run.model_dump()
+            return add_run
         except Exception as error:
             logger.exception("Add failed")
             return JSONResponse(
