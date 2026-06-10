@@ -42,6 +42,19 @@ same ``vector_engine.index_data_points`` write path (a small carrier provides
 the new id and the unchanged text), never by reconstructing ``Entity(**payload)``,
 so the stored shape stays identical to cognify-written rows on every backend.
 
+Vector re-key strategy
+----------------------
+Re-keying a point means moving its row to a new primary key. Two paths:
+
+  * native (LanceDB, PGVector) — the stored row, INCLUDING its vector, is moved
+    to the new id directly inside the store (SQL UPDATE / row copy). No
+    re-embedding, no embedding backend needed, no per-point cost beyond the
+    store operation. Dispatched by adapter type in ``_rekey_native``.
+  * generic (every other backend) — the point is re-inserted through
+    ``index_data_points`` under the new id, which re-embeds the (unchanged)
+    text; the old point is then deleted. Needs the embedding backend available,
+    exactly as ``cognify`` does.
+
 How the new ID is recovered
 ---------------------------
 Both ``generate_node_id`` and the model's identity normalization lower-case,
@@ -84,8 +97,10 @@ Caveats:
 - ``get_graph_data`` does not return ``created_at``/``updated_at``, so a
   remapped graph node's timestamps are reset to the migration time. Semantic
   properties are preserved; original timestamps are not recoverable here.
-- The vector re-key re-embeds the (unchanged) text via ``index_data_points``;
-  it needs the embedding backend available, exactly as ``cognify`` does.
+- On backends without a native re-key path (see "Vector re-key strategy"), the
+  vector re-key re-embeds the (unchanged) text via ``index_data_points`` and
+  needs the embedding backend available, exactly as ``cognify`` does. LanceDB
+  and PGVector move the stored vector and never re-embed.
 - The legacy ``graph_relationship_ledger`` has no ``dataset_id`` column, so its
   rows are updated globally; this is benign because old ids are deterministic
   and every dataset is migrated in the same run.
@@ -210,6 +225,104 @@ class _RekeyedPoint(DataPoint):
     metadata: dict = {"index_fields": ["text"]}
 
 
+async def _rekey_lancedb(vector_engine, collection: str, id_map: dict) -> None:
+    """Move LanceDB rows to their new ids, carrying the stored vector over.
+
+    Reads the full rows (vector included), re-adds them under the new id with
+    the payload's embedded ``id`` updated, then deletes the old rows. Uses
+    plain ``add`` (append) — NOT ``merge_insert``, which lance 0.32 can panic
+    with on tables carrying deletion vectors. Compacts afterwards when the
+    table supports it (the subprocess-proxy table does not expose
+    ``optimize``), so later cognify ``merge_insert`` writes see a clean table.
+    """
+    from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+
+    try:
+        table = await vector_engine.get_collection(collection)
+    except CollectionNotFoundError:
+        return
+
+    old_ids = [str(old_id) for old_id in id_map]
+    if len(old_ids) == 1:
+        where = f"id = '{old_ids[0]}'"
+    else:
+        id_list = ", ".join(f"'{old_id}'" for old_id in old_ids)
+        where = f"id IN ({id_list})"
+
+    rows = await table.query().where(where).to_list()
+    if not rows:
+        return
+
+    new_rows = []
+    for row in rows:
+        new_id = id_map[str(row["id"])]
+        new_row = dict(row)
+        new_row["id"] = new_id
+        payload = dict(new_row.get("payload") or {})
+        payload["id"] = new_id
+        new_row["payload"] = payload
+        new_rows.append(new_row)
+
+    await table.add(new_rows)
+    await vector_engine.delete_data_points(collection, [str(row["id"]) for row in rows])
+
+    optimize = getattr(table, "optimize", None)
+    if optimize is not None:
+        await optimize()
+
+
+async def _rekey_pgvector(vector_engine, collection: str, id_map: dict) -> None:
+    """Move PGVector rows to their new ids with SQL UPDATEs — the vector column
+    never moves, so nothing is re-embedded."""
+    from sqlalchemy import select, update
+
+    from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+
+    try:
+        table = await vector_engine.get_table(collection)
+    except CollectionNotFoundError:
+        return
+
+    async with vector_engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(table.c.id, table.c.payload).where(table.c.id.in_(list(id_map)))
+            )
+        ).all()
+        for row in rows:
+            new_id = id_map[str(row.id)]
+            payload = dict(row.payload or {})
+            payload["id"] = new_id
+            await session.execute(
+                update(table).where(table.c.id == row.id).values(id=new_id, payload=payload)
+            )
+        await session.commit()
+
+
+async def _rekey_native(vector_engine, collection: str, id_map: dict) -> bool:
+    """Vector-preserving re-key for backends that support it.
+
+    Returns ``True`` when the collection was handled natively (vectors moved,
+    nothing re-embedded); ``False`` means the caller must use the generic
+    re-embed path. Dispatch is by adapter class name so the optional backend
+    packages are never imported here.
+    """
+    if not id_map:
+        return True
+
+    # NOT type(vector_engine): the engine arrives wrapped (_VectorEngineHandle /
+    # the cache's _LeasedValueProxy), and both spoof ``__class__`` to the real
+    # adapter class precisely so checks like this resolve through the wrapper.
+    adapter = vector_engine.__class__.__name__
+    if adapter == "LanceDBAdapter":
+        await _rekey_lancedb(vector_engine, collection, id_map)
+        return True
+    if adapter == "PGVectorAdapter":
+        await _rekey_pgvector(vector_engine, collection, id_map)
+        return True
+    return False
+
+
 async def _migrate_vector(vector_engine, id_map: dict, properties_by_id: dict) -> set:
     """Re-key Entity/EntityType vector points from old id to new id.
 
@@ -242,6 +355,14 @@ async def _migrate_vector(vector_engine, id_map: dict, properties_by_id: dict) -
 
         for index_field in _index_fields(model_cls):
             collection = f"{node_type}_{index_field}"
+
+            # Vector-preserving fast path; nothing can fail per-point here
+            # (no text needed), so no ids join the failed set.
+            if await _rekey_native(
+                vector_engine, collection, {old_id: id_map[old_id] for old_id in old_ids}
+            ):
+                continue
+
             rows = await vector_engine.retrieve(collection, [str(o) for o in old_ids])
 
             new_points = []
@@ -313,6 +434,10 @@ async def _migrate_triplet_vector(vector_engine, triplet_map: dict) -> None:
     if vector_engine is None or not triplet_map:
         return
 
+    # Vector-preserving fast path (missing collection is a no-op inside).
+    if await _rekey_native(vector_engine, "Triplet_text", triplet_map):
+        return
+
     try:
         rows = await vector_engine.retrieve("Triplet_text", list(triplet_map.keys()))
     except Exception:  # noqa: BLE001 - collection absent when feature is off
@@ -348,10 +473,13 @@ async def _migrate_ledger(id_map: dict, dataset_id) -> None:
     """Repoint the relational delete-ledger rows from old node ids to new ones.
 
     Updates ``nodes.slug`` and ``edges.source_node_id`` / ``destination_node_id``
-    (scoped to ``dataset_id``), plus the legacy ``graph_relationship_ledger``
-    (unscoped — it has no dataset column). The PK of a ``nodes`` row is left
-    as-is: it is an internal surrogate and the delete path keys on ``slug``,
-    which we update.
+    — scoped to ``dataset_id`` when given (access control on: one database pair
+    per dataset), unscoped when ``None`` (global mode: one graph backs every
+    dataset's ledger rows, and old ids are deterministic, so the update is
+    correct across all of them) — plus the legacy ``graph_relationship_ledger``
+    (always unscoped — it has no dataset column). The PK of a ``nodes`` row is
+    left as-is: it is an internal surrogate and the delete path keys on
+    ``slug``, which we update.
     """
     if not id_map:
         return
@@ -370,13 +498,13 @@ async def _migrate_ledger(id_map: dict, dataset_id) -> None:
         for old_id, new_id in id_map.items():
             old_uuid, new_uuid = UUID(old_id), UUID(new_id)
 
-            node_stmt = update(Node).where(Node.slug == old_uuid, Node.dataset_id == dataset_id)
-            source_stmt = update(Edge).where(
-                Edge.source_node_id == old_uuid, Edge.dataset_id == dataset_id
-            )
-            target_stmt = update(Edge).where(
-                Edge.destination_node_id == old_uuid, Edge.dataset_id == dataset_id
-            )
+            node_stmt = update(Node).where(Node.slug == old_uuid)
+            source_stmt = update(Edge).where(Edge.source_node_id == old_uuid)
+            target_stmt = update(Edge).where(Edge.destination_node_id == old_uuid)
+            if dataset_id is not None:
+                node_stmt = node_stmt.where(Node.dataset_id == dataset_id)
+                source_stmt = source_stmt.where(Edge.dataset_id == dataset_id)
+                target_stmt = target_stmt.where(Edge.dataset_id == dataset_id)
 
             await session.execute(node_stmt.values(slug=new_uuid))
             await session.execute(source_stmt.values(source_node_id=new_uuid))

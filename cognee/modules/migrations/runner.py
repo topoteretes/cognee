@@ -1,10 +1,13 @@
-"""Startup runner that applies pending graph/vector migrations to every dataset database.
+"""Startup runner that applies pending graph/vector migrations to every database.
 
-Requires backend access control (one ``dataset_database`` row per dataset, which
-is where revisions are tracked); when it is disabled there is no bookkeeping row,
-so the runner is a no-op.
+- Access control ON  -> one ``dataset_database`` row per dataset carries that
+  database pair's revisions; each row's databases are resolved through the
+  per-dataset context and migrated independently.
+- Access control OFF -> a single global graph/vector pair backs every dataset,
+  so revisions live in the standalone single-row ``global_database_version``
+  table (one database, one row — per-dataset tracking is meaningless here).
 
-For each row the runner walks its stored revision forward to head (see
+In both modes the runner walks the stored revision forward to head (see
 ``migration.py``) and records the new head revision and the current Cognee
 version. The migrate-then-stamp sequence runs under a row lock
 (``SELECT ... FOR UPDATE``) so concurrent workers starting at once serialize per
@@ -14,6 +17,8 @@ re-check of the stored revision under the lock closes the remaining window.
 """
 
 import logging
+
+from sqlalchemy.exc import IntegrityError
 
 from cognee.version import get_cognee_version
 from cognee.context_global_variables import (
@@ -31,6 +36,7 @@ from cognee.modules.migrations.migration import (
     MigrationContext,
     pending_migrations,
 )
+from cognee.modules.migrations.models import GLOBAL_DATABASE_VERSION_ROW_ID, GlobalDatabaseVersion
 from cognee.modules.migrations.graph_migrations import GRAPH_MIGRATIONS
 from cognee.modules.migrations.vector_migrations import VECTOR_MIGRATIONS
 
@@ -56,27 +62,130 @@ async def _apply(
     return [migration.slug for migration in pending], new_revision
 
 
-def _nothing_pending(row: DatasetDatabase) -> bool:
-    """True when both revision chains are already satisfied by the row's snapshot."""
-    return not pending_migrations(
-        GRAPH_MIGRATIONS, row.graph_migration_revision
-    ) and not pending_migrations(VECTOR_MIGRATIONS, row.vector_migration_revision)
+def _nothing_pending(graph_revision: str | None, vector_revision: str | None) -> bool:
+    """True when both revision chains are already satisfied by the given snapshot."""
+    return not pending_migrations(GRAPH_MIGRATIONS, graph_revision) and not pending_migrations(
+        VECTOR_MIGRATIONS, vector_revision
+    )
+
+
+async def _record_deployment_version(current_version: str) -> GlobalDatabaseVersion:
+    """Upsert the single ``global_database_version`` row's ``cognee_version``.
+
+    Runs on every startup in BOTH access-control modes, so this row is the one
+    place to read which Cognee release last ran. The global revision columns
+    are left untouched here (NULL on creation): in per-dataset mode they stay
+    NULL forever, and in global mode NULL means "run every migration" — correct
+    for an upgrade, and a free no-op chain run followed by a head stamp for a
+    fresh deployment (every migration is idempotent and cheap on empty stores).
+    """
+    db_engine = get_relational_engine()
+
+    async with db_engine.get_async_session() as session:
+        record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+        if record is not None:
+            if record.cognee_version != current_version:
+                record.cognee_version = current_version
+                await session.commit()
+            return record
+
+    async with db_engine.get_async_session() as session:
+        record = GlobalDatabaseVersion(
+            id=GLOBAL_DATABASE_VERSION_ROW_ID,
+            cognee_version=current_version,
+        )
+        try:
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+            return record
+        except IntegrityError:
+            # Concurrent startup (e.g. multiple workers) already created it.
+            await session.rollback()
+            existing = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+            if existing is None:
+                raise
+            return existing
+
+
+async def _run_global_migrations(current_version: str) -> list[dict]:
+    """Migrate the single global graph/vector pair (access control disabled).
+
+    Same lock + re-check + migrate + stamp sequence as the per-dataset path,
+    against the ``global_database_version`` row. The migration context carries
+    ``dataset_id=None``, so ledger updates apply unscoped — correct here, since
+    the one global graph backs every dataset's ledger rows.
+    """
+    row = await _record_deployment_version(current_version)
+    if _nothing_pending(row.global_graph_migration_revision, row.global_vector_migration_revision):
+        return [
+            {
+                "database": "global",
+                "graph_migrations_applied": [],
+                "vector_migrations_applied": [],
+            }
+        ]
+
+    db_engine = get_relational_engine()
+    try:
+        async with db_engine.get_async_session() as session:
+            record = await session.get(
+                GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID, with_for_update=True
+            )
+            if record is None or _nothing_pending(
+                record.global_graph_migration_revision, record.global_vector_migration_revision
+            ):
+                return []
+
+            # No context override: without access control, get_graph_engine /
+            # get_vector_engine resolve the global databases directly.
+            graph_engine = await get_graph_engine()
+            vector_engine = get_vector_engine()
+            migration_context = MigrationContext(
+                graph_engine=graph_engine,
+                vector_engine=vector_engine,
+                dataset_id=None,
+            )
+            graph_applied, graph_revision = await _apply(
+                migration_context, GRAPH_MIGRATIONS, record.global_graph_migration_revision
+            )
+            vector_applied, vector_revision = await _apply(
+                migration_context, VECTOR_MIGRATIONS, record.global_vector_migration_revision
+            )
+
+            record.global_graph_migration_revision = graph_revision
+            record.global_vector_migration_revision = vector_revision
+            await session.commit()
+    except Exception:
+        logger.exception("Database migrations failed for the global databases.")
+        return [{"database": "global", "result": "failed"}]
+
+    if graph_applied or vector_applied:
+        logger.info("Migrated global databases: graph=%s vector=%s.", graph_applied, vector_applied)
+    return [
+        {
+            "database": "global",
+            "graph_migrations_applied": graph_applied,
+            "vector_migrations_applied": vector_applied,
+        }
+    ]
 
 
 async def run_database_migrations() -> list[dict]:
-    """Apply pending graph and vector migrations to every Cognee dataset database.
+    """Apply pending graph and vector migrations to every Cognee database.
 
     Failures for one database are logged and skipped so the remaining databases
     are still migrated. Returns a per-database summary.
     """
-    if not backend_access_control_enabled():
-        logger.info(
-            "Backend access control is disabled; no per-dataset database rows exist, "
-            "skipping graph/vector migrations."
-        )
-        return []
-
     current_version = get_cognee_version()
+
+    if not backend_access_control_enabled():
+        return await _run_global_migrations(current_version)
+
+    # Record the deployment-wide version even in per-dataset mode (the global
+    # revision columns stay NULL — per-dataset revisions live on each row).
+    await _record_deployment_version(current_version)
+
     rows = await get_dataset_databases()
     db_engine = get_relational_engine()
 
@@ -85,7 +194,7 @@ async def run_database_migrations() -> list[dict]:
     for row in rows:
         # Fast path: nothing pending per this row's snapshot — skip without
         # opening the dataset's databases or writing anything.
-        if _nothing_pending(row):
+        if _nothing_pending(row.graph_migration_revision, row.vector_migration_revision):
             summaries.append(
                 {
                     "dataset_id": str(row.dataset_id),
@@ -100,7 +209,9 @@ async def run_database_migrations() -> list[dict]:
                 # Lock the row and re-read its revisions: a concurrent worker
                 # may have migrated this database while we waited for the lock.
                 record = await session.get(DatasetDatabase, row.dataset_id, with_for_update=True)
-                if record is None or _nothing_pending(record):
+                if record is None or _nothing_pending(
+                    record.graph_migration_revision, record.vector_migration_revision
+                ):
                     continue
 
                 # Resolve this dataset's graph/vector databases through the

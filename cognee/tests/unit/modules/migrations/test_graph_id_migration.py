@@ -28,6 +28,7 @@ from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
     _migrate_graph,
     _migrate_triplet_vector,
     _migrate_vector,
+    _rekey_native,
     build_id_remap,
 )
 
@@ -399,6 +400,141 @@ def test_triplet_migration_tolerates_missing_collection():
     vector = _NoCollectionVector()
     asyncio.run(_migrate_triplet_vector(vector, {"old": "new"}))  # must not raise
     assert vector.points == {}
+
+
+# ── vector store: native (vector-preserving) re-key paths ───────────────────
+
+
+class _FakeLanceQuery:
+    def __init__(self, table):
+        self._table = table
+        self._where = None
+
+    def where(self, clause):
+        self._where = clause
+        return self
+
+    async def to_list(self):
+        import re
+
+        wanted = re.findall(r"'([^']+)'", self._where or "")
+        return [dict(self._table.rows[i]) for i in wanted if i in self._table.rows]
+
+
+class _FakeLanceTable:
+    """Mimics the lancedb AsyncTable surface the native re-key uses."""
+
+    def __init__(self, rows):
+        self.rows = {row["id"]: row for row in rows}
+        self.optimized = False
+
+    def query(self):
+        return _FakeLanceQuery(self)
+
+    async def add(self, new_rows):
+        for row in new_rows:
+            self.rows[row["id"]] = row
+
+    async def optimize(self):
+        self.optimized = True
+
+
+def _make_lance_adapter(table):
+    """Adapter stub whose CLASS NAME drives the native-path dispatch."""
+    from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+
+    class LanceDBAdapter:
+        def __init__(self):
+            self.table = table
+
+        async def get_collection(self, collection):
+            if self.table is None:
+                raise CollectionNotFoundError(f"Collection '{collection}' not found!")
+            return self.table
+
+        async def delete_data_points(self, collection, ids):
+            for point_id in ids:
+                self.table.rows.pop(str(point_id), None)
+
+    return LanceDBAdapter()
+
+
+def test_native_lancedb_rekey_moves_vector_without_reembedding():
+    old_id = str(generate_node_id("Alice"))
+    new_id = str(Entity.id_for("alice"))
+    vector = [0.1, 0.2, 0.3]
+    table = _FakeLanceTable(
+        [{"id": old_id, "vector": vector, "payload": {"id": old_id, "text": "alice"}}]
+    )
+    adapter = _make_lance_adapter(table)
+
+    handled = asyncio.run(_rekey_native(adapter, "Entity_name", {old_id: new_id}))
+
+    assert handled
+    assert old_id not in table.rows
+    moved = table.rows[new_id]
+    assert moved["vector"] == vector  # the stored vector travelled, byte for byte
+    assert moved["payload"] == {"id": new_id, "text": "alice"}
+    assert table.optimized  # compacted so later merge_inserts see no deletion vectors
+
+
+def test_native_lancedb_missing_collection_is_noop():
+    adapter = _make_lance_adapter(None)
+    assert asyncio.run(_rekey_native(adapter, "Triplet_text", {"old": "new"}))
+
+
+def test_native_pgvector_rekey_updates_rows_in_place():
+    """Drives the real SQL path against an in-memory SQLAlchemy table shaped
+    like a PGVector collection (id PK, payload JSON, vector)."""
+    from sqlalchemy import JSON, Column, MetaData, String, Table, select
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    old_id = str(generate_node_id("Alice"))
+    new_id = str(Entity.id_for("alice"))
+
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://")
+        metadata = MetaData()
+        table = Table(
+            "Entity_name",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column("payload", JSON),
+            Column("vector", JSON),
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
+            await conn.execute(
+                table.insert().values(
+                    id=old_id, payload={"id": old_id, "text": "alice"}, vector=[0.1, 0.2]
+                )
+            )
+
+        class PGVectorAdapter:  # class name drives the dispatch
+            async def get_table(self, collection):
+                return table
+
+            def get_async_session(self):
+                return AsyncSession(engine)
+
+        handled = await _rekey_native(PGVectorAdapter(), "Entity_name", {old_id: new_id})
+
+        async with AsyncSession(engine) as session:
+            rows = (await session.execute(select(table))).all()
+        await engine.dispose()
+        return handled, rows
+
+    handled, rows = asyncio.run(run())
+    assert handled
+    assert len(rows) == 1
+    assert rows[0].id == new_id
+    assert rows[0].payload == {"id": new_id, "text": "alice"}
+    assert rows[0].vector == [0.1, 0.2]  # untouched — nothing re-embedded
+
+
+def test_rekey_native_unknown_adapter_falls_back():
+    """Backends without a native path report unhandled so the caller re-embeds."""
+    assert not asyncio.run(_rekey_native(_FakeVector(), "Entity_name", {"old": "new"}))
 
 
 if __name__ == "__main__":

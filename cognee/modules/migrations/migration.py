@@ -31,15 +31,17 @@ class MigrationContext:
     handles here rather than just one engine.
 
     Attributes:
-        graph_engine: Resolved graph engine for this dataset's database.
-        vector_engine: Resolved vector engine for this dataset's database.
-        dataset_id: The dataset whose stores this migration touches; ledger
-            updates are filtered to it.
+        graph_engine: Resolved graph engine for this database.
+        vector_engine: Resolved vector engine for this database.
+        dataset_id: The dataset whose ledger rows this migration may touch
+            (access control on: one database pair per dataset), or ``None`` in
+            global mode (access control off: one global pair backs every
+            dataset, so ledger updates apply unscoped).
     """
 
     graph_engine: Any
     vector_engine: Any
-    dataset_id: UUID
+    dataset_id: Optional[UUID] = None
 
 
 def revision_id(slug: str) -> str:

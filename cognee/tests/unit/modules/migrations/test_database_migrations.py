@@ -124,9 +124,10 @@ def test_apply_runs_pending_then_advances_revision():
     assert applied_order == []
 
 
-def test_runner_is_noop_without_access_control(monkeypatch):
-    """Revisions live on per-dataset dataset_database rows; with access control
-    off there are none, so the runner must return without touching anything."""
+def test_runner_routes_to_global_path_without_access_control(monkeypatch):
+    """With access control off there are no per-dataset rows: the runner must
+    migrate via the single global_database_version row, never the per-dataset
+    iteration."""
     import cognee.modules.migrations.runner as runner
 
     monkeypatch.setattr(runner, "backend_access_control_enabled", lambda: False)
@@ -136,4 +137,12 @@ def test_runner_is_noop_without_access_control(monkeypatch):
 
     monkeypatch.setattr(runner, "get_dataset_databases", _explode)
 
-    assert asyncio.run(runner.run_database_migrations()) == []
+    sentinel = [{"database": "global", "graph_migrations_applied": ["x"]}]
+
+    async def _fake_global(current_version):
+        assert current_version
+        return sentinel
+
+    monkeypatch.setattr(runner, "_run_global_migrations", _fake_global)
+
+    assert asyncio.run(runner.run_database_migrations()) == sentinel
