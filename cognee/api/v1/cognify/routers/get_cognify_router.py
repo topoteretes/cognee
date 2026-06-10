@@ -39,47 +39,80 @@ logger = get_logger("api.cognify")
 
 
 class CognifyPayloadDTO(InDTO):
+    # Examples double as the Swagger try-it-out prefill, which is SUBMITTED
+    # as-is on Execute — keep them behavior-neutral (empty/None) for every
+    # field where a value changes processing.
     datasets: Optional[List[str]] = Field(
         default=None,
-        examples=[["main_dataset"]],
+        examples=[["default_dataset"]],
         description=(
             "Dataset names to process; resolved against datasets owned by the authenticated user."
         ),
     )
-    dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
-    run_in_background: Optional[bool] = Field(default=False)
+    dataset_ids: Optional[List[UUID]] = Field(
+        default=None,
+        examples=[[]],
+        description=(
+            "Dataset UUIDs to process (required for datasets shared with you). "
+            "Takes precedence over the datasets name list when both are provided."
+        ),
+    )
+    run_in_background: Optional[bool] = Field(
+        default=False,
+        description=(
+            "If true, the request returns immediately with a pipeline_run_id while the "
+            "graph builds server-side — track completion via GET /v1/datasets/status or "
+            "the /v1/cognify/subscribe WebSocket. If false, the request blocks until the "
+            "knowledge graph is fully built, which can take minutes for large datasets."
+        ),
+    )
     graph_model: Optional[dict] = Field(
         default=None,
         examples=[{}],
         description=(
-            "JSON schema describing a custom graph model for entity extraction. "
-            "When omitted or {}, the default KnowledgeGraph model is used."
+            "JSON schema describing a custom graph model for entity extraction, including a "
+            "top-level 'title' key. When omitted or {}, the default KnowledgeGraph model is "
+            "used — a restrictive schema here can produce an empty graph."
         ),
     )
     custom_prompt: Optional[str] = Field(
         default="",
-        description="Custom prompt for entity extraction and graph generation",
-        examples=["Extract entities focusing on technical concepts and their relationships."],
+        examples=[""],
+        description=(
+            "Replaces the default entity-extraction prompt to steer which entities and "
+            "relationships get extracted (e.g. 'Extract entities focusing on technical "
+            "concepts and their relationships.'). Leave empty for the default prompt."
+        ),
     )
     chunk_size: Optional[int] = Field(
         default=None,
-        description="Maximum tokens per chunk. Defaults to automatic model-based sizing.",
-        examples=[4096, 8192],
+        examples=[None],
+        description=(
+            "Maximum tokens per chunk (e.g. 4096). Leave null for automatic model-based "
+            "sizing. Larger chunks give more context per LLM extraction pass; smaller "
+            "chunks give finer-grained extraction at higher LLM cost."
+        ),
     )
     ontology_key: Optional[List[str]] = Field(
         default=None,
         examples=[[]],
-        description="Reference to one or more previously uploaded ontologies",
+        description=(
+            "Keys of previously uploaded ontologies (see /v1/ontologies) to ground "
+            "entity extraction. Leave empty to process without an ontology."
+        ),
     )
     chunks_per_batch: Optional[int] = Field(
         default=None,
-        description="Number of chunks to process per task batch in Cognify (overrides default).",
-        examples=[36, 50, 100],
+        examples=[None],
+        description=(
+            "Number of chunks to process per task batch (e.g. 36). Controls processing "
+            "parallelism/throughput; leave null for the pipeline default."
+        ),
     )
     data_per_batch: Optional[int] = Field(
         default=20,
+        examples=[20],
         description="Maximum number of data items to process concurrently within a dataset.",
-        examples=[20, 30, 50],
     )
 
 
