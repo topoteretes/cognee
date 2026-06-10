@@ -13,6 +13,8 @@ from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
@@ -41,6 +43,8 @@ async def run_pipeline(
     graph_db_config: Optional[dict] = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ):
     validate_pipeline_tasks(tasks)
     await setup_and_check_environment(vector_db_config, graph_db_config)
@@ -59,6 +63,8 @@ async def run_pipeline(
             use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
         ):
             yield run_info
 
@@ -72,6 +78,8 @@ async def run_pipeline_per_dataset(
     use_pipeline_cache=False,
     incremental_loading=False,
     data_per_batch: int = 20,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ):
     if not data:
         data = await get_dataset_data(dataset_id=dataset.id)
@@ -101,6 +109,8 @@ async def run_pipeline_per_dataset(
         pipeline_name,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
     )
 
     async for pipeline_run_info in pipeline_run:

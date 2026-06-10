@@ -66,7 +66,7 @@ async def main():
     await migrate_relational_database(graph, schema=schema)
     print("Relational database migration complete.")
 
-    # Make sure to set top_k at a high value for a broader search, the default value is only 10!
+    # Make sure to set top_k at a high value for a broader search, the default value is only 15!
     # top_k represent the number of graph tripplets to supply to the LLM to answer your question
     search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,

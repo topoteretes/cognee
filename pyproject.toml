@@ -48,7 +48,7 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
-    "ladybug==0.16.0",
+    "ladybug>=0.16.0,<0.18",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
@@ -122,15 +122,6 @@ deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
 groq = ["groq>=0.8.0,<1.0.0"]
 llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0"]
-chromadb = [
-    "chromadb>=0.6,<0.7",
-    # pypika 0.48.9's setup.py uses ast.Str, which Python 3.14 removed (it
-    # was deprecated since 3.8). Build fails with "module 'ast' has no
-    # attribute 'Str'". Allow newer pypika on 3.14 — chromadb itself only
-    # requires pypika>=0.48.9, so this is in-range for it.
-    "pypika==0.48.9 ; python_version < '3.14'",
-    "pypika>=0.50.0 ; python_version >= '3.14'",
-]
 docs = [
     "lxml>=4.9.3,<5 ; python_version < '3.13'",
     "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",

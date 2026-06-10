@@ -11,6 +11,8 @@ from cognee.infrastructure.llm import get_max_chunk_tokens
 
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
@@ -55,6 +57,8 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     data_per_batch: int = 20,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
     **kwargs,
 ):
     """
@@ -267,6 +271,8 @@ async def cognify(
             use_pipeline_cache=True,
             pipeline_name="cognify_pipeline",
             data_per_batch=data_per_batch,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
         )
 
         dataset_desc = str(datasets) if datasets else "all datasets"

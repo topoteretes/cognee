@@ -329,6 +329,9 @@ async def main():
     tables_in_database = await connection.table_names()
     assert len(tables_in_database) == 0, "LanceDB database is not empty"
 
+    if hasattr(vector_engine, "close"):
+        await vector_engine.close()
+
 
 if __name__ == "__main__":
     import asyncio
