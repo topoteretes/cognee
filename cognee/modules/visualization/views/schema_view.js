@@ -313,6 +313,24 @@
           labelX = lx + 36;
           labelY = src.y + src.h / 2;
           sx = lx; sy = src.y + 30; tx = lx; ty = src.y + src.h - 30;
+        } else if (Math.abs(src.x - tgt.x) < LAYOUT.BOX_W * 0.5) {
+          // Same-column pair (vertically stacked cards — common in the tall
+          // Entity column). The horizontal-ease curve degenerates into an
+          // S-loop here, leaving arrowheads pointing backwards. Route a side
+          // loop instead: exit the source's right edge, bulge outward, enter
+          // the target's right edge — the head always points cleanly left
+          // into the target card.
+          const offset = (idxInPair - (group.length - 1) / 2) * 22;
+          const sxp = src.x + src.w, syp = src.y + Math.min(34, src.h / 2);
+          const txp = tgt.x + tgt.w, typ = tgt.y + Math.min(34, tgt.h / 2);
+          const bulge = 56 + Math.min(150, Math.abs(typ - syp) * 0.14) + Math.abs(offset);
+          pathD = 'M ' + sxp + ' ' + syp +
+                  ' C ' + (sxp + bulge) + ' ' + syp +
+                  ', ' + (txp + bulge) + ' ' + typ +
+                  ', ' + txp + ' ' + typ;
+          labelX = Math.max(sxp, txp) + bulge * 0.78;
+          labelY = (syp + typ) / 2;
+          sx = sxp; sy = syp; tx = txp; ty = typ;
         } else {
           const aSrc = boxAnchor(src, tgtCx, tgtCy);
           const aTgt = boxAnchor(tgt, srcCx, srcCy);
@@ -753,17 +771,23 @@
   function flowCurve(sx, sy, tx, ty, offset) {
     offset = offset || 0;
     const dx = tx - sx;
+    const dy = Math.abs(ty - sy);
     const span = Math.abs(dx) / (LAYOUT.BOX_W + LAYOUT.COL_GAP);
     const handle = Math.max(60, Math.abs(dx) * 0.5);
     const dir = dx >= 0 ? 1 : -1;
     let c1y = sy + offset, c2y = ty + offset;
     // Drop the control points below the card band so multi-column edges arc
-    // clearly under the intermediate cards rather than grazing them.
-    if (span >= 1.25) {
+    // clearly under the intermediate cards rather than grazing them. Only
+    // when the endpoints sit at similar heights: with a large vertical span
+    // (tall columns) the drop overshot below BOTH cards, hooking the curve
+    // back up so the arrowhead pointed the wrong way ("inverted" arrows).
+    // Vertically distant cards get the plain horizontal-ease instead, which
+    // already clears the band diagonally.
+    if (span >= 1.25 && dy < 140) {
       const drop = Math.max(sy, ty) + (64 + span * 40);
       c1y = drop + offset;
       c2y = drop + offset;
-    } else if (span >= 0.4) {
+    } else if (span >= 0.4 && dy < 90) {
       // Adjacent columns: a gentle downward bow so the edge clears the card edges.
       const drop = Math.max(sy, ty) + 34;
       c1y = drop + offset;
