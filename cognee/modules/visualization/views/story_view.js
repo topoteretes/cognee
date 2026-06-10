@@ -1199,16 +1199,33 @@ function isInViewport(wx,wy,margin,vp){
 
 // ── Mouse ──
 var isDragging=false,dragNode=null,isPanning=false;
-var lastMx=0,lastMy=0;
+// A press only becomes a drag after the cursor moves DRAG_THRESHOLD px.
+// Plain clicks must never touch node pins or reheat the simulation —
+// doing so unpinned the clicked node and let repulsion push it off into
+// space (the layout anchors are much weaker than the charge force).
+var dragStarted=false;
+var DRAG_THRESHOLD=3;
+var lastMx=0,lastMy=0,downMx=0,downMy=0;
+
+function releaseDragNode(){
+  if(!dragNode)return;
+  if(layoutMode==="story"){
+    // Story pins every node into its lane; snap the dragged node back so
+    // interaction can never degrade the deterministic grid.
+    dragNode.fx=(typeof dragNode._targetX==="number")?dragNode._targetX:null;
+    dragNode.fy=(typeof dragNode._targetY==="number")?dragNode._targetY:null;
+  }else{
+    dragNode.fx=null;dragNode.fy=null;
+  }
+  if(dragStarted)simulation.alphaTarget(0);
+}
 
 canvas.addEventListener("mousedown",function(ev){
   var mx=ev.offsetX,my=ev.offsetY;
-  lastMx=mx;lastMy=my;
+  lastMx=mx;lastMy=my;downMx=mx;downMy=my;
   var hit=findNodeAt(mx,my);
   if(hit){
-    dragNode=hit;isDragging=true;
-    dragNode.fx=dragNode.x;dragNode.fy=dragNode.y;
-    simulation.alphaTarget(0.3).restart();
+    dragNode=hit;isDragging=true;dragStarted=false;
     canvas.style.cursor="grabbing";
   }else{
     isPanning=true;
@@ -1219,6 +1236,12 @@ canvas.addEventListener("mousedown",function(ev){
 canvas.addEventListener("mousemove",function(ev){
   var mx=ev.offsetX,my=ev.offsetY;
   if(isDragging&&dragNode){
+    if(!dragStarted){
+      var dx=mx-downMx,dy=my-downMy;
+      if(dx*dx+dy*dy<DRAG_THRESHOLD*DRAG_THRESHOLD){lastMx=mx;lastMy=my;return}
+      dragStarted=true;
+      simulation.alphaTarget(0.3).restart();
+    }
     var w=screenToWorld(mx,my);
     dragNode.fx=w.x;dragNode.fy=w.y;
   }else if(isPanning){
@@ -1243,17 +1266,14 @@ canvas.addEventListener("mousemove",function(ev){
 });
 
 canvas.addEventListener("mouseup",function(){
-  if(isDragging&&dragNode){
-    dragNode.fx=null;dragNode.fy=null;
-    simulation.alphaTarget(0);
-  }
-  isDragging=false;dragNode=null;isPanning=false;
+  if(isDragging)releaseDragNode();
+  isDragging=false;dragNode=null;isPanning=false;dragStarted=false;
   canvas.style.cursor="grab";
 });
 
 canvas.addEventListener("mouseleave",function(){
-  if(isDragging&&dragNode){dragNode.fx=null;dragNode.fy=null;simulation.alphaTarget(0)}
-  isDragging=false;dragNode=null;isPanning=false;
+  if(isDragging)releaseDragNode();
+  isDragging=false;dragNode=null;isPanning=false;dragStarted=false;
   hoveredNode=null;draw();
 });
 
@@ -1441,10 +1461,11 @@ function updateFps(){
 }
 
 // Top-chrome reserved zone in screen-pixels. Tabs (32px), header (~40px),
-// theme toggle, search box all live in the first ~64px of the viewport.
-// Column gridlines and column labels must start below this so they don't
-// bleed into the chrome.
-var TOP_CHROME_PAD=72;
+// theme toggle, and the fixed search box (top:56px, ~34px tall — see
+// #search-box in template.html) live in the first ~90px of the viewport.
+// Column gridlines and column labels must start below ALL of it, or the
+// first column's "Documents" pill collides with the "Search nodes" input.
+var TOP_CHROME_PAD=104;
 // Bottom-chrome zone for the floating controls bar.
 var BOT_CHROME_PAD=64;
 function drawRankColumns(vp,_light){
@@ -1815,33 +1836,39 @@ function draw(){
       else if(N>500){labelEvery=scale<0.3?Math.ceil(N/20):scale<0.8?Math.ceil(N/80):1}
       else{labelEvery=1}
 
+      // Two-pass labeling: collect candidates first, then place them in
+      // priority order with rectangle-collision rejection. Drawing labels
+      // node-by-node let neighbors overprint each other, which made
+      // entity names unreadable even on small graphs.
+      var labelCandidates=[];
       nodes.forEach(function(n,i){
         if(typeof n.x!=="number")return;
         // Viewport culling for labels
         if(!isInViewport(n.x,n.y,n._r+fontSize*2+vpMargin,vp))return;
 
-        var shouldLabel=false;
+        // Priority: hovered focus (3) > search match (2) > key node (1).
+        var prio=-1;
 
         // Always label hovered + neighbors (budget-independent)
-        if(hoveredNode&&neighborSet&&neighborSet.has(n.id))shouldLabel=true;
+        if(hoveredNode&&neighborSet&&neighborSet.has(n.id))prio=3;
         // Always label search matches
-        if(hasSearch&&searchMatches.has(n.id))shouldLabel=true;
+        if(hasSearch&&searchMatches.has(n.id))prio=Math.max(prio,2);
 
         if(labelBudget==="key"){
           // Default: label only nodes the preprocessor marked as
           // label_priority (documents, entity-types, top-quartile
           // importance). Hovered/searched already opted-in above.
-          if(n.label_priority===true)shouldLabel=true;
+          if(n.label_priority===true)prio=Math.max(prio,1);
         }else if(N>5000){
           // "all" mode on a huge graph still has to cap somewhere
-          if(topDegreeSet.has(n.id))shouldLabel=true;
+          if(topDegreeSet.has(n.id))prio=Math.max(prio,1);
         }else{
           // "all" mode — original legacy adaptive behavior
-          if(n._degree>=maxDeg*0.3)shouldLabel=true;
-          if(labelEvery<Infinity&&i%labelEvery===0)shouldLabel=true;
+          if(n._degree>=maxDeg*0.3)prio=Math.max(prio,1);
+          if(labelEvery<Infinity&&i%labelEvery===0)prio=Math.max(prio,0);
         }
 
-        if(!shouldLabel)return;
+        if(prio<0)return;
 
         var alpha2=0.85;
         if(hoveredNode){
@@ -1851,14 +1878,44 @@ function draw(){
           alpha2=searchMatches.has(n.id)?1:0.08;
         }
 
+        labelCandidates.push({n:n,prio:prio,alpha:alpha2});
+      });
+
+      // Important labels claim space first; ties broken by degree so hubs
+      // keep their names when space runs out.
+      labelCandidates.sort(function(a,b){
+        if(a.prio!==b.prio)return b.prio-a.prio;
+        return (b.n._degree||0)-(a.n._degree||0);
+      });
+
+      var placedLabelRects=[];
+      var MAX_PLACED_LABELS=250;
+      labelCandidates.forEach(function(c){
+        if(placedLabelRects.length>=MAX_PLACED_LABELS)return;
+        var n=c.n;
         var label=truncate(n.name||"",30);
+        if(!label)return;
         var yOff=n._r+fontSize*0.8;
+        var halfW=ctx.measureText(label).width/2+2;
+        var rect={
+          x1:n.x-halfW,x2:n.x+halfW,
+          y1:n.y+yOff-fontSize*0.7,y2:n.y+yOff+fontSize*0.7,
+        };
+        // The hovered node's neighborhood is the user's focus — always
+        // drawn. Everything else must not overlap an already-placed label.
+        if(c.prio<3){
+          for(var p=0;p<placedLabelRects.length;p++){
+            var r=placedLabelRects[p];
+            if(rect.x1<r.x2&&rect.x2>r.x1&&rect.y1<r.y2&&rect.y2>r.y1)return;
+          }
+        }
+        placedLabelRects.push(rect);
 
         // Text shadow
-        ctx.fillStyle=_light ? "rgba(255,255,255,"+alpha2*0.8+")" : "rgba(0,0,0,"+alpha2*0.8+")";
+        ctx.fillStyle=_light ? "rgba(255,255,255,"+c.alpha*0.8+")" : "rgba(0,0,0,"+c.alpha*0.8+")";
         ctx.fillText(label,n.x+0.5,n.y+yOff+0.5);
 
-        ctx.fillStyle=_light ? "rgba(30,30,30,"+alpha2+")" : "rgba(244,244,244,"+alpha2+")";
+        ctx.fillStyle=_light ? "rgba(30,30,30,"+c.alpha+")" : "rgba(244,244,244,"+c.alpha+")";
         ctx.fillText(label,n.x,n.y+yOff);
       });
     }else if(hoveredNode){
