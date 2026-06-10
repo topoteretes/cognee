@@ -48,8 +48,9 @@ async def _load_checkpoint(cache_engine, key: str) -> Optional[datetime]:
         if raw:
             return datetime.fromisoformat(raw)
         return None
-    except (NotImplementedError, AttributeError):
-        # Adapter predates the KV interface, fall back to legacy duck-typing
+    except (NotImplementedError, AttributeError, TypeError):
+        # Adapter predates the KV interface (missing, non-async, or
+        # different-signature get_value), fall back to legacy duck-typing
         pass
     except Exception:
         logger.debug("_load_checkpoint: cache read failed for key %s", key)
@@ -76,8 +77,9 @@ async def _save_checkpoint(cache_engine, key: str, ts: datetime) -> None:
     try:
         await cache_engine.set_value(key, value)
         return
-    except (NotImplementedError, AttributeError):
-        # Adapter predates the KV interface, fall back to legacy duck-typing
+    except (NotImplementedError, AttributeError, TypeError):
+        # Adapter predates the KV interface (missing, non-async, or
+        # different-signature set_value), fall back to legacy duck-typing
         pass
     try:
         await cache_engine.async_redis.set(key, value)

@@ -24,12 +24,19 @@ def clear_factory_cache():
     factory_mod.create_cache_engine.cache_clear()
 
 
-def _fake_cache_config(backend: str):
-    return types.SimpleNamespace(caching=True, usage_logging=False, cache_backend=backend)
+def _fake_cache_config(backend: str, explicit: bool = False):
+    return types.SimpleNamespace(
+        caching=True,
+        usage_logging=False,
+        cache_backend=backend,
+        model_fields_set={"cache_backend"} if explicit else set(),
+    )
 
 
-def _create_engine(backend: str, cache_db_url=None):
-    with patch.object(factory_mod, "get_cache_config", return_value=_fake_cache_config(backend)):
+def _create_engine(backend: str, cache_db_url=None, explicit: bool = False):
+    with patch.object(
+        factory_mod, "get_cache_config", return_value=_fake_cache_config(backend, explicit)
+    ):
         return factory_mod.create_cache_engine(
             cache_host="localhost",
             cache_port=6379,
@@ -73,6 +80,31 @@ def test_postgres_backend_with_cache_db_url_returns_sql_adapter():
 
     assert isinstance(engine, SqlCacheAdapter)
     assert engine.db_uri == explicit_url
+
+
+def test_default_sqlite_backend_falls_back_to_fs_when_db_path_on_s3():
+    """The implicit sqlite default degrades to the fs cache on S3 system roots."""
+    fake_relational = types.SimpleNamespace(
+        db_path="s3://bucket/cognee/system/databases", db_provider="sqlite"
+    )
+
+    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
+        engine = _create_engine("sqlite")
+
+    from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
+
+    assert isinstance(engine, FSCacheAdapter)
+
+
+def test_explicitly_chosen_sqlite_backend_on_s3_still_raises():
+    """An explicit CACHE_BACKEND=sqlite must fail loudly instead of degrading."""
+    fake_relational = types.SimpleNamespace(
+        db_path="s3://bucket/cognee/system/databases", db_provider="sqlite"
+    )
+
+    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
+        with pytest.raises(CacheConnectionError, match="cannot store cache.db on S3"):
+            _create_engine("sqlite", explicit=True)
 
 
 def test_postgres_backend_without_url_or_postgres_relational_raises():

@@ -134,8 +134,25 @@ def create_cache_engine(
                 SqlCacheAdapter,
             )
 
+            try:
+                connection_string = _resolve_cache_db_url(config.cache_backend, cache_db_url)
+            except CacheConnectionError as error:
+                # An explicitly chosen backend must fail loudly. The implicit
+                # sqlite default, however, can land on deployments it cannot
+                # serve (e.g. system root on S3) - degrade to the filesystem
+                # cache there so sessions keep working out of the box.
+                explicitly_chosen = "cache_backend" in getattr(config, "model_fields_set", set())
+                if config.cache_backend != "sqlite" or explicitly_chosen:
+                    raise
+                logger.warning(
+                    f"Default sqlite cache backend is unavailable ({error}); "
+                    "falling back to the filesystem cache backend. "
+                    "Set CACHE_DB_URL or CACHE_BACKEND to override."
+                )
+                return FSCacheAdapter(session_ttl_seconds=session_ttl_seconds)
+
             return SqlCacheAdapter(
-                connection_string=_resolve_cache_db_url(config.cache_backend, cache_db_url),
+                connection_string=connection_string,
                 lock_key=lock_key,
                 log_key=log_key,
                 session_ttl_seconds=session_ttl_seconds,

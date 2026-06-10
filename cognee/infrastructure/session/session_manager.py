@@ -800,8 +800,9 @@ class SessionManager:
         try:
             raw = await self._cache.get_value(key)
             return raw if raw else ""
-        except (NotImplementedError, AttributeError):
-            # Adapter predates the KV interface, fall back to legacy duck-typing
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature get_value), fall back to legacy duck-typing
             pass
         except Exception:
             return ""
@@ -832,8 +833,9 @@ class SessionManager:
         try:
             await self._cache.set_value(key, context, ttl=self._cache.session_ttl_seconds)
             return
-        except (NotImplementedError, AttributeError):
-            # Adapter predates the KV interface, fall back to legacy duck-typing
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature set_value), fall back to legacy duck-typing
             pass
         try:
             await self._cache.async_redis.set(key, context)
@@ -861,8 +863,9 @@ class SessionManager:
         graph_key = self._graph_context_key(user_id, session_id)
         try:
             await self._cache.delete_value(graph_key)
-        except (NotImplementedError, AttributeError):
-            # Adapter predates the KV interface, fall back to legacy duck-typing
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature delete_value), fall back to legacy duck-typing
             try:
                 await self._cache.async_redis.delete(graph_key)
             except AttributeError:
