@@ -2,11 +2,14 @@
 
 Formats:
 
+- ``pydantic`` — a :class:`GraphSnapshot` of typed DataPoint instances (the
+  Pydantic-native export: real ``Entity``/``DocumentChunk``/custom-model
+  objects, losslessly serializable via ``model_dump_json``)
 - ``cmif``    — a CMIF archive directory (the canonical portable dump;
   re-importable via :class:`CMIFArchiveSource`)
 - ``json``    — full-fidelity nodes/edges JSON
 - ``graphml`` — Gephi/yEd/NetworkX interop
-- ``cypher``  — MERGE script loadable into any Neo4j-compatible database
+- ``cypher`` — MERGE script loadable into any Neo4j-compatible database
 """
 
 from dataclasses import dataclass
@@ -22,11 +25,12 @@ from cognee.modules.migration.cmif import (
     parse_timestamp,
 )
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
+from cognee.modules.migration.snapshot import GraphSnapshot, build_snapshot
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("migration.export")
 
-EXPORT_FORMATS = ("cmif", "json", "graphml", "cypher")
+EXPORT_FORMATS = ("pydantic", "cmif", "json", "graphml", "cypher")
 
 _FORMAT_SUFFIX = {"json": ".json", "graphml": ".graphml", "cypher": ".cypher"}
 
@@ -95,11 +99,19 @@ def _write_cmif(nodes, edges, destination: Path, dataset_name: str) -> None:
 
 async def export_dataset(
     dataset: Union[str, UUID] = "main_dataset",
-    format: str = "cmif",
+    format: str = "pydantic",
     destination: Optional[Union[str, Path]] = None,
     user=None,
-) -> ExportResult:
-    """Export an authorized dataset's graph. Requires read permission."""
+    link_relations: bool = False,
+) -> Union[ExportResult, GraphSnapshot]:
+    """Export an authorized dataset's graph. Requires read permission.
+
+    ``format="pydantic"`` returns a :class:`GraphSnapshot` (typed DataPoint
+    instances, in memory; pass ``destination`` to also persist it as JSON).
+    All other formats write a file and return an :class:`ExportResult`.
+    ``link_relations`` (pydantic only) re-attaches edges as object references
+    on declared relation fields, e.g. ``entity.is_a``.
+    """
     if format not in EXPORT_FORMATS:
         raise ValueError(f"Unknown export format {format!r}. Expected one of {EXPORT_FORMATS}.")
 
@@ -120,6 +132,24 @@ async def export_dataset(
     async with set_database_global_context_variables(dataset_obj.id, dataset_obj.owner_id):
         graph_engine = await get_graph_engine()
         nodes, edges = await graph_engine.get_graph_data()
+
+    if format == "pydantic":
+        snapshot = build_snapshot(
+            nodes,
+            edges,
+            dataset_name=dataset_obj.name,
+            dataset_id=str(dataset_obj.id),
+            link_relations=link_relations,
+        )
+        if destination is not None:
+            snapshot.save(destination)
+        logger.info(
+            "Exported dataset %s as GraphSnapshot: %d nodes, %d edges",
+            dataset_obj.name,
+            len(snapshot.nodes),
+            len(snapshot.edges),
+        )
+        return snapshot
 
     if destination is None:
         suffix = _FORMAT_SUFFIX.get(format, "")

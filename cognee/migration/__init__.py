@@ -9,6 +9,8 @@ Importing from other memory systems (pass any source to ``cognee.remember``)::
 
 Exporting (``cognee.export``)::
 
+    snapshot = await cognee.export("main_dataset")     # GraphSnapshot: typed
+    alice = snapshot.find(name="Alice")[0]             # real DataPoint objects
     result = await cognee.export("main_dataset", format="graphml")
 
 Restoring / Cognee-to-Cognee migration::
@@ -32,15 +34,20 @@ from cognee.modules.migration import (
     CMIFTurn,
     EXPORT_FORMATS,
     ExportResult,
+    GraphEdge,
+    GraphSnapshot,
     GraphitiSource,
     IMPORT_MODES,
     LettaSource,
     Mem0Source,
     MemorySource,
     ZepSource,
+    build_snapshot,
+    datapoint_registry,
     export_dataset,
     read_archive,
     read_manifest,
+    rehydrate_node,
 )
 
 __all__ = [

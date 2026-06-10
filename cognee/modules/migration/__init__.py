@@ -16,6 +16,7 @@ from .cmif import (
 from .export import EXPORT_FORMATS, ExportResult, export_dataset
 from .import_source import import_memory_source
 from .loader import TranslationResult, translate_records
+from .snapshot import GraphEdge, GraphSnapshot, build_snapshot, datapoint_registry, rehydrate_node
 from .sources import (
     IMPORT_MODES,
     CMIFArchiveSource,
@@ -42,6 +43,11 @@ __all__ = [
     "read_manifest",
     "EXPORT_FORMATS",
     "ExportResult",
+    "GraphEdge",
+    "GraphSnapshot",
+    "build_snapshot",
+    "datapoint_registry",
+    "rehydrate_node",
     "export_dataset",
     "import_memory_source",
     "TranslationResult",
