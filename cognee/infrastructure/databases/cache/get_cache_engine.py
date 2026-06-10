@@ -1,10 +1,62 @@
 """Factory to get the appropriate cache coordination engine (e.g., Redis)."""
 
+import os
 from functools import lru_cache
 from typing import Optional
+
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
+from cognee.infrastructure.databases.exceptions import CacheConnectionError
+
+logger = get_logger("CacheEngine")
+
+
+def _resolve_cache_db_url(backend: str, cache_db_url: Optional[str]) -> str:
+    """
+    Resolve the SQLAlchemy async URL for the SQL cache backends.
+
+    CACHE_DB_URL wins when set. Otherwise "sqlite" mirrors the relational SQLite
+    engine's databases directory (with a dedicated cache.db file), and "postgres"
+    falls back to the relational DB_* settings when DB_PROVIDER=postgres.
+    """
+    if cache_db_url:
+        return cache_db_url
+
+    from cognee.infrastructure.databases.relational.config import get_relational_config
+
+    relational_config = get_relational_config()
+
+    if backend == "sqlite":
+        db_path = relational_config.db_path
+        if "s3://" in db_path:
+            raise CacheConnectionError(
+                "CACHE_BACKEND=sqlite cannot store cache.db on S3; "
+                "set CACHE_DB_URL or CACHE_BACKEND=postgres"
+            )
+        os.makedirs(db_path, exist_ok=True)
+        return f"sqlite+aiosqlite:///{db_path}/cache.db"
+
+    if relational_config.db_provider == "postgres":
+        from sqlalchemy import URL
+
+        logger.warning(
+            "CACHE_BACKEND=postgres without CACHE_DB_URL; "
+            "falling back to the relational DB_* settings."
+        )
+        return URL.create(
+            "postgresql+asyncpg",
+            username=relational_config.db_username,
+            password=relational_config.db_password,
+            host=relational_config.db_host,
+            port=int(relational_config.db_port),
+            database=relational_config.db_name,
+        ).render_as_string(hide_password=False)
+
+    raise CacheConnectionError(
+        "CACHE_BACKEND=postgres requires CACHE_DB_URL or DB_PROVIDER=postgres"
+    )
 
 
 @lru_cache
@@ -23,9 +75,11 @@ def create_cache_engine(
     tapes_agent_name: str = "cognee",
     tapes_model: str = "cognee-session",
     tapes_request_timeout: float = 5.0,
+    cache_db_url: str | None = None,
+    cache_purge_interval_seconds: int = 900,
 ):
     """
-    Factory function to instantiate a cache coordination backend (currently Redis).
+    Factory function to instantiate a cache coordination backend.
 
     Parameters:
     -----------
@@ -37,6 +91,8 @@ def create_cache_engine(
     - log_key: Identifier used for usage logging.
     - agentic_lock_expire: Duration to hold the lock after acquisition.
     - agentic_lock_timeout: Max time to wait for the lock before failing.
+    - cache_db_url: SQLAlchemy async URL for the SQL cache backends.
+    - cache_purge_interval_seconds: Minimum interval between global TTL purge sweeps.
 
     Returns:
     --------
@@ -44,9 +100,9 @@ def create_cache_engine(
     """
     config = get_cache_config()
     if config.caching or config.usage_logging:
-        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
-
         if config.cache_backend == "redis":
+            from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
             return RedisAdapter(
                 host=cache_host,
                 port=cache_port,
@@ -73,10 +129,24 @@ def create_cache_engine(
                 tapes_model=tapes_model,
                 tapes_request_timeout=tapes_request_timeout,
             )
+        elif config.cache_backend in ("sqlite", "postgres"):
+            from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
+                SqlCacheAdapter,
+            )
+
+            return SqlCacheAdapter(
+                connection_string=_resolve_cache_db_url(config.cache_backend, cache_db_url),
+                lock_key=lock_key,
+                log_key=log_key,
+                session_ttl_seconds=session_ttl_seconds,
+                agentic_lock_expire=agentic_lock_expire,
+                agentic_lock_timeout=agentic_lock_timeout,
+                purge_interval_seconds=cache_purge_interval_seconds,
+            )
         else:
             raise ValueError(
                 f"Unsupported cache backend: '{config.cache_backend}'. "
-                f"Supported backends are: 'redis', 'fs', 'tapes'"
+                f"Supported backends are: 'redis', 'fs', 'tapes', 'sqlite', 'postgres'"
             )
     else:
         return None
@@ -106,6 +176,8 @@ def get_cache_engine(
         tapes_agent_name=config.tapes_agent_name,
         tapes_model=config.tapes_model,
         tapes_request_timeout=config.tapes_request_timeout,
+        cache_db_url=config.cache_db_url,
+        cache_purge_interval_seconds=config.cache_purge_interval_seconds,
     )
 
 
