@@ -141,12 +141,12 @@ class TestDetectFeedback:
         result = FeedbackDetectionResult(
             candidate_context_updates=[
                 {
-                    "section": "rules",
+                    "section": " Rules ",
                     "content": "Use PostgreSQL for database examples.",
                     "confidence": 0.9,
                 },
                 {
-                    "section": "lessons_learned",
+                    "section": " LESSONS_LEARNED ",
                     "content": "The previous Docker build failed due to memory limits.",
                     "confidence": 0.85,
                 },
@@ -155,6 +155,8 @@ class TestDetectFeedback:
 
         assert isinstance(result.candidate_context_updates[0], CandidateRuleUpdate)
         assert isinstance(result.candidate_context_updates[1], CandidateLessonLearnedUpdate)
+        assert result.candidate_context_updates[0].section == "rules"
+        assert result.candidate_context_updates[1].section == "lessons_learned"
 
 
 class TestDetectFeedbackServedContext:

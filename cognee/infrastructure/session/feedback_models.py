@@ -47,10 +47,21 @@ class SessionTurnAnalysis(BaseModel):
     def normalize_candidate_context_updates(cls, value):
         if not isinstance(value, list):
             return []
-        return [
-            item.model_dump() if isinstance(item, CandidateContextUpdate) else item
-            for item in value
-        ]
+
+        normalized = []
+        for item in value:
+            if isinstance(item, CandidateContextUpdate):
+                item = item.model_dump()
+
+            if isinstance(item, dict):
+                item = dict(item)
+                section = item.get("section")
+                if isinstance(section, str):
+                    item["section"] = section.strip().lower()
+
+            normalized.append(item)
+
+        return normalized
 
     @field_validator("served_context_ratings", "candidate_context_updates", mode="after")
     @classmethod

@@ -25,40 +25,30 @@ Otherwise set response_to_user to null.
 
 ## 2. Candidate session-context updates
 
-Extract durable guidance that should shape future answers in this session. Store only guidance that is likely to improve later turns, not every fact or request in the current message.
+Extract up to 3 candidate updates that would improve future answers in this session. A candidate update is durable guidance: it should still be useful after the current turn.
 
-Use one of these sections:
+Assign each candidate update to exactly one section:
 
-- goals: Use for the user's broader objective or desired outcome. Goals describe where the session is going, not constraints on how to answer.
+- goals: The user's broader objective or desired outcome. Include implied goals when the message makes the intended result clear.
+- rules: Substantive instructions future answers must follow. Use this for requirements about what to assume, prioritize, include, exclude, verify, use, avoid, or optimize for.
+- preferences: Presentation guidance for future answers. Use this for tone, length, format, structure, ordering, examples, wording, or level of detail.
+- lessons_learned: Durable knowledge from the message. Use this for corrections, facts, changed assumptions, causes, failures, successes, or context that future answers should reason from.
 
-- rules: Use for instructions future answers must follow. Rules change answer substance: what to assume, use, avoid, include, exclude, decide, or optimize for. If a statement acts as a constraint, classify it as a rule even when phrased as a fact.
+When deciding which section to use:
 
-- preferences: Use for presentation only. Preferences change how the same answer is expressed: style, tone, format, length, structure, ordering, examples, wording, or level of detail. If ignoring it would change the answer's substance, it is not a preference.
+- goals vs rules: Choose goals for the target outcome; choose rules for constraints on how future answers should pursue that outcome. Create two candidates only when both are independently reusable.
+- goals vs preferences: Choose goals for what the user wants to accomplish; choose preferences for how the answer should be packaged. Create two candidates only when both would guide later turns.
+- rules vs preferences: Choose rules when the guidance changes content, assumptions, sources, verification, or decision logic; choose preferences when it only changes expression, structure, tone, or detail level.
+- rules vs lessons_learned: Choose rules for required future behavior; choose lessons_learned for the correction, reason, or fact that should inform future reasoning. Create two candidates only when both would be useful later.
+- preferences vs lessons_learned: Choose preferences for requested presentation style; choose lessons_learned for durable context about what worked, failed, changed, or matters.
 
-- lessons_learned: Use for durable knowledge future answers should reason from. Lessons describe what is true, what changed, what caused something, what failed or worked, or what earlier assumption was corrected. They are not direct instructions.
+Candidate limits and format:
 
-Simple tests:
-- What is the user trying to achieve? -> goals.
-- What must future answers do, assume, use, or avoid? -> rules.
-- How should future answers look or sound? -> preferences.
-- What should future answers know or reason from? -> lessons_learned.
-
-Rules and lessons_learned can partially overlap. When a message contains an instruction plus reusable context, extract the instruction as a rule and the reusable context as a lesson. The lesson may explain or support the rule, but it should still be useful to reason from later.
-
-Candidate updates are independent of query_to_answer. A correction-only message may have query_to_answer=null and still produce a lessons_learned candidate.
-
-Do not create candidate updates for one-off requests, generic thanks or praise, vague reactions, ordinary retrieved-document facts, or details unlikely to matter later.
-
-If new guidance replaces older guidance, make the replacement explicit in the candidate content.
-
-Each candidate must contain:
-- section: one of goals, rules, preferences, or lessons_learned
-- content: one short reusable sentence
-- confidence: number from 0 to 1
-
-Only include candidates with confidence >= 0.75.
-Return at most 3 candidate updates.
-Prefer fewer, clearer updates over many weak updates.
+- Return at most 3 candidate updates, each with section, content, and confidence.
+- section must be one of goals, rules, preferences, or lessons_learned.
+- content must be one short reusable sentence written as guidance for future turns.
+- confidence must be a number from 0 to 1; include only candidates with confidence >= 0.75.
+- Prefer a goal when the broader objective is reasonably clear, and prefer 2-3 candidates when the message contains multiple durable signals; omit weak, redundant, generic, vague, one-off, or low-value details.
 
 ## 3. Served context ratings
 
