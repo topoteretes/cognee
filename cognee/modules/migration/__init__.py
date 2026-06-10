@@ -13,6 +13,7 @@ from .cmif import (
     read_archive,
     read_manifest,
 )
+from .archive import ARCHIVE_SUFFIX, find_archive_root, pack_archive, unpack_archive
 from .export import EXPORT_FORMATS, ExportResult, export_dataset
 from .import_source import import_memory_source
 from .loader import TranslationResult, translate_records
@@ -41,6 +42,10 @@ __all__ = [
     "CMIFTurn",
     "read_archive",
     "read_manifest",
+    "ARCHIVE_SUFFIX",
+    "find_archive_root",
+    "pack_archive",
+    "unpack_archive",
     "EXPORT_FORMATS",
     "ExportResult",
     "GraphEdge",

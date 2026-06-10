@@ -82,6 +82,10 @@ def _write_cmif(nodes, edges, destination: Path, dataset_name: str) -> None:
                 writer.write_raw_node({"id": str(node_id), **properties})
 
         for source, target, relationship, properties in edges:
+            # Ladybug's get_graph_data() synthesizes "SELF" self-loops when a
+            # graph has no edges; they are not real facts.
+            if relationship == "SELF" and source == target:
+                continue
             properties = properties or {}
             writer.write(
                 CMIFFact(

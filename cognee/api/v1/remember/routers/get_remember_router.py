@@ -23,6 +23,44 @@ logger = get_logger()
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 
+async def _import_cmif_archives(uploads, dataset_name: str, import_mode, user):
+    """Import uploaded CMIF archive tarballs (produced by ``cognee.push()``)."""
+    import tempfile
+
+    from cognee.modules.migration import CMIFArchiveSource, import_memory_source
+    from cognee.modules.migration.archive import unpack_archive
+    from cognee.modules.migration.sources.base import IMPORT_MODES
+
+    if import_mode and import_mode not in IMPORT_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown import_mode {import_mode!r}. Expected one of {IMPORT_MODES}.",
+        )
+
+    result = None
+    try:
+        for upload in uploads:
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                archive_root = unpack_archive(upload.file, temporary_directory)
+                source = CMIFArchiveSource(archive_root, mode=import_mode or "preserve")
+                result = await import_memory_source(source, dataset_name=dataset_name, user=user)
+        if result is None:
+            raise HTTPException(status_code=400, detail="No archive files were processed.")
+        return jsonable_encoder(result.to_dict())
+    except ValueError as error:
+        logger.error("CMIF archive import validation error: %s", error, exc_info=True)
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Invalid CMIF archive: {error}"},
+        )
+    except Exception as error:
+        logger.error("CMIF archive import error: %s", error, exc_info=True)
+        return JSONResponse(
+            status_code=409,
+            content={"error": "An error occurred during CMIF archive import."},
+        )
+
+
 def get_remember_router() -> APIRouter:
     router = APIRouter()
 
@@ -49,6 +87,13 @@ def get_remember_router() -> APIRouter:
             description="JSON-serialised graph model schema (same format as the cognify endpoint).",
         ),
         content_type: Optional[str] = Form(default=None, examples=[""]),
+        import_mode: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "CMIF archive imports only: 'preserve' (default), 'hybrid', or 're-derive'."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -91,6 +136,19 @@ def get_remember_router() -> APIRouter:
                 status_code=400,
                 detail="Either datasetId or datasetName must be provided.",
             )
+
+        if content_type == "cmif-archive":
+            if not data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="content_type 'cmif-archive' requires an uploaded archive file.",
+                )
+            if not datasetName:
+                raise HTTPException(
+                    status_code=400,
+                    detail="datasetName must be provided for CMIF archive imports.",
+                )
+            return await _import_cmif_archives(data, datasetName, import_mode, user)
 
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService

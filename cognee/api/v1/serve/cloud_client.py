@@ -65,6 +65,8 @@ class CloudClient:
             form.add_field("chunks_per_batch", str(kwargs["chunks_per_batch"]))
         if kwargs.get("content_type") is not None:
             form.add_field("content_type", str(kwargs["content_type"]))
+        if kwargs.get("import_mode") is not None:
+            form.add_field("import_mode", str(kwargs["import_mode"]))
 
         # Handle data — string or file-like objects
         if isinstance(data, str):
