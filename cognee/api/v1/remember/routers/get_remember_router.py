@@ -39,8 +39,11 @@ def get_remember_router() -> APIRouter:
             ),
         ),
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
+        # examples=[""] keeps Swagger try-it-out runnable: without an example,
+        # Swagger UI auto-generates the literal "string" and submits it.
         session_id: Optional[str] = Form(
             default=None,
+            examples=[""],
             description=(
                 "Session to attribute this memory to (e.g. claude-code-1718000000). "
                 "When set, the data is stored in the session cache (and bridged into the "
@@ -66,6 +69,7 @@ def get_remember_router() -> APIRouter:
         ),
         graph_model: Optional[str] = Form(
             default=None,
+            examples=[""],
             description=(
                 "JSON-serialised graph model schema (same format as the cognify endpoint), "
                 "e.g. {\"title\": \"CompanyGraph\", \"type\": \"object\", \"properties\": {...}}. "
@@ -76,6 +80,7 @@ def get_remember_router() -> APIRouter:
         ),
         content_type: Optional[str] = Form(
             default=None,
+            examples=[""],
             description=(
                 "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes. "
                 "Only supported value: 'skills'; leave empty for normal ingestion."
@@ -127,6 +132,15 @@ def get_remember_router() -> APIRouter:
             raise HTTPException(
                 status_code=400,
                 detail="Either datasetId or datasetName must be provided.",
+            )
+
+        if content_type and content_type != "skills":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported content_type '{content_type}'. "
+                    "Use 'skills' or leave it empty for normal ingestion."
+                ),
             )
 
         from cognee.api.v1.remember import remember as cognee_remember
@@ -183,7 +197,7 @@ def get_remember_router() -> APIRouter:
             logger.error("Remember endpoint validation error: %s", error, exc_info=True)
             return JSONResponse(
                 status_code=409,
-                content={"error": "Invalid request data for remember operation."},
+                content={"error": f"Invalid request data for remember operation: {error}"},
             )
         except Exception as error:
             logger.error("Remember endpoint error: %s", error, exc_info=True)
