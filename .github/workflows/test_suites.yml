@@ -166,6 +166,9 @@ jobs:
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
       os: '["ubuntu-22.04"]'
+      # postgres so the SQL cache adapter tests run instead of skipping; omitted
+      # on macos/windows (extended) where psycopg2 has no prebuilt wheels.
+      extra-dependencies: 'postgres'
     secrets: inherit
 
   different-os-tests-extended:
