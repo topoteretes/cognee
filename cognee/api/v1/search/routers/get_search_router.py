@@ -37,7 +37,7 @@ class SearchPayloadDTO(InDTO):
     skills: Optional[list[str]] = Field(default=None, examples=[None])
     tools: Optional[list[str]] = Field(default=None, examples=[None])
     max_iter: Optional[int] = Field(default=None, examples=[None])
-    include_references: bool = Field(default=True)
+    include_references: bool = Field(default=False)
 
 
 def get_search_router() -> APIRouter:

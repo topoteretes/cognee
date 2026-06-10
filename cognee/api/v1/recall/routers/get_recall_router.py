@@ -37,7 +37,7 @@ class RecallPayloadDTO(InDTO):
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
-    include_references: bool = Field(default=True)
+    include_references: bool = Field(default=False)
     session_id: Optional[str] = Field(default=None, examples=[None])
     scope: Optional[Union[str, list[str]]] = Field(
         default=None,
