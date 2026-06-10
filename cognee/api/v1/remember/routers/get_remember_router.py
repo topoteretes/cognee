@@ -252,6 +252,14 @@ def get_remember_router() -> APIRouter:
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
             )
 
+            # A blocking run that ended errored must not look like a success
+            # to status-code-checking clients.
+            if result.status == "errored":
+                return JSONResponse(
+                    status_code=409,
+                    content=jsonable_encoder(result.to_dict()),
+                )
+
             return jsonable_encoder(result.to_dict())
         except ValueError as error:
             logger.error("Remember endpoint validation error: %s", error, exc_info=True)
@@ -263,7 +271,7 @@ def get_remember_router() -> APIRouter:
             logger.error("Remember endpoint error: %s", error, exc_info=True)
             return JSONResponse(
                 status_code=409,
-                content={"error": "An error occurred during remember."},
+                content={"error": f"An error occurred during remember: {error}"},
             )
 
     class RememberEntryRequest(BaseModel):
