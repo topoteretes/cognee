@@ -330,7 +330,23 @@ async def main():
     assert len(tables_in_database) == 0, "LanceDB database is not empty"
 
 
+async def run_main():
+    try:
+        await main()
+    finally:
+        from cognee.infrastructure.databases.vector import get_vector_engine
+        from cognee.infrastructure.databases.vector.create_vector_engine import (
+            _create_vector_engine,
+        )
+
+        vector_engine = get_vector_engine()
+        close = getattr(vector_engine, "close", None)
+        if close is not None:
+            await close()
+        _create_vector_engine.cache_clear()
+
+
 if __name__ == "__main__":
     import asyncio
 
-    asyncio.run(main())
+    asyncio.run(run_main())
