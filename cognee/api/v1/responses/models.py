@@ -70,7 +70,6 @@ class ResponseRequest(InDTO):
     tool_choice: Optional[Union[str, Dict[str, Any]]] = "auto"
     user: Optional[str] = None
     temperature: Optional[float] = 1.0
-    max_completion_tokens: Optional[int] = None
 
 
 class ToolCallOutput(BaseModel):

@@ -1,9 +1,8 @@
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import Optional, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
@@ -13,7 +12,7 @@ from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -23,10 +22,10 @@ from cognee.shared.utils import send_telemetry
 
 
 class RecallPayloadDTO(InDTO):
-    # Default preserved as GRAPH_COMPLETION for backward compatibility
-    # with existing HTTP clients. Pass ``search_type: null`` explicitly
-    # to opt into auto-routing (the new ``cognee.recall`` default).
-    search_type: Optional[SearchType] = Field(default=SearchType.GRAPH_COMPLETION)
+    # Default ``None`` so the core ``cognee.recall`` auto-router picks the
+    # best search strategy for the query. Pass an explicit ``search_type``
+    # to bypass auto-routing and force a specific strategy.
+    search_type: Optional[SearchType] = Field(default=None)
     datasets: Optional[list[str]] = Field(default=None)
     dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
     query: str = Field(default="What is in the document?")
@@ -131,7 +130,7 @@ def get_recall_router() -> APIRouter:
                 scope=payload.scope,
                 include_references=payload.include_references,
             )
-            return jsonable_encoder(results)
+            return results
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
             logger = get_logger()
             logger.error("Recall prerequisites error: %s", e, exc_info=True)

@@ -1,9 +1,8 @@
 from datetime import datetime
-from typing import Any, List, Optional, Union
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
@@ -96,7 +95,7 @@ def get_search_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Union[List[SearchResult], List],
+        response_model=List[SearchResult],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -178,7 +177,7 @@ def get_search_router() -> APIRouter:
                 include_references=payload.include_references,
             )
 
-            return jsonable_encoder(results)
+            return results
         except PermissionDeniedError as e:
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
