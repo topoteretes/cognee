@@ -13,6 +13,7 @@ Schema, Context, Retrieval) sees the same enrichment.
 import colorsys
 import json
 import math
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -146,19 +147,38 @@ def generate_provenance_colors(values):
     return color_map
 
 
+# UUID- or content-hash-shaped strings: never useful as display names.
+_IDENTIFIER_LIKE_RE = re.compile(
+    r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32,64})$",
+    re.IGNORECASE,
+)
+
+
+def looks_like_identifier(value) -> bool:
+    """True for UUID/hash-shaped strings that would read as noise in the UI."""
+    return isinstance(value, str) and bool(_IDENTIFIER_LIKE_RE.match(value.strip()))
+
+
 def derive_node_name(node_info, node_id):
-    """Pick a human-readable label for a node, falling back through name/title/text/etc."""
+    """Pick a human-readable label for a node, falling back through name/title/text/etc.
+
+    Identifier-shaped values (UUIDs, content hashes) are never used as
+    display names — surfacing them as labels was the single biggest
+    first-session trust killer in user testing. Nodes with no readable
+    field get an explicit "Unnamed <Type>" placeholder instead.
+    """
     name = node_info.get("name")
-    if name:
+    if name and not looks_like_identifier(name):
         return name
 
     for key in ("title", "text", "summary", "description", "content"):
         value = node_info.get(key)
-        if isinstance(value, str) and value.strip():
+        if isinstance(value, str) and value.strip() and not looks_like_identifier(value):
             normalized = " ".join(value.split())
             return normalized[:120]
 
-    return str(node_id)
+    node_type = node_info.get("type") or "node"
+    return f"Unnamed {node_type} ({str(node_id)[:8]})"
 
 
 def node_type_rank(node_type):
@@ -904,7 +924,13 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
         )
         if node_info.get("ontology_valid") is True:
             node_info["color"] = _ONTOLOGY_VALID_COLOR
+        raw_name = node_info.get("name")
         node_info["name"] = derive_node_name(node_info, node_id)
+        # Unnamed nodes (UUID/hash names) must never become Key-mode label
+        # landmarks; pass 3 reads this flag.
+        node_info["is_unnamed"] = looks_like_identifier(raw_name) or node_info["name"].startswith(
+            "Unnamed "
+        )
         node_info.pop("updated_at", None)
         node_info.pop("created_at", None)
 
@@ -999,7 +1025,10 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
     importances = [n["importance"] for n in nodes]
     threshold = _label_priority_threshold(importances, percentile=0.75)
     for node in nodes:
-        if node["stage"] in _ALWAYS_LABEL_STAGES:
+        if node.get("is_unnamed"):
+            # A placeholder name is never worth a Key-mode label slot.
+            node["label_priority"] = False
+        elif node["stage"] in _ALWAYS_LABEL_STAGES:
             node["label_priority"] = True
         elif node["importance"] >= threshold and threshold > 0:
             node["label_priority"] = True

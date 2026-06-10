@@ -54,16 +54,23 @@ canvas:active{cursor:grabbing}
 }
 .ctrl-btn:hover{color:var(--text);background:var(--surface)}
 .ctrl-btn.active{color:#F4F4F4;background:rgba(101,16,244,0.2)}
+.ctrl-btn:disabled{opacity:0.35;cursor:not-allowed}
+.ctrl-btn:disabled:hover{color:var(--text2);background:transparent}
 .ctrl-sep{width:1px;background:var(--border);margin:2px 4px}
 
 #search-box{
   position:fixed;top:56px;left:20px;z-index:100;width:280px;
 }
 #search-input{
-  width:100%;padding:8px 12px 8px 32px;
+  width:100%;padding:8px 64px 8px 32px;
   font-size:12px;font-family:inherit;color:var(--text);
   background:var(--bg2);border:1px solid var(--border);border-radius:8px;
   outline:none;transition:border-color 0.15s;
+}
+#search-count{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  font-size:10.5px;color:var(--text2);pointer-events:none;
+  font-variant-numeric:tabular-nums;white-space:nowrap;
 }
 #search-input:focus{border-color:var(--accent)}
 #search-input::placeholder{color:var(--text2)}
@@ -166,7 +173,8 @@ canvas:active{cursor:grabbing}
 
 <div id="search-box">
   <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-  <input type="text" id="search-input" placeholder="Search nodes..." autocomplete="off" spellcheck="false">
+  <input type="text" id="search-input" placeholder="Search nodes... (Enter jumps to match)" autocomplete="off" spellcheck="false">
+  <span id="search-count"></span>
 </div>
 
 <div id="controls">
