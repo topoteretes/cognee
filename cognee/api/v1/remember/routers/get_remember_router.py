@@ -116,7 +116,7 @@ def get_remember_router() -> APIRouter:
                 "e.g. {\"title\": \"CompanyGraph\", \"type\": \"object\", \"properties\": {...}}. "
                 "Must include a top-level 'title' key. Leave empty to use the default "
                 "KnowledgeGraph model — a restrictive schema here can produce an empty graph. "
-                "Invalid JSON is silently ignored (not rejected)."
+                "Invalid JSON or an unconvertible schema is rejected with 400."
             ),
         ),
         content_type: Optional[str] = Form(
@@ -156,7 +156,8 @@ def get_remember_router() -> APIRouter:
         Either datasetName or datasetId must be provided.
 
         ## Error Codes
-        - **400 Bad Request**: Neither datasetId nor datasetName provided
+        - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
+          content_type, or invalid graph_model JSON/schema
         - **409 Conflict**: Error during processing
         """
         send_telemetry(
@@ -188,6 +189,29 @@ def get_remember_router() -> APIRouter:
         from cognee.api.v1.ontologies.ontologies import OntologyService
         from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
+        # Validate graph_model before the generic try/except so failures
+        # surface as a clear 400 instead of being swallowed into a 409.
+        graph_model_parsed = None
+        if graph_model:
+            try:
+                graph_model_schema = json.loads(graph_model)
+            except json.JSONDecodeError as parse_err:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"graph_model is not valid JSON: {parse_err}",
+                )
+            try:
+                graph_model_parsed = graph_schema_to_graph_model(graph_model_schema)
+            except Exception as parse_err:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"graph_model could not be converted to a graph model schema: {parse_err}. "
+                        "Expected the same dict format as the cognify endpoint, "
+                        "including a top-level 'title' key."
+                    ),
+                )
+
         try:
             config_to_use = None
             # Drop empty entries — Swagger UI submits untouched array items as "".
@@ -209,13 +233,6 @@ def get_remember_router() -> APIRouter:
                     }
                 }
 
-            graph_model_parsed = None
-            if graph_model:
-                try:
-                    graph_model_schema = json.loads(graph_model)
-                    graph_model_parsed = graph_schema_to_graph_model(graph_model_schema)
-                except (json.JSONDecodeError, Exception) as parse_err:
-                    logger.warning("remember: invalid graph_model JSON, ignoring: %s", parse_err)
 
             result = await cognee_remember(
                 data,
