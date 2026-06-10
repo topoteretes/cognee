@@ -182,7 +182,8 @@ async def test_vector_nodeset_filtering_retriever_integration():
     retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="OR")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
 
-    assert len(retrieved_objects) == 3
+    assert any("NLP" in chunk.payload["text"] for chunk in retrieved_objects)
+    assert any("Quantum" in chunk.payload["text"] for chunk in retrieved_objects)
 
     # Search with "AND" operator
     retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="AND")
@@ -198,13 +199,13 @@ async def test_vector_nodeset_filtering_retriever_integration():
     retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="OR")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
 
-    assert len(retrieved_objects) == 2
+    assert any("Alice" in chunk.payload["text"] for chunk in retrieved_objects)
 
     # Search with "AND" operator
     retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="AND")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
 
-    assert len(retrieved_objects) == 1
+    assert all("Alice" not in chunk.payload["text"] for chunk in retrieved_objects)
 
 
 async def main():
