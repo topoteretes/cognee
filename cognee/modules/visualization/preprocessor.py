@@ -30,6 +30,16 @@ SCHEMA_GRAPH_NODE_TYPES = {
 # Maximum sample instance names attached to each schema type node.
 SCHEMA_SAMPLES_PER_TYPE: int = 5
 
+# Maximum semantic entity-type cards in the Schema view's Entity column.
+# Entity-type diversity grows with the data (every new EntityType the LLM
+# extracts becomes its own card), so beyond this cap the long tail is rolled
+# up into a single "Other entities" card — the renderer stacks one card per
+# type per rank column, which otherwise made the Entity column endless.
+SCHEMA_MAX_ENTITY_TYPES: int = 12
+
+# Display name of the rollup card holding the entity-type long tail.
+OTHER_ENTITY_TYPES_LABEL: str = "Other entities"
+
 # Internal graph taxonomy types that must not appear as separate type groups in
 # the schema view. EntityType is now surfaced as its own schema type group
 # alongside the resolved semantic entity types (Person/Field/...); Entity
@@ -464,6 +474,30 @@ def extract_type_schema_graph_data(
             if target_node and target_node.get("name"):
                 semantic_type_names.add(target_node["name"])
 
+    # Bound the Entity column: keep the most-populated semantic entity types
+    # as their own cards and remap the long tail onto one rollup type. The
+    # remap happens on node_type_by_id *before* any downstream aggregation, so
+    # relationship distributions, pair edges, instance drill-down, and the
+    # operation layer all treat the rollup as an ordinary type.
+    rolled_up_types: List[Dict[str, Any]] = []
+    entity_type_counts = Counter(
+        type_name for type_name in node_type_by_id.values() if type_name in semantic_type_names
+    )
+    if len(entity_type_counts) > SCHEMA_MAX_ENTITY_TYPES:
+        kept_types = {
+            name for name, _ in entity_type_counts.most_common(SCHEMA_MAX_ENTITY_TYPES - 1)
+        }
+        rolled_types = set(entity_type_counts) - kept_types
+        rolled_up_types = [
+            {"name": name, "count": count}
+            for name, count in entity_type_counts.most_common()
+            if name in rolled_types
+        ]
+        for node_id, type_name in node_type_by_id.items():
+            if type_name in rolled_types:
+                node_type_by_id[node_id] = OTHER_ENTITY_TYPES_LABEL
+        semantic_type_names = (semantic_type_names - rolled_types) | {OTHER_ENTITY_TYPES_LABEL}
+
     def _rank_for(type_name):
         if type_name in semantic_type_names:
             return node_type_rank("Entity")
@@ -535,22 +569,35 @@ def extract_type_schema_graph_data(
             key=lambda rel: (-rel["count"], rel["to_type"] or "", rel["relation"]),
         )
 
-        schema_nodes.append(
-            {
-                "id": f"type:{node_type_name}",
-                "name": node_type_name,
-                "type": "GraphNodeType",
-                "rank": _rank_for(node_type_name),
-                "fields": extract_type_schema_fields(type_nodes),
-                "source_pipeline": top_pipeline,
-                "source_task": top_task,
-                "source_user": top_user,
-                "instance_count": len(type_nodes),
-                "samples": samples,
-                "sample_size": len(samples),
-                "relationships": relationships,
-            }
-        )
+        schema_node = {
+            "id": f"type:{node_type_name}",
+            "name": node_type_name,
+            "type": "GraphNodeType",
+            "rank": _rank_for(node_type_name),
+            "fields": extract_type_schema_fields(type_nodes),
+            "source_pipeline": top_pipeline,
+            "source_task": top_task,
+            "source_user": top_user,
+            "instance_count": len(type_nodes),
+            "samples": samples,
+            "sample_size": len(samples),
+            "relationships": relationships,
+        }
+        if node_type_name == OTHER_ENTITY_TYPES_LABEL and rolled_up_types:
+            schema_node["rollup"] = True
+            schema_node["rolled_up_types"] = rolled_up_types
+            # Lead the card with the tail size and its largest types so the
+            # rollup is self-explanatory without inspector drill-down.
+            top_tail = ", ".join(f"{t['name']} ({t['count']})" for t in rolled_up_types[:3])
+            schema_node["fields"].insert(
+                1,
+                {
+                    "name": "entity types",
+                    "type": f"{len(rolled_up_types)} rolled up: {top_tail}, …",
+                    "required": True,
+                },
+            )
+        schema_nodes.append(schema_node)
 
     relation_counts_by_pair: Dict[Tuple[str, str], Counter] = defaultdict(Counter)
     for link in links_list:

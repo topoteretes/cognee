@@ -17,6 +17,8 @@ from raw graph adapter output. These tests pin the contract:
 import pytest
 
 from cognee.modules.visualization.preprocessor import (
+    OTHER_ENTITY_TYPES_LABEL,
+    SCHEMA_MAX_ENTITY_TYPES,
     STAGE_ORDER,
     PreprocessedGraph,
     preprocess,
@@ -383,6 +385,76 @@ def test_schema_type_nodes_carry_full_relationship_distribution():
     }
     assert chunk_rels[("contains", "Person")] == 2
     assert chunk_rels[("contains", "Field")] == 1
+
+
+def _many_entity_types_graph(num_types):
+    """num_types semantic entity types with strictly descending instance counts:
+    Type00 has num_types instances, Type01 has num_types-1, ... down to 1."""
+    nodes_data = []
+    edges_data = []
+    for i in range(num_types):
+        type_name = f"Type{i:02d}"
+        type_id = f"etype{i}"
+        nodes_data.append((type_id, {"type": "EntityType", "name": type_name}))
+        for j in range(num_types - i):
+            entity_id = f"e{i}_{j}"
+            nodes_data.append((entity_id, {"type": "Entity", "name": f"{type_name}_inst{j}"}))
+            edges_data.append((entity_id, type_id, "is_a", {}))
+    return (nodes_data, edges_data)
+
+
+def test_entity_type_long_tail_rolls_up_into_other_entities():
+    """Beyond SCHEMA_MAX_ENTITY_TYPES, the tail of semantic entity types
+    collapses into one rollup card so the Entity column stays bounded."""
+    num_types = SCHEMA_MAX_ENTITY_TYPES + 3
+    result = preprocess(_many_entity_types_graph(num_types))
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    semantic_cards = [name for name in type_nodes if name.startswith("Type")] + (
+        [OTHER_ENTITY_TYPES_LABEL] if OTHER_ENTITY_TYPES_LABEL in type_nodes else []
+    )
+    assert len(semantic_cards) == SCHEMA_MAX_ENTITY_TYPES
+
+    # Top types keep their own cards; the smallest types are rolled up.
+    assert "Type00" in type_nodes
+    assert f"Type{num_types - 1:02d}" not in type_nodes
+
+    rollup = type_nodes[OTHER_ENTITY_TYPES_LABEL]
+    assert rollup["rollup"] is True
+    tail_size = num_types - (SCHEMA_MAX_ENTITY_TYPES - 1)
+    assert len(rollup["rolled_up_types"]) == tail_size
+    # Tail of descending counts ends at 1: tail_size + (tail_size-1) + ... + 1.
+    assert rollup["instance_count"] == tail_size * (tail_size + 1) // 2
+    # Rollup keeps the same rank as the kept entity-type cards (one column).
+    assert rollup["rank"] == type_nodes["Type00"]["rank"]
+    # The lead field announces the rollup.
+    assert any(f["name"] == "entity types" for f in rollup["fields"])
+
+    # Pair-relationship nodes never reference a rolled-up type name.
+    rolled_names = {t["name"] for t in rollup["rolled_up_types"]}
+    for node in result.schema_graph["nodes"]:
+        if node["type"] == "GraphRelationshipType":
+            assert node["source_type"] not in rolled_names
+            assert node["target_type"] not in rolled_names
+
+    # Instance drill-down still reaches the rolled-up instances.
+    instances = result.schema_graph["instances_by_type"][OTHER_ENTITY_TYPES_LABEL]
+    assert len(instances) == rollup["instance_count"]
+
+
+def test_entity_types_under_cap_are_not_rolled_up():
+    result = preprocess(_alice_like_graph())
+    names = {n["name"] for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"}
+    assert OTHER_ENTITY_TYPES_LABEL not in names
+
+    result_at_cap = preprocess(_many_entity_types_graph(SCHEMA_MAX_ENTITY_TYPES))
+    names_at_cap = {
+        n["name"] for n in result_at_cap.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+    assert OTHER_ENTITY_TYPES_LABEL not in names_at_cap
+    assert sum(1 for name in names_at_cap if name.startswith("Type")) == SCHEMA_MAX_ENTITY_TYPES
 
 
 def test_empty_graph_does_not_crash():
