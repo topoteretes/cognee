@@ -24,6 +24,7 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.GRAPH_COMPLETION_DECOMPOSITION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.GRAPH_SUMMARY_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
+    SearchType.HYBRID_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.RAG_COMPLETION: SearchResultKind.RAG_COMPLETION,
     SearchType.TRIPLET_COMPLETION: SearchResultKind.TRIPLET_COMPLETION,
     SearchType.CYPHER: SearchResultKind.CYPHER,

@@ -336,6 +336,10 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 index_point = IndexSchema(
                     id=dp.id,
                     text=embed_text,
+                    # Reference scalars for search "Evidence"; None for non-chunks.
+                    document_id=getattr(dp, "document_id", None),
+                    document_name=getattr(dp, "document_name", None),
+                    chunk_index=getattr(dp, "chunk_index", None),
                     belongs_to_set=(dp.belongs_to_set or []),
                 )
                 payload = serialize_data(index_point.model_dump())
