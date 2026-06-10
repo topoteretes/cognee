@@ -115,7 +115,10 @@ _TYPE_COLOR_MAP: Dict[str, str] = {
 }
 
 
-_ONTOLOGY_VALID_COLOR = "#D8D8D8"
+# Ontology-grounded nodes get a distinct fill: the old #D8D8D8 gray was
+# indistinguishable from the #DBD8D8 unknown-type fallback, so ontology
+# matches visually disappeared into untyped nodes.
+_ONTOLOGY_VALID_COLOR = "#FF5CA8"
 _UNKNOWN_TYPE_COLOR = "#DBD8D8"
 
 

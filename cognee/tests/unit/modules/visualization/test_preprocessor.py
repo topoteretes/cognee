@@ -282,10 +282,16 @@ def test_node_color_preserved_from_type_map():
 
 
 def test_ontology_valid_overrides_color():
-    nodes_data = [("e", {"type": "Entity", "name": "X", "ontology_valid": True})]
+    """Ontology-grounded nodes get a distinct fill — it must differ from the
+    unknown-type fallback gray so ontology matches stand apart visually."""
+    nodes_data = [
+        ("e", {"type": "Entity", "name": "X", "ontology_valid": True}),
+        ("u", {"type": "MysteryType", "name": "Y"}),
+    ]
     edges_data = []
     result = preprocess((nodes_data, edges_data))
-    assert result.nodes[0]["color"] == "#D8D8D8"
+    assert result.nodes[0]["color"] == "#FF5CA8"
+    assert result.nodes[0]["color"] != result.nodes[1]["color"]
 
 
 def test_schema_graph_falls_back_to_type_graph_when_no_schema_nodes():

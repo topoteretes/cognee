@@ -392,8 +392,8 @@ nodes.forEach(function(n){
   }
   n._rgb=typeRgbCache[n.type];
   if(n.ontology_valid===true){
-    n.color="#D8D8D8";
-    n._rgb=[216,216,216];
+    n.color="#FF5CA8";
+    n._rgb=[255,92,168];
   }
 });
 
@@ -508,6 +508,7 @@ function updateLegend(){
   var ontologySection=
     '<div class="legend-section">'+
       '<span class="legend-title">Ontology</span>'+
+      '<span class="legend-item"><span class="legend-dot" style="background:#FF5CA8"></span>grounded node</span>'+
       '<span class="legend-item"><span class="legend-ring"></span>matched in OWL</span>'+
     '</div>';
   var importanceSection=

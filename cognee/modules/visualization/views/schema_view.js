@@ -962,9 +962,26 @@
       const accent = accentFor(focus.type);
       const marker = overlay.append('defs').append('marker')
         .attr('id', 'sd-spot-arrow').attr('viewBox', '0 -5 10 10')
-        .attr('refX', 8).attr('refY', 0).attr('markerWidth', 7).attr('markerHeight', 7)
+        .attr('refX', 10).attr('refY', 0).attr('markerWidth', 7).attr('markerHeight', 7)
         .attr('orient', 'auto');
-      marker.append('path').attr('d', 'M0,-3.5L8,0L0,3.5').attr('fill', accent);
+      marker.append('path').attr('d', 'M0,-4L10,0L0,4').attr('fill', accent);
+      let sameCardIdx = 0;
+      let crossCardIdx = 0;
+      // Greedy vertical declutter: connector labels for links to nearby
+      // instances land on nearly the same midpoint and overprint into
+      // garbage. Push each new label below any already-placed neighbor.
+      const placedLabelYs = [];
+      function declutterY(y) {
+        let moved = true;
+        while (moved) {
+          moved = false;
+          for (let i = 0; i < placedLabelYs.length; i++) {
+            if (Math.abs(y - placedLabelYs[i]) < 13) { y = placedLabelYs[i] + 13; moved = true; }
+          }
+        }
+        placedLabelYs.push(y);
+        return y;
+      }
       links.forEach(function(l) {
         const n = index[l.id];
         if (!n) return;
@@ -972,13 +989,46 @@
         if (!tgtRect) return;
         let s = focusRect, t = tgtRect;
         if (l.dir === 'in') { s = tgtRect; t = focusRect; }
-        const a = anchorBetween(s, t);
-        const curve = flowCurve(a.sx, a.sy, a.tx, a.ty, 0);
-        overlay.append('path').attr('class', 'sd-spotlight-edge-halo').attr('fill', 'none').attr('stroke', accent).attr('d', curve.d);
+        let d, lx, ly, anchor = 'middle';
+        if (n.type === focus.type) {
+          // Connection between two instances of the SAME type card. The
+          // facing-side anchors degenerate here: the connector cut straight
+          // across the card with its label overprinting the others. Route a
+          // side loop out of the card's LEFT edge instead (the right side
+          // already hosts the type-pair loops), nesting loops and labels by
+          // index so multiple relations stay individually readable.
+          sameCardIdx += 1;
+          const sx = s.x, sy = s.y + s.h / 2;
+          const tx = t.x, ty = t.y + t.h / 2;
+          const bulge = 46 + Math.min(140, Math.abs(ty - sy) * 0.18) + sameCardIdx * 16;
+          const RUN = 8;
+          d = 'M ' + sx + ' ' + sy +
+              ' L ' + (sx - RUN) + ' ' + sy +
+              ' C ' + (sx - bulge) + ' ' + sy +
+              ', ' + (tx - bulge) + ' ' + ty +
+              ', ' + (tx - RUN) + ' ' + ty +
+              ' L ' + tx + ' ' + ty;
+          // Right-align the label just left of the loop apex so the text
+          // extends away from the nested loop strokes.
+          lx = Math.min(sx, tx) - bulge - 4;
+          ly = declutterY((sy + ty) / 2);
+          anchor = 'end';
+        } else {
+          // Cross-card connector: spread vertically so labels between the
+          // same pair of cards don't land on one coincident midpoint.
+          crossCardIdx += 1;
+          const spread = ((crossCardIdx % 5) - 2) * 16;
+          const a = anchorBetween(s, t);
+          const curve = flowCurve(a.sx, a.sy, a.tx, a.ty, spread);
+          d = curve.d;
+          lx = curve.mx;
+          ly = declutterY(curve.my);
+        }
+        overlay.append('path').attr('class', 'sd-spotlight-edge-halo').attr('fill', 'none').attr('stroke', accent).attr('d', d);
         overlay.append('path').attr('class', 'sd-spotlight-edge').attr('fill', 'none').attr('stroke', accent)
-          .attr('marker-end', 'url(#sd-spot-arrow)').attr('d', curve.d);
+          .attr('marker-end', 'url(#sd-spot-arrow)').attr('d', d);
         overlay.append('text').attr('class', 'sd-spotlight-label')
-          .attr('x', curve.mx).attr('y', curve.my).attr('text-anchor', 'middle')
+          .attr('x', lx).attr('y', ly).attr('text-anchor', anchor)
           .attr('fill', accent).text(l.relation);
       });
     }
