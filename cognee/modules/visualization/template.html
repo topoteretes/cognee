@@ -273,6 +273,32 @@ canvas:active{cursor:grabbing}
 .sd-edge-count{font-size:9.5px;fill:var(--text2);font-variant-numeric:tabular-nums;}
 .sd-stage-header{font-size:10px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;fill:#8792A2;}
 
+/* ── Schema dark theme ── card/chip colors come from the JS palette (re-rendered
+   on toggle); these override the CSS-styled and inline-styled chrome. */
+html:not(.light) #schema-view{background:#15181D !important;color:#E4E8EE !important;}
+html:not(.light) #schema-diagram-section{background:#15181D !important;}
+html:not(.light) .sd-edge-label-bg{fill:#23272F;stroke:#3A4049;}
+html:not(.light) .sd-edge-label{fill:#AEB7C2;}
+html:not(.light) .sd-edge-label.is-hot{fill:#3DD68C;}
+html:not(.light) .sd-stage-header{fill:#7E8894;}
+html:not(.light) .sd-node-box:hover{filter:drop-shadow(0 6px 16px rgba(0,0,0,0.55));}
+html:not(.light) .sd-mini-card:hover rect{fill:#1E3A2E;stroke:#2E6B4F;}
+html:not(.light) .sd-mini-card.is-spotlit rect{fill:#1E3A2E;stroke:#1F9E6E;}
+html:not(.light) .sd-mini-card.is-linked rect{fill:#23272F;stroke:#2E6B4F;}
+html:not(.light) .sd-spotlight-label{stroke:#15181D;}
+html:not(.light) #schema-zoom{background:#23272F !important;border-color:#3A4049 !important;}
+html:not(.light) #schema-zoom button{color:#C3CAD4 !important;}
+html:not(.light) #schema-zoom button:hover{background:#2E333C;color:#ECEFF4;}
+html:not(.light) #schema-ops-toggle{background:#23272F !important;border-color:#3A4049 !important;color:#C3CAD4 !important;}
+html:not(.light) #schema-ops-toggle.active{background:#1F9E6E !important;color:#fff !important;border-color:#1F9E6E !important;}
+html:not(.light) #schema-legend{background:#23272F !important;border-color:#3A4049 !important;color:#C3CAD4 !important;}
+html:not(.light) #schema-side-panel{background:#1B1F25 !important;border-left-color:#3A4049 !important;color:#E4E8EE;box-shadow:-12px 0 32px rgba(0,0,0,0.45) !important;}
+html:not(.light) .si-title{color:#ECEFF4;}
+html:not(.light) .si-close:hover{background:#2A2F37;color:#ECEFF4;}
+html:not(.light) .si-chip{background:#2A2F37;border-color:#3A4049;color:#E4E8EE;}
+html:not(.light) .si-chip:hover{background:#1E3A2E;border-color:#2E6B4F;color:#3DD68C;}
+html:not(.light) .si-rel{border-bottom-color:#2E333C;}
+
 /* ── Schema inspector side panel (PR3) — clean & airy Segment style ── */
 #schema-side-panel{font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px;color:#1A1F36;}
 .si-close{position:absolute;top:14px;right:16px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#8792A2;font-size:18px;line-height:1;cursor:pointer;transition:background .12s,color .12s;}

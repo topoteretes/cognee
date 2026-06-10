@@ -2,8 +2,13 @@
 (function(){
   const btn = document.getElementById('theme-toggle');
   // Expose for canvas draw() to read. Default light so the Graph view matches
-  // the (always-light) Schema view instead of opening dark.
+  // the Schema view instead of opening dark.
   window._isLightMode = true;
+  // Sync the CSS theme class with the JS default. Without this the page
+  // loads with dark :root variables while the JS believes it's light, and
+  // the first "Dark mode" click ADDS the light class — a visual no-op — so
+  // dark mode was unreachable.
+  document.documentElement.classList.add('light');
   btn.addEventListener('click', () => {
     document.documentElement.classList.toggle('light');
     const isLight = document.documentElement.classList.contains('light');
