@@ -45,9 +45,10 @@ async def _ensure_migrations_run():
         return
     _migrations_done = True
 
-    from cognee.run_migrations import run_vector_migrations
+    # Version-gated: skips databases already touched by the current release.
+    from cognee.run_migrations import run_pending_vector_migrations
 
-    await run_vector_migrations()
+    await run_pending_vector_migrations()
 
 
 class RememberKwargs(TypedDict, total=False):

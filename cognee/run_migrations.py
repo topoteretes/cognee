@@ -62,15 +62,74 @@ async def run_migrations():
 
 async def run_vector_migrations():
     """
-    Run adapter-specific vector storage migrations at startup.
+    Run the adapter-specific storage migration for ONE vector database: the one
+    the current context resolves to — the dataset's own database inside
+    ``set_database_global_context_variables``, the global one outside it.
+
+    Pure execution. Per-dataset iteration, context switching, version gating
+    and bookkeeping live in :func:`run_pending_vector_migrations`.
+
+    Returns the adapter's migration result, or ``None`` when the adapter has
+    no ``run_migrations`` method.
     """
+    vector_engine = get_vector_engine()
+    migrate_method = getattr(vector_engine, "run_migrations", None)
+    if migrate_method is None:
+        logger.warning("Vector engine has no run_migrations method. Skipping.")
+        return None
+    return await migrate_method()
+
+
+async def run_pending_vector_migrations():
+    """
+    Version-gating wrapper around :func:`run_vector_migrations`.
+
+    A database whose row already records the current Cognee release was
+    migrated by this release before, so it is skipped without resolving its
+    vector engine — each release pays the adapter-migration cost once per
+    database, not once per startup. For each pending dataset the wrapper enters
+    the dataset's database context and runs the migration there, then stamps
+    the release on the rows that succeeded; the global row is stamped by
+    ``run_database_migrations`` right after in the startup sequence.
+    """
+    from sqlalchemy import update as sql_update
     from sqlalchemy.exc import OperationalError
+    from cognee.context_global_variables import set_database_global_context_variables
     from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-    from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
-    from cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info import (
-        resolve_dataset_database_connection_info,
-    )
+    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
+    from cognee.modules.migrations.models import (
+        GLOBAL_DATABASE_VERSION_ROW_ID,
+        GlobalDatabaseVersion,
+    )
+    from cognee.modules.users.models import DatasetDatabase
+    from cognee.version import get_cognee_version
+
+    current_version = get_cognee_version()
+    db_engine = get_relational_engine()
+
+    if not backend_access_control_enabled():
+        async with db_engine.get_async_session() as session:
+            global_row = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+        if global_row is not None and global_row.cognee_version == current_version:
+            return []
+
+        migration_result = await run_vector_migrations()
+        if migration_result is None:
+            return []
+        vector_config = get_vectordb_config()
+        logger.info(
+            "Vector startup migration completed using provider '%s': %s",
+            vector_config.vector_db_provider,
+            migration_result,
+        )
+        return [
+            {
+                "provider": vector_config.vector_db_provider,
+                "vector_database_name": vector_config.vector_db_name,
+                "result": migration_result,
+            }
+        ]
 
     try:
         dataset_databases = await get_dataset_databases()
@@ -81,81 +140,56 @@ async def run_vector_migrations():
         )
         return []
 
-    migration_summaries = []
-
-    if not backend_access_control_enabled():
-        vector_engine = get_vector_engine()
-        vector_config = get_vectordb_config()
-        migrate_method = getattr(vector_engine, "run_migrations", None)
-        if migrate_method is None:
-            logger.warning(
-                "Vector engine has no run_migrations method. Skipping.",
-            )
-            return []
-
-        migration_result = await migrate_method()
-        summary = {
-            "provider": vector_config.vector_db_provider,
-            "vector_database_name": vector_config.vector_db_name,
-            "result": migration_result,
-        }
-        migration_summaries.append(summary)
+    pending = [row for row in dataset_databases if row.cognee_version != current_version]
+    if len(pending) < len(dataset_databases):
         logger.info(
-            "Vector startup migration completed using provider '%s': %s",
-            vector_config.vector_db_provider,
-            migration_result,
+            "Vector startup migrations skipped for %d dataset(s) already on cognee %s.",
+            len(dataset_databases) - len(pending),
+            current_version,
         )
-    else:
-        for dataset_database in dataset_databases:
-            dataset_id = getattr(dataset_database, "dataset_id", None)
-            try:
-                dataset_database = await resolve_dataset_database_connection_info(dataset_database)
 
-                connection_info = (
-                    getattr(dataset_database, "vector_database_connection_info", {}) or {}
-                )
-                vector_engine = create_vector_engine(
-                    vector_db_provider=dataset_database.vector_database_provider,
-                    vector_db_url=dataset_database.vector_database_url,
-                    vector_db_name=dataset_database.vector_database_name,
-                    vector_db_port=str(connection_info.get("port", "") or ""),
-                    vector_db_key=dataset_database.vector_database_key or "",
-                    vector_dataset_database_handler=dataset_database.vector_dataset_database_handler
-                    or "",
-                    vector_db_username=connection_info.get("username", "") or "",
-                    vector_db_password=connection_info.get("password", "") or "",
-                    vector_db_host=connection_info.get("host", "") or "",
-                )
-
-                migrate_method = getattr(vector_engine, "run_migrations", None)
-                if migrate_method is None:
-                    logger.warning(
-                        "Vector engine has no run_migrations method for dataset '%s'. Skipping.",
-                        dataset_database.dataset_id,
-                    )
-                    continue
-
-                migration_result = await migrate_method()
-            except Exception:
-                logger.exception(
-                    "Vector startup migration failed for dataset '%s'; continuing with remaining datasets.",
-                    dataset_id,
-                )
-                migration_summaries.append({"dataset_id": str(dataset_id), "result": "failed"})
-                continue
-            summary = {
-                "dataset_id": str(dataset_database.dataset_id),
-                "provider": dataset_database.vector_database_provider,
-                "vector_database_name": dataset_database.vector_database_name,
+    migration_summaries = []
+    migrated_dataset_ids = []
+    for row in pending:
+        try:
+            # Resolve the dataset's own vector database the same way every
+            # other per-dataset operation does.
+            async with set_database_global_context_variables(row.dataset_id, row.owner_id):
+                migration_result = await run_vector_migrations()
+        except Exception:
+            logger.exception(
+                "Vector startup migration failed for dataset '%s'; continuing with remaining datasets.",
+                row.dataset_id,
+            )
+            migration_summaries.append({"dataset_id": str(row.dataset_id), "result": "failed"})
+            continue
+        if migration_result is None:
+            continue
+        migrated_dataset_ids.append(row.dataset_id)
+        migration_summaries.append(
+            {
+                "dataset_id": str(row.dataset_id),
+                "provider": row.vector_database_provider,
+                "vector_database_name": row.vector_database_name,
                 "result": migration_result,
             }
-            migration_summaries.append(summary)
-            logger.info(
-                "Vector startup migration completed for dataset '%s' using provider '%s': %s",
-                dataset_database.dataset_id,
-                dataset_database.vector_database_provider,
-                migration_result,
+        )
+        logger.info(
+            "Vector startup migration completed for dataset '%s' using provider '%s': %s",
+            row.dataset_id,
+            row.vector_database_provider,
+            migration_result,
+        )
+
+    # Record the release so these databases are skipped on the next startup.
+    if migrated_dataset_ids:
+        async with db_engine.get_async_session() as session:
+            await session.execute(
+                sql_update(DatasetDatabase)
+                .where(DatasetDatabase.dataset_id.in_(migrated_dataset_ids))
+                .values(cognee_version=current_version)
             )
+            await session.commit()
 
     return migration_summaries
 
@@ -164,12 +198,14 @@ async def run_startup_migrations():
     """
     Run all startup migrations:
     1. relational schema (Alembic) — also creates the version/revision columns
-    2. vector schema (adapter-specific)
-    3. version-keyed graph + vector script migrations (revision chain)
+    2. vector schema (adapter-specific; skipped for databases whose row already
+       records the current Cognee release)
+    3. graph + vector script migrations (revision chain; also records the
+       current release on the rows, which is what gates step 2 next startup)
     """
     # Imported lazily to avoid import cycles during ``cognee`` package import.
     from cognee.modules.migrations.runner import run_database_migrations
 
     await run_migrations()
-    await run_vector_migrations()
+    await run_pending_vector_migrations()
     await run_database_migrations()
