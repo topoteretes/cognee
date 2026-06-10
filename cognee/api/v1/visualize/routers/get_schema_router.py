@@ -66,9 +66,23 @@ def get_schema_router() -> APIRouter:
         },
     )
     async def schema_inventory(
-        dataset_id: UUID = Query(...),
+        dataset_id: UUID = Query(
+            ...,
+            description=(
+                "Dataset UUID to scope the graph databases. "
+                "List your datasets via GET /api/v1/datasets to find it."
+            ),
+            examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+        ),
         samples_per_type: int = Query(default=5, ge=0),
-        sort: str = Query(default="count"),
+        sort: str = Query(
+            default="count",
+            description=(
+                "Sort order: 'count' (default) orders types by descending instance count; "
+                "'none' preserves discovery order. Other values are rejected."
+            ),
+            examples=["count"],
+        ),
         user: User = Depends(get_authenticated_user),
     ) -> list[dict]:
         """Return the data-derived schema inventory for an authorized dataset.
@@ -124,10 +138,22 @@ def get_schema_router() -> APIRouter:
         responses={409: {"model": ErrorResponse}},
     )
     async def schema_provenance(
-        include_memory: bool = Query(default=False),
+        include_memory: bool = Query(
+            default=False,
+            description=(
+                "When true, include the extracted memory subgraph "
+                "(entities/relationships) in the provenance visualization."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Return a caller-scoped HTML memory-provenance visualization."""
+        """Return a caller-scoped HTML memory-provenance visualization.
+
+        Query parameters:
+            include_memory: when true, also folds the extracted memory
+                (entities/relationships) into the provenance view alongside
+                data lineage (default false).
+        """
         send_telemetry(
             "Schema Provenance API Endpoint Invoked",
             user.id,
