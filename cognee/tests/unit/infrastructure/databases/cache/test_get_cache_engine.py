@@ -72,6 +72,7 @@ def test_sqlite_backend_prefers_explicit_cache_db_url(tmp_path):
 
 
 def test_postgres_backend_with_cache_db_url_returns_sql_adapter():
+    pytest.importorskip("asyncpg", reason="postgres extra not installed")
     explicit_url = "postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db"
 
     engine = _create_engine("postgres", cache_db_url=explicit_url)
@@ -116,6 +117,7 @@ def test_postgres_backend_without_url_or_postgres_relational_raises():
 
 
 def test_postgres_backend_falls_back_to_relational_postgres_settings():
+    pytest.importorskip("asyncpg", reason="postgres extra not installed")
     fake_relational = types.SimpleNamespace(
         db_provider="postgres",
         db_username="cognee",
