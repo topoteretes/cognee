@@ -20,6 +20,7 @@ from cognee.memory import (
     SkillRunEntry,
 )
 from cognee.memory.entries import MEMORY_ENTRY_TYPES
+from cognee.modules.migration.sources.base import MemorySource
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -618,6 +619,7 @@ async def remember(
         DataItem,
         list[DataItem],
         "MemoryEntry",
+        MemorySource,
     ],
     dataset_name: str = "main_dataset",
     *,
@@ -689,6 +691,20 @@ async def remember(
     """
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+
+    # Migration dispatch: a MemorySource streams CMIF records from an external
+    # memory system (Mem0, Zep/Graphiti, Letta, a CMIF archive, ...). The
+    # migration loader routes them through add/cognify or direct graph storage
+    # depending on the source's fidelity mode.
+    if isinstance(data, MemorySource):
+        from cognee.modules.migration.import_source import import_memory_source
+
+        return await import_memory_source(
+            data,
+            dataset_name=dataset_name,
+            run_in_background=run_in_background,
+            **kwargs,
+        )
 
     # Typed MemoryEntry dispatch: trace steps, rich QA, feedback, and
     # explicit skill-run scores. These short-circuit the add+cognify path.
