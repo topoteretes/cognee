@@ -114,13 +114,17 @@ def head_revision(migrations: list[Migration]) -> Optional[str]:
 
 
 def pending_migrations(
-    migrations: list[Migration], stored_revision: Optional[str]
+    migrations: list[Migration],
+    stored_revision: Optional[str],
+    target_revision: str = "head",
 ) -> list[Migration]:
-    """Return the migrations needed to bring ``stored_revision`` up to head.
+    """Return the migrations needed to bring ``stored_revision`` up to ``target_revision``.
 
-    - ``None`` stored revision -> the whole chain (a database with no recorded
-      revision runs every migration).
-    - stored revision at head -> empty list.
+    - ``None`` stored revision -> everything up to the target (a database with
+      no recorded revision runs every migration).
+    - stored revision at/beyond the target -> empty list.
+    - ``target_revision`` is ``"head"`` (default) or a slug; an unknown slug
+      RAISES — an explicit target is an operator action, never best-effort.
     - stored revision unknown to this chain -> empty list, with a WARNING.
       Unlike Alembic (which raises), this tolerates a database stamped by newer
       code (rollback); but the same state also arises from a renamed migration
@@ -129,12 +133,22 @@ def pending_migrations(
     """
     ordered = order_migrations(migrations)
 
+    if target_revision == "head":
+        end_index = len(ordered)
+    else:
+        revisions = [migration.revision for migration in ordered]
+        if target_revision not in revisions:
+            raise ValueError(
+                f"Target revision {target_revision!r} is unknown to this chain; cannot upgrade."
+            )
+        end_index = revisions.index(target_revision) + 1
+
     if stored_revision is None:
-        return ordered
+        return ordered[:end_index]
 
     for index, migration in enumerate(ordered):
         if migration.revision == stored_revision:
-            return ordered[index + 1 :]
+            return ordered[index + 1 : end_index]
 
     logger.warning(
         "Stored migration revision %r is unknown to this chain (head: %r) — no migrations "

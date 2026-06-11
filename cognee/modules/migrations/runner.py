@@ -52,6 +52,10 @@ from cognee.modules.migrations.vector_migrations import VECTOR_MIGRATIONS
 
 logger = logging.getLogger(__name__)
 
+# Target sentinel: leave a chain completely untouched (used when an explicit
+# revision was given for the OTHER chain, alembic-style partial operations).
+KEEP = "keep"
+
 # Advisory-lock key for the global database pair (any stable bigint works).
 _GLOBAL_MIGRATION_LOCK_KEY = 0x636F676E6565_01  # "cognee" + 01
 
@@ -87,14 +91,19 @@ async def _migration_lock(db_engine, key: int):
 
 
 async def _apply(
-    context: MigrationContext, migrations: list[Migration], stored_revision: str | None
+    context: MigrationContext,
+    migrations: list[Migration],
+    stored_revision: str | None,
+    target_revision: str = "head",
 ) -> tuple[list[str], str | None]:
-    """Run every pending migration in order.
+    """Run every migration pending up to ``target_revision`` in order.
 
-    Returns the applied migration slugs and the resulting revision (the chain
-    head if anything ran, otherwise the unchanged stored revision).
+    Returns the applied migration slugs and the resulting revision (the last
+    applied if anything ran, otherwise the unchanged stored revision).
     """
-    pending = pending_migrations(migrations, stored_revision)
+    if target_revision == KEEP:
+        return [], stored_revision
+    pending = pending_migrations(migrations, stored_revision, target_revision)
     for migration in pending:
         logger.info(
             "Applying migration '%s' (cognee %s).", migration.slug, migration.cognee_version
@@ -105,11 +114,24 @@ async def _apply(
     return [migration.slug for migration in pending], new_revision
 
 
-def _nothing_pending(graph_revision: str | None, vector_revision: str | None) -> bool:
+def _nothing_pending(
+    graph_revision: str | None,
+    vector_revision: str | None,
+    graph_target: str = "head",
+    vector_target: str = "head",
+) -> bool:
     """True when both revision chains are already satisfied by the given snapshot."""
-    return not pending_migrations(GRAPH_MIGRATIONS, graph_revision) and not pending_migrations(
-        VECTOR_MIGRATIONS, vector_revision
+    graph_pending = (
+        []
+        if graph_target == KEEP
+        else pending_migrations(GRAPH_MIGRATIONS, graph_revision, graph_target)
     )
+    vector_pending = (
+        []
+        if vector_target == KEEP
+        else pending_migrations(VECTOR_MIGRATIONS, vector_revision, vector_target)
+    )
+    return not graph_pending and not vector_pending
 
 
 async def pending_migration_dataset_ids() -> list[UUID]:
@@ -178,7 +200,9 @@ async def _record_deployment_version(current_version: str) -> GlobalDatabaseVers
             return existing
 
 
-async def _run_global_migrations(current_version: str) -> list[dict]:
+async def _run_global_migrations(
+    current_version: str, graph_target: str = "head", vector_target: str = "head"
+) -> list[dict]:
     """Migrate the single global graph/vector pair (access control disabled).
 
     Same lock + re-check + migrate + stamp sequence as the per-dataset path,
@@ -187,7 +211,12 @@ async def _run_global_migrations(current_version: str) -> list[dict]:
     the one global graph backs every dataset's ledger rows.
     """
     row = await _record_deployment_version(current_version)
-    if _nothing_pending(row.global_graph_migration_revision, row.global_vector_migration_revision):
+    if _nothing_pending(
+        row.global_graph_migration_revision,
+        row.global_vector_migration_revision,
+        graph_target,
+        vector_target,
+    ):
         return [
             {
                 "database": "global",
@@ -203,7 +232,10 @@ async def _run_global_migrations(current_version: str) -> list[dict]:
             async with db_engine.get_async_session() as session:
                 record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
             if record is None or _nothing_pending(
-                record.global_graph_migration_revision, record.global_vector_migration_revision
+                record.global_graph_migration_revision,
+                record.global_vector_migration_revision,
+                graph_target,
+                vector_target,
             ):
                 return []
             graph_stored = record.global_graph_migration_revision
@@ -219,10 +251,10 @@ async def _run_global_migrations(current_version: str) -> list[dict]:
                 dataset_id=None,
             )
             graph_applied, graph_revision = await _apply(
-                migration_context, GRAPH_MIGRATIONS, graph_stored
+                migration_context, GRAPH_MIGRATIONS, graph_stored, graph_target
             )
             vector_applied, vector_revision = await _apply(
-                migration_context, VECTOR_MIGRATIONS, vector_stored
+                migration_context, VECTOR_MIGRATIONS, vector_stored, vector_target
             )
 
             async with db_engine.get_async_session() as session:
@@ -246,7 +278,9 @@ async def _run_global_migrations(current_version: str) -> list[dict]:
     ]
 
 
-async def _migrate_dataset(db_engine, row, current_version: str) -> Optional[dict]:
+async def _migrate_dataset(
+    db_engine, row, current_version: str, graph_target: str = "head", vector_target: str = "head"
+) -> Optional[dict]:
     """Run pending migrations for one dataset's database pair, under its lock.
 
     Relational transactions stay SHORT: one read after acquiring the lock, the
@@ -262,7 +296,7 @@ async def _migrate_dataset(db_engine, row, current_version: str) -> Optional[dic
                 return None
             graph_stored = record.graph_migration_revision
             vector_stored = record.vector_migration_revision
-        if _nothing_pending(graph_stored, vector_stored):
+        if _nothing_pending(graph_stored, vector_stored, graph_target, vector_target):
             return None
 
         # Resolve this dataset's graph/vector databases through the
@@ -276,10 +310,10 @@ async def _migrate_dataset(db_engine, row, current_version: str) -> Optional[dic
                 dataset_id=row.dataset_id,
             )
             graph_applied, graph_revision = await _apply(
-                migration_context, GRAPH_MIGRATIONS, graph_stored
+                migration_context, GRAPH_MIGRATIONS, graph_stored, graph_target
             )
             vector_applied, vector_revision = await _apply(
-                migration_context, VECTOR_MIGRATIONS, vector_stored
+                migration_context, VECTOR_MIGRATIONS, vector_stored, vector_target
             )
 
         async with db_engine.get_async_session() as session:
@@ -298,16 +332,20 @@ async def _migrate_dataset(db_engine, row, current_version: str) -> Optional[dic
     }
 
 
-async def run_database_migrations() -> list[dict]:
+async def run_database_migrations(
+    graph_target: str = "head", vector_target: str = "head"
+) -> list[dict]:
     """Apply pending graph and vector migrations to every Cognee database.
 
-    Failures for one database are logged and skipped so the remaining databases
-    are still migrated. Returns a per-database summary.
+    Targets are ``"head"`` (default), a slug (alembic-style partial upgrade up
+    to and including it), or ``KEEP`` (leave that chain untouched). Failures
+    for one database are logged and skipped so the remaining databases are
+    still migrated. Returns a per-database summary.
     """
     current_version = get_cognee_version()
 
     if not backend_access_control_enabled():
-        return await _run_global_migrations(current_version)
+        return await _run_global_migrations(current_version, graph_target, vector_target)
 
     # Record the deployment-wide version even in per-dataset mode (the global
     # revision columns stay NULL — per-dataset revisions live on each row).
@@ -321,7 +359,9 @@ async def run_database_migrations() -> list[dict]:
     for row in rows:
         # Fast path: nothing pending per this row's snapshot — skip without
         # locking, opening the dataset's databases, or writing anything.
-        if _nothing_pending(row.graph_migration_revision, row.vector_migration_revision):
+        if _nothing_pending(
+            row.graph_migration_revision, row.vector_migration_revision, graph_target, vector_target
+        ):
             summaries.append(
                 {
                     "dataset_id": str(row.dataset_id),
@@ -332,7 +372,9 @@ async def run_database_migrations() -> list[dict]:
             continue
 
         try:
-            summary = await _migrate_dataset(db_engine, row, current_version)
+            summary = await _migrate_dataset(
+                db_engine, row, current_version, graph_target, vector_target
+            )
         except Exception:
             logger.exception(
                 "Database migrations failed for dataset '%s'; continuing with remaining datasets.",
@@ -361,7 +403,12 @@ async def _revert(
     stored_revision: Optional[str],
     target_revision: Optional[str],
 ) -> list[str]:
-    """Run the down() of every migration between stored and target, newest first."""
+    """Run the down() of every migration between stored and target, newest first.
+
+    A ``KEEP`` target leaves the chain untouched.
+    """
+    if target_revision == KEEP:
+        return []
     to_revert = migrations_to_downgrade(migrations, stored_revision, target_revision)
     for migration in to_revert:
         logger.info("Reverting migration '%s'.", migration.slug)

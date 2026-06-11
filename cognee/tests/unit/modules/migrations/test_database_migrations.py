@@ -84,6 +84,20 @@ def test_disconnected_chain_raises():
         order_migrations([a, orphan])
 
 
+def test_pending_with_explicit_target_stops_at_target():
+    # alembic-style partial upgrade: `upgrade m2` applies up to and including m2.
+    assert [m.slug for m in pending_migrations(_chain(), None, "m2")] == ["m1", "m2"]
+    assert [m.slug for m in pending_migrations(_chain(), "m1", "m2")] == ["m2"]
+    assert pending_migrations(_chain(), "m2", "m2") == []
+    # Stored beyond the target -> nothing to do (use downgrade to go back).
+    assert pending_migrations(_chain(), "m3", "m2") == []
+
+
+def test_pending_unknown_target_raises():
+    with pytest.raises(ValueError, match="unknown"):
+        pending_migrations(_chain(), None, "mystery")
+
+
 # ── downgrade spans ──────────────────────────────────────────────────────────
 
 
@@ -249,7 +263,7 @@ def test_runner_routes_to_global_path_without_access_control(monkeypatch):
 
     sentinel = [{"database": "global", "graph_migrations_applied": ["x"]}]
 
-    async def _fake_global(current_version):
+    async def _fake_global(current_version, graph_target="head", vector_target="head"):
         assert current_version
         return sentinel
 
