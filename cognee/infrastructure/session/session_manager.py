@@ -442,7 +442,8 @@ class SessionManager:
             or analysis.candidate_context_updates
             or analysis.served_context_ratings
         )
-        should_answer = bool(query_to_answer or not has_analysis_signal)
+        has_previous_answer = bool(previous_qa_id)
+        should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_answer)
         effective_query = query_to_answer or query
         if not should_answer and not response_to_user:
             response_to_user = "Got it."

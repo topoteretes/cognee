@@ -828,6 +828,50 @@ class TestSessionManager:
         mock_cache.update_qa_entry.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_generate_completion_with_session_feedback_like_empty_session_answers_and_adds_qa(
+        self, sm, mock_cache
+    ):
+        """Without previous QA, acknowledgement-only analysis still answers the original query."""
+        mock_cache.get_latest_qa_entries.return_value = []
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.session_user"
+            ) as mock_session_user,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                new_callable=AsyncMock,
+                return_value=FeedbackDetectionResult(response_to_user="Got it."),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                new_callable=AsyncMock,
+                return_value=("Generated answer", "", None),
+            ),
+        ):
+            mock_user = MagicMock()
+            mock_user.id = "u1"
+            mock_session_user.get.return_value = mock_user
+            mock_config = MagicMock()
+            mock_config.caching = True
+            mock_config.auto_feedback = True
+            mock_config_cls.return_value = mock_config
+
+            result = await sm.generate_completion_with_session(
+                session_id="s1",
+                query="Test default session",
+                context="ctx",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+            )
+
+        assert result == "Generated answer"
+        mock_cache.create_qa_entry.assert_called_once()
+        qa_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert qa_kw["question"] == "Test default session"
+        mock_cache.update_qa_entry.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_generate_completion_with_session_feedback_persistence_failure_returns_response(
         self, sm, mock_cache
     ):

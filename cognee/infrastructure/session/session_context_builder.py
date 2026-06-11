@@ -204,7 +204,7 @@ async def build_active_context_block(
     user_id,
     session_id,
     query,
-    ranker: ContextRanker = None,
+    ranker: ContextRanker | None = None,
     per_section_char_budget: int = DEFAULT_PER_SECTION_CHAR_BUDGET,
     total_char_budget: int = DEFAULT_TOTAL_CHAR_BUDGET,
 ) -> Tuple[str, List[str]]:
