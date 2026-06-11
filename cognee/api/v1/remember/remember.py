@@ -138,6 +138,39 @@ def _data_to_text(data) -> str:
     return f"[{type(data).__name__}]"
 
 
+class _DetachedUpload:
+    """Duck-types an UploadFile (.file / .filename) with a pipeline-owned buffer."""
+
+    def __init__(self, file, filename):
+        self.file = file
+        self.filename = filename
+
+
+def _detach_request_files(data):
+    """Copy request-scoped uploads into buffers the pipeline owns.
+
+    In background mode the HTTP response is sent before ingestion runs,
+    and Starlette closes each UploadFile's temp file on request teardown —
+    the pipeline would then fail with "I/O operation on closed file".
+    """
+    import shutil
+    from tempfile import SpooledTemporaryFile
+
+    def _detach(item):
+        file_obj = getattr(item, "file", None)
+        if file_obj is None or not hasattr(item, "filename"):
+            return item
+        buffer = SpooledTemporaryFile(max_size=10 * 1024 * 1024)
+        file_obj.seek(0)
+        shutil.copyfileobj(file_obj, buffer)
+        buffer.seek(0)
+        return _DetachedUpload(buffer, item.filename)
+
+    if isinstance(data, list):
+        return [_detach(item) for item in data]
+    return _detach(data)
+
+
 _SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
 
 
@@ -981,6 +1014,9 @@ async def _remember_inner(
             await improve(**improve_kwargs)
 
     if run_in_background:
+        # Detach before returning the response — request teardown closes
+        # the original upload handles while the task is still running.
+        data = _detach_request_files(data)
 
         async def _remember_background():
             try:
