@@ -177,6 +177,38 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
             relational.assert_awaited_once()
             self.assertTrue(startup._startup_migrations_done)
 
+    def test_auto_migrations_flag_disables_all_runs(self):
+        """ENABLE_AUTO_MIGRATIONS=false must skip relational AND data
+        migrations entirely (read dynamically — tests set it after import).
+        The explicit CLI path calls the runner directly and is unaffected."""
+        import os
+
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+
+        with (
+            patch.dict(os.environ, {"ENABLE_AUTO_MIGRATIONS": "false"}),
+            patch.object(startup, "run_relational_migrations", new=AsyncMock()) as relational,
+            patch(
+                "cognee.modules.migrations.runner.run_database_migrations",
+                new=AsyncMock(),
+            ) as database,
+        ):
+            asyncio.run(startup.run_startup_migrations())
+            relational.assert_not_awaited()
+            database.assert_not_awaited()
+            self.assertFalse(startup._startup_migrations_done)
+
+        # Flag back on -> next call runs normally (nothing was latched).
+        with (
+            patch.object(startup, "run_relational_migrations", new=AsyncMock()) as relational,
+            patch(
+                "cognee.modules.migrations.runner.run_database_migrations",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            asyncio.run(startup.run_startup_migrations())
+            relational.assert_awaited_once()
+
     def test_second_call_is_a_noop_after_success(self):
         startup = importlib.import_module("cognee.modules.migrations.startup")
 

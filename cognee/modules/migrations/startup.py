@@ -9,8 +9,12 @@ Two stages, in order:
    chain entry (``adapter_storage_migration``), so it is gated, locked and
    failure-isolated exactly like every other migration.
 
-Triggered from the FastAPI lifespan on every server start, from ``remember()``'s
-first call in an SDK process, and explicitly via ``cognee.run_startup_migrations()``.
+Triggered from the FastAPI lifespan on every server start, from the first
+``remember()``/``cognify()`` call in an SDK process, and explicitly via
+``cognee.run_startup_migrations()``. Set ``ENABLE_AUTO_MIGRATIONS=false`` to
+disable ALL of these automatic runs (e.g. operating on deliberately
+old-format data, or environments where migrations are operator-driven) —
+``cognee-cli upgrade`` remains the explicit path and ignores the flag.
 
 ``run_startup_migrations`` is once-per-process: a cognee instance never needs
 to run migrations twice (databases at head no-op anyway, but the relational
@@ -53,6 +57,12 @@ MIGRATIONS_DIR_NAME = "alembic"
 
 class MigrationError(Exception):
     """Raised when migrations fail."""
+
+
+def _auto_migrations_enabled() -> bool:
+    """Read ENABLE_AUTO_MIGRATIONS dynamically — tests/embedders set it via
+    os.environ after import, so it must not be frozen at module load."""
+    return os.getenv("ENABLE_AUTO_MIGRATIONS", "true").lower() not in ("false", "0", "no")
 
 
 async def run_relational_migrations():
@@ -107,6 +117,12 @@ async def run_startup_migrations():
     vector revision chains. Once per process (see module docstring); a failed
     run is retried on the next call."""
     global _startup_migrations_done
+    if not _auto_migrations_enabled():
+        logger.info(
+            "Automatic migrations are disabled (ENABLE_AUTO_MIGRATIONS=false); "
+            "run `cognee-cli upgrade` to migrate explicitly."
+        )
+        return
     if _startup_migrations_done:
         return
 

@@ -551,6 +551,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+          ENABLE_AUTO_MIGRATIONS: 'false'
         run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
 
   test-deletion-on-default-graph_with_legacy_data_2:
@@ -578,6 +579,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          ENABLE_AUTO_MIGRATIONS: 'false'
         run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_2.py
 
   test-delete-two-users-with-legacy-data:
@@ -603,6 +605,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          ENABLE_AUTO_MIGRATIONS: 'false'
         run: uv run python ./cognee/tests/test_delete_two_users_with_legacy_data.py
 
   test-delete-two-users-on-same-dataset:

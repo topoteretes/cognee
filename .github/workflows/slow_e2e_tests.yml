@@ -89,4 +89,5 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          ENABLE_AUTO_MIGRATIONS: 'false'
         run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
