@@ -160,10 +160,6 @@ jobs:
             --short-sha "${{ matrix.short_sha }}" \
             --pr-number "${{ matrix.pr_number }}"
 
-      - name: Skip docs PR creation when docs are not needed
-        if: ${{ steps.assessment.outputs.needs_update != 'true' }}
-        run: echo "Assessment says no documentation update is needed for ${{ matrix.branch_name }}; skipping docs PR."
-
       - name: Check out docs repository
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         uses: actions/checkout@v6
