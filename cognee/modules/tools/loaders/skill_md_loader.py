@@ -15,7 +15,7 @@ The `allowed-tools` field may be either a YAML list or a comma-separated string.
 """
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import Iterator, List, Tuple
 
 import yaml
 
@@ -86,7 +86,18 @@ def load_skill_from_md(path: Path) -> Skill:
     return parse_skill_md(text)
 
 
+def iter_skill_md_files(root: Path) -> Iterator[Path]:
+    """Yield every SKILL.md file under root, matching the name case-insensitively.
+
+    Shared by directory loading and skill-source detection so that both agree on
+    what counts as a SKILL.md (e.g. lowercase `skill.md` on case-sensitive
+    filesystems).
+    """
+    for path in sorted(Path(root).rglob("*")):
+        if path.is_file() and path.name.lower() == "skill.md":
+            yield path
+
+
 def load_skills_from_directory(root: Path) -> List[Skill]:
-    """Recursively load every SKILL.md under root."""
-    root_path = Path(root)
-    return [load_skill_from_md(p) for p in sorted(root_path.rglob("SKILL.md"))]
+    """Recursively load every SKILL.md (any case) under root."""
+    return [load_skill_from_md(p) for p in iter_skill_md_files(root)]
