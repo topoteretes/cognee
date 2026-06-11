@@ -1,0 +1,42 @@
+# Email thread: Lease renewal confirmation
+
+From: Ana Petrovic <ana.petrovic@oakline-homes.example>
+To: Veljko <veljko@topoteretes.com>
+Date: 2026-06-09T08:18
+Subject: Lease renewal paperwork due Friday
+
+Hi Veljko,
+
+We are preparing lease renewals for July. Could you confirm by Friday,
+2026-06-12 at 12:00 whether you want to renew for another 12 months?
+
+If yes, I will send the DocuSign packet. If you need different dates, please
+reply with your preferred move-out or renewal term.
+
+Ana
+
+---
+
+From: Veljko <veljko@topoteretes.com>
+To: Ana Petrovic <ana.petrovic@oakline-homes.example>
+Date: 2026-06-09T10:02
+Subject: Re: Lease renewal paperwork due Friday
+
+Hi Ana,
+
+Yes, I want to renew for another 12 months. Please send the DocuSign packet.
+
+Thanks,
+Veljko
+
+---
+
+From: Ana Petrovic <ana.petrovic@oakline-homes.example>
+To: Veljko <veljko@topoteretes.com>
+Date: 2026-06-10T14:37
+Subject: Re: Lease renewal paperwork due Friday
+
+Thanks, Veljko. I sent the DocuSign packet just now. Please sign it by Friday,
+2026-06-12 at 12:00 so we can lock the current rate.
+
+Ana

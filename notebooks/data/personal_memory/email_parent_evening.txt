@@ -1,0 +1,25 @@
+# Email thread: Friday dinner RSVP
+
+From: Jelena Markovic <jelena.markovic@example.com>
+To: Veljko <veljko@topoteretes.com>
+Date: 2026-06-10T19:24
+Subject: Friday dinner headcount
+
+Veljko,
+
+Can you let me know by EOD Thursday, 2026-06-11, whether you and Milica are
+coming to dinner on Friday? I need to tell the restaurant the final headcount.
+
+Love,
+Jelena
+
+---
+
+From: Milica <milica@example.com>
+To: Jelena Markovic <jelena.markovic@example.com>
+Cc: Veljko <veljko@topoteretes.com>
+Date: 2026-06-11T08:46
+Subject: Re: Friday dinner headcount
+
+I am not sure yet. Veljko, can you decide and reply to Jelena? I have a late
+call Friday and can make it only if we choose the 20:30 table.
