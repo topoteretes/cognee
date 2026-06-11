@@ -31,7 +31,7 @@ from typing import Any, Callable
 
 from cognee.shared.logging_utils import get_logger
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 _INSTALLED = False
 
