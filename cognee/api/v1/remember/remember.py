@@ -35,30 +35,18 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
-_migrations_done = False
-_migrations_lock = asyncio.Lock()
-
 
 async def _ensure_migrations_run():
-    """Run startup migrations once per SDK process, on the first local call.
+    """Run startup migrations on the first local SDK call.
 
     The full set (relational schema + graph/vector revision chains), not just
     vector schema — an SDK process is otherwise capable of writing new-scheme
-    data into an unmigrated store. Cheap when already migrated: the revision
-    chains no-op on in-memory comparisons. The done-flag is set only AFTER
-    success so a transient failure is retried on the next call, and the lock
-    keeps a concurrent second call from proceeding mid-migration.
+    data into an unmigrated store. The once-per-process guard (flag, lock,
+    retry-on-failure) lives inside ``run_startup_migrations`` itself.
     """
-    global _migrations_done
-    if _migrations_done:
-        return
-    async with _migrations_lock:
-        if _migrations_done:
-            return
-        from cognee.run_migrations import run_startup_migrations
+    from cognee.run_migrations import run_startup_migrations
 
-        await run_startup_migrations()
-        _migrations_done = True
+    await run_startup_migrations()
 
 
 class RememberKwargs(TypedDict, total=False):

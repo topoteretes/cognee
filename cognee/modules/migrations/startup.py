@@ -11,8 +11,15 @@ Two stages, in order:
 
 Triggered from the FastAPI lifespan on every server start, from ``remember()``'s
 first call in an SDK process, and explicitly via ``cognee.run_startup_migrations()``.
+
+``run_startup_migrations`` is once-per-process: a cognee instance never needs
+to run migrations twice (databases at head no-op anyway, but the relational
+Alembic subprocess and the per-database row scan are not free). The guard
+lives HERE, not in any caller — a concurrent second call waits on the lock,
+and a FAILED run does not set the flag, so the next call retries.
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -21,6 +28,27 @@ from pathlib import Path
 import importlib.resources as pkg_resources
 
 logger = logging.getLogger(__name__)
+
+_startup_migrations_done = False
+_startup_migrations_lock = None
+_startup_migrations_lock_loop = None
+
+
+def _get_startup_lock() -> asyncio.Lock:
+    """The in-process migration lock, recreated when the event loop changes.
+
+    SDK code commonly runs each call in its own ``asyncio.run()`` loop; an
+    ``asyncio.Lock`` is bound to the loop it first awaited on and raises if
+    reused on another, so a failed first attempt would otherwise make every
+    retry from a fresh loop crash on the lock instead of retrying.
+    """
+    global _startup_migrations_lock, _startup_migrations_lock_loop
+    loop = asyncio.get_running_loop()
+    if _startup_migrations_lock is None or _startup_migrations_lock_loop is not loop:
+        _startup_migrations_lock = asyncio.Lock()
+        _startup_migrations_lock_loop = loop
+    return _startup_migrations_lock
+
 
 MIGRATIONS_PACKAGE = "cognee"
 MIGRATIONS_DIR_NAME = "alembic"
@@ -68,8 +96,18 @@ async def run_relational_migrations():
 
 async def run_startup_migrations():
     """Run all startup migrations: relational schema first, then the graph +
-    vector revision chains (see module docstring)."""
-    from cognee.modules.migrations.runner import run_database_migrations
+    vector revision chains. Once per process (see module docstring); a failed
+    run is retried on the next call."""
+    global _startup_migrations_done
+    if _startup_migrations_done:
+        return
 
-    await run_relational_migrations()
-    await run_database_migrations()
+    async with _get_startup_lock():
+        if _startup_migrations_done:
+            return
+
+        from cognee.modules.migrations.runner import run_database_migrations
+
+        await run_relational_migrations()
+        await run_database_migrations()
+        _startup_migrations_done = True
