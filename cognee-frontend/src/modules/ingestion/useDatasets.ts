@@ -29,7 +29,7 @@ function filterDatasets(datasets: Dataset[], searchValue: string) {
   );
 }
 
-function useDatasets(instance: CogneeInstance, searchValue: string, onReady?: () => void) {
+function useDatasets(instance: CogneeInstance, searchValue: string, onReady?: () => void, tenantId?: string | null) {
   const allDatasets = useRef<Dataset[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const onReadyCalledRef = useRef(false);
@@ -39,7 +39,7 @@ function useDatasets(instance: CogneeInstance, searchValue: string, onReady?: ()
   }, [searchValue])
 
   const addDataset = useCallback((datasetName: string) => {
-    return createDataset({ name: datasetName  }, instance)
+    return createDataset({ name: datasetName  }, instance, tenantId)
       .then((dataset) => {
         const newDatasets = [
           ...allDatasets.current,

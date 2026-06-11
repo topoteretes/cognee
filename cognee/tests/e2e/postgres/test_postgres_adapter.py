@@ -277,6 +277,22 @@ async def test_get_connections(adapter):
     assert edge["relationship_name"] == "LINKED"
 
 
+@pytest.mark.asyncio
+async def test_get_neighborhood_with_asyncpg_seed_array(adapter):
+    await adapter.add_nodes(
+        [
+            ("nh1", {"name": "A", "type": "Entity"}),
+            ("nh2", {"name": "B", "type": "Entity"}),
+        ]
+    )
+    await adapter.add_edges([("nh1", "nh2", "next", {})])
+
+    nodes, edges = await adapter.get_neighborhood(["nh1"], depth=1)
+
+    assert {node_id for node_id, _ in nodes} == {"nh1", "nh2"}
+    assert ("nh1", "nh2", "next", {}) in edges
+
+
 # -- Tests: graph-wide reads --
 
 

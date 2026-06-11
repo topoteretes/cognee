@@ -7,8 +7,11 @@ import ServeOnboarding from "./ServeOnboarding";
 import { LocalCogneeStep, AgentStep, DatabaseStep } from "./ConnectionSteps";
 import addData from "@/modules/ingestion/addData";
 import createDataset from "@/modules/datasets/createDataset";
+import getDatasets from "@/modules/datasets/getDatasets";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
+import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import searchDataset from "@/modules/datasets/searchDataset";
+import { trackEvent, TrackPageView } from "@/modules/analytics";
 
 // ── Icons ──
 
@@ -44,7 +47,7 @@ function StepDots({ current, total = 4 }: { current: number; total?: number }) {
 function SkipLink() {
   const router = useRouter();
   return (
-    <button onClick={() => { sessionStorage.setItem("cognee-onboarding-skipped", "1"); router.push("/dashboard"); }} className="cursor-pointer" style={{ background: "none", border: "none", color: "#9CA3AF", fontSize: 13, paddingTop: 32, paddingBottom: 24 }}>
+    <button onClick={() => { trackEvent({ pageName: "Onboarding", eventName: "onboarding_skipped" }); sessionStorage.setItem("cognee-onboarding-skipped", "1"); router.push("/dashboard"); }} className="cursor-pointer" style={{ background: "none", border: "none", color: "#9CA3AF", fontSize: 13, paddingTop: 32, paddingBottom: 24 }}>
       Skip onboarding and go to dashboard
     </button>
   );
@@ -106,6 +109,7 @@ function Step1({ onNext, files, setFiles, cogniInstance, datasetId, setDatasetId
   const handleFiles = (newFiles: FileList | File[]) => {
     const fileArray = Array.from(newFiles);
     setFiles((prev) => [...prev, ...fileArray]);
+    trackEvent({ pageName: "Onboarding", eventName: "onboarding_files_added", additionalProperties: { file_count: String(fileArray.length), step: "1" } });
     uploadFiles(fileArray);
   };
 
@@ -113,6 +117,7 @@ function Step1({ onNext, files, setFiles, cogniInstance, datasetId, setDatasetId
 
   const handlePasteSubmit = () => {
     if (!pasteText.trim()) return;
+    trackEvent({ pageName: "Onboarding", eventName: "onboarding_text_pasted", additionalProperties: { text_length: String(pasteText.length), step: "1" } });
     const blob = new Blob([pasteText], { type: "text/plain" });
     const file = new File([blob], "pasted-text.txt", { type: "text/plain" });
     setFiles((prev) => [...prev, file]);
@@ -221,50 +226,20 @@ function Step1({ onNext, files, setFiles, cogniInstance, datasetId, setDatasetId
             )}
           </div>
 
-          {/* Right card: Connect a source */}
-          <div style={{ backgroundColor: "#FFFFFF", borderColor: "#E5E7EB", borderRadius: 16, borderStyle: "solid", borderWidth: 1, display: "flex", flexBasis: "0%", flexDirection: "column", flexGrow: 1, flexShrink: 1, gap: 20, paddingBlock: 32, paddingInline: 32 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ color: "#111111", fontSize: 17, lineHeight: "22px" }}>Connect a source</div>
-              <div style={{ color: "#9CA3AF", fontSize: 13, lineHeight: "16px" }}>Link an existing system to sync data</div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <SourceRow
-                icon={<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>}
-                title="Local Cognee"
-                subtitle="Sync your local instance"
-                onClick={() => setConnectionView("local")}
-              />
-              <SourceRow
-                icon={<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="10" rx="2" /><circle cx="12" cy="5" r="2" /><path d="M12 7v4" /><line x1="8" y1="16" x2="8" y2="16" /><line x1="16" y1="16" x2="16" y2="16" /></svg>}
-                title="Agent"
-                subtitle="OpenAI, OpenClaw, and more"
-                onClick={() => setConnectionView("agent")}
-              />
-              <SourceRow
-                icon={<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></svg>}
-                title="Database"
-                subtitle="Postgres, MySQL, and more"
-                onClick={() => setConnectionView("database")}
-              />
-              <SourceRow
-                icon={<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" /></svg>}
-                title="Cloud storage"
-                subtitle="S3, GCS, Azure Blob, and more"
-                onClick={() => router.push("/connections")}
-              />
-            </div>
-          </div>
         </div>
 
         {/* Continue button when files selected */}
         {files.length > 0 && (
           <div style={{ paddingTop: 24 }}>
-            <button onClick={onNext} className="cursor-pointer" style={{ background: "#6510F4", border: "none", borderRadius: 8, padding: "10px 32px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
+            <button onClick={() => { trackEvent({ pageName: "Onboarding", eventName: "onboarding_step_completed", additionalProperties: { step: "1", file_count: String(files.length) } }); onNext(); }} className="cursor-pointer" style={{ background: "#6510F4", border: "none", borderRadius: 8, padding: "10px 32px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
               Continue with {files.length} file{files.length !== 1 ? "s" : ""}
             </button>
           </div>
         )}
 
+        <div style={{ marginTop: 24 }}>
+          <StepDots current={1} />
+        </div>
         <SkipLink />
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -320,21 +295,23 @@ function Step2({ files, datasetId, onNext, cogniInstance }: {
       await new Promise((r) => setTimeout(r, 400));
       updateStep(0, { progress: 100, status: "done" });
 
-      // Step 2: Cognify (extracting + building)
-      updateStep(1, { status: "active", progress: 20 });
-
-      // Simulate progress while cognify runs
-      const progressInterval = setInterval(() => {
-        setSteps((prev) => prev.map((s, i) => {
-          if (i === 1 && s.status === "active" && s.progress < 90) return { ...s, progress: s.progress + 5 };
-          if (i === 2 && s.status === "active" && s.progress < 90) return { ...s, progress: s.progress + 3 };
-          return s;
-        }));
-      }, 500);
-
+      // Start cognify, then poll until actually complete
+      updateStep(1, { status: "active", progress: 10 });
       await cognifyDataset({ id: currentDsId!, name: "default_dataset", data: [], status: "ready" }, cogniInstance);
 
-      clearInterval(progressInterval);
+      await pollDatasetStatus(currentDsId!, cogniInstance, {
+        intervalMs: 3000,
+        initialDelayMs: 2000,
+        onStatus: (status) => {
+          if (status === "DATASET_PROCESSING_INITIATED") {
+            updateStep(1, { progress: 30 });
+          } else if (status === "DATASET_PROCESSING_STARTED") {
+            updateStep(1, { progress: 60 });
+            updateStep(2, { status: "active", progress: 20 });
+          }
+        },
+      });
+
       updateStep(1, { progress: 100, status: "done" });
       updateStep(2, { progress: 100, status: "done" });
 
@@ -402,7 +379,7 @@ function Step2({ files, datasetId, onNext, cogniInstance }: {
       <StepDots current={2} />
 
       {allDone && (
-        <button onClick={() => onNext(dsId!)} className="cursor-pointer" style={{ background: "#6510F4", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
+        <button onClick={() => { trackEvent({ pageName: "Onboarding", eventName: "onboarding_step_completed", additionalProperties: { step: "2" } }); onNext(dsId!); }} className="cursor-pointer" style={{ background: "#6510F4", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
           Continue
         </button>
       )}
@@ -431,6 +408,7 @@ function Step3({ datasetId, onNext, cogniInstance }: {
     setQuery(q);
     setIsSearching(true);
     setResults([]);
+    trackEvent({ pageName: "Onboarding", eventName: "onboarding_search_executed", additionalProperties: { query_length: String(q.length), step: "3" } });
     try {
       const data = await searchDataset(cogniInstance, { query: q, searchType: "GRAPH_COMPLETION", datasetIds: [datasetId] });
       const texts: string[] = [];
@@ -504,7 +482,7 @@ function Step3({ datasetId, onNext, cogniInstance }: {
       <StepDots current={3} />
 
       {results.length > 0 && (
-        <button onClick={onNext} className="cursor-pointer" style={{ background: "#6510F4", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>Continue</button>
+        <button onClick={() => { trackEvent({ pageName: "Onboarding", eventName: "onboarding_step_completed", additionalProperties: { step: "3" } }); onNext(); }} className="cursor-pointer" style={{ background: "#6510F4", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>Continue</button>
       )}
 
       <SkipLink />
@@ -517,6 +495,23 @@ function Step3({ datasetId, onNext, cogniInstance }: {
 
 function Step4() {
   const router = useRouter();
+
+  useEffect(() => {
+    localStorage.setItem("cognee-onboarding-complete", "1");
+    trackEvent({ pageName: "Onboarding", eventName: "onboarding_completed" });
+  }, []);
+
+  function go(destination: string, href: string) {
+    trackEvent({ pageName: "Onboarding", eventName: "onboarding_completed", additionalProperties: { destination } });
+    router.push(href);
+  }
+
+  const actions = [
+    { label: "Go to dashboard", href: "/dashboard",       primary: true },
+    { label: "Search data",     href: "/search",          primary: false },
+    { label: "Inspect graph",   href: "/knowledge-graph", primary: false },
+  ];
+
   return (
     <div className="flex flex-col items-center justify-center gap-6 flex-1" style={{ padding: 48, fontFamily: '"Inter", system-ui, sans-serif' }}>
       <StepBadge step={4} />
@@ -525,13 +520,27 @@ function Step4() {
         Your knowledge graph is built and searchable. Explore your data, add more documents, or connect agents.
       </p>
 
-      <div className="flex gap-3">
-        <button onClick={() => router.push("/dashboard")} className="cursor-pointer" style={{ background: "#6510F4", color: "#fff", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, border: "none" }}>
-          Go to dashboard
-        </button>
-        <button onClick={() => router.push("/datasets")} className="cursor-pointer bg-white" style={{ border: "1px solid #E4E4E7", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#000" }}>
-          View datasets
-        </button>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, width: 480 }}>
+        {actions.map(({ label, href, primary }) => (
+          <button
+            key={href}
+            onClick={() => go(label.toLowerCase().replace(/ /g, "_"), href)}
+            className="cursor-pointer"
+            style={{
+              background: primary ? "#6510F4" : "#fff",
+              color: primary ? "#fff" : "#18181B",
+              border: primary ? "none" : "1px solid #E4E4E7",
+              borderRadius: 8,
+              padding: "10px 16px",
+              fontSize: 14,
+              fontWeight: 500,
+              fontFamily: "inherit",
+              textAlign: "center",
+            }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <StepDots current={4} />
@@ -544,17 +553,27 @@ function Step4() {
 export default function OnboardingPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
   const searchParams = useSearchParams();
-  const [step, setStep] = useState(1);
+  const isServeMode = searchParams.get("source") === "serve";
+  const initialStep = Math.min(Math.max(parseInt(searchParams.get("step") ?? "1", 10), 1), 4);
+  const [step, setStep] = useState(initialStep);
   const [files, setFiles] = useState<File[]>([]);
   const [datasetId, setDatasetId] = useState<string | null>(null);
 
-  const isServeMode = searchParams.get("source") === "serve";
+  // When entering mid-flow (step > 1), resolve the existing dataset
+  useEffect(() => {
+    if (initialStep <= 1 || !cogniInstance) return;
+    getDatasets(cogniInstance)
+      .then((data: Array<{ id: string }>) => {
+        if (Array.isArray(data) && data.length > 0) setDatasetId(data[0].id);
+      })
+      .catch(() => {});
+  }, [cogniInstance, initialStep]);
 
   if (isInitializing || !cogniInstance) {
     return (
-      <div className="flex items-center justify-center h-screen" style={{ fontFamily: '"Inter", system-ui, sans-serif' }}>
+      <><TrackPageView page="Onboarding" /><div className="flex items-center justify-center h-screen" style={{ fontFamily: '"Inter", system-ui, sans-serif' }}>
         <span style={{ fontSize: 14, color: "#71717A" }}>Connecting...</span>
-      </div>
+      </div></>
     );
   }
 
@@ -564,9 +583,13 @@ export default function OnboardingPage() {
 
   return (
     <div className="flex flex-col h-full overflow-auto" style={{ background: "#FAFAF9" }}>
+      <TrackPageView page="Onboarding" additionalProperties={{ step: String(step) }} />
       {step === 1 && <Step1 files={files} setFiles={setFiles} onNext={() => setStep(2)} cogniInstance={cogniInstance} datasetId={datasetId} setDatasetId={setDatasetId} />}
       {step === 2 && <Step2 files={files} datasetId={datasetId} onNext={(id) => { setDatasetId(id); setStep(3); }} cogniInstance={cogniInstance} />}
-      {step === 3 && datasetId && <Step3 datasetId={datasetId} onNext={() => setStep(4)} cogniInstance={cogniInstance} />}
+      {step === 3 && (datasetId
+        ? <Step3 datasetId={datasetId} onNext={() => setStep(4)} cogniInstance={cogniInstance} />
+        : <div className="flex items-center justify-center flex-1"><span style={{ fontSize: 14, color: "#71717A" }}>Loading...</span></div>
+      )}
       {step === 4 && <Step4 />}
     </div>
   );

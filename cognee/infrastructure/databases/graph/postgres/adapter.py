@@ -1,5 +1,6 @@
 """Postgres graph adapter using two tables (graph_node, graph_edge) over SQLAlchemy + asyncpg."""
 
+import asyncio
 import json
 from uuid import UUID
 from datetime import datetime, timezone
@@ -10,6 +11,9 @@ from sqlalchemy import text, values, select, exists, func, String
 from sqlalchemy import column as sa_column
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.exc import DBAPIError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from asyncpg import DeadlockDetectedError
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -31,6 +35,7 @@ class PostgresAdapter(GraphDBInterface):
         self.db_uri = connection_string
         self.engine = create_async_engine(self.db_uri)
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+        self._write_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Create tables and indexes if they do not exist."""
@@ -147,9 +152,10 @@ class PostgresAdapter(GraphDBInterface):
             },
         )
 
-        async with self._session() as session:
-            await session.execute(stmt)
-            await session.commit()
+        async with self._write_lock:
+            async with self._session() as session:
+                await session.execute(stmt)
+                await session.commit()
 
     async def delete_node(self, node_id: str) -> None:
         """Delete a single node. Delegates to delete_nodes.
@@ -169,11 +175,12 @@ class PostgresAdapter(GraphDBInterface):
         """
         if not node_ids:
             return
-        async with self._session() as session:
-            await session.execute(
-                text("DELETE FROM graph_node WHERE id = ANY(:ids)"), {"ids": node_ids}
-            )
-            await session.commit()
+        async with self._write_lock:
+            async with self._session() as session:
+                await session.execute(
+                    text("DELETE FROM graph_node WHERE id = ANY(:ids)"), {"ids": node_ids}
+                )
+                await session.commit()
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a single node by ID.
@@ -271,9 +278,10 @@ class PostgresAdapter(GraphDBInterface):
             },
         )
 
-        async with self._session() as session:
-            await session.execute(stmt)
-            await session.commit()
+        async with self._write_lock:
+            async with self._session() as session:
+                await session.execute(stmt)
+                await session.commit()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         """Check whether a single edge exists.
@@ -744,7 +752,7 @@ class PostgresAdapter(GraphDBInterface):
         # nodes and edges in two unioned result sets distinguished by 'kind'
         query_str = f"""
             WITH RECURSIVE neighborhood(id, hops) AS (
-                SELECT unnest(:seeds), 0
+                SELECT unnest(CAST(:seeds AS text[])), 0
               UNION
                 SELECT CASE WHEN e.source_id = n.id THEN e.target_id
                             ELSE e.source_id END,
@@ -804,9 +812,10 @@ class PostgresAdapter(GraphDBInterface):
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
         await self.initialize()
-        async with self._session() as session:
-            await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
-            await session.commit()
+        async with self._write_lock:
+            async with self._session() as session:
+                await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
+                await session.commit()
 
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
         """Retrieve a batch of (source, relationship, target) triplets.

@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -37,7 +38,17 @@ def get_remember_router() -> APIRouter:
         custom_prompt: Optional[str] = Form(default=""),
         chunk_size: Optional[int] = Form(default=4096),
         chunks_per_batch: Optional[int] = Form(default=36),
-        content_type: Optional[str] = Form(default=None),
+        ontology_key: Optional[List[str]] = Form(
+            default=None,
+            examples=[[]],
+            description="Reference to one or more previously uploaded ontologies",
+        ),
+        graph_model: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description="JSON-serialised graph model schema (same format as the cognify endpoint).",
+        ),
+        content_type: Optional[str] = Form(default=None, examples=[""]),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -56,6 +67,8 @@ def get_remember_router() -> APIRouter:
         - **chunk_size** (Optional[int]): Maximum tokens per chunk. Defaults to automatic
           model-based sizing.
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
+        - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
+        - **graph_model** (Optional[str]): JSON-serialised graph model schema (same dict format accepted by the cognify endpoint).
 
         Either datasetName or datasetId must be provided.
 
@@ -80,8 +93,36 @@ def get_remember_router() -> APIRouter:
             )
 
         from cognee.api.v1.remember import remember as cognee_remember
+        from cognee.api.v1.ontologies.ontologies import OntologyService
+        from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
         try:
+            config_to_use = None
+            if ontology_key and ontology_key != [""]:
+                ontology_service = OntologyService()
+                ontology_contents = ontology_service.get_ontology_contents(ontology_key, user)
+
+                from cognee.modules.ontology.ontology_config import Config
+                from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
+                    RDFLibOntologyResolver,
+                )
+                from io import StringIO
+
+                ontology_streams = [StringIO(content) for content in ontology_contents]
+                config_to_use: Config = {
+                    "ontology_config": {
+                        "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)
+                    }
+                }
+
+            graph_model_parsed = None
+            if graph_model:
+                try:
+                    graph_model_schema = json.loads(graph_model)
+                    graph_model_parsed = graph_schema_to_graph_model(graph_model_schema)
+                except (json.JSONDecodeError, Exception) as parse_err:
+                    logger.warning("remember: invalid graph_model JSON, ignoring: %s", parse_err)
+
             result = await cognee_remember(
                 data,
                 dataset_name=datasetName,
@@ -94,9 +135,17 @@ def get_remember_router() -> APIRouter:
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
                 content_type=content_type,
+                **({"config": config_to_use} if config_to_use else {}),
+                **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
             )
 
             return jsonable_encoder(result.to_dict())
+        except ValueError as error:
+            logger.error("Remember endpoint validation error: %s", error, exc_info=True)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Invalid request data for remember operation."},
+            )
         except Exception as error:
             logger.error("Remember endpoint error: %s", error, exc_info=True)
             return JSONResponse(

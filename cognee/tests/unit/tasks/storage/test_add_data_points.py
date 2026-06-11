@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
 from cognee.tasks.storage.add_data_points import (
@@ -18,6 +20,36 @@ adp_module = sys.modules["cognee.tasks.storage.add_data_points"]
 class SimplePoint(DataPoint):
     text: str
     metadata: dict = {"index_fields": ["text"]}
+
+
+class NamedPoint(DataPoint):
+    name: str
+    metadata: dict = {"index_fields": ["name"]}
+
+
+class TitledPoint(DataPoint):
+    title: str
+    metadata: dict = {"index_fields": ["title"]}
+
+
+class IndexedNonNamePoint(DataPoint):
+    """`name` is present, but `index_fields` points to a different field."""
+
+    name: str
+    handle: str
+    metadata: dict = {"index_fields": ["handle"]}
+
+
+class OnlyNamePoint(DataPoint):
+    """Has `name` but no `index_fields` declared."""
+
+    name: str
+
+
+class UnlabelablePoint(DataPoint):
+    """Has neither `name` nor `index_fields` — the misuse case."""
+
+    payload: str
 
 
 def _make_unified_mock():
@@ -64,8 +96,8 @@ async def test_add_data_points_indexes_nodes_and_edges(
     graph_engine.add_nodes.assert_awaited_once()
     mock_index_nodes.assert_awaited_once()
     assert graph_engine.add_edges.await_count == 2
-    expected_main_edges = ensure_default_edge_properties([edge1])
-    expected_custom_edges = ensure_default_edge_properties(custom_edges)
+    expected_main_edges = ensure_default_edge_properties([edge1], nodes=[dp1, dp2])
+    expected_custom_edges = ensure_default_edge_properties(custom_edges, nodes=[dp1, dp2])
     first_call_edges = graph_engine.add_edges.await_args_list[0].args[0]
     assert expected_main_edges[0] in first_call_edges
     assert expected_custom_edges[0] in first_call_edges
@@ -292,6 +324,131 @@ def test_create_triplets_skips_nodes_without_id():
     triplets = _create_triplets_from_graph([dp, node_no_id], [edge])
 
     assert len(triplets) == 0
+
+
+def test_ensure_default_edge_properties_preserves_existing_defaults():
+    # edge_text is supplied so the fallback path isn't invoked; this test
+    # focuses on edge_object_id and feedback_weight surviving.
+    edge = (
+        "source",
+        "target",
+        "related_to",
+        {
+            "edge_object_id": "edge-id",
+            "feedback_weight": 0.9,
+            "edge_text": "source related to target",
+        },
+    )
+
+    result = ensure_default_edge_properties([edge])
+
+    properties = result[0][3]
+    assert properties["edge_object_id"] == "edge-id"
+    assert properties["feedback_weight"] == 0.9
+    assert properties["edge_text"] == "source related to target"
+
+
+@pytest.mark.parametrize(
+    "properties",
+    [{}, {"edge_text": None}, {"edge_text": ""}, {"edge_text": "   "}],
+)
+def test_ensure_default_edge_properties_falls_back_for_missing_or_blank_edge_text(properties):
+    source = NamedPoint(name="Alice")
+    target = NamedPoint(name="Acme")
+    edge = (str(source.id), str(target.id), "works_at", properties)
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "Alice works at Acme."
+
+
+def test_ensure_default_edge_properties_preserves_nonblank_edge_text():
+    edge = ("source", "target", "related_to", {"edge_text": "Alice works at Acme."})
+
+    result = ensure_default_edge_properties([edge])
+
+    assert result[0][3]["edge_text"] == "Alice works at Acme."
+
+
+def test_ensure_default_edge_properties_uses_node_id_when_node_lookup_fails():
+    # Nodes were not passed to ensure_default_edge_properties, so neither
+    # endpoint can be resolved. Soft-fall back to the raw id so structural
+    # edges still get a usable (if ugly) label.
+    edge = ("source-node-id", "target-node-id", "related_to", {})
+
+    result = ensure_default_edge_properties([edge])
+
+    assert result[0][3]["edge_text"] == "source-node-id related to target-node-id."
+
+
+def test_ensure_default_edge_properties_uses_type_name_when_label_cannot_be_derived():
+    # Structural DataPoints (e.g. `Timestamp`) intentionally declare empty
+    # `index_fields` and no `name`. The helper soft-falls back to the class
+    # name so the graph still functions; a warning is emitted separately.
+    source = UnlabelablePoint(payload="hello")
+    target = NamedPoint(name="Acme")
+    edge = (str(source.id), str(target.id), "related_to", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "UnlabelablePoint related to Acme."
+
+
+def test_ensure_default_edge_properties_prefers_index_field_over_name():
+    # When both `name` and a different `index_fields[0]` are declared, the
+    # author's index_fields choice wins.
+    source = IndexedNonNamePoint(name="Display Name", handle="@actual_handle")
+    target = NamedPoint(name="Acme")
+    edge = (str(source.id), str(target.id), "tagged", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "@actual_handle tagged Acme."
+
+
+def test_ensure_default_edge_properties_falls_back_to_name_when_index_fields_missing():
+    source = OnlyNamePoint(name="Alice")
+    target = OnlyNamePoint(name="Bob")
+    edge = (str(source.id), str(target.id), "knows", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "Alice knows Bob."
+
+
+def test_ensure_default_edge_properties_prefers_title_when_name_is_unavailable():
+    source = TitledPoint(title="Source Title")
+    target = TitledPoint(title="Target Title")
+    edge = (str(source.id), str(target.id), "references", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["edge_text"] == "Source Title references Target Title."
+
+
+def test_ensure_default_edge_properties_uses_index_field_for_document_chunks():
+    # DocumentChunk declares `metadata = {"index_fields": ["text"]}`, so the
+    # fallback label uses the chunk's text (trimmed), per the index_fields
+    # contract — no class-name special-casing in the helper.
+    document = Document(
+        name="Doc",
+        raw_data_location="memory",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+    chunk = DocumentChunk(
+        text="Chunk text",
+        chunk_size=10,
+        chunk_index=3,
+        cut_type="paragraph",
+        is_part_of=document,
+    )
+    entity = NamedPoint(name="Alice")
+    edge = (str(chunk.id), str(entity.id), "contains", {})
+
+    result = ensure_default_edge_properties([edge], nodes=[chunk, entity])
+
+    assert result[0][3]["edge_text"] == "Chunk text contains Alice."
 
 
 @pytest.mark.asyncio

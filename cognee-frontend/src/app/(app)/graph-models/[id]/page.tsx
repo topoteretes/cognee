@@ -1,7 +1,9 @@
-export const dynamic = "force-dynamic";
+"use client";
 
-import { redirect } from "next/navigation";
+import { use } from "react";
+import GraphModelEditorPage from "./GraphModelEditorPage";
 
-export default async function Page() {
-  redirect("/dashboard");
+export default function Page({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  return <GraphModelEditorPage modelId={id} />;
 }

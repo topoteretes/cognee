@@ -34,9 +34,9 @@ class SearchPayloadDTO(InDTO):
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
-    skills: Optional[list[str]] = Field(default=None)
-    tools: Optional[list[str]] = Field(default=None)
-    max_iter: Optional[int] = Field(default=None)
+    skills: Optional[list[str]] = Field(default=None, examples=[None])
+    tools: Optional[list[str]] = Field(default=None, examples=[None])
+    max_iter: Optional[int] = Field(default=None, examples=[None])
 
 
 def get_search_router() -> APIRouter:
@@ -185,7 +185,7 @@ def get_search_router() -> APIRouter:
                 ).model_dump(),
             )
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_ENTITY)
+            status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_CONTENT)
             return JSONResponse(
                 status_code=status_code,
                 content=ErrorResponse(

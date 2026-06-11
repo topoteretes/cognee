@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 
 logger = get_logger()
@@ -398,8 +399,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         edge_texts = []
         for edge in edges:
             props = edge[3] if len(edge) > 3 and edge[3] else {}
-            edge_text = props.get("edge_text", edge[2])
-            edge_texts.append(edge_text)
+            edge_text = get_edge_retrieval_text(props.get("edge_text"), edge[2])
+            if edge_text:
+                edge_texts.append(edge_text)
 
         edge_type_counts = Counter(edge_texts)
 

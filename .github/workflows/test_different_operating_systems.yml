@@ -23,6 +23,8 @@ on:
         required: true
       LLM_API_KEY:
         required: true
+      LLM_ARGS:
+        required: false
       LLM_API_VERSION:
         required: true
       EMBEDDING_PROVIDER:
@@ -70,6 +72,7 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
@@ -107,6 +110,7 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
@@ -178,6 +182,7 @@ jobs:
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
@@ -210,6 +215,7 @@ jobs:
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}

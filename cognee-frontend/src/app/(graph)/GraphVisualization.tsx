@@ -207,7 +207,6 @@ export default function GraphVisualization({ ref, data, graphControls, className
 
   useEffect(() => {
     async function startAnimation() {
-      // @ts-expect-error d3-force-3d has no types
       const { forceCollide, forceManyBody } = await import("d3-force-3d");
 
       if (typeof window !== "undefined" && data && graphRef.current) {

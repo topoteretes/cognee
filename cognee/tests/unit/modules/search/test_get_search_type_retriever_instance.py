@@ -117,6 +117,25 @@ async def test_default_mapping_passes_top_k_to_retrievers():
 
 
 @pytest.mark.asyncio
+async def test_chunks_retriever_receives_nodeset_filter_arguments():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.CHUNKS,
+        query_text="land cover",
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    assert isinstance(retriever_instance, ChunksRetriever)
+    assert retriever_instance.top_k == 30
+    assert retriever_instance.node_name == ["KEN", "src_type:figure"]
+    assert retriever_instance.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
 async def test_chunks_lexical_returns_jaccard_tools():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
     from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever

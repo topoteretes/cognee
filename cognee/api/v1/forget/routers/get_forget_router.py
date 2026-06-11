@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Optional, Union
+from typing import Optional, Union, Literal
 from pydantic import Field
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
@@ -15,7 +15,8 @@ from cognee.shared.logging_utils import get_logger
 
 class ForgetPayloadDTO(InDTO):
     data_id: Optional[UUID] = Field(default=None)
-    dataset: Optional[Union[str, UUID]] = Field(default=None)
+    dataset: Optional[str] = Field(default=None, examples=[""])
+    dataset_id: Optional[UUID] = Field(default=None, examples=[""])
     everything: bool = Field(default=False)
     memory_only: bool = Field(
         default=False,
@@ -36,11 +37,11 @@ def get_forget_router() -> APIRouter:
         """Remove data from the knowledge graph.
 
         - Set `everything: true` to delete all user data.
-        - Set `dataset` alone to delete an entire dataset.
-        - Set `dataset` + `data_id` to delete a single item.
-        - Set `dataset` + `memory_only: true` to clear memory
+        - Set `dataset` or `dataset_id` alone to delete an entire dataset.
+        - Set `dataset`/`dataset_id` + `data_id` to delete a single item.
+        - Set `dataset`/`dataset_id` + `memory_only: true` to clear memory
           (graph + vector), preserving raw files so the dataset can be re-cognified.
-        - Set `dataset` + `data_id` + `memory_only: true` to clear memory
+        - Set `dataset`/`dataset_id` + `data_id` + `memory_only: true` to clear memory
           for a single file only.
         """
         send_telemetry(
@@ -58,6 +59,7 @@ def get_forget_router() -> APIRouter:
             result = await forget(
                 data_id=payload.data_id,
                 dataset=payload.dataset,
+                dataset_id=payload.dataset_id,
                 everything=payload.everything,
                 memory_only=payload.memory_only,
                 user=user,
@@ -67,7 +69,7 @@ def get_forget_router() -> APIRouter:
             return JSONResponse(
                 status_code=422,
                 content={
-                    "error": "Invalid request parameters. Specify dataset, data_id+dataset, or everything=True."
+                    "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, or everything=True."
                 },
             )
         except Exception as error:

@@ -176,39 +176,8 @@ def get_cognify_router() -> APIRouter:
                     }
                 }
 
-            # Resolve graph model and custom prompt: use payload values,
-            # fall back to stored DatasetConfiguration, then defaults.
             graph_model_schema = payload.graph_model
             custom_prompt = payload.custom_prompt
-
-            if datasets and (not graph_model_schema or not custom_prompt):
-                try:
-                    from uuid import UUID as _UUID
-                    from cognee.modules.data.models import DatasetConfiguration
-                    from cognee.infrastructure.databases.relational import get_relational_engine
-                    from sqlalchemy import select
-
-                    first_ds = datasets[0]
-                    try:
-                        ds_uuid = first_ds if isinstance(first_ds, _UUID) else _UUID(str(first_ds))
-                    except (ValueError, AttributeError):
-                        ds_uuid = None
-
-                    if ds_uuid:
-                        db_engine = get_relational_engine()
-                        async with db_engine.get_async_session() as session:
-                            config = await session.scalar(
-                                select(DatasetConfiguration).where(
-                                    DatasetConfiguration.dataset_id == ds_uuid
-                                )
-                            )
-                        if config:
-                            if not graph_model_schema and config.graph_schema:
-                                graph_model_schema = config.graph_schema
-                            if not custom_prompt and config.custom_prompt:
-                                custom_prompt = config.custom_prompt
-                except Exception as config_err:
-                    logger.debug("DatasetConfiguration lookup skipped: %s", config_err)
 
             if not graph_model_schema:
                 graph_model = KnowledgeGraph
@@ -226,45 +195,6 @@ def get_cognify_router() -> APIRouter:
                 chunks_per_batch=payload.chunks_per_batch,
                 data_per_batch=payload.data_per_batch,
             )
-
-            # Persist schema and prompt to DatasetConfiguration for first dataset
-            if datasets and (graph_model_schema or custom_prompt):
-                try:
-                    from uuid import UUID as _UUID
-                    from cognee.modules.data.models import DatasetConfiguration
-                    from cognee.infrastructure.databases.relational import get_relational_engine
-                    from sqlalchemy import select
-
-                    first_ds = datasets[0]
-                    try:
-                        ds_uuid = first_ds if isinstance(first_ds, _UUID) else _UUID(str(first_ds))
-                    except (ValueError, AttributeError):
-                        ds_uuid = None
-
-                    if ds_uuid:
-                        db_engine = get_relational_engine()
-                        async with db_engine.get_async_session() as session:
-                            config = await session.scalar(
-                                select(DatasetConfiguration).where(
-                                    DatasetConfiguration.dataset_id == ds_uuid
-                                )
-                            )
-                            if config:
-                                if graph_model_schema:
-                                    config.graph_schema = graph_model_schema
-                                if custom_prompt:
-                                    config.custom_prompt = custom_prompt
-                            else:
-                                session.add(
-                                    DatasetConfiguration(
-                                        dataset_id=ds_uuid,
-                                        graph_schema=graph_model_schema,
-                                        custom_prompt=custom_prompt,
-                                    )
-                                )
-                            await session.commit()
-                except Exception as persist_err:
-                    logger.warning("Failed to persist dataset configuration: %s", persist_err)
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):

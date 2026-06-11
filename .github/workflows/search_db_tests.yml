@@ -53,6 +53,7 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
@@ -95,6 +96,7 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
@@ -154,6 +156,7 @@ jobs:
             LLM_MODEL: ${{ secrets.LLM_MODEL }}
             LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
             LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+            LLM_ARGS: ${{ secrets.LLM_ARGS }}
             LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
             EMBEDDING_DIMENSIONS: 300
             EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
@@ -218,6 +221,7 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}

@@ -33,6 +33,7 @@ class GlobalContextSummary(DataPoint):
     dataset_id: str
     level: int
     is_root: bool = False
+    graph_bucket_entity_ids: list[str] | None = None
     summarized_in: Optional["GlobalContextSummary"] = None
     metadata: dict = {"index_fields": ["text"]}
 

@@ -18,6 +18,8 @@ on:
       #  required: true
       LLM_API_KEY:
         required: true
+      LLM_ARGS:
+        required: false
       OPENAI_API_KEY:
         required: true
       #LLM_API_VERSION:
@@ -59,6 +61,7 @@ jobs:
           #LLM_MODEL: ${{ secrets.LLM_MODEL }}
           #LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Use OpenAI Until a multimedia model is deployed and DeepEval support for other models is added
           #LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_DIMENSIONS: 300

@@ -14,6 +14,7 @@ import { useCallback, useState, KeyboardEvent } from "react";
 import { Dropzone } from "@mantine/dropzone";
 import addData, { addUrlData } from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
+import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import { useToggle } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { trackEvent } from "@/modules/analytics";
@@ -116,6 +117,7 @@ export default function DatasetAddWidget({
             llmModel,
           },
         )
+          .then(() => pollDatasetStatus(dataset_id, instance, { intervalMs: 5000 }))
           .then(() => {
             trackEvent({ pageName: "Dashboard", eventName: "cognify_completed", additionalProperties: { dataset_id, dataset_name, model: llmModel ?? "", prompt: activePromptName ?? "" } });
             onCognifyComplete?.();
@@ -177,6 +179,7 @@ export default function DatasetAddWidget({
             llmModel,
           },
         )
+          .then(() => pollDatasetStatus(dataset_id, instance, { intervalMs: 5000 }))
           .then(() => {
             trackEvent({ pageName: "Dashboard", eventName: "cognify_completed", additionalProperties: { dataset_id, dataset_name, model: llmModel ?? "", prompt: activePromptName ?? "" } });
             onCognifyComplete?.();

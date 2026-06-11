@@ -28,6 +28,14 @@ def _create_edge_key(source_id: str, target_id: str, relationship_name: str) -> 
     return f"{source_id}_{target_id}_{relationship_name}"
 
 
+def _strip_nonblank_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    stripped_value = value.strip()
+    return stripped_value or None
+
+
 def _process_ontology_nodes(
     ontology_nodes: list,
     data_chunk: DocumentChunk,
@@ -252,12 +260,11 @@ def _process_graph_nodes(
         if data_chunk.contains is None:
             data_chunk.contains = []
 
-        edge_text = "; ".join(
-            [
-                "relationship_name: contains",
-                f"entity_name: {entity_node.name}",
-                f"entity_description: {entity_node.description}",
-            ]
+        entity_description = _strip_nonblank_text(node.description)
+        edge_text = (
+            f"Document chunk mentions {entity_node.name}: {entity_description}"
+            if entity_description
+            else None
         )
 
         data_chunk.contains.append(
@@ -284,6 +291,7 @@ def _process_graph_edges(
         target_node_id = generate_node_id(target_id)
         relationship_name = generate_edge_name(edge.relationship_name)
         edge_key = _create_edge_key(source_node_id, target_node_id, relationship_name)
+        edge_text = _strip_nonblank_text(edge.description)
 
         if edge_key not in existing_edges_map:
             relationships.append(
@@ -296,6 +304,7 @@ def _process_graph_edges(
                         "source_node_id": source_node_id,
                         "target_node_id": target_node_id,
                         "ontology_valid": False,
+                        "edge_text": edge_text,
                     },
                 )
             )
@@ -310,14 +319,22 @@ def _resolve_node(node_id: str, all_nodes: dict, key_mapping: dict):
 
 def _populate_node_relations(all_nodes: dict, relationships: list, key_mapping: dict) -> None:
     """Attach edges to nodes via .relations for downstream traversal and persistence."""
-    for src_id, tgt_id, rel_name, _ in relationships:
+    for src_id, tgt_id, rel_name, properties in relationships:
         src_node = _resolve_node(src_id, all_nodes, key_mapping)
         tgt_node = _resolve_node(tgt_id, all_nodes, key_mapping)
 
         if src_node is None or tgt_node is None:
             continue
 
-        src_node.relations.append((Edge(relationship_type=rel_name), tgt_node))
+        src_node.relations.append(
+            (
+                Edge(
+                    relationship_type=rel_name,
+                    edge_text=(properties or {}).get("edge_text"),
+                ),
+                tgt_node,
+            )
+        )
 
 
 def expand_with_nodes_and_edges(
