@@ -21,8 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 TABLE_NAME = "dataset_database"
 NEW_COLUMNS = (
     "cognee_version",
-    "graph_migration_revision",
-    "vector_migration_revision",
+    "migration_revision",
 )
 
 

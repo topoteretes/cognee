@@ -22,7 +22,7 @@ import asyncio
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils.generate_node_name import generate_node_name
-from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
+from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
     _build_triplet_remap,
     _make_node,
     _migrate_graph,
@@ -663,7 +663,7 @@ def test_native_pgvector_rekey_merges_when_new_id_already_exists():
 
 
 def test_build_id_remap_reverse_targets_released_bare_scheme():
-    from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
+    from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
         build_id_remap_reverse,
     )
 
@@ -677,7 +677,7 @@ def test_build_id_remap_reverse_targets_released_bare_scheme():
 
 def test_graph_upgrade_then_downgrade_roundtrip():
     """up() then down() restores the released bare scheme on the graph store."""
-    from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
+    from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
         build_id_remap_reverse,
     )
 

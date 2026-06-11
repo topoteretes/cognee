@@ -16,11 +16,11 @@ class GlobalDatabaseVersion(Base):
     deployment (the per-dataset ``dataset_database.cognee_version`` records
     only which release last migrated that dataset's databases).
 
-    The ``global_*_migration_revision`` columns apply only when backend access
+    The ``global_migration_revision`` column applies only when backend access
     control is disabled: in that mode one global graph/vector pair backs every
     dataset (no ``dataset_database`` rows exist to carry revisions), so this
-    row tracks the pair's last-applied migration revisions. With access control
-    enabled they stay NULL — per-dataset revisions live on ``dataset_database``.
+    row tracks the pair's last-applied migration revision. With access control
+    enabled it stays NULL — the per-dataset revision lives on ``dataset_database``.
 
     Standalone on purpose: no Dataset FK and no sentinel rows in user-facing
     tables, so no query anywhere needs to filter anything out.
@@ -33,11 +33,10 @@ class GlobalDatabaseVersion(Base):
     # Cognee release that last started against this deployment (both modes).
     cognee_version = Column(String, nullable=True)
 
-    # Last-applied migration revision per GLOBAL database (access control off
-    # only; Alembic-style revision chain). NULL means "no recorded revision"
-    # -> all migrations run.
-    global_graph_migration_revision = Column(String, nullable=True)
-    global_vector_migration_revision = Column(String, nullable=True)
+    # Last-applied data-migration revision for the GLOBAL database pair
+    # (access control off only; one chain covers graph + vector + ledger).
+    # NULL means "no recorded revision" -> all migrations run.
+    global_migration_revision = Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))

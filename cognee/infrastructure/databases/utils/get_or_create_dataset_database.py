@@ -14,8 +14,7 @@ from cognee.modules.users.models import DatasetDatabase
 from cognee.modules.users.models import User
 from cognee.version import get_cognee_version
 from cognee.modules.migrations.migration import head_revision
-from cognee.modules.migrations.graph_migrations import GRAPH_MIGRATIONS
-from cognee.modules.migrations.vector_migrations import VECTOR_MIGRATIONS
+from cognee.modules.migrations.registry import MIGRATIONS
 
 
 async def _get_vector_db_info(dataset_id: UUID, user: User) -> dict:
@@ -118,8 +117,7 @@ async def get_or_create_dataset_database(
             owner_id=user.id,
             dataset_id=dataset_id,
             cognee_version=get_cognee_version(),
-            graph_migration_revision=head_revision(GRAPH_MIGRATIONS),
-            vector_migration_revision=head_revision(VECTOR_MIGRATIONS),
+            migration_revision=head_revision(MIGRATIONS),
             **graph_config_dict,  # Unpack graph db config
             **vector_config_dict,  # Unpack vector db config
         )

@@ -18,8 +18,7 @@ from cognee.modules.migrations.migration import (
     order_migrations,
     pending_migrations,
 )
-from cognee.modules.migrations.graph_migrations import GRAPH_MIGRATIONS
-from cognee.modules.migrations.vector_migrations import VECTOR_MIGRATIONS
+from cognee.modules.migrations.registry import MIGRATIONS
 
 
 async def _noop(context):
@@ -141,22 +140,18 @@ def test_shipped_slugs_are_pinned():
     """These slugs are stored in customer databases. They are APPEND-ONLY:
     if this test fails because a slug changed or vanished, every stamped
     deployment silently stops migrating — fix the chain, not this test."""
-    assert [m.slug for m in order_migrations(GRAPH_MIGRATIONS)] == [
-        "namespace_entity_type_node_ids",
-    ]
-    assert [m.slug for m in order_migrations(VECTOR_MIGRATIONS)] == [
+    assert [m.slug for m in order_migrations(MIGRATIONS)] == [
         "adapter_storage_migration",
+        "namespace_entity_type_node_ids",
     ]
 
 
 def test_registered_migrations_skipped_at_head():
-    assert pending_migrations(GRAPH_MIGRATIONS, head_revision(GRAPH_MIGRATIONS)) == []
-    assert pending_migrations(VECTOR_MIGRATIONS, head_revision(VECTOR_MIGRATIONS)) == []
+    assert pending_migrations(MIGRATIONS, head_revision(MIGRATIONS)) == []
 
 
 def test_shipped_migrations_are_downgradable():
-    assert all(m.down is not None for m in GRAPH_MIGRATIONS)
-    assert all(m.down is not None for m in VECTOR_MIGRATIONS)
+    assert all(m.down is not None for m in MIGRATIONS)
 
 
 def test_frozen_id_derivations_are_pinned():
@@ -166,7 +161,7 @@ def test_frozen_id_derivations_are_pinned():
     live model code. If this fails, someone 'deduplicated' the frozen copies
     against the live functions — revert that, and ship a NEW migration for the
     new scheme instead."""
-    from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
+    from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
         _frozen_bare_id,
         _frozen_model_id,
     )
@@ -183,7 +178,7 @@ def test_frozen_derivations_currently_match_live_models():
     copies — append a migration translating frozen-target -> new live scheme."""
     from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
     from cognee.modules.engine.models import Entity, EntityType
-    from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
+    from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
         _frozen_bare_id,
         _frozen_model_id,
     )
@@ -196,10 +191,11 @@ def test_frozen_derivations_currently_match_live_models():
 # ── runner pieces ────────────────────────────────────────────────────────────
 
 
-def test_apply_runs_pending_then_advances_revision():
-    from cognee.modules.migrations.runner import _apply
+def test_apply_runs_pending_in_order_and_stamps_per_step(monkeypatch):
+    import cognee.modules.migrations.runner as runner
 
     applied_order: list[str] = []
+    stamps: list = []
 
     def make_up(name):
         async def up(context):
@@ -207,21 +203,21 @@ def test_apply_runs_pending_then_advances_revision():
 
         return up
 
+    async def stamp(revision):
+        stamps.append(revision)
+
     m1 = Migration(slug="t1", cognee_version="1.0.0", up=make_up("t1"), down_revision=None)
     m2 = Migration(slug="t2", cognee_version="1.1.0", up=make_up("t2"), down_revision="t1")
-    chain = [m1, m2]
-    fake_context = object()
+    monkeypatch.setattr(runner, "MIGRATIONS", [m1, m2])
 
-    applied, new_revision = asyncio.run(_apply(fake_context, chain, None))
+    applied = asyncio.run(runner._apply(object(), None, "head", stamp))
     assert applied == ["t1", "t2"]
-    assert new_revision == "t2"
     assert applied_order == ["t1", "t2"]
+    assert stamps == ["t1", "t2"]  # stamped after EACH applied step
 
-    # Re-running from head applies nothing and keeps the stored revision.
+    # Re-running from head applies nothing.
     applied_order.clear()
-    applied_again, revision_again = asyncio.run(_apply(fake_context, chain, "t2"))
-    assert applied_again == []
-    assert revision_again == "t2"
+    assert asyncio.run(runner._apply(object(), "t2", "head", stamp)) == []
     assert applied_order == []
 
 
@@ -290,12 +286,12 @@ def test_downgrade_span_is_synchronous_validation():
     """_downgrade_span is pure validation called without await everywhere —
     it must be a plain function (regression: declaring it async made every
     downgrade fail with 'coroutine is not iterable')."""
-    from cognee.modules.migrations.runner import KEEP, _downgrade_span
+    import inspect
 
-    chain = _chain(with_downs=True)
-    assert _downgrade_span(chain, "m3", None) == list(reversed(order_migrations(chain)))
-    assert _downgrade_span(chain, None, None) == []
-    assert _downgrade_span(chain, "m3", KEEP) == []
+    from cognee.modules.migrations.runner import _downgrade_span
+
+    assert not inspect.iscoroutinefunction(_downgrade_span)
+    assert _downgrade_span(None, None) == []  # nothing applied -> nothing to revert
 
 
 def test_runner_routes_to_global_path_without_access_control(monkeypatch):
@@ -313,7 +309,7 @@ def test_runner_routes_to_global_path_without_access_control(monkeypatch):
 
     sentinel = [{"database": "global", "graph_migrations_applied": ["x"]}]
 
-    async def _fake_global(current_version, graph_target="head", vector_target="head"):
+    async def _fake_global(current_version, target="head"):
         assert current_version
         return sentinel
 

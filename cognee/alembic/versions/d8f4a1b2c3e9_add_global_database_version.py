@@ -2,7 +2,7 @@
 
 Tracks the deployment-wide Cognee version (written on every startup in both
 access-control modes) and, when backend access control is disabled, the
-migration revisions of the GLOBAL graph/vector databases (no per-dataset
+data-migration revision of the GLOBAL graph/vector databases (no per-dataset
 dataset_database rows exist to carry them in that mode).
 
 Revision ID: d8f4a1b2c3e9
@@ -34,8 +34,7 @@ def upgrade() -> None:
             TABLE_NAME,
             sa.Column("id", sa.Integer(), primary_key=True),
             sa.Column("cognee_version", sa.String(), nullable=True),
-            sa.Column("global_graph_migration_revision", sa.String(), nullable=True),
-            sa.Column("global_vector_migration_revision", sa.String(), nullable=True),
+            sa.Column("global_migration_revision", sa.String(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         )

@@ -49,7 +49,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.models import Edge, Node
-from cognee.modules.migrations.graph.namespace_entity_type_node_ids import build_id_remap
+from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
 
 _LEDGER_ENTITY_TYPES = (Entity.__name__, EntityType.__name__)
 

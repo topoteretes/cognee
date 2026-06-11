@@ -1,16 +1,18 @@
 # Graph / Vector Data Migrations
 
-Alembic-style revision chains for cognee's **graph and vector databases** (the
-relational schema has its own Alembic setup under `cognee/alembic/`). Each
-database records the slug of the last migration applied to it; on startup the
-runner walks the chain forward.
+ONE alembic-style revision chain for cognee's **data migrations** — each
+migration is a cross-store transformation that may touch the graph database,
+vector database and relational delete-ledger together (the relational schema
+has its own Alembic setup under `cognee/alembic/`). Each database pair records
+the slug of the last migration applied to it; on startup the runner walks the
+chain forward, stamping after every step.
 
 ## Where state lives
 
-| Mode | Revisions | Written by |
+| Mode | Revision | Written by |
 |---|---|---|
-| Access control ON (default) | `dataset_database.graph_migration_revision` / `.vector_migration_revision` — one row per dataset's database pair | head-stamped at row creation (`get_or_create_dataset_database`); advanced by `runner.run_database_migrations` |
-| Access control OFF | `global_database_version.global_graph_migration_revision` / `.global_vector_migration_revision` — one row, one global pair | `runner._run_global_migrations` |
+| Access control ON (default) | `dataset_database.migration_revision` — one row per dataset's database pair | head-stamped at row creation (`get_or_create_dataset_database`); advanced per applied step by `runner.run_database_migrations` |
+| Access control OFF | `global_database_version.global_migration_revision` — one row, one global pair | `runner._run_global_migrations` |
 
 `cognee_version` columns are **audit-only** (which release last migrated /
 last started); nothing gates on them. Revisions are the only gates.
@@ -55,7 +57,7 @@ converge it on the next upgrade.
    several stores, compute the map while the source of truth (the graph) still
    holds the source ids; re-key the derived stores (vector points, relational
    ledger) first and rename the graph LAST, so a crash at any point leaves a
-   state the next startup finishes. See `graph/namespace_entity_type_node_ids.py`
+   state the next startup finishes. See `versions/namespace_entity_type_node_ids.py`
    for the worked example.
 4. **Freeze everything you derive.** Vendor private copies of id derivations,
    normalization rules and collection names into the migration module
@@ -68,9 +70,10 @@ converge it on the next upgrade.
 6. **Downgrades** are optional per migration (`down=`), explicit-only
    (`runner.downgrade_database_migrations`), and a chain can only be
    downgraded through a contiguous span where every entry defines `down`.
-7. **Validate at import.** Each registry calls `order_migrations(...)` at
-   module bottom so a typo'd `down_revision` fails in CI, not at customer
-   startup. The unit tests additionally pin the shipped slugs.
+7. **Validate at import.** The registry validates the chain (linearity,
+   unique slugs, reserved keywords) at module bottom so a typo'd
+   `down_revision` fails in CI, not at customer startup. The unit tests
+   additionally pin the shipped slugs.
 
 ## Landmine index (things migration #1 had to learn the hard way)
 
@@ -115,7 +118,7 @@ a maintenance window.
   `cognee/tests/unit/modules/migrations/` — they mirror the REAL adapter
   contracts (IndexSchema payloads; no `create_data_points` on the vector fake,
   so model-reconstruction regressions fail loudly).
-- Integration: `scripts/test_migration_lockstep.py` — seed via real cognify,
+- Integration: `cognee/tests/migrations/test_migration_lockstep.py` — seed via real cognify,
   downgrade via the migration's own `down`, re-migrate, verify all stores,
   re-cognify, hard-delete. Run per phase in separate processes.
 - Cross-version: `cognee/tests/backwards_compatibility/phase{1,2}` against a

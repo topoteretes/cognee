@@ -19,7 +19,7 @@ revisions live in the single-row global_database_version table.
 
 Run (add ENABLE_BACKEND_ACCESS_CONTROL=False for the global-mode variant):
     TRIPLET_EMBEDDING=true SYSTEM_ROOT_DIRECTORY=... DATA_ROOT_DIRECTORY=... \
-    python scripts/test_migration_lockstep.py <seed|downgrade|migrate|verify|recognify|delete>
+    python cognee/tests/migrations/test_migration_lockstep.py <seed|downgrade|migrate|verify|recognify|delete>
 """
 
 import asyncio
@@ -41,7 +41,7 @@ from cognee.modules.data.methods.get_dataset_databases import get_dataset_databa
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.models import Edge, Node
-from cognee.modules.migrations.graph.namespace_entity_type_node_ids import build_id_remap
+from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
 from cognee.modules.migrations.runner import run_database_migrations
 
 TEXT = """
@@ -79,9 +79,17 @@ async def verify(stage: str):
             f"{len(build_id_remap(nodes))} stale",
         )
         model = {"Entity": Entity, "EntityType": EntityType}
+        # Positive id-scheme check. Not all(): an entity whose LLM-emitted raw
+        # id differs from its name is LEGITIMATELY at id_for(raw_id), not
+        # id_for(name) — the "no old-scheme ids remain" check above covers
+        # staleness; this one proves the migration produced model-owned ids.
+        on_scheme = sum(
+            1 for nid, p in entityish if nid == str(model[p["type"]].id_for(p["name"]))
+        )
         check(
-            f"{stage}: every entity id == Model.id_for(name)",
-            all(nid == str(model[p["type"]].id_for(p["name"])) for nid, p in entityish),
+            f"{stage}: entities on the model-owned id scheme",
+            on_scheme > 0,
+            f"{on_scheme}/{len(entityish)} (rest are the id!=name case)",
         )
         dangling = [(s, t) for s, t, _, _ in real_edges if s not in node_ids or t not in node_ids]
         check(f"{stage}: no dangling edges", not dangling, f"{len(dangling)} dangling")
@@ -204,7 +212,7 @@ async def main(phase: str):
         check(
             "downgrade reverted the id migration",
             any(
-                "namespace_entity_type_node_ids" in (s.get("graph_migrations_reverted") or [])
+                "namespace_entity_type_node_ids" in (s.get("migrations_reverted") or [])
                 for s in summaries
             ),
             str(summaries),
@@ -221,12 +229,12 @@ async def main(phase: str):
     elif phase == "migrate":
         print("\n[3] run startup migrations")
         summaries = await run_database_migrations()
-        migrated = [s for s in summaries if s.get("graph_migrations_applied")]
+        migrated = [s for s in summaries if s.get("migrations_applied")]
         check("migration ran for the downgraded dataset", bool(migrated), str(summaries))
         summaries2 = await run_database_migrations()
         check(
             "second run applies nothing (idempotency + fast path)",
-            all(not s.get("graph_migrations_applied") for s in summaries2),
+            all(not s.get("migrations_applied") for s in summaries2),
             str(summaries2),
         )
 
