@@ -27,7 +27,9 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
+
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 
 from cognee.version import get_cognee_version
 from cognee.context_global_variables import (
@@ -210,7 +212,19 @@ async def _run_global_migrations(
     ``dataset_id=None``, so ledger updates apply unscoped — correct here, since
     the one global graph backs every dataset's ledger rows.
     """
-    row = await _record_deployment_version(current_version)
+    try:
+        row = await _record_deployment_version(current_version)
+    except (OperationalError, ProgrammingError, EntityNotFoundError) as error:
+        # The bookkeeping tables may not exist yet on a fresh database. A
+        # missing table surfaces as OperationalError on SQLite ("no such
+        # table") and as ProgrammingError on PostgreSQL/asyncpg
+        # (UndefinedTableError); skip the migrations in both cases (the
+        # startup path runs Alembic first, so this only affects direct calls).
+        logger.warning(
+            "Skipping graph/vector migrations. Could not access migration bookkeeping tables: %s",
+            error,
+        )
+        return []
     if _nothing_pending(
         row.global_graph_migration_revision,
         row.global_vector_migration_revision,
@@ -347,11 +361,24 @@ async def run_database_migrations(
     if not backend_access_control_enabled():
         return await _run_global_migrations(current_version, graph_target, vector_target)
 
-    # Record the deployment-wide version even in per-dataset mode (the global
-    # revision columns stay NULL — per-dataset revisions live on each row).
-    await _record_deployment_version(current_version)
+    try:
+        # Record the deployment-wide version even in per-dataset mode (the
+        # global revision columns stay NULL — per-dataset revisions live on
+        # each row).
+        await _record_deployment_version(current_version)
+        rows = await get_dataset_databases()
+    except (OperationalError, ProgrammingError, EntityNotFoundError) as error:
+        # The bookkeeping tables may not exist yet on a fresh database. A
+        # missing table surfaces as OperationalError on SQLite ("no such
+        # table") and as ProgrammingError on PostgreSQL/asyncpg
+        # (UndefinedTableError); skip the migrations in both cases (the
+        # startup path runs Alembic first, so this only affects direct calls).
+        logger.warning(
+            "Skipping graph/vector migrations. Could not access migration bookkeeping tables: %s",
+            error,
+        )
+        return []
 
-    rows = await get_dataset_databases()
     db_engine = get_relational_engine()
 
     summaries: list[dict] = []

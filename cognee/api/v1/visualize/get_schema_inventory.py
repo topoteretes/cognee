@@ -22,12 +22,11 @@ ENTITY_TYPE_RELATION = "is_a"
 
 
 # Internal graph taxonomy types that must not appear as separate type groups in
-# the inventory. EntityType nodes are genuine graph nodes grouped under their own
-# "EntityType" type (their ``name`` — Person/Tool/... — is surfaced as samples),
-# while Entity instances still collapse to their semantic type via the is_a edge,
-# so they are intentionally NOT internal. This set is kept (currently empty) so
-# future genuinely-internal types can be added without re-plumbing the guards.
-_INTERNAL_TYPES: frozenset[str] = frozenset()
+# the inventory. EntityType nodes act as semantic-type labels — their role is
+# resolved onto the Entity instances via the is_a edge, so surfacing them as a
+# separate group would double-count. Filtering them here also drops is_a edges
+# from the relationship distribution (their target is always an EntityType node).
+_INTERNAL_TYPES: frozenset[str] = frozenset({"EntityType"})
 
 
 def _resolve_node_types(

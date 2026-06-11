@@ -128,7 +128,7 @@ async def test_sort_by_count_descending(mock_graph_engine):
     counts = [rec["count"] for rec in inventory]
     assert counts == sorted(counts, reverse=True)
 
-    # Person (3) and EntityType (3) tie on count; type name breaks the tie.
+    # Person (3) is the top type; type name breaks ties on equal counts.
     ordering = [(rec["count"], rec["type"]) for rec in inventory]
     assert ordering == sorted(ordering, key=lambda pair: (-pair[0], pair[1]))
 

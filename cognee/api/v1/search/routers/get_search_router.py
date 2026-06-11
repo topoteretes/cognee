@@ -31,12 +31,13 @@ class SearchPayloadDTO(InDTO):
         default="Answer the question using the provided context. Be as brief as possible."
     )
     node_name: Optional[list[str]] = Field(default=None, example=[])
-    top_k: Optional[int] = Field(default=10)
+    top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
     skills: Optional[list[str]] = Field(default=None, examples=[None])
     tools: Optional[list[str]] = Field(default=None, examples=[None])
     max_iter: Optional[int] = Field(default=None, examples=[None])
+    include_references: bool = Field(default=True)
 
 
 def get_search_router() -> APIRouter:
@@ -118,7 +119,7 @@ def get_search_router() -> APIRouter:
         - **query** (str): The search query string
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
-        - **top_k** (Optional[int]): Maximum number of results to return (default: 10)
+        - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
 
         ## Response
@@ -150,6 +151,7 @@ def get_search_router() -> APIRouter:
                 "skills": payload.skills,
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
+                "include_references": payload.include_references,
                 "cognee_version": cognee_version,
             },
         )
@@ -173,6 +175,7 @@ def get_search_router() -> APIRouter:
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
+                include_references=payload.include_references,
             )
 
             return jsonable_encoder(results)

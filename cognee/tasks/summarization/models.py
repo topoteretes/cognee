@@ -6,24 +6,6 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart
 
 
-class TextSummary(DataPoint):
-    """
-    Represent a text summary derived from a document chunk.
-
-    This class encapsulates a text summary as well as its associated metadata. The public
-    instance variables include 'text' for the summary content and 'made_from' which
-    indicates the source document chunk. The 'metadata' instance variable contains
-    additional information such as indexed fields.
-    """
-
-    text: str
-    made_from: DocumentChunk
-    summarized_in: Optional["GlobalContextSummary"] = None
-    global_context_bucket_id: Optional[str] = None
-    metadata: dict = {"index_fields": ["text"]}
-    importance_weight: Optional[float] = 0.5
-
-
 class GlobalContextSummary(DataPoint):
     """
     Summarizes a global context index bucket or dataset root.
@@ -36,6 +18,24 @@ class GlobalContextSummary(DataPoint):
     graph_bucket_entity_ids: list[str] | None = None
     summarized_in: Optional["GlobalContextSummary"] = None
     metadata: dict = {"index_fields": ["text"]}
+
+
+class TextSummary(DataPoint):
+    """
+    Represent a text summary derived from a document chunk.
+
+    This class encapsulates a text summary as well as its associated metadata. The public
+    instance variables include 'text' for the summary content and 'made_from' which
+    indicates the source document chunk. The 'metadata' instance variable contains
+    additional information such as indexed fields.
+    """
+
+    text: str
+    made_from: DocumentChunk
+    summarized_in: Optional[GlobalContextSummary] = None
+    global_context_bucket_id: Optional[str] = None
+    metadata: dict = {"index_fields": ["text"]}
+    importance_weight: Optional[float] = 0.5
 
 
 class CodeSummary(DataPoint):

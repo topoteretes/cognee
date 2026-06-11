@@ -26,6 +26,8 @@ from cognee.modules.users.models import User
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from .run_tasks_data_item import run_tasks_data_item
 
 logger = get_logger("run_tasks_distributed()")
@@ -89,6 +91,8 @@ async def run_tasks_distributed(
     pipeline_name: str = "unknown_pipeline",
     incremental_loading: bool = False,
     data_per_batch: int = 20,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -109,7 +113,12 @@ async def run_tasks_distributed(
         payload=data,
     )
 
-    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+    async with set_database_global_context_variables(
+        dataset.id,
+        dataset.owner_id,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
+    ):
         try:
             if not isinstance(data, list):
                 data = [data]

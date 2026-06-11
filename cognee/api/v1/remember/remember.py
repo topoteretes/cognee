@@ -68,6 +68,8 @@ class RememberKwargs(TypedDict, total=False):
     write_disposition: str
     query: str
     max_rows_per_table: int
+    llm_config: Any
+    embedding_config: Any
 
 
 # Kwarg routing: which RememberKwargs go to add(), cognify(), or both.
@@ -93,6 +95,8 @@ _SHARED = frozenset(
         "incremental_loading",
         "data_per_batch",
         "run_in_background",
+        "llm_config",
+        "embedding_config",
     }
 )
 

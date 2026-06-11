@@ -90,7 +90,7 @@ async def test_upsert_nodes_sanitizes_strings_before_insert():
     assert payload["attributes"]["text"] == "Bad text"
     assert payload["attributes"]["details"] == {"summary": "Nested value", "items": ["A", "B"]}
     session.execute.assert_awaited_once_with(statement)
-    session.commit.assert_awaited_once()
+    session.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -129,7 +129,7 @@ async def test_upsert_edges_sanitizes_strings_before_insert():
         "nested": {"value": "still here"},
     }
     session.execute.assert_awaited_once_with(statement)
-    session.commit.assert_awaited_once()
+    session.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -167,4 +167,4 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
         "note": "nul byte",
     }
     session.execute.assert_awaited_once_with(statement)
-    session.commit.assert_awaited_once()
+    session.commit.assert_not_called()

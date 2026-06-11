@@ -16,7 +16,9 @@ from cognee.modules.retrieval.utils.global_context import (
 from cognee.modules.retrieval.utils.used_graph_elements import (
     is_edge_list,
     extract_from_edges,
+    extract_from_temporal_dict,
 )
+from cognee.modules.retrieval.utils.references import build_graph_reference_context
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
@@ -57,6 +59,7 @@ class GraphCompletionRetriever(BaseRetriever):
         neighborhood_seed_top_k: Optional[int] = 10,
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
+        include_references: bool = True,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
@@ -77,6 +80,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self.neighborhood_seed_top_k = neighborhood_seed_top_k
         self.include_global_context_index = include_global_context_index
         self.global_context_index_top_k = global_context_index_top_k
+        self.include_references = include_references
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -302,6 +306,50 @@ class GraphCompletionRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
+    def _node_ids_from_retrieved(self, retrieved_objects: Any) -> List[str]:
+        """Collect entity node ids from retrieved edges (or a temporal dict)."""
+        extracted: Optional[Dict[str, List[str]]] = None
+        if isinstance(retrieved_objects, dict):
+            extracted = extract_from_temporal_dict(retrieved_objects)
+        elif is_edge_list(retrieved_objects):
+            extracted = extract_from_edges(retrieved_objects)
+        if not extracted:
+            return []
+        return extracted.get("node_ids", [])
+
+    async def _append_graph_evidence(
+        self, completions: List[Any], retrieved_objects: Any
+    ) -> List[Any]:
+        """Append a code-assembled entity-fallback Evidence block to string completions.
+
+        Evidence is appended only when references are enabled, the completion is a
+        plain string (never corrupt a structured response_model), and the built
+        Evidence block is non-empty. Traversal failures degrade to no Evidence.
+        """
+        if not self.include_references or self.response_model is not str:
+            return completions
+
+        node_ids = self._node_ids_from_retrieved(retrieved_objects)
+        if not node_ids:
+            return completions
+
+        from cognee.infrastructure.databases.graph import get_graph_engine
+
+        try:
+            graph_engine = await get_graph_engine()
+        except Exception as error:  # pragma: no cover - defensive
+            logger.debug(f"Unable to obtain graph engine for references: {error}")
+            return completions
+
+        evidence = await build_graph_reference_context(node_ids, graph_engine)
+        if not evidence:
+            return completions
+
+        return [
+            f"{completion}\n\n{evidence}" if isinstance(completion, str) else completion
+            for completion in completions
+        ]
+
     async def get_completion_from_context(
         self,
         query: Optional[str] = None,
@@ -343,8 +391,15 @@ class GraphCompletionRetriever(BaseRetriever):
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
             )
-            return [completion]
-        return await self._generate_completion_without_session(query, query_batch, context)
+            completions = [completion]
+        else:
+            completions = await self._generate_completion_without_session(
+                query, query_batch, context
+            )
+
+        # Session and non-session branches rejoin here so every variant that calls
+        # this method (including via super()) appends graph references once.
+        return await self._append_graph_evidence(completions, retrieved_objects)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None

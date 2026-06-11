@@ -317,13 +317,13 @@ def get_sessions_router() -> APIRouter:
         # (so trace-only sessions — the plugin case — still have a label).
         label = None
         for entry in qas:
-            if isinstance(entry, dict) and entry.get("question"):
-                label = str(entry["question"])[:120]
+            if getattr(entry, "question", None):
+                label = str(entry.question)[:120]
                 break
         if label is None:
             for entry in traces:
-                if isinstance(entry, dict) and entry.get("origin_function"):
-                    label = str(entry["origin_function"])
+                if getattr(entry, "origin_function", None):
+                    label = str(entry.origin_function)
                     break
         record["label"] = label
         record["msg_count"] = len(qas)

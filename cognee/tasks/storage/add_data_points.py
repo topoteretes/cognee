@@ -5,6 +5,7 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+from cognee.infrastructure.databases.relational import get_async_session
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
@@ -96,20 +97,25 @@ async def add_data_points(
         )
 
     if user and dataset and data_item:
-        await upsert_nodes(
-            nodes,
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            dataset_id=dataset.id,
-            data_id=data_item.id,
-        )
-        await upsert_edges(
-            edges,
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            dataset_id=dataset.id,
-            data_id=data_item.id,
-        )
+        # Single session for both upserts: one transaction, one commit.
+        async with get_async_session() as session:
+            await upsert_nodes(
+                nodes,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data_item.id,
+                session=session,
+            )
+            await upsert_edges(
+                edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data_item.id,
+                session=session,
+            )
+            await session.commit()
 
     if use_hybrid:
         await graph_engine.add_edges_with_vectors(edges)
@@ -130,13 +136,16 @@ async def add_data_points(
             )
 
         if user and dataset and data_item:
-            await upsert_edges(
-                custom_edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=dataset.id,
-                data_id=data_item.id,
-            )
+            async with get_async_session() as session:
+                await upsert_edges(
+                    custom_edges,
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    dataset_id=dataset.id,
+                    data_id=data_item.id,
+                    session=session,
+                )
+                await session.commit()
 
         edges.extend(custom_edges)
 
