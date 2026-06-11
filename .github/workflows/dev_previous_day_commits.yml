@@ -13,14 +13,13 @@ on:
         default: ""
   schedule:
     - cron: "59 23 * * *"
-  pull_request:
 
 permissions:
   contents: read
   pull-requests: read
 
 env:
-  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || (github.event_name == 'pull_request' && '3') || '1' }}
+  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
 
 jobs:
   prepare-merged-branches:
@@ -229,8 +228,15 @@ jobs:
             exit 1
           fi
 
-      - name: Generate docs changes with Claude
+      - name: Read docs scope plan outputs
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: scope_plan
+        run: |
+          python3 tools/write_docs_scope_plan_outputs.py \
+            --scope-plan "${{ steps.branch_paths.outputs.docs_scope_plan }}"
+
+      - name: Generate docs changes with Claude
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -256,7 +262,7 @@ jobs:
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 50"
 
       - name: Prepare docs PR content
-        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: pr_content
         env:
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
@@ -274,7 +280,7 @@ jobs:
             --docs-root docs-repo
 
       - name: Create docs draft commit
-        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: commit_docs
         working-directory: docs-repo
         run: |
@@ -289,12 +295,12 @@ jobs:
           echo "changes_made=true" >> "$GITHUB_OUTPUT"
 
       - name: Push docs draft branch
-        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
         working-directory: docs-repo
         run: git push --force-with-lease origin "${{ steps.assessment.outputs.docs_branch }}"
 
       - name: Create or update docs pull request
-        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: manage_pr
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
@@ -311,6 +317,7 @@ jobs:
             --changes-made "${CHANGES_MADE}"
 
       - name: Summarize docs PR result
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         env:
           CHANGED_FILES: ${{ steps.pr_content.outputs.changed_files }}
         run: |
