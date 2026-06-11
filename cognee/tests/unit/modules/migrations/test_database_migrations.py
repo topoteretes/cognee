@@ -225,16 +225,24 @@ def test_apply_runs_pending_then_advances_revision():
     assert applied_order == []
 
 
-def test_revert_runs_downs_newest_first():
-    from cognee.modules.migrations.runner import _revert
+def test_revert_span_runs_downs_newest_first_and_stamps_per_step():
+    """Per-step stamping: after each down(), the stored revision is moved to
+    that migration's down_revision — a failure mid-span can never leave the
+    bookkeeping pointing at already-reverted data."""
+    from cognee.modules.migrations.migration import migrations_to_downgrade
+    from cognee.modules.migrations.runner import _revert_span
 
     reverted_order: list[str] = []
+    stamps: list = []
 
     def make_down(name):
         async def down(context):
             reverted_order.append(name)
 
         return down
+
+    async def stamp(revision):
+        stamps.append(revision)
 
     m1 = Migration(
         slug="t1", cognee_version="1.0.0", up=_noop, down_revision=None, down=make_down("t1")
@@ -243,9 +251,39 @@ def test_revert_runs_downs_newest_first():
         slug="t2", cognee_version="1.1.0", up=_noop, down_revision="t1", down=make_down("t2")
     )
 
-    reverted = asyncio.run(_revert(object(), [m1, m2], "t2", None))
+    span = migrations_to_downgrade([m1, m2], "t2", None)
+    reverted = asyncio.run(_revert_span(object(), span, stamp))
     assert reverted == ["t2", "t1"]
     assert reverted_order == ["t2", "t1"]
+    assert stamps == ["t1", None]  # stamped after EACH step, ending at base
+
+
+def test_revert_span_failure_mid_span_keeps_bookkeeping_consistent():
+    """t2 reverts and stamps t1; t1's down raises -> the stored revision must
+    remain t1 (last consistent state), never t2-over-reverted-data."""
+    import pytest
+
+    from cognee.modules.migrations.migration import migrations_to_downgrade
+    from cognee.modules.migrations.runner import _revert_span
+
+    stamps: list = []
+
+    async def stamp(revision):
+        stamps.append(revision)
+
+    async def ok_down(context):
+        return None
+
+    async def boom_down(context):
+        raise RuntimeError("backend down")
+
+    m1 = Migration(slug="t1", cognee_version="1.0.0", up=_noop, down_revision=None, down=boom_down)
+    m2 = Migration(slug="t2", cognee_version="1.1.0", up=_noop, down_revision="t1", down=ok_down)
+
+    span = migrations_to_downgrade([m1, m2], "t2", None)
+    with pytest.raises(RuntimeError):
+        asyncio.run(_revert_span(object(), span, stamp))
+    assert stamps == ["t1"]  # t2's revert recorded; nothing claims base
 
 
 def test_runner_routes_to_global_path_without_access_control(monkeypatch):

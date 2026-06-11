@@ -21,6 +21,11 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
+# Unknown stored revisions already warned about (once per process per value):
+# the check runs on every startup AND on every cognify() pending-check, so an
+# unrepaired legacy row must not flood the logs.
+_warned_unknown_revisions: set = set()
+
 
 @dataclass(frozen=True)
 class MigrationContext:
@@ -150,14 +155,17 @@ def pending_migrations(
         if migration.revision == stored_revision:
             return ordered[index + 1 : end_index]
 
-    logger.warning(
-        "Stored migration revision %r is unknown to this chain (head: %r) — no migrations "
-        "will run for this database. Expected only after a rollback to older code; if no "
-        "rollback happened, a migration slug was renamed or the revision row is corrupted, "
-        "and this database will silently skip all future migrations until fixed.",
-        stored_revision,
-        ordered[-1].revision if ordered else None,
-    )
+    if stored_revision not in _warned_unknown_revisions:
+        _warned_unknown_revisions.add(stored_revision)
+        logger.warning(
+            "Stored migration revision %r is unknown to this chain (head: %r) — no migrations "
+            "will run for this database. Expected only after a rollback to older code; if no "
+            "rollback happened, a migration slug was renamed or the revision row is corrupted, "
+            "and this database will silently skip all future migrations until repaired "
+            "(`cognee-cli stamp base --dataset <id>` re-arms the chain). Logged once per process.",
+            stored_revision,
+            ordered[-1].revision if ordered else None,
+        )
     return []
 
 

@@ -26,6 +26,21 @@ last started); nothing gates on them. Revisions are the only gates.
 Steady state is cheap: an in-memory revision comparison per database, nothing
 opened, nothing written.
 
+## Operator commands (alembic-style)
+
+```
+cognee-cli upgrade [revision]              # head (default) or a slug; partial-chain ok
+cognee-cli downgrade <revision> [--dataset ID]   # 'base' or a slug; data-rewriting, confirmed
+cognee-cli stamp <revision> [--dataset ID] # set the stored revision WITHOUT running anything
+cognee-cli history                         # the chains, newest first
+cognee-cli current                         # each database's stamped revision
+```
+
+`stamp` is the bookkeeping-repair escape hatch: `stamp base --dataset <id>`
+re-arms the chain for a database whose data drifted from its stamp (restored
+backup, old-code writes after migration), letting the idempotent chain
+converge it on the next upgrade.
+
 ## Authoring contract — read before writing migration #2
 
 1. **Slugs are append-only and immutable.** The slug IS the revision stored in

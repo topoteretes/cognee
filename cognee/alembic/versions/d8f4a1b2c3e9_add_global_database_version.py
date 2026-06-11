@@ -6,7 +6,7 @@ migration revisions of the GLOBAL graph/vector databases (no per-dataset
 dataset_database rows exist to carry them in that mode).
 
 Revision ID: d8f4a1b2c3e9
-Revises: c1a2b3d4e5f7
+Revises: c1a2b3d4e5f9
 Create Date: 2026-06-10 00:00:00.000000
 
 """

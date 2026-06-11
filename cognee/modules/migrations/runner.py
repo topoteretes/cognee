@@ -45,6 +45,7 @@ from cognee.modules.users.models import DatasetDatabase
 from cognee.modules.migrations.migration import (
     Migration,
     MigrationContext,
+    head_revision,
     migrations_to_downgrade,
     pending_migrations,
 )
@@ -424,36 +425,74 @@ async def run_database_migrations(
     return summaries
 
 
-async def _revert(
-    context: MigrationContext,
+async def _downgrade_span(
     migrations: list[Migration],
     stored_revision: Optional[str],
     target_revision: Optional[str],
-) -> list[str]:
-    """Run the down() of every migration between stored and target, newest first.
+) -> list[Migration]:
+    """Validate and return the migrations to revert for one chain (may be []).
 
-    A ``KEEP`` target leaves the chain untouched.
+    A ``KEEP`` target means the chain is untouched. Raises (unknown stored
+    revision, irreversible span, target ahead of stored) BEFORE anything
+    executes — both chains are validated up front so a bad graph span can
+    never be discovered after vector down()s already ran.
     """
     if target_revision == KEEP:
         return []
-    to_revert = migrations_to_downgrade(migrations, stored_revision, target_revision)
-    for migration in to_revert:
+    return migrations_to_downgrade(migrations, stored_revision, target_revision)
+
+
+async def _revert_span(context: MigrationContext, span: list[Migration], stamp) -> list[str]:
+    """Run the down() of every migration in the (pre-validated) span, newest
+    first, STAMPING AFTER EACH STEP via ``stamp(new_revision)``.
+
+    Per-step stamping means a crash or failure mid-span leaves the stored
+    revision pointing at exactly the last consistent state — never at a
+    revision whose data has already been reverted.
+    """
+    reverted = []
+    for migration in span:
         logger.info("Reverting migration '%s'.", migration.slug)
         await migration.down(context)
-    return [migration.slug for migration in to_revert]
+        await stamp(migration.down_revision)
+        reverted.append(migration.slug)
+    return reverted
 
 
 async def _downgrade_dataset(
     db_engine, row, graph_target: Optional[str], vector_target: Optional[str]
 ) -> Optional[dict]:
-    """Revert migrations for one dataset's database pair, under its lock."""
+    """Revert migrations for one dataset's database pair, under its lock.
+
+    Fast path first: spans are computed from the row snapshot, so datasets
+    with nothing to revert are skipped without locking or resolving engines.
+    """
+    # Fast path (validates too: a bad stored revision fails loudly here).
+    if not _downgrade_span(
+        GRAPH_MIGRATIONS, row.graph_migration_revision, graph_target
+    ) and not _downgrade_span(VECTOR_MIGRATIONS, row.vector_migration_revision, vector_target):
+        return None
+
     async with _migration_lock(db_engine, _advisory_key(row.dataset_id)):
+        # Re-read under the lock: a concurrent operator may have finished.
         async with db_engine.get_async_session() as session:
             record = await session.get(DatasetDatabase, row.dataset_id)
             if record is None:
                 return None
             graph_stored = record.graph_migration_revision
             vector_stored = record.vector_migration_revision
+
+        # Validate BOTH spans before executing anything from either.
+        graph_span = _downgrade_span(GRAPH_MIGRATIONS, graph_stored, graph_target)
+        vector_span = _downgrade_span(VECTOR_MIGRATIONS, vector_stored, vector_target)
+        if not graph_span and not vector_span:
+            return None
+
+        async def stamp_graph(revision):
+            await _stamp_dataset(db_engine, row.dataset_id, "graph_migration_revision", revision)
+
+        async def stamp_vector(revision):
+            await _stamp_dataset(db_engine, row.dataset_id, "vector_migration_revision", revision)
 
         async with set_database_global_context_variables(row.dataset_id, row.owner_id):
             graph_engine = await get_graph_engine()
@@ -464,21 +503,8 @@ async def _downgrade_dataset(
                 dataset_id=row.dataset_id,
             )
             # Reverse of the upgrade order: vector chain first, then graph.
-            vector_reverted = await _revert(
-                migration_context, VECTOR_MIGRATIONS, vector_stored, vector_target
-            )
-            graph_reverted = await _revert(
-                migration_context, GRAPH_MIGRATIONS, graph_stored, graph_target
-            )
-
-        async with db_engine.get_async_session() as session:
-            record = await session.get(DatasetDatabase, row.dataset_id)
-            if record is not None:
-                if graph_reverted:
-                    record.graph_migration_revision = graph_target
-                if vector_reverted:
-                    record.vector_migration_revision = vector_target
-                await session.commit()
+            vector_reverted = await _revert_span(migration_context, vector_span, stamp_vector)
+            graph_reverted = await _revert_span(migration_context, graph_span, stamp_graph)
 
     return {
         "dataset_id": str(row.dataset_id),
@@ -487,19 +513,38 @@ async def _downgrade_dataset(
     }
 
 
+async def _stamp_dataset(db_engine, dataset_id: UUID, column: str, revision: Optional[str]) -> None:
+    """Write one revision column on a dataset_database row (short transaction)."""
+    async with db_engine.get_async_session() as session:
+        record = await session.get(DatasetDatabase, dataset_id)
+        if record is not None:
+            setattr(record, column, revision)
+            await session.commit()
+
+
+async def _stamp_global(db_engine, column: str, revision: Optional[str]) -> None:
+    """Write one revision column on the global_database_version row."""
+    async with db_engine.get_async_session() as session:
+        record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+        if record is not None:
+            setattr(record, column, revision)
+            await session.commit()
+
+
 async def downgrade_database_migrations(
     graph_target_revision: Optional[str] = None,
     vector_target_revision: Optional[str] = None,
+    dataset_ids: Optional[list[UUID]] = None,
 ) -> list[dict]:
     """Revert graph/vector migrations back to the given target revisions.
 
     EXPLICIT OPERATOR ACTION — never runs automatically. ``None`` targets mean
     "revert every applied migration" (the pre-chain state, revisions NULL, so
-    the next startup re-applies the whole chain). Mirrors
-    :func:`run_database_migrations`: same per-database locking, both
-    access-control modes, per-database failure isolation. Raises inside a
-    database's span are reported as ``failed`` for that database; a migration
-    without a ``down()`` in the span fails it up front (chains cannot skip).
+    the next startup re-applies the whole chain); ``KEEP`` leaves a chain
+    untouched. ``dataset_ids`` restricts the operation to specific datasets
+    (per-dataset mode only). Both chains' spans are validated before any
+    down() executes, and the stored revision is stamped after EVERY reverted
+    step, so a failure mid-span leaves bookkeeping consistent with the data.
     """
     if not backend_access_control_enabled():
         db_engine = get_relational_engine()
@@ -511,8 +556,28 @@ async def downgrade_database_migrations(
                     )
                 if record is None:
                     return []
-                graph_stored = record.global_graph_migration_revision
-                vector_stored = record.global_vector_migration_revision
+                graph_span = _downgrade_span(
+                    GRAPH_MIGRATIONS, record.global_graph_migration_revision, graph_target_revision
+                )
+                vector_span = _downgrade_span(
+                    VECTOR_MIGRATIONS,
+                    record.global_vector_migration_revision,
+                    vector_target_revision,
+                )
+                if not graph_span and not vector_span:
+                    return [
+                        {
+                            "database": "global",
+                            "graph_migrations_reverted": [],
+                            "vector_migrations_reverted": [],
+                        }
+                    ]
+
+                async def stamp_graph(revision):
+                    await _stamp_global(db_engine, "global_graph_migration_revision", revision)
+
+                async def stamp_vector(revision):
+                    await _stamp_global(db_engine, "global_vector_migration_revision", revision)
 
                 graph_engine = await get_graph_engine()
                 vector_engine = get_vector_engine()
@@ -521,23 +586,8 @@ async def downgrade_database_migrations(
                     vector_engine=vector_engine,
                     dataset_id=None,
                 )
-                vector_reverted = await _revert(
-                    migration_context, VECTOR_MIGRATIONS, vector_stored, vector_target_revision
-                )
-                graph_reverted = await _revert(
-                    migration_context, GRAPH_MIGRATIONS, graph_stored, graph_target_revision
-                )
-
-                async with db_engine.get_async_session() as session:
-                    record = await session.get(
-                        GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID
-                    )
-                    if record is not None:
-                        if graph_reverted:
-                            record.global_graph_migration_revision = graph_target_revision
-                        if vector_reverted:
-                            record.global_vector_migration_revision = vector_target_revision
-                        await session.commit()
+                vector_reverted = await _revert_span(migration_context, vector_span, stamp_vector)
+                graph_reverted = await _revert_span(migration_context, graph_span, stamp_graph)
         except Exception:
             logger.exception("Database downgrade failed for the global databases.")
             return [{"database": "global", "result": "failed"}]
@@ -550,6 +600,9 @@ async def downgrade_database_migrations(
         ]
 
     rows = await get_dataset_databases()
+    if dataset_ids is not None:
+        wanted = set(dataset_ids)
+        rows = [row for row in rows if row.dataset_id in wanted]
     db_engine = get_relational_engine()
     summaries: list[dict] = []
 
@@ -577,3 +630,100 @@ async def downgrade_database_migrations(
             )
 
     return summaries
+
+
+async def stamp_revisions(
+    graph_target: str = KEEP,
+    vector_target: str = KEEP,
+    dataset_ids: Optional[list[UUID]] = None,
+) -> list[dict]:
+    """Set stored revisions WITHOUT running any migration (alembic `stamp`).
+
+    EXPLICIT OPERATOR ACTION for repairing bookkeeping that has drifted from
+    reality — e.g. a restored graph/vector backup behind a head-stamped row
+    (stamp base, then upgrade re-runs the idempotent chain), or data verified
+    migrated by hand. Targets: ``"head"``, ``"base"`` (-> NULL), a slug, or
+    ``KEEP`` (leave that chain's stamp alone). Validates slugs against the
+    chains; never touches data.
+    """
+
+    def resolve(target: str, migrations: list[Migration]) -> tuple[bool, Optional[str]]:
+        if target == KEEP:
+            return False, None
+        if target == "head":
+            return True, head_revision(migrations)
+        if target == "base":
+            return True, None
+        revisions = [migration.revision for migration in migrations]
+        if target not in revisions:
+            raise ValueError(f"Revision {target!r} is unknown to this chain; cannot stamp.")
+        return True, target
+
+    set_graph, graph_revision = resolve(graph_target, GRAPH_MIGRATIONS)
+    set_vector, vector_revision = resolve(vector_target, VECTOR_MIGRATIONS)
+    if not set_graph and not set_vector:
+        return []
+
+    db_engine = get_relational_engine()
+    summaries: list[dict] = []
+
+    if not backend_access_control_enabled():
+        async with db_engine.get_async_session() as session:
+            record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+            if record is None:
+                return []
+            if set_graph:
+                record.global_graph_migration_revision = graph_revision
+            if set_vector:
+                record.global_vector_migration_revision = vector_revision
+            await session.commit()
+        return [
+            {
+                "database": "global",
+                "graph_revision": graph_revision if set_graph else "(kept)",
+                "vector_revision": vector_revision if set_vector else "(kept)",
+            }
+        ]
+
+    rows = await get_dataset_databases()
+    if dataset_ids is not None:
+        wanted = set(dataset_ids)
+        rows = [row for row in rows if row.dataset_id in wanted]
+
+    for row in rows:
+        async with db_engine.get_async_session() as session:
+            record = await session.get(DatasetDatabase, row.dataset_id)
+            if record is None:
+                continue
+            if set_graph:
+                record.graph_migration_revision = graph_revision
+            if set_vector:
+                record.vector_migration_revision = vector_revision
+            await session.commit()
+        summaries.append(
+            {
+                "dataset_id": str(row.dataset_id),
+                "graph_revision": graph_revision if set_graph else "(kept)",
+                "vector_revision": vector_revision if set_vector else "(kept)",
+            }
+        )
+
+    return summaries
+
+
+def _validate_registries() -> None:
+    """Cross-chain invariants, enforced at import: slugs must be unique across
+    BOTH chains (a slug is a CLI revision argument and must resolve to exactly
+    one chain) and must not shadow the reserved revision keywords."""
+    reserved = {"head", "base", KEEP}
+    graph_slugs = {migration.slug for migration in GRAPH_MIGRATIONS}
+    vector_slugs = {migration.slug for migration in VECTOR_MIGRATIONS}
+    overlap = graph_slugs & vector_slugs
+    if overlap:
+        raise ValueError(f"Migration slugs present in BOTH chains: {sorted(overlap)}")
+    shadowed = (graph_slugs | vector_slugs) & reserved
+    if shadowed:
+        raise ValueError(f"Migration slugs shadow reserved revision keywords: {sorted(shadowed)}")
+
+
+_validate_registries()

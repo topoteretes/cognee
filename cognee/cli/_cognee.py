@@ -106,6 +106,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.migrate_command", "DowngradeCommand"),
         ("cognee.cli.commands.migrate_command", "HistoryCommand"),
         ("cognee.cli.commands.migrate_command", "CurrentCommand"),
+        ("cognee.cli.commands.migrate_command", "StampCommand"),
     ]
 
     for module_path, class_name in command_modules:

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from alembic import context
 from logging.config import fileConfig
 from sqlalchemy import pool
@@ -14,8 +15,10 @@ import cognee.modules.migrations.models  # noqa: F401
 config = context.config
 
 # Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
+# This line sets up loggers basically. Programmatic invocations (cognee's
+# startup migrations run alembic in-process) set configure_logger=False so
+# this does not clobber the host process's logging configuration.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
@@ -87,7 +90,7 @@ def run_migrations_online() -> None:
 
 db_engine = get_relational_engine()
 
-print("Using database:", db_engine.db_uri)
+logging.getLogger("alembic.env").info("Using database: %s", db_engine.db_uri)
 # In case db_uri is a SQLAlchemy URL object, convert it to string
 db_uri = (
     db_engine.db_uri

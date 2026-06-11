@@ -45,16 +45,16 @@ def _resolve_targets(revision: str, base_keyword: str, base_value):
     raise CliCommandException(f"Unknown revision: {revision}", error_code=1)
 
 
-def _print_summaries(summaries: list, applied_key: str, reverted_key: str) -> None:
+def _print_summaries(summaries: list, keys: tuple, failure_hint: str) -> None:
     if not summaries:
         fmt.note("No databases found — nothing to do.")
         return
     for summary in summaries:
         target = summary.get("dataset_id") or summary.get("database", "?")
         if summary.get("result") == "failed":
-            fmt.error(f"  {target}: FAILED (see logs; it will be retried on the next run)")
+            fmt.error(f"  {target}: FAILED ({failure_hint})")
             continue
-        ran = summary.get(applied_key) or summary.get(reverted_key) or []
+        ran = [slug for key in keys for slug in (summary.get(key) or [])]
         if ran:
             fmt.success(f"  {target}: {', '.join(ran)}")
         else:
@@ -63,7 +63,22 @@ def _print_summaries(summaries: list, applied_key: str, reverted_key: str) -> No
 
 def _raise_on_failures(summaries: list, action: str) -> None:
     if any(s.get("result") == "failed" for s in summaries):
-        raise CliCommandException(f"One or more databases failed to {action}", error_code=1)
+        message = f"One or more databases failed to {action} — see the output above."
+        fmt.error(message)
+        raise CliCommandException(message, error_code=1)
+
+
+def _bookkeeping_guard(error: Exception) -> None:
+    """Translate missing-bookkeeping-schema errors into an actionable hint."""
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+
+    if isinstance(error, (OperationalError, ProgrammingError)):
+        fmt.error(
+            "The migration bookkeeping schema is missing or outdated on this "
+            "database — run `cognee-cli upgrade` first."
+        )
+        raise CliCommandException("Bookkeeping schema missing", error_code=1)
+    raise error
 
 
 class UpgradeCommand(SupportsCliCommand):
@@ -107,7 +122,11 @@ Examples:
             )
 
         summaries = asyncio.run(run())
-        _print_summaries(summaries, "graph_migrations_applied", "vector_migrations_applied")
+        _print_summaries(
+            summaries,
+            ("graph_migrations_applied", "vector_migrations_applied"),
+            "see logs; it will be retried on the next startup/upgrade",
+        )
         _raise_on_failures(summaries, "upgrade")
         fmt.success("Upgrade complete.")
 
@@ -138,15 +157,27 @@ Examples:
             help="Target revision: 'base' (revert everything) or a migration slug",
         )
         parser.add_argument(
+            "--dataset",
+            action="append",
+            default=None,
+            help="Restrict to a dataset UUID (repeatable; default: all datasets)",
+        )
+        parser.add_argument(
             "--force", "-f", action="store_true", help="Skip the confirmation prompt"
         )
 
     def execute(self, args: argparse.Namespace) -> None:
+        from uuid import UUID
+
         graph_target, vector_target = _resolve_targets(args.revision, "base", None)
+        dataset_ids = [UUID(d) for d in args.dataset] if args.dataset else None
 
         if not args.force:
+            scope = f"{len(dataset_ids)} dataset(s)" if dataset_ids else "ALL databases"
             if not fmt.confirm(
-                f"Downgrade ALL databases to '{args.revision}'? This rewrites data.",
+                f"Downgrade {scope} to '{args.revision}'? This rewrites data, and entities "
+                "whose name collides across Entity/EntityType merge into one node on the "
+                "old scheme (lossy — that was the old scheme's #2515 bug).",
                 default=False,
             ):
                 fmt.note("Aborted.")
@@ -158,10 +189,18 @@ Examples:
             return await downgrade_database_migrations(
                 graph_target_revision=graph_target,
                 vector_target_revision=vector_target,
+                dataset_ids=dataset_ids,
             )
 
-        summaries = asyncio.run(run())
-        _print_summaries(summaries, "graph_migrations_reverted", "vector_migrations_reverted")
+        try:
+            summaries = asyncio.run(run())
+        except Exception as error:  # noqa: BLE001 - translated to an actionable hint
+            _bookkeeping_guard(error)
+        _print_summaries(
+            summaries,
+            ("graph_migrations_reverted", "vector_migrations_reverted"),
+            "see logs; downgrades never run automatically — fix and re-run this command",
+        )
         _raise_on_failures(summaries, "downgrade")
         fmt.success("Downgrade complete.")
 
@@ -263,4 +302,88 @@ migration has been applied (everything pending).
                     f"vector: {fmt_revision(record.global_vector_migration_revision, vector_head)}"
                 )
 
-        asyncio.run(run())
+        try:
+            asyncio.run(run())
+        except Exception as error:  # noqa: BLE001 - translated to an actionable hint
+            _bookkeeping_guard(error)
+
+
+class StampCommand(SupportsCliCommand):
+    command_string = "stamp"
+    help_string = "Set the stored revision WITHOUT running migrations (like `alembic stamp`)"
+    docs_url = DEFAULT_DOCS_URL
+    description = """
+Set the stored graph/vector revisions without running any migration.
+
+For repairing bookkeeping that has drifted from reality — e.g. a restored
+graph/vector backup sitting behind a head-stamped row (stamp 'base', then
+`cognee upgrade` re-runs the idempotent chain against it), or data you have
+verified by hand. REVISION is 'head', 'base', or a migration slug; a slug
+stamps only its own chain. Never touches data.
+
+Examples:
+  cognee stamp base --dataset 7df514cd-...   # re-arm migrations for one dataset
+  cognee stamp head                          # mark everything migrated (dangerous)
+"""
+
+    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "revision",
+            help="Revision to stamp: 'head', 'base', or a migration slug",
+        )
+        parser.add_argument(
+            "--dataset",
+            action="append",
+            default=None,
+            help="Restrict to a dataset UUID (repeatable; default: all databases)",
+        )
+        parser.add_argument(
+            "--force", "-f", action="store_true", help="Skip the confirmation prompt"
+        )
+
+    def execute(self, args: argparse.Namespace) -> None:
+        from uuid import UUID
+
+        from cognee.modules.migrations.runner import KEEP
+
+        if args.revision in ("head", "base"):
+            graph_target = vector_target = args.revision
+        else:
+            graph_target, vector_target = _resolve_targets(args.revision, "head", "head")
+            # _resolve_targets maps the non-targeted chain to KEEP already; for
+            # 'head' it returns ("head","head"), handled above.
+
+        dataset_ids = [UUID(d) for d in args.dataset] if args.dataset else None
+
+        if not args.force:
+            scope = f"{len(dataset_ids)} dataset(s)" if dataset_ids else "ALL databases"
+            if not fmt.confirm(
+                f"Stamp {scope} at '{args.revision}' WITHOUT running migrations? "
+                "Stamping 'head' over unmigrated data permanently skips its migrations.",
+                default=False,
+            ):
+                fmt.note("Aborted.")
+                return
+
+        async def run():
+            from cognee.modules.migrations.runner import stamp_revisions
+
+            return await stamp_revisions(
+                graph_target=graph_target,
+                vector_target=vector_target,
+                dataset_ids=dataset_ids,
+            )
+
+        try:
+            summaries = asyncio.run(run())
+        except Exception as error:  # noqa: BLE001 - translated to an actionable hint
+            _bookkeeping_guard(error)
+        if not summaries:
+            fmt.note("No databases found — nothing stamped.")
+            return
+        for summary in summaries:
+            target = summary.get("dataset_id") or summary.get("database", "?")
+            fmt.success(
+                f"  {target}: graph={summary['graph_revision']} vector={summary['vector_revision']}"
+            )
+        fmt.success("Stamp complete.")

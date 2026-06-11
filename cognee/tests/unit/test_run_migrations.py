@@ -4,7 +4,7 @@ Originally written against cognee/run_migrations.py; the implementation moved
 to cognee.modules.migrations.{startup,runner} (run_migrations.py is now a thin
 shim). The original intents are preserved:
 
-  * the Alembic subprocess must use sys.executable, not bare 'python'
+  * Alembic runs IN-PROCESS so programmatic cognee config is honored
   * a missing dataset_database table must skip migrations, not crash startup
 
 plus the newer guarantees: empty-database bootstrap fallback and the
@@ -13,7 +13,6 @@ once-per-process flag being set only on clean runs.
 
 import asyncio
 import importlib
-import sys
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,36 +25,34 @@ def _reset_startup_flag():
 
 
 class TestRunRelationalMigrations(unittest.TestCase):
-    """Verify the Alembic subprocess is invoked via sys.executable, not bare 'python'."""
+    """Alembic must run IN-PROCESS so programmatic cognee config is honored.
 
-    def test_uses_sys_executable(self):
-        """subprocess.run must be called with sys.executable, not 'python'.
+    A subprocess (the previous implementation) inherits only environment
+    variables, so tests/examples that set roots via
+    ``cognee.config.system_root_directory(...)`` had their migrations applied
+    to the DEFAULT-location database instead — the library-test CI failure.
+    (This also retires GitHub issue #2466's bare-'python' hazard: there is no
+    subprocess interpreter to resolve anymore.)
+    """
 
-        On Windows with uv-managed Python, bare 'python' can resolve to a
-        different interpreter that doesn't have alembic installed
-        (see GitHub issue #2466). Exercised through the public shim
-        (cognee.run_migrations.run_migrations) so the delegation is covered too.
-        """
+    def test_runs_alembic_in_process_without_logger_clobbering(self):
         shim = importlib.import_module("cognee.run_migrations")
         startup = importlib.import_module("cognee.modules.migrations.startup")
 
         with (
             patch.object(startup.pkg_resources, "files", return_value="/fake/package"),
             patch.object(startup.os.path, "exists", return_value=True),
-            patch.object(startup.subprocess, "run") as mock_run,
+            patch("alembic.command.upgrade") as mock_upgrade,
         ):
-            mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
             asyncio.run(shim.run_migrations())
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        self.assertEqual(
-            cmd[0],
-            sys.executable,
-            f"Expected sys.executable ({sys.executable!r}) but got {cmd[0]!r}. "
-            "Using bare 'python' breaks venv/uv setups on Windows.",
-        )
-        self.assertEqual(cmd[1:], ["-m", "alembic", "upgrade", "head"])
+        mock_upgrade.assert_called_once()
+        alembic_config, target = mock_upgrade.call_args[0]
+        self.assertEqual(target, "head")
+        self.assertEqual(alembic_config.get_main_option("script_location"), "/fake/package/alembic")
+        # env.py honors this to skip fileConfig(), which would otherwise
+        # disable the host process's loggers.
+        self.assertFalse(alembic_config.attributes.get("configure_logger", True))
 
 
 class TestMissingBookkeepingTables(unittest.TestCase):

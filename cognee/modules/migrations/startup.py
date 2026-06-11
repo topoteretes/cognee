@@ -22,9 +22,6 @@ and a FAILED run does not set the flag, so the next call retries.
 import asyncio
 import logging
 import os
-import sys
-import subprocess
-from pathlib import Path
 import importlib.resources as pkg_resources
 
 logger = logging.getLogger(__name__)
@@ -59,14 +56,20 @@ class MigrationError(Exception):
 
 
 async def run_relational_migrations():
-    """
-    Finds the Alembic configuration within the installed package and
-    programmatically executes 'alembic upgrade head'.
-    """
-    # 1. Locate the base path of the installed package.
-    package_root = str(pkg_resources.files(MIGRATIONS_PACKAGE))
+    """Apply the Alembic relational-schema migrations, in-process.
 
-    # 2. Define the paths for config and scripts
+    Runs ``alembic.command.upgrade`` in a worker thread (``env.py`` drives an
+    async engine via ``asyncio.run``, which needs a thread with no running
+    event loop). IN-PROCESS on purpose — not a subprocess: ``env.py`` resolves
+    the database from ``get_relational_engine()``, so programmatically
+    configured roots/credentials (``cognee.config.system_root_directory(...)``,
+    as every test/example uses) are honored. A subprocess inherits only
+    environment variables and silently migrates the DEFAULT-location database
+    instead — the bug behind the library-test/example CI failures. The thread
+    also keeps the caller's event loop unblocked for the duration.
+    """
+    # Locate the Alembic configuration within the installed package.
+    package_root = str(pkg_resources.files(MIGRATIONS_PACKAGE))
     alembic_ini_path = os.path.join(package_root, "alembic.ini")
     script_location_path = os.path.join(package_root, MIGRATIONS_DIR_NAME)
 
@@ -79,17 +82,22 @@ async def run_relational_migrations():
             f"Error: Migrations directory not found at expected locations for package '{MIGRATIONS_PACKAGE}'."
         )
 
-    migration_result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        capture_output=True,
-        text=True,
-        cwd=Path(package_root),
-    )
+    def _upgrade_to_head():
+        from alembic import command
+        from alembic.config import Config
 
-    if migration_result.returncode != 0:
-        migration_output = migration_result.stderr + migration_result.stdout
-        logger.error("Migration failed with unexpected error: %s", migration_output)
-        raise MigrationError("Relational DB Migrations failed.")
+        alembic_config = Config(alembic_ini_path)
+        alembic_config.set_main_option("script_location", script_location_path)
+        # Tell env.py not to fileConfig() — that would reconfigure (and
+        # disable) the host process's loggers from alembic.ini.
+        alembic_config.attributes["configure_logger"] = False
+        command.upgrade(alembic_config, "head")
+
+    try:
+        await asyncio.to_thread(_upgrade_to_head)
+    except Exception as error:
+        logger.error("Migration failed with unexpected error: %s", error)
+        raise MigrationError("Relational DB Migrations failed.") from error
 
     logger.info("Migration completed successfully.")
 

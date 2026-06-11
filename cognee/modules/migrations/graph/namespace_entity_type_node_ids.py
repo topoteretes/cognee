@@ -276,10 +276,10 @@ async def _rekey_lancedb(vector_engine, collection: str, id_map: dict) -> None:
     Merge-safe and idempotent: an old id whose new id already exists in the
     table is deleted, never duplicated — so a crash between add and delete, a
     re-run, or a pre-existing new-scheme row all converge to one row per id.
-    Uses plain ``add`` (append), NOT ``merge_insert`` (lance 0.32 can panic
-    with it on tables carrying deletion vectors), and compacts afterwards when
-    the table handle supports it (the subprocess-proxy table does not expose
-    ``optimize``).
+    Uses plain ``add`` (append), NOT ``merge_insert`` (lance
+    0.32 can panic with it on tables carrying deletion vectors), and compacts
+    afterwards, best-effort (both local and subprocess-proxy table handles
+    expose ``optimize``).
     """
     from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
@@ -445,7 +445,16 @@ async def _migrate_vector(vector_engine, id_map: dict, properties_by_id: dict) -
             ):
                 continue
 
-            rows = await vector_engine.retrieve(collection, [str(o) for o in old_ids])
+            from cognee.infrastructure.databases.vector.exceptions import (
+                CollectionNotFoundError,
+            )
+
+            try:
+                rows = await vector_engine.retrieve(collection, [str(o) for o in old_ids])
+            except CollectionNotFoundError:
+                # Graph-only deployment / collection never created: no points
+                # to move for this kind. Same tolerance the triplet path has.
+                continue
 
             new_points = []
             migrated_old_ids = []
