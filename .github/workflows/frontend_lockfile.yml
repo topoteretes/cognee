@@ -15,6 +15,10 @@ on:
       - ".github/workflows/frontend_lockfile.yml"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -22,6 +26,7 @@ jobs:
   frontend-lockfile:
     name: Frontend lockfile sync
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
