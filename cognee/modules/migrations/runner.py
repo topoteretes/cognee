@@ -137,33 +137,6 @@ def _nothing_pending(
     return not graph_pending and not vector_pending
 
 
-async def pending_migration_dataset_ids() -> list[UUID]:
-    """Dataset ids whose databases have unapplied migrations.
-
-    Per-dataset (access control on) mode only; in global mode use
-    :func:`global_migrations_pending`. Cheap: reads the rows and compares
-    revisions in memory, no engines are opened.
-    """
-    rows = await get_dataset_databases()
-    return [
-        row.dataset_id
-        for row in rows
-        if not _nothing_pending(row.graph_migration_revision, row.vector_migration_revision)
-    ]
-
-
-async def global_migrations_pending() -> bool:
-    """True when the global database pair (access control off) has unapplied migrations."""
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        row = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
-    if row is None:
-        return True
-    return not _nothing_pending(
-        row.global_graph_migration_revision, row.global_vector_migration_revision
-    )
-
-
 async def _record_deployment_version(current_version: str) -> GlobalDatabaseVersion:
     """Upsert the single ``global_database_version`` row's ``cognee_version``.
 
@@ -425,7 +398,7 @@ async def run_database_migrations(
     return summaries
 
 
-async def _downgrade_span(
+def _downgrade_span(
     migrations: list[Migration],
     stored_revision: Optional[str],
     target_revision: Optional[str],

@@ -286,6 +286,18 @@ def test_revert_span_failure_mid_span_keeps_bookkeeping_consistent():
     assert stamps == ["t1"]  # t2's revert recorded; nothing claims base
 
 
+def test_downgrade_span_is_synchronous_validation():
+    """_downgrade_span is pure validation called without await everywhere —
+    it must be a plain function (regression: declaring it async made every
+    downgrade fail with 'coroutine is not iterable')."""
+    from cognee.modules.migrations.runner import KEEP, _downgrade_span
+
+    chain = _chain(with_downs=True)
+    assert _downgrade_span(chain, "m3", None) == list(reversed(order_migrations(chain)))
+    assert _downgrade_span(chain, None, None) == []
+    assert _downgrade_span(chain, "m3", KEEP) == []
+
+
 def test_runner_routes_to_global_path_without_access_control(monkeypatch):
     """With access control off there are no per-dataset rows: the runner must
     migrate via the single global_database_version row, never the per-dataset

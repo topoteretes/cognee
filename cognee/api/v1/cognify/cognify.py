@@ -39,44 +39,17 @@ from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_
 logger = get_logger("cognify")
 
 
-async def _warn_if_migrations_pending() -> None:
-    """Warn loudly when cognify is about to write into unmigrated databases.
+async def _ensure_migrations_run() -> None:
+    """Run startup migrations on the first local cognify in this process.
 
-    Cognify writes model-owned (new-scheme) ids unconditionally; doing that
-    against a store still holding old-scheme ids duplicates entities. The API
-    server migrates at startup, but SDK/CLI processes only migrate when
-    something calls ``cognee.run_startup_migrations()`` — this check is the
-    safety net for those surfaces. Best-effort: never blocks cognify (e.g. a
-    pre-migration relational schema cannot be read).
+    The full set (relational schema + graph/vector revision chains), The once-per-process guard
+    (flag, lock, bootstrap fallback, retry-on-failure) lives inside
+    ``run_startup_migrations``, so on the API server (already migrated in the
+    lifespan) and on every later call this is a flag check.
     """
-    try:
-        from cognee.context_global_variables import backend_access_control_enabled
-        from cognee.modules.migrations.runner import (
-            global_migrations_pending,
-            pending_migration_dataset_ids,
-        )
+    from cognee.run_migrations import run_startup_migrations
 
-        if backend_access_control_enabled():
-            pending = await pending_migration_dataset_ids()
-            if pending:
-                logger.warning(
-                    "%d dataset(s) have unapplied graph/vector migrations (e.g. %s). "
-                    "Cognify will write new-scheme ids into unmigrated stores, which can "
-                    "duplicate entities. Run `await cognee.run_startup_migrations()` first.",
-                    len(pending),
-                    pending[0],
-                )
-        elif await global_migrations_pending():
-            logger.warning(
-                "The global graph/vector databases have unapplied migrations. "
-                "Cognify will write new-scheme ids into unmigrated stores, which can "
-                "duplicate entities. Run `await cognee.run_startup_migrations()` first."
-            )
-    except Exception as error:  # noqa: BLE001 - advisory check must never block cognify
-        logger.debug("Pending-migration check skipped: %s", error)
-
-
-update_status_lock = asyncio.Lock()
+    await run_startup_migrations()
 
 
 async def cognify(
@@ -255,7 +228,7 @@ async def cognify(
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
 
-        await _warn_if_migrations_pending()
+        await _ensure_migrations_run()
 
         if config is None:
             ontology_config = get_ontology_env_config()
