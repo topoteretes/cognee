@@ -5,6 +5,11 @@ Mirrors Alembic's model: each migration declares a stable ``revision`` and the
 stores the last-applied revision; the runner walks the chain forward to head.
 Cognee versions are never compared for ordering — they are recorded only as
 informational metadata on each migration and on the database row.
+
+The revision IS the slug. It is stored verbatim in the database so an operator
+reading a ``dataset_database`` row can see exactly which migration last ran —
+no hashing, no lookup table. Slugs are therefore append-only and immutable:
+renaming one orphans every stamped database (see ``pending_migrations``).
 """
 
 from __future__ import annotations
@@ -12,12 +17,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
-from uuid import NAMESPACE_DNS, UUID, uuid5
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
-
-# Stable namespace so revision ids are reproducible across machines and runs.
-COGNEE_MIGRATION_NAMESPACE = uuid5(NAMESPACE_DNS, "migrations.cognee.ai")
 
 
 @dataclass(frozen=True)
@@ -44,30 +46,30 @@ class MigrationContext:
     dataset_id: Optional[UUID] = None
 
 
-def revision_id(slug: str) -> str:
-    """Deterministically derive a migration revision id from its slug."""
-    return str(uuid5(COGNEE_MIGRATION_NAMESPACE, slug))
-
-
 @dataclass(frozen=True)
 class Migration:
     """A single graph or vector database migration.
 
     Attributes:
-        slug: Human-readable unique identifier; also seeds the revision id.
+        slug: Human-readable unique identifier; stored verbatim as the revision.
+            IMMUTABLE once shipped — renaming orphans every stamped database.
         cognee_version: Release this migration shipped in (informational only).
         up: Async callable receiving a :class:`MigrationContext`.
-        down_revision: Revision this builds on (``None`` for the first migration).
+        down_revision: Slug of the migration this builds on (``None`` for the
+            first migration in a chain).
+        down: Optional reverse transformation (same signature as ``up``).
+            A chain can only be downgraded through migrations that define it.
     """
 
     slug: str
     cognee_version: str
     up: Callable[["MigrationContext"], Awaitable[None]]
     down_revision: Optional[str] = None
+    down: Optional[Callable[["MigrationContext"], Awaitable[None]]] = None
 
     @property
     def revision(self) -> str:
-        return revision_id(self.slug)
+        return self.slug
 
 
 def order_migrations(migrations: list[Migration]) -> list[Migration]:
@@ -143,3 +145,53 @@ def pending_migrations(
         ordered[-1].revision if ordered else None,
     )
     return []
+
+
+def migrations_to_downgrade(
+    migrations: list[Migration],
+    stored_revision: Optional[str],
+    target_revision: Optional[str] = None,
+) -> list[Migration]:
+    """Return the migrations to revert (newest first) to reach ``target_revision``.
+
+    - ``None`` stored revision -> nothing applied, nothing to revert.
+    - ``None`` target -> revert every applied migration (back to pre-chain state).
+    - Unlike :func:`pending_migrations`, an unknown stored or target revision
+      RAISES: downgrading is always an explicit operator action against a state
+      that must be fully understood, never a best-effort no-op.
+    - Every migration in the returned span must define ``down`` — a chain
+      cannot skip a step — otherwise this raises.
+    """
+    ordered = order_migrations(migrations)
+    if stored_revision is None:
+        return []
+
+    revisions = [migration.revision for migration in ordered]
+    if stored_revision not in revisions:
+        raise ValueError(
+            f"Stored revision {stored_revision!r} is unknown to this chain; cannot downgrade."
+        )
+    stored_index = revisions.index(stored_revision)
+
+    if target_revision is None:
+        target_index = -1
+    else:
+        if target_revision not in revisions:
+            raise ValueError(
+                f"Target revision {target_revision!r} is unknown to this chain; cannot downgrade."
+            )
+        target_index = revisions.index(target_revision)
+        if target_index > stored_index:
+            raise ValueError(
+                f"Target revision {target_revision!r} is ahead of stored "
+                f"{stored_revision!r}; nothing to downgrade."
+            )
+
+    to_revert = list(reversed(ordered[target_index + 1 : stored_index + 1]))
+    irreversible = [migration.slug for migration in to_revert if migration.down is None]
+    if irreversible:
+        raise ValueError(
+            "Cannot downgrade: migration(s) without a down() in the span: "
+            + ", ".join(irreversible)
+        )
+    return to_revert

@@ -49,7 +49,8 @@ Re-keying a point means moving its row to a new primary key. Two paths:
   * native (LanceDB, PGVector) — the stored row, INCLUDING its vector, is moved
     to the new id directly inside the store (SQL UPDATE / row copy). No
     re-embedding, no embedding backend needed, no per-point cost beyond the
-    store operation. Dispatched by adapter type in ``_rekey_native``.
+    store operation. Migration-local by design (``_rekey_native`` below) —
+    the VectorDBInterface is deliberately not extended for this.
   * generic (every other backend) — the point is re-inserted through
     ``index_data_points`` under the new id, which re-embeds the (unchanged)
     text; the old point is then deleted. Needs the embedding backend available,
@@ -57,18 +58,31 @@ Re-keying a point means moving its row to a new primary key. Two paths:
 
 How the new ID is recovered
 ---------------------------
-Both ``generate_node_id`` and the model's identity normalization lower-case,
-strip apostrophes and turn spaces into underscores, and ``generate_node_name``
-lower-cases and strips apostrophes. So the stored ``name`` property is enough to
-recompute the node's ID under any scheme — no need to reverse the UUID hash::
+Both the historical ``generate_node_id`` and the model's identity normalization
+lower-case, strip apostrophes and turn spaces into underscores, and
+``generate_node_name`` lower-cases and strips apostrophes. So the stored
+``name`` property is enough to recompute the node's ID under any scheme — no
+need to reverse the UUID hash::
 
-    Entity.id_for(name)                 -> the new, model-owned ID
-    generate_node_id(name)              -> the released "bare" ID
-    generate_node_id(f"entity:{name}")  -> the interim ID (this branch, never released)
+    uuid5(OID, f"Entity:{norm(name)}")   -> the new, model-owned ID
+    uuid5(OID, norm(name))               -> the released "bare" ID
+    uuid5(OID, norm(f"entity:{name}"))   -> the interim ID (never released)
 
 A node is only remapped when its current ID matches one of the recognized old
 schemes for its kind; anything else is left untouched (already migrated, or an
 ID not derived from its name).
+
+FROZEN derivations
+------------------
+This migration vendors its own copies of every id derivation, normalization
+rule and collection name it depends on (``_frozen_*`` below, ``_INDEX_FIELDS``)
+instead of importing the live model code. A migration's revision must identify
+one deterministic transformation forever; if ``Entity.id_for`` or
+``identity_fields`` evolve later, that is a NEW migration appended to the
+chain — it must never silently change what this one means. Do not "deduplicate"
+these copies against the live functions. (The ``_RekeyedPoint`` carrier is the
+deliberate exception: it rides the LIVE ``index_data_points`` write path so
+re-inserted rows always match what current adapters store.)
 
 Ordering and retry-safety
 --------------------------
@@ -107,21 +121,50 @@ Caveats:
 """
 
 import logging
-from uuid import UUID
+from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
-from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.migrations.migration import MigrationContext
 
 logger = logging.getLogger(__name__)
 
-# Stored DataPoint ``type`` property -> (model class that owns the new id via
-# ``id_for``, interim per-kind prefix this branch briefly used before id_for).
+# Stored DataPoint ``type`` property -> interim per-kind prefix this branch
+# briefly used before the model-owned scheme. The kind string itself is the
+# class-name namespace of the new scheme.
 _NODE_KINDS = {
-    "Entity": (Entity, "entity"),
-    "EntityType": (EntityType, "type"),
+    "Entity": "entity",
+    "EntityType": "type",
 }
+
+# FROZEN: vector collections per kind at the time this migration shipped
+# (collection name = f"{kind}_{field}"). Do not derive from live metadata.
+_INDEX_FIELDS = {
+    "Entity": ["name"],
+    "EntityType": ["name"],
+}
+_TRIPLET_COLLECTION = "Triplet_text"
+
+
+def _frozen_normalize(value: str) -> str:
+    """FROZEN copy of the normalization shared by every scheme this migration
+    touches (``generate_node_id`` and ``DataPoint._normalize_identity_value``
+    as of cognee 1.2.0): lower-case, spaces to underscores, strip apostrophes."""
+    return value.lower().replace(" ", "_").replace("'", "")
+
+
+def _frozen_bare_id(text: str) -> str:
+    """FROZEN: the released pre-#2515 scheme (``generate_node_id`` as of 1.1.x).
+
+    Also the Triplet point-id derivation (``generate_node_id(source + rel +
+    target)``), which ``add_data_points`` used verbatim.
+    """
+    return str(uuid5(NAMESPACE_OID, _frozen_normalize(text)))
+
+
+def _frozen_model_id(kind: str, name: str) -> str:
+    """FROZEN: the model-owned target scheme this migration maps TO
+    (``DataPoint.id_for`` as of cognee 1.2.0): class-name-namespaced uuid5."""
+    return str(uuid5(NAMESPACE_OID, f"{kind}:{_frozen_normalize(name)}"))
 
 
 # Per-class carrier types so a re-added graph node satisfies EVERY adapter's
@@ -168,25 +211,25 @@ def build_id_remap(nodes: list) -> dict:
     skipped = 0
 
     for node_id, properties in nodes:
-        kind = _NODE_KINDS.get(properties.get("type"))
-        if kind is None:
+        node_type = properties.get("type")
+        interim_prefix = _NODE_KINDS.get(node_type)
+        if interim_prefix is None:
             # Only Entity / EntityType IDs changed.
             continue
-        model_cls, interim_prefix = kind
 
         name = properties.get("name")
         if not name:
             continue
 
-        new_id = str(model_cls.id_for(name))
+        new_id = _frozen_model_id(node_type, name)
         if node_id == new_id:
             # Already on the model-owned scheme.
             continue
 
         # Recognized historical schemes this node could still be on.
         recognized_old_ids = {
-            str(generate_node_id(name)),  # released "bare" scheme
-            str(generate_node_id(f"{interim_prefix}:{name}")),  # interim, never released
+            _frozen_bare_id(name),  # released "bare" scheme
+            _frozen_bare_id(f"{interim_prefix}:{name}"),  # interim, never released
         }
         if node_id in recognized_old_ids:
             id_map[node_id] = new_id
@@ -206,12 +249,6 @@ def build_id_remap(nodes: list) -> dict:
     return id_map
 
 
-def _index_fields(model_cls) -> list[str]:
-    """The vector collections for a kind are ``f'{Type}_{field}'`` per index field."""
-    metadata_default = model_cls.model_fields["metadata"].default or {}
-    return list(metadata_default.get("index_fields") or [])
-
-
 class _RekeyedPoint(DataPoint):
     """Carrier for re-inserting an existing vector point under a new id.
 
@@ -225,15 +262,24 @@ class _RekeyedPoint(DataPoint):
     metadata: dict = {"index_fields": ["text"]}
 
 
-async def _rekey_lancedb(vector_engine, collection: str, id_map: dict) -> None:
-    """Move LanceDB rows to their new ids, carrying the stored vector over.
+def _lancedb_where(ids: list[str]) -> str:
+    """WHERE clause over ids, escaped the same way the adapter's own queries are."""
+    escaped = [point_id.replace("'", "''") for point_id in ids]
+    if len(escaped) == 1:
+        return f"id = '{escaped[0]}'"
+    return "id IN ({})".format(", ".join(f"'{point_id}'" for point_id in escaped))
 
-    Reads the full rows (vector included), re-adds them under the new id with
-    the payload's embedded ``id`` updated, then deletes the old rows. Uses
-    plain ``add`` (append) — NOT ``merge_insert``, which lance 0.32 can panic
-    with on tables carrying deletion vectors. Compacts afterwards when the
-    table supports it (the subprocess-proxy table does not expose
-    ``optimize``), so later cognify ``merge_insert`` writes see a clean table.
+
+async def _rekey_lancedb(vector_engine, collection: str, id_map: dict) -> None:
+    """Move LanceDB rows to new ids carrying their stored vectors (no re-embedding).
+
+    Merge-safe and idempotent: an old id whose new id already exists in the
+    table is deleted, never duplicated — so a crash between add and delete, a
+    re-run, or a pre-existing new-scheme row all converge to one row per id.
+    Uses plain ``add`` (append), NOT ``merge_insert`` (lance 0.32 can panic
+    with it on tables carrying deletion vectors), and compacts afterwards when
+    the table handle supports it (the subprocess-proxy table does not expose
+    ``optimize``).
     """
     from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
@@ -243,38 +289,59 @@ async def _rekey_lancedb(vector_engine, collection: str, id_map: dict) -> None:
         return
 
     old_ids = [str(old_id) for old_id in id_map]
-    if len(old_ids) == 1:
-        where = f"id = '{old_ids[0]}'"
-    else:
-        id_list = ", ".join(f"'{old_id}'" for old_id in old_ids)
-        where = f"id IN ({id_list})"
-
-    rows = await table.query().where(where).to_list()
+    rows = await table.query().where(_lancedb_where(old_ids)).to_list()
     if not rows:
         return
 
-    new_rows = []
+    new_ids = [str(new_id) for new_id in id_map.values()]
+    existing_new = {
+        row["id"] for row in await table.query().where(_lancedb_where(new_ids)).to_list()
+    }
+
+    moved_rows = []
+    processed_old_ids = []
     for row in rows:
-        new_id = id_map[str(row["id"])]
+        new_id = str(id_map[str(row["id"])])
+        processed_old_ids.append(str(row["id"]))
+        if new_id in existing_new:
+            # Target row already exists (equivalent content) -> merge by
+            # dropping the old row instead of duplicating the id.
+            continue
         new_row = dict(row)
         new_row["id"] = new_id
         payload = dict(new_row.get("payload") or {})
         payload["id"] = new_id
         new_row["payload"] = payload
-        new_rows.append(new_row)
+        moved_rows.append(new_row)
+        existing_new.add(new_id)  # two old ids -> one new id: move once, drop the rest
 
-    await table.add(new_rows)
-    await vector_engine.delete_data_points(collection, [str(row["id"]) for row in rows])
+    if moved_rows:
+        await table.add(moved_rows)
+    await vector_engine.delete_data_points(collection, processed_old_ids)
 
-    optimize = getattr(table, "optimize", None)
-    if optimize is not None:
-        await optimize()
+    # Best-effort compaction: materializes the deletion vectors this re-key
+    # just created (lance 0.32 reads/merge_inserts can panic on them). Uses a
+    # FRESH handle (the deletes above advanced the table version, and optimize
+    # from a stale handle raises a commit conflict); failure is non-fatal —
+    # the data is already correct, only un-compacted.
+    try:
+        fresh_table = await vector_engine.get_collection(collection)
+        optimize = getattr(fresh_table, "optimize", None)
+        if optimize is not None:
+            await optimize()
+    except Exception as exc:  # noqa: BLE001 - compaction is an optimization
+        logger.warning("Post-re-key compaction skipped for %s: %s", collection, exc)
 
 
 async def _rekey_pgvector(vector_engine, collection: str, id_map: dict) -> None:
-    """Move PGVector rows to their new ids with SQL UPDATEs — the vector column
-    never moves, so nothing is re-embedded."""
-    from sqlalchemy import select, update
+    """Move PGVector rows to new primary-key ids with SQL UPDATEs — the vector
+    column never moves, so nothing is re-embedded.
+
+    Merge-safe and idempotent: an old id whose new id already exists is
+    deleted instead of moved (the surviving row is equivalent), so re-runs and
+    pre-existing new-scheme rows never raise a duplicate-key error.
+    """
+    from sqlalchemy import delete, select, update
 
     from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
@@ -284,28 +351,44 @@ async def _rekey_pgvector(vector_engine, collection: str, id_map: dict) -> None:
         return
 
     async with vector_engine.get_async_session() as session:
+        old_ids = [str(old_id) for old_id in id_map]
+        new_ids = [str(new_id) for new_id in id_map.values()]
+
+        existing_new = {
+            str(row_id)
+            for row_id in (
+                await session.execute(select(table.c.id).where(table.c.id.in_(new_ids)))
+            ).scalars()
+        }
         rows = (
             await session.execute(
-                select(table.c.id, table.c.payload).where(table.c.id.in_(list(id_map)))
+                select(table.c.id, table.c.payload).where(table.c.id.in_(old_ids))
             )
         ).all()
+
         for row in rows:
-            new_id = id_map[str(row.id)]
+            new_id = str(id_map[str(row.id)])
+            if new_id in existing_new:
+                # Target row already exists -> merge by dropping the old row.
+                await session.execute(delete(table).where(table.c.id == row.id))
+                continue
             payload = dict(row.payload or {})
             payload["id"] = new_id
             await session.execute(
                 update(table).where(table.c.id == row.id).values(id=new_id, payload=payload)
             )
+            existing_new.add(new_id)  # two old ids -> one new id: move once
         await session.commit()
 
 
 async def _rekey_native(vector_engine, collection: str, id_map: dict) -> bool:
     """Vector-preserving re-key for backends that support it.
 
-    Returns ``True`` when the collection was handled natively (vectors moved,
-    nothing re-embedded); ``False`` means the caller must use the generic
-    re-embed path. Dispatch is by adapter class name so the optional backend
-    packages are never imported here.
+    Migration-local by design (no VectorDBInterface changes). Returns ``True``
+    when the collection was handled natively (vectors moved, nothing
+    re-embedded); ``False`` means the caller must use the generic re-embed
+    path. Dispatch is by adapter class name so the optional backend packages
+    are never imported here.
     """
     if not id_map:
         return True
@@ -348,12 +431,11 @@ async def _migrate_vector(vector_engine, id_map: dict, properties_by_id: dict) -
         ids_by_kind.setdefault(node_type, []).append(old_id)
 
     for node_type, old_ids in ids_by_kind.items():
-        kind = _NODE_KINDS.get(node_type)
-        if kind is None:
+        index_fields = _INDEX_FIELDS.get(node_type)
+        if index_fields is None:
             continue
-        model_cls, _ = kind
 
-        for index_field in _index_fields(model_cls):
+        for index_field in index_fields:
             collection = f"{node_type}_{index_field}"
 
             # Vector-preserving fast path; nothing can fail per-point here
@@ -416,10 +498,8 @@ def _build_triplet_remap(edges: list, id_map: dict) -> dict:
         new_target = id_map.get(target_id, target_id)
         if new_source == source_id and new_target == target_id:
             continue
-        old_triplet_id = str(generate_node_id(str(source_id) + relationship_name + str(target_id)))
-        new_triplet_id = str(
-            generate_node_id(str(new_source) + relationship_name + str(new_target))
-        )
+        old_triplet_id = _frozen_bare_id(str(source_id) + relationship_name + str(target_id))
+        new_triplet_id = _frozen_bare_id(str(new_source) + relationship_name + str(new_target))
         triplet_map[old_triplet_id] = new_triplet_id
     return triplet_map
 
@@ -435,12 +515,15 @@ async def _migrate_triplet_vector(vector_engine, triplet_map: dict) -> None:
         return
 
     # Vector-preserving fast path (missing collection is a no-op inside).
-    if await _rekey_native(vector_engine, "Triplet_text", triplet_map):
+    if await _rekey_native(vector_engine, _TRIPLET_COLLECTION, triplet_map):
         return
 
+    from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+
     try:
-        rows = await vector_engine.retrieve("Triplet_text", list(triplet_map.keys()))
-    except Exception:  # noqa: BLE001 - collection absent when feature is off
+        rows = await vector_engine.retrieve(_TRIPLET_COLLECTION, list(triplet_map.keys()))
+    except CollectionNotFoundError:
+        # Triplet embedding was never enabled for this database.
         return
 
     new_points = []
@@ -465,7 +548,7 @@ async def _migrate_triplet_vector(vector_engine, triplet_map: dict) -> None:
         migrated_old_ids.append(old_id)
 
     if new_points:
-        await vector_engine.index_data_points("Triplet", "text", new_points)
+        await vector_engine.index_data_points("Triplet", "text", new_points)  # -> Triplet_text
         await vector_engine.delete_data_points("Triplet_text", migrated_old_ids)
 
 
@@ -563,28 +646,62 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
     return len(remapped_edges)
 
 
-async def migrate(context: MigrationContext) -> None:
-    """Remap old-scheme Entity/EntityType ids across graph, vector and ledger."""
-    graph_engine = context.graph_engine
-    nodes, edges = await graph_engine.get_graph_data()
-    if not nodes:
-        return
+def _is_hybrid_backend() -> bool:
+    """True when graph and vector live in ONE store (e.g. Neptune Analytics).
 
-    id_map = build_id_remap(nodes)
-    if not id_map:
-        logger.info("Entity/EntityType ID migration: no old-scheme nodes found.")
-        return
+    On hybrid backends the vector "points" are graph nodes sharing the entity's
+    id; this migration's separate vector/graph steps would corrupt them (the
+    vector delete is a DETACH DELETE of the live graph node). Refuse rather
+    than corrupt — uses the same detection the unified engine factory uses.
+    """
+    from cognee.infrastructure.databases.graph.config import get_graph_context_config
+    from cognee.infrastructure.databases.unified.get_unified_engine import _is_hybrid_provider
+    from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 
+    return _is_hybrid_provider(get_graph_context_config(), get_vectordb_context_config())
+
+
+def build_id_remap_reverse(nodes: list) -> dict:
+    """``{model_owned_id: released_bare_id}`` for nodes on the NEW scheme.
+
+    Inverse of :func:`build_id_remap`, targeting the RELEASED bare scheme (the
+    interim scheme was never released, so it is never a downgrade target).
+    Nodes not on the model-owned scheme are left untouched. NOTE: the bare
+    scheme is the one with the Entity/EntityType name collision — downgrading
+    a graph holding both ``Entity("x")`` and ``EntityType("x")`` faithfully
+    reproduces that collision (two map entries to one id); the merge-safe
+    re-key and graph upsert collapse them, exactly as old cognee stored them.
+    """
+    id_map: dict = {}
+    for node_id, properties in nodes:
+        node_type = properties.get("type")
+        if node_type not in _NODE_KINDS:
+            continue
+        name = properties.get("name")
+        if not name:
+            continue
+        if node_id != _frozen_model_id(node_type, name):
+            continue
+        id_map[node_id] = _frozen_bare_id(name)
+    return id_map
+
+
+async def _apply_id_map(context: MigrationContext, nodes: list, edges: list, id_map: dict) -> None:
+    """Apply an id remap across all three stores, derived stores first.
+
+    Direction-agnostic core shared by :func:`migrate` (old -> model-owned) and
+    :func:`downgrade` (model-owned -> bare). The map must be computed while the
+    graph still holds the SOURCE ids; the graph is renamed last so a crash at
+    any point leaves a state the next run finishes (see module docstring).
+    """
     properties_by_id = {node_id: properties for node_id, properties in nodes}
 
-    # Re-key the derived stores first (while the graph still holds the old ids),
-    # rename the graph last. See module docstring for why this order is retry-safe.
     failed = await _migrate_vector(context.vector_engine, id_map, properties_by_id)
     if failed:
         for old_id in failed:
             id_map.pop(old_id, None)
         logger.warning(
-            "Entity/EntityType ID migration: %d node(s) left on the old scheme "
+            "Entity/EntityType ID remap: %d node(s) left on their current scheme "
             "(vector point could not be re-keyed); they remain consistent across stores.",
             len(failed),
         )
@@ -593,10 +710,60 @@ async def migrate(context: MigrationContext) -> None:
 
     await _migrate_triplet_vector(context.vector_engine, _build_triplet_remap(edges, id_map))
     await _migrate_ledger(id_map, context.dataset_id)
-    remapped_edge_count = await _migrate_graph(graph_engine, id_map, properties_by_id, edges)
+    remapped_edge_count = await _migrate_graph(
+        context.graph_engine, id_map, properties_by_id, edges
+    )
 
     logger.info(
-        "Entity/EntityType ID migration: remapped %d node(s) and %d edge(s).",
+        "Entity/EntityType ID remap: remapped %d node(s) and %d edge(s).",
         len(id_map),
         remapped_edge_count,
     )
+
+
+async def migrate(context: MigrationContext) -> None:
+    """Remap old-scheme Entity/EntityType ids across graph, vector and ledger."""
+    if _is_hybrid_backend():
+        logger.warning(
+            "Entity/EntityType ID migration does not support hybrid graph+vector "
+            "backends; skipping. The database keeps its current id scheme."
+        )
+        return
+
+    nodes, edges = await context.graph_engine.get_graph_data()
+    if not nodes:
+        return
+
+    id_map = build_id_remap(nodes)
+    if not id_map:
+        logger.info("Entity/EntityType ID migration: no old-scheme nodes found.")
+        return
+
+    await _apply_id_map(context, nodes, edges, id_map)
+
+
+async def downgrade(context: MigrationContext) -> None:
+    """Reverse :func:`migrate`: model-owned ids back to the released bare scheme.
+
+    Same three-store lockstep and retry-safety as the upgrade, with the map
+    inverted. Only useful when rolling back to a pre-#2515 cognee release —
+    the bare scheme reintroduces the Entity/EntityType name collision that
+    release had (see :func:`build_id_remap_reverse`).
+    """
+    if _is_hybrid_backend():
+        logger.warning(
+            "Entity/EntityType ID migration does not support hybrid graph+vector "
+            "backends; skipping downgrade. The database keeps its current id scheme."
+        )
+        return
+
+    nodes, edges = await context.graph_engine.get_graph_data()
+    if not nodes:
+        return
+
+    id_map = build_id_remap_reverse(nodes)
+    if not id_map:
+        logger.info("Entity/EntityType ID downgrade: no model-owned-scheme nodes found.")
+        return
+
+    await _apply_id_map(context, nodes, edges, id_map)

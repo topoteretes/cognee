@@ -132,9 +132,18 @@ class _NoCollectionVector(_FakeVector):
     """Adapter whose ``retrieve`` raises on a missing collection (e.g. PGVector)."""
 
     async def retrieve(self, collection, ids):
+        from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+
         if collection not in self.points:
-            raise RuntimeError(f"collection {collection} does not exist")
+            raise CollectionNotFoundError(f"collection {collection} does not exist")
         return await super().retrieve(collection, ids)
+
+
+class _BrokenVector(_FakeVector):
+    """Adapter whose ``retrieve`` fails with a REAL backend error (timeout etc.)."""
+
+    async def retrieve(self, collection, ids):
+        raise RuntimeError("connection timed out")
 
 
 async def _run_graph_migration(graph):
@@ -402,6 +411,16 @@ def test_triplet_migration_tolerates_missing_collection():
     assert vector.points == {}
 
 
+def test_triplet_migration_propagates_real_backend_errors():
+    """ONLY missing-collection is tolerated. A real backend failure (timeout,
+    auth) must abort the migration so the revision is NOT stamped and the next
+    startup retries — swallowing it would strand Triplet points forever."""
+    import pytest
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        asyncio.run(_migrate_triplet_vector(_BrokenVector(), {"old": "new"}))
+
+
 # ── vector store: native (vector-preserving) re-key paths ───────────────────
 
 
@@ -541,3 +560,143 @@ if __name__ == "__main__":
     import pytest
 
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+# ── merge safety (pre-existing new-scheme rows must never duplicate) ─────────
+
+
+def test_native_lancedb_rekey_merges_when_new_id_already_exists():
+    """An SDK process may have written the new-scheme point before the
+    migration ran. The native re-key must DROP the old row, not append a
+    duplicate id (lance `add` has no uniqueness)."""
+    old_id = str(generate_node_id("Alice"))
+    new_id = str(Entity.id_for("alice"))
+    table = _FakeLanceTable(
+        [
+            {"id": old_id, "vector": [0.1], "payload": {"id": old_id, "text": "alice"}},
+            {"id": new_id, "vector": [0.2], "payload": {"id": new_id, "text": "alice"}},
+        ]
+    )
+    adapter = _make_lance_adapter(table)
+
+    assert asyncio.run(_rekey_native(adapter, "Entity_name", {old_id: new_id}))
+
+    assert old_id not in table.rows
+    assert list(table.rows) == [new_id]
+    # The pre-existing new row survived untouched (no overwrite, no duplicate).
+    assert table.rows[new_id]["vector"] == [0.2]
+
+
+def test_native_lancedb_rekey_collapses_two_old_ids_to_one_target():
+    """Downgrade case: Entity('x') and EntityType('x') both map to the bare id.
+    One row moves, the other old row is dropped — never two rows with one id."""
+    old_a = str(Entity.id_for("alice"))
+    old_b = str(EntityType.id_for("alice"))
+    bare = str(generate_node_id("alice"))
+    table = _FakeLanceTable(
+        [
+            {"id": old_a, "vector": [0.1], "payload": {"id": old_a, "text": "alice"}},
+            {"id": old_b, "vector": [0.2], "payload": {"id": old_b, "text": "alice"}},
+        ]
+    )
+    adapter = _make_lance_adapter(table)
+
+    assert asyncio.run(_rekey_native(adapter, "Entity_name", {old_a: bare, old_b: bare}))
+
+    assert list(table.rows) == [bare]
+
+
+def test_native_pgvector_rekey_merges_when_new_id_already_exists():
+    """Same merge-safety for the SQL path: a pre-existing new-id row must make
+    the old row a DELETE, not a duplicate-PK UPDATE that fails every startup."""
+    from sqlalchemy import JSON, Column, MetaData, String, Table, select
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    old_id = str(generate_node_id("Alice"))
+    new_id = str(Entity.id_for("alice"))
+
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite://")
+        metadata = MetaData()
+        table = Table(
+            "Entity_name",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column("payload", JSON),
+            Column("vector", JSON),
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
+            await conn.execute(
+                table.insert().values(
+                    id=old_id, payload={"id": old_id, "text": "alice"}, vector=[0.1]
+                )
+            )
+            await conn.execute(
+                table.insert().values(
+                    id=new_id, payload={"id": new_id, "text": "alice"}, vector=[0.2]
+                )
+            )
+
+        class PGVectorAdapter:  # class name drives the dispatch
+            async def get_table(self, collection):
+                return table
+
+            def get_async_session(self):
+                return AsyncSession(engine)
+
+        handled = await _rekey_native(PGVectorAdapter(), "Entity_name", {old_id: new_id})
+
+        async with AsyncSession(engine) as session:
+            rows = (await session.execute(select(table))).all()
+        await engine.dispose()
+        return handled, rows
+
+    handled, rows = asyncio.run(run())
+    assert handled
+    assert len(rows) == 1
+    assert rows[0].id == new_id
+    assert rows[0].vector == [0.2]  # the pre-existing new row survived
+
+
+# ── downgrade (reverse remap) ────────────────────────────────────────────────
+
+
+def test_build_id_remap_reverse_targets_released_bare_scheme():
+    from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
+        build_id_remap_reverse,
+    )
+
+    entity_new = str(Entity.id_for("alice"))
+    nodes = [
+        (entity_new, {"name": "alice", "type": "Entity", "description": "a"}),
+        ("chunk-1", {"name": "c", "type": "DocumentChunk"}),
+    ]
+    assert build_id_remap_reverse(nodes) == {entity_new: str(generate_node_id("alice"))}
+
+
+def test_graph_upgrade_then_downgrade_roundtrip():
+    """up() then down() restores the released bare scheme on the graph store."""
+    from cognee.modules.migrations.graph.namespace_entity_type_node_ids import (
+        build_id_remap_reverse,
+    )
+
+    graph = _FakeGraph()
+    entity_bare = graph.add_old_node("Alice", "Entity")
+    graph.edges = [("chunk-1", entity_bare, "contains", {})]
+
+    asyncio.run(_run_graph_migration(graph))  # upgrade
+    entity_new = str(Entity.id_for("alice"))
+    assert entity_new in graph.nodes
+
+    async def run_down():
+        nodes, edges = await graph.get_graph_data()
+        id_map = build_id_remap_reverse(nodes)
+        properties_by_id = {nid: props for nid, props in nodes}
+        await _migrate_graph(graph, id_map, properties_by_id, edges)
+
+    asyncio.run(run_down())
+
+    assert entity_new not in graph.nodes
+    assert entity_bare in graph.nodes  # back on the released bare scheme
+    assert ("chunk-1", entity_bare, "contains", {}) in graph.edges
