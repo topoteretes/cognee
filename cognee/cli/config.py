@@ -23,6 +23,11 @@ COMMAND_DESCRIPTIONS = {
     "improve": "Enrich an existing knowledge graph with additional context and rules",
     "forget": "Remove data from the knowledge graph",
     "serve": "Connect to a Cognee instance (cloud or local)",
+    "upgrade": "Apply pending relational + data migrations (alembic-style; head or a revision)",
+    "downgrade": "Revert data migrations to a revision ('base' or a slug); rewrites data",
+    "stamp": "Set the stored migration revision WITHOUT running migrations (bookkeeping repair)",
+    "history": "List the data-migration chain, newest first",
+    "current": "Show each database's stamped migration revision (and last failure, if any)",
 }
 
 # Search type choices

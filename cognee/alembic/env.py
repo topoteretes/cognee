@@ -90,13 +90,13 @@ def run_migrations_online() -> None:
 
 db_engine = get_relational_engine()
 
-logging.getLogger("alembic.env").info("Using database: %s", db_engine.db_uri)
-# In case db_uri is a SQLAlchemy URL object, convert it to string
-db_uri = (
-    db_engine.db_uri
-    if isinstance(db_engine.db_uri, str)
-    else db_engine.db_uri.render_as_string(hide_password=False)
-)
+# Use the LIVE engine's URL, not db_uri: for S3-backed SQLite the adapter
+# pulls the database to a local temp file and connects to THAT (db_uri still
+# names the s3:// path, which aiosqlite cannot open). The live engine's URL
+# always points at the real connection target on every backend.
+db_uri = db_engine.engine.url.render_as_string(hide_password=False)
+
+logging.getLogger("alembic.env").info("Using database: %s", db_uri)
 
 config.set_section_option(
     config.config_ini_section,

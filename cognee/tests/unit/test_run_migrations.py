@@ -13,6 +13,7 @@ once-per-process flag being set only on clean runs.
 
 import asyncio
 import importlib
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -49,7 +50,11 @@ class TestRunRelationalMigrations(unittest.TestCase):
         mock_upgrade.assert_called_once()
         alembic_config, target = mock_upgrade.call_args[0]
         self.assertEqual(target, "head")
-        self.assertEqual(alembic_config.get_main_option("script_location"), "/fake/package/alembic")
+        # os.path.join -> backslash on Windows; assert platform-agnostically.
+        self.assertEqual(
+            alembic_config.get_main_option("script_location"),
+            os.path.join("/fake/package", "alembic"),
+        )
         # env.py honors this to skip fileConfig(), which would otherwise
         # disable the host process's loggers.
         self.assertFalse(alembic_config.attributes.get("configure_logger", True))
