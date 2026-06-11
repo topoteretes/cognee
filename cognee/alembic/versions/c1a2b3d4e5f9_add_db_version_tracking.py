@@ -1,6 +1,6 @@
 """Add Cognee version and migration revision tracking to dataset_database
 
-Revision ID: c1a2b3d4e5f7
+Revision ID: c1a2b3d4e5f9
 Revises: 760ef4f08ef0
 Create Date: 2026-06-03 00:00:00.000000
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "c1a2b3d4e5f7"
+revision: str = "c1a2b3d4e5f9"
 down_revision: Union[str, None] = "760ef4f08ef0"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

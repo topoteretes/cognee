@@ -5,7 +5,7 @@ access-control modes) and, when backend access control is disabled, the
 migration revisions of the GLOBAL graph/vector databases (no per-dataset
 dataset_database rows exist to carry them in that mode).
 
-Revision ID: d8f4a1b2c3e6
+Revision ID: d8f4a1b2c3e9
 Revises: c1a2b3d4e5f7
 Create Date: 2026-06-10 00:00:00.000000
 
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "d8f4a1b2c3e6"
-down_revision: Union[str, None] = "c1a2b3d4e5f7"
+revision: str = "d8f4a1b2c3e9"
+down_revision: Union[str, None] = "c1a2b3d4e5f9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
