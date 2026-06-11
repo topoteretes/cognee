@@ -78,9 +78,9 @@ def create_embedding_engine(
         - llm_api_key: API key for the LLM service, to be used if embedding_api_key is not
           provided.
         - accumulate_embedding_calls: Whether to enable coalescing of concurrent embed_text
-          calls into batched API requests (default: False).
+          calls into batched API requests (default: True).
         - accumulate_embedding_timeout_ms: Maximum wait time in milliseconds before flushing
-          accumulated calls (default: 100).
+          accumulated calls (default: 20).
 
     Returns:
     --------

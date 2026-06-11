@@ -235,3 +235,79 @@ def test_rejects_non_positive_flush_timeout():
     inner = FakeEngine(batch_size=4)
     with pytest.raises(ValueError):
         AccumulatingEmbeddingEngine(inner, flush_timeout_seconds=0)
+
+
+# --------------------------------------------------------------------------- #
+# Factory wiring (create_embedding_engine)
+# --------------------------------------------------------------------------- #
+
+
+class StubInnerEngine:
+    """Stands in for LiteLLMEmbeddingEngine inside create_embedding_engine."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def get_vector_size(self) -> int:
+        return 3
+
+    def get_batch_size(self) -> int:
+        return 4
+
+    async def embed_text(self, text):
+        return [[0.0] * 3 for _ in text]
+
+
+@pytest.fixture
+def stubbed_factory(monkeypatch):
+    """Patch the LiteLLM engine class and clear the factory's lru_cache."""
+    import importlib
+
+    import cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine as llm_mod
+
+    # The package __init__ re-exports the function under the module's name,
+    # so resolve the module itself through importlib.
+    factory = importlib.import_module(
+        "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine"
+    )
+
+    monkeypatch.setattr(llm_mod, "LiteLLMEmbeddingEngine", StubInnerEngine)
+    factory.create_embedding_engine.cache_clear()
+    yield factory
+    factory.create_embedding_engine.cache_clear()
+
+
+def _create_engine(factory, accumulate: bool, timeout_ms: int):
+    return factory.create_embedding_engine(
+        embedding_provider="openai",
+        embedding_model="stub/embedding-model",
+        embedding_dimensions=3,
+        embedding_max_completion_tokens=8191,
+        embedding_endpoint=None,
+        embedding_api_key="test-key",
+        embedding_api_version=None,
+        embedding_batch_size=4,
+        huggingface_tokenizer=None,
+        llm_api_key="test-key",
+        llm_provider="openai",
+        accumulate_embedding_calls=accumulate,
+        accumulate_embedding_timeout_ms=timeout_ms,
+    )
+
+
+def test_factory_wraps_engine_and_converts_timeout_to_seconds(stubbed_factory):
+    """With accumulation enabled, the factory wraps the inner engine and
+    converts ACCUMULATE_EMBEDDING_TIMEOUT_MS (milliseconds) into seconds."""
+    engine = _create_engine(stubbed_factory, accumulate=True, timeout_ms=50)
+
+    assert isinstance(engine, AccumulatingEmbeddingEngine)
+    assert isinstance(engine._inner, StubInnerEngine)
+    assert engine._flush_timeout == pytest.approx(0.05)
+
+
+def test_factory_returns_bare_engine_when_accumulation_disabled(stubbed_factory):
+    """With accumulation disabled, the factory returns the inner engine unwrapped."""
+    engine = _create_engine(stubbed_factory, accumulate=False, timeout_ms=50)
+
+    assert isinstance(engine, StubInnerEngine)
+    assert not isinstance(engine, AccumulatingEmbeddingEngine)
