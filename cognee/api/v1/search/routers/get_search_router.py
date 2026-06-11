@@ -64,8 +64,7 @@ class SearchPayloadDTO(InDTO):
     verbose: bool = Field(
         default=False,
         description=(
-            "Return detailed result information including the graph representation"
-            " when available."
+            "Return detailed result information including the graph representation when available."
         ),
     )
     skills: Optional[list[str]] = Field(

@@ -113,7 +113,7 @@ def get_remember_router() -> APIRouter:
             examples=[""],
             description=(
                 "JSON-serialised graph model schema (same format as the cognify endpoint), "
-                "e.g. {\"title\": \"CompanyGraph\", \"type\": \"object\", \"properties\": {...}}. "
+                'e.g. {"title": "CompanyGraph", "type": "object", "properties": {...}}. '
                 "Must include a top-level 'title' key. Leave empty to use the default "
                 "KnowledgeGraph model — a restrictive schema here can produce an empty graph. "
                 "Invalid JSON or an unconvertible schema is rejected with 400."
@@ -232,7 +232,6 @@ def get_remember_router() -> APIRouter:
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)
                     }
                 }
-
 
             result = await cognee_remember(
                 data,
