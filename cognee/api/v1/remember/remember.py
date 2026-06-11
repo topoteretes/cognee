@@ -793,7 +793,9 @@ async def _remember_inner(
     # writes, even when the API server was never started.
     await _ensure_migrations_run()
 
-    content_type = kwargs.pop("content_type", None)
+    # Normalize "" to None — HTML forms and Swagger UI submit untouched
+    # optional fields as empty strings.
+    content_type = kwargs.pop("content_type", None) or None
     skill_improvement = kwargs.pop("skill_improvement", None)
 
     def _requested_node_set(default: str) -> str:
