@@ -302,9 +302,12 @@ class Task:
         else:
             raise ValueError(f"Unsupported task type: {executable}")
 
+        # Copy the caller's dict so the writes below (default batch_size,
+        # workers, timeout) never mutate caller-owned state that may be
+        # shared across tasks.
         if task_config is not None:
-            self.task_config = task_config
-            if "batch_size" not in task_config:
+            self.task_config = dict(task_config)
+            if "batch_size" not in self.task_config:
                 self.task_config["batch_size"] = 1
         else:
             self.task_config = {"batch_size": 1}
