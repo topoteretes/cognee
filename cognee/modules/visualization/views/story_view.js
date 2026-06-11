@@ -41,6 +41,12 @@ nodes.forEach(function(n){
 });
 var nodeMap={};
 nodes.forEach(function(n){nodeMap[n.id]=n});
+// Share node/link details with the Memory view (views/memory_map.js) so its
+// slim structural payload never re-embeds the node JSON. _vizLinks must be
+// the UNFILTERED array: the memory payload's edge index holds integer
+// positions into the links array exactly as the preprocessor emitted it.
+window._vizNodeById=nodeMap;
+window._vizLinks=links;
 links=links.filter(function(l){
   var s=typeof l.source==="object"?(l.source.id||l.source):l.source;
   var t=typeof l.target==="object"?(l.target.id||l.target):l.target;
