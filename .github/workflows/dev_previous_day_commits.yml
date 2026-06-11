@@ -13,13 +13,14 @@ on:
         default: ""
   schedule:
     - cron: "59 23 * * *"
+  pull_request:
 
 permissions:
   contents: read
   pull-requests: read
 
 env:
-  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || '1' }}
+  lookback_days: ${{ github.event.inputs.lookback_days || vars.lookback_days || (github.event_name == 'pull_request' && '3') || '1' }}
 
 jobs:
   prepare-merged-branches:
@@ -108,6 +109,8 @@ jobs:
           echo "notes_markdown=${OUTPUT_DIR}/branch_notes.md" >> "${GITHUB_OUTPUT}"
           echo "assessment_json=${OUTPUT_DIR}/docs_assessment.json" >> "${GITHUB_OUTPUT}"
           echo "assessment_markdown=${OUTPUT_DIR}/docs_assessment.md" >> "${GITHUB_OUTPUT}"
+          echo "docs_edit_scope_json=${OUTPUT_DIR}/docs_edit_scope.json" >> "${GITHUB_OUTPUT}"
+          echo "docs_edit_scope_markdown=${OUTPUT_DIR}/docs_edit_scope.md" >> "${GITHUB_OUTPUT}"
           echo "docs_scope_plan=${OUTPUT_DIR}/docs_scope_plan.md" >> "${GITHUB_OUTPUT}"
 
       - name: Generate branch notes
@@ -186,11 +189,17 @@ jobs:
       - name: Prepare docs edit scope
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: docs_scope
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 tools/prepare_docs_edit_scope.py \
-            --first-parent "${{ matrix.first_parent }}" \
-            --second-parent "${{ matrix.second_parent }}" \
-            --docs-root docs-repo
+            --repo "${{ github.repository }}" \
+            --pr-number "${{ matrix.pr_number }}" \
+            --docs-root docs-repo \
+            --notes-json "${{ steps.branch_paths.outputs.notes_json }}" \
+            --assessment-json "${{ steps.branch_paths.outputs.assessment_json }}" \
+            --scope-json-output "${{ steps.branch_paths.outputs.docs_edit_scope_json }}" \
+            --scope-markdown-output "${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}"
 
       - name: Plan docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
@@ -210,16 +219,8 @@ jobs:
             - Second parent: `${{ matrix.second_parent }}`
             - Scope plan output: `./${{ steps.branch_paths.outputs.docs_scope_plan }}`
 
-            - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`): Summary of the merged branch.
-            - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`): Candidate docs areas and rationale for the update.
-
-            ## Precomputed scope
-
-            Changed source files:
-            ${{ steps.docs_scope.outputs.changed_source_files }}
-
-            Likely documentation targets:
-            ${{ steps.docs_scope.outputs.candidate_doc_files }}
+            - **Prepared documentation edit scope** (`./${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}`): Curated source files, docs candidates, assessment summary, and out-of-scope files.
+            - **Prepared documentation edit scope JSON** (`./${{ steps.branch_paths.outputs.docs_edit_scope_json }}`): Machine-readable copy of the prepared scope.
           claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 35"
 
       - name: Validate docs scope plan
