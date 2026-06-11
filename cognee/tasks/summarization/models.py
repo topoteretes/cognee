@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Union, Optional
+from uuid import UUID
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart
@@ -32,6 +33,7 @@ class TextSummary(DataPoint):
 
     text: str
     made_from: DocumentChunk
+    source_chunk_id: Optional[UUID] = None
     summarized_in: Optional[GlobalContextSummary] = None
     global_context_bucket_id: Optional[str] = None
     metadata: dict = {"index_fields": ["text"]}
