@@ -13,6 +13,7 @@ Example:
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import time
@@ -27,6 +28,19 @@ import pytest
 PASSWORD = "securepassword123!"
 VERIFY_PHRASE = "crimson-river-2776"
 VERIFY_NOTE = "Vela-117"
+
+_SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)([A-Z0-9_]*(?:API_KEY|SECRET|TOKEN|PASSWORD)[A-Z0-9_]*\s*[=:]\s*)\S+"
+)
+_BEARER_TOKEN_PATTERN = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/-]+=*")
+_OPENAI_KEY_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")
+
+
+def _redact_secrets(text: str) -> str:
+    """Mask API keys, tokens, and passwords so failure output is safe to print in CI logs."""
+    text = _SENSITIVE_ASSIGNMENT_PATTERN.sub(r"\1****", text)
+    text = _BEARER_TOKEN_PATTERN.sub(r"\1****", text)
+    return _OPENAI_KEY_PATTERN.sub("sk-****", text)
 
 
 def _repo_root() -> Path:
@@ -96,12 +110,13 @@ def _run(
 
 
 def _container_logs(container_name: str, *, tail: int = 300) -> str:
+    """Return the container's recent logs with secret-looking values redacted."""
     result = _run(
         ["docker", "logs", "--tail", str(tail), container_name],
         check=False,
         timeout=30,
     )
-    return (result.stdout + "\n" + result.stderr).strip()
+    return _redact_secrets((result.stdout + "\n" + result.stderr).strip())
 
 
 def _container_status(container_name: str) -> str:
