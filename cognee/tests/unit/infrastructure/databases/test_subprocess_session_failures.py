@@ -12,6 +12,7 @@ Covers the scenarios that used to silently hang or leak:
 from __future__ import annotations
 
 import multiprocessing as mp
+import sys
 import time
 
 import pytest
@@ -406,6 +407,16 @@ def test_describe_exitcode_decodes_signals():
     assert _describe_exitcode(-999) == "-999"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "POSIX signal-exitcode semantics: os.kill(pid, SIGTERM) maps to "
+        "TerminateProcess on Windows with a positive exitcode (no negative "
+        "signal number), so signal-name surfacing cannot be guaranteed. "
+        "_describe_exitcode's POSIX decoding is covered by "
+        "test_describe_exitcode_decodes_signals."
+    ),
+)
 def test_init_signal_killed_worker_surfaces_signal_name():
     """End-to-end: a worker that dies to SIGTERM before READY surfaces
     ``exitcode=-15 (SIGTERM …)`` in the error message. Regression guard
