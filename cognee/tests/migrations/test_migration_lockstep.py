@@ -83,9 +83,7 @@ async def verify(stage: str):
         # id differs from its name is LEGITIMATELY at id_for(raw_id), not
         # id_for(name) — the "no old-scheme ids remain" check above covers
         # staleness; this one proves the migration produced model-owned ids.
-        on_scheme = sum(
-            1 for nid, p in entityish if nid == str(model[p["type"]].id_for(p["name"]))
-        )
+        on_scheme = sum(1 for nid, p in entityish if nid == str(model[p["type"]].id_for(p["name"])))
         check(
             f"{stage}: entities on the model-owned id scheme",
             on_scheme > 0,
@@ -137,6 +135,23 @@ async def verify(stage: str):
             f"{stage}: triplet points keyed by current endpoints",
             len(triplet_rows) > 0,
             f"{len(triplet_rows)}/{len(triplet_ids)} resolvable",
+        )
+
+        # EdgeType points: ids must be recomputable via the live lookup
+        # derivation (EdgeType.id_for) — this is the retrieval/delete join key.
+        from cognee.modules.graph.models.EdgeType import EdgeType
+        from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+
+        edge_texts = {
+            get_edge_retrieval_text((props or {}).get("edge_text"), rel)
+            for _, _, rel, props in real_edges
+        } - {""}
+        edge_type_ids = [str(EdgeType.id_for(text)) for text in edge_texts]
+        edge_type_rows = await vector_engine.retrieve("EdgeType_relationship_name", edge_type_ids)
+        check(
+            f"{stage}: EdgeType points keyed by EdgeType.id_for(text)",
+            len(edge_type_rows) == len(edge_type_ids),
+            f"{len(edge_type_rows)}/{len(edge_type_ids)} resolvable",
         )
 
         # Ledger: every Entity/EntityType slug + edge endpoint resolves to the graph.

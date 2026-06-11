@@ -9,7 +9,7 @@ from cognee.modules.graph.legacy.mark_ledger_as_deleted import (
 from cognee.modules.graph.models import Node, Edge
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.engine.utils import generate_node_id
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("delete_from_graph_and_vector")
@@ -94,7 +94,7 @@ async def delete_from_graph_and_vector(
         for edge in unique_edges:
             edge_text = _get_deleted_edge_retrieval_text(edge)
             if edge_text:
-                edge_type_ids.append(str(generate_edge_id(edge_id=edge_text)))
+                edge_type_ids.append(str(EdgeType.id_for(edge_text)))
 
         await vector_engine.delete_data_points("EdgeType_relationship_name", edge_type_ids)
 
@@ -137,7 +137,7 @@ async def delete_from_graph_and_vector(
                     remaining_edge_texts.add(edge_text)
 
             orphaned_edge_type_ids = [
-                str(generate_edge_id(edge_id=edge_text))
+                str(EdgeType.id_for(edge_text))
                 for edge_text in deleted_edge_texts
                 if edge_text not in remaining_edge_texts
             ]

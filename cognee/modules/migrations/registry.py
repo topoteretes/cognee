@@ -23,6 +23,10 @@ from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
     downgrade as namespace_entity_type_node_ids_down,
     migrate as namespace_entity_type_node_ids,
 )
+from cognee.modules.migrations.versions.namespace_edge_type_point_ids import (
+    downgrade as namespace_edge_type_point_ids_down,
+    migrate as namespace_edge_type_point_ids,
+)
 
 MIGRATIONS: list[Migration] = [
     # Vector adapters' own storage-schema migration (e.g. LanceDB adding the
@@ -44,6 +48,16 @@ MIGRATIONS: list[Migration] = [
         up=namespace_entity_type_node_ids,
         down_revision="adapter_storage_migration",
         down=namespace_entity_type_node_ids_down,
+    ),
+    # EdgeType vector points moved from the bare hand-rolled uuid5 to the
+    # DataPoint identity derivation ("EdgeType:<name>"), unifying the last
+    # hand-rolled id with the single DataPoint mechanism.
+    Migration(
+        slug="namespace_edge_type_point_ids",
+        cognee_version="1.2.0",
+        up=namespace_edge_type_point_ids,
+        down_revision="namespace_entity_type_node_ids",
+        down=namespace_edge_type_point_ids_down,
     ),
 ]
 
