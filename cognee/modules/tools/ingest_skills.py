@@ -11,6 +11,7 @@ from typing import List, Union
 
 from cognee.modules.engine.models import Skill
 from cognee.modules.tools.loaders import (
+    iter_skill_md_files,
     load_skill_from_md,
     load_skills_from_directory,
 )
@@ -29,9 +30,9 @@ def looks_like_skill_source(data) -> bool:
     path = Path(data)
     try:
         if path.is_file():
-            return path.name.upper() == "SKILL.MD"
+            return path.name.lower() == "skill.md"
         if path.is_dir():
-            return any(path.rglob("SKILL.md")) or any(path.rglob("skill.md"))
+            return any(iter_skill_md_files(path))
     except OSError:
         return False
     return False
