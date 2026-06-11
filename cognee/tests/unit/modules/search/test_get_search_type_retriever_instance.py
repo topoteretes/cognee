@@ -241,7 +241,7 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             return_value=unified,
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ),
         patch(

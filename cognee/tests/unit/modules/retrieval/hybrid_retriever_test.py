@@ -196,7 +196,7 @@ async def test_chunk_retrieval_ranks_bm25_and_vector_channels_with_dedupe():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ) as bm25_cls,
     ):
@@ -237,7 +237,7 @@ async def test_bm25_chunks_respect_nodeset_filter_before_ranking():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ),
     ):
@@ -268,7 +268,7 @@ async def test_zero_score_bm25_chunks_do_not_reserve_context_slots():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ),
     ):
@@ -310,7 +310,7 @@ async def test_default_summary_search_participates_in_chunk_ranking():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ),
     ):
@@ -337,7 +337,7 @@ async def test_summary_retrieval_opt_out_disables_summary_channel_only():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ),
     ):
@@ -376,7 +376,7 @@ async def test_summary_only_hit_fetches_source_chunk():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -411,7 +411,7 @@ async def test_summary_only_hit_respects_source_chunk_nodeset_filter():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -435,7 +435,7 @@ async def test_summary_search_receives_nodeset_filters():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -462,7 +462,7 @@ async def test_summary_hit_without_source_chunk_id_is_skipped():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -490,7 +490,7 @@ async def test_missing_summary_collection_does_not_fail_hybrid_retrieval():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -518,7 +518,7 @@ async def test_importance_weight_adjusts_summary_enabled_ranking():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -546,7 +546,7 @@ async def test_importance_weight_can_be_disabled_for_summary_enabled_ranking():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -580,7 +580,7 @@ async def test_final_raw_chunk_gets_paired_summary_text():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -624,7 +624,7 @@ async def test_paired_summary_text_respects_nodeset_filter():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
         ),
     ):
@@ -670,7 +670,7 @@ async def test_independent_retrieval_channels_run_concurrently():
             return_value=_unified(vector=vector),
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ),
     ):
