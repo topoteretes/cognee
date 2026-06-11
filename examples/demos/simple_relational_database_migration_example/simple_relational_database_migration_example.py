@@ -75,11 +75,16 @@ Each of these companies has significantly impacted the technology landscape, dri
 
 def _get_postgres_engine() -> sa.Engine:
     # Requires a running Postgres database and a pre-created database (db_name).
-    connection_string = (
-        f"postgresql+psycopg2://{MIGRATION_DB_USERNAME}:{MIGRATION_DB_PASSWORD}"
-        f"@{MIGRATION_DB_HOST}:{MIGRATION_DB_PORT}/{MIGRATION_DB_NAME}"
+    # URL.create safely encodes credentials that contain URL-reserved characters.
+    connection_url = sa.URL.create(
+        "postgresql+psycopg2",
+        username=MIGRATION_DB_USERNAME,
+        password=MIGRATION_DB_PASSWORD,
+        host=MIGRATION_DB_HOST,
+        port=int(MIGRATION_DB_PORT),
+        database=MIGRATION_DB_NAME,
     )
-    return sa.create_engine(connection_string)
+    return sa.create_engine(connection_url)
 
 
 def create_example_postgres_db() -> None:
