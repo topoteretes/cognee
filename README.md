@@ -59,7 +59,7 @@ Cognee is the open-source AI memory platform that gives AI agents persistent lon
 </div>
 </div>
 
-📄 Read the research paper: [Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning](https://arxiv.org/abs/2505.24478) — Markovic et al., 2025 
+📄 Read the research paper: [Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning](https://arxiv.org/abs/2505.24478) — Markovic et al., 2025
 
 
 ## About Cognee
