@@ -130,6 +130,32 @@ async def test_recover_stale_cognify_runs_skips_missing_dataset(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_recover_stale_cognify_runs_swallows_discovery_query_failure(monkeypatch):
+    """A failure while querying for stale runs must not propagate: the
+    function is called from FastAPI lifespan, so an exception here would
+    prevent the whole API from starting."""
+
+    class _FailingSession(_FakeSession):
+        async def execute(self, _statement):
+            raise RuntimeError("relational database unavailable")
+
+    engine = _FakeEngine([_FailingSession()])
+
+    rollback_calls = []
+
+    async def _rollback_handler(**kwargs):
+        rollback_calls.append(kwargs)
+
+    monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _rollback_handler)
+
+    await recovery_module.recover_stale_cognify_runs_on_startup()
+
+    assert rollback_calls == []
+
+
+@pytest.mark.asyncio
 async def test_recover_stale_cognify_runs_skips_recent_run(monkeypatch):
     """A STARTED run younger than the staleness threshold is left alone so a
     live run on another worker is not rolled back out from under it."""
