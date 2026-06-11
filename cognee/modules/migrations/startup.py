@@ -108,6 +108,29 @@ async def run_startup_migrations():
 
         from cognee.modules.migrations.runner import run_database_migrations
 
-        await run_relational_migrations()
-        await run_database_migrations()
-        _startup_migrations_done = True
+        try:
+            await run_relational_migrations()
+        except MigrationError:
+            # cognee's Alembic chain is not self-sufficient on an EMPTY
+            # database — it patches a schema bootstrapped by
+            # Base.metadata.create_all (e.g. the acls migration assumes its
+            # table already exists). Bootstrap the schema and retry once: the
+            # same first-boot recovery the API lifespan has always used, now
+            # available to every caller (remember(), MCP, explicit SDK calls).
+            from cognee.infrastructure.databases.relational import get_relational_engine
+
+            logger.info(
+                "Alembic failed on an unbootstrapped database; creating schema and retrying."
+            )
+            db_engine = get_relational_engine()
+            await db_engine.create_database()
+            await run_relational_migrations()
+
+        summaries = await run_database_migrations()
+
+        # Mark done only when every database succeeded: a failed dataset must
+        # be retried by the next call in this process, exactly as the module
+        # docstring promises. (An empty summary list — no datasets yet — is a
+        # clean outcome.)
+        if all(summary.get("result") != "failed" for summary in summaries):
+            _startup_migrations_done = True

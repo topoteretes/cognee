@@ -1439,7 +1439,7 @@ requires-dist = [
     { name = "instructor", specifier = ">=1.9.1,<2.0.0" },
     { name = "jinja2", specifier = ">=3.1.3,<4" },
     { name = "ladybug", specifier = ">=0.16.0,<0.18" },
-    { name = "lancedb", specifier = ">=0.24.0,<1.0.0" },
+    { name = "lancedb", specifier = ">=0.24.3,<1.0.0" },
     { name = "langchain-aws", marker = "extra == 'neptune'", specifier = ">=0.2.22" },
     { name = "langchain-core", marker = "extra == 'langchain'", specifier = ">=1.2.5" },
     { name = "langchain-text-splitters", marker = "extra == 'langchain'", specifier = ">=0.3.2,<1.0.0" },
