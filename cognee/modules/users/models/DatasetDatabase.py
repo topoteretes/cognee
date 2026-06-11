@@ -34,6 +34,9 @@ class DatasetDatabase(Base):
     # (one Alembic-style chain covers graph + vector + relational-ledger
     # changes). NULL means "no recorded revision" -> all migrations run.
     migration_revision = Column(String, unique=False, nullable=True)
+    # Why the last migration attempt failed (NULL when healthy). Written by the
+    # runner on failure, cleared on success; surfaced by `cognee-cli current`.
+    migration_last_error = Column(String, unique=False, nullable=True)
 
     # configuration details for different database types. This would make it more flexible to add new database types
     # without changing the database schema.

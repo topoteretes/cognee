@@ -140,5 +140,18 @@ async def run_startup_migrations():
         # be retried by the next call in this process, exactly as the module
         # docstring promises. (An empty summary list — no datasets yet — is a
         # clean outcome.)
-        if all(summary.get("result") != "failed" for summary in summaries):
+        failed = [
+            summary.get("dataset_id") or summary.get("database", "?")
+            for summary in summaries
+            if summary.get("result") == "failed"
+        ]
+        if failed:
+            logger.warning(
+                "Migrations FAILED for %d database(s): %s. Writes into them may duplicate "
+                "entities until they migrate. Inspect with `cognee-cli current` (shows the "
+                "recorded error); retried on the next call/startup.",
+                len(failed),
+                ", ".join(failed),
+            )
+        else:
             _startup_migrations_done = True

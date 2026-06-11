@@ -100,14 +100,29 @@ Examples:
 
         async def run():
             from cognee.modules.migrations.runner import run_database_migrations
-            from cognee.modules.migrations.startup import run_relational_migrations
+            from cognee.modules.migrations.startup import (
+                MigrationError,
+                run_relational_migrations,
+            )
 
             fmt.echo("Running relational (Alembic) migrations...")
-            await run_relational_migrations()
+            try:
+                await run_relational_migrations()
+            except MigrationError:
+                # Fresh database: the Alembic chain is not self-sufficient on an
+                # empty schema — bootstrap and retry once, exactly like startup.
+                from cognee.infrastructure.databases.relational import get_relational_engine
+
+                fmt.note("Empty database detected — creating the schema and retrying.")
+                await get_relational_engine().create_database()
+                await run_relational_migrations()
             fmt.echo(f"Upgrading the data-migration chain to '{args.revision}'...")
             return await run_database_migrations(target=args.revision)
 
-        summaries = asyncio.run(run())
+        try:
+            summaries = asyncio.run(run())
+        except Exception as error:  # noqa: BLE001 - translated to an actionable hint
+            _bookkeeping_guard(error)
         _print_summaries(
             summaries,
             "migrations_applied",
@@ -259,6 +274,8 @@ migration has been applied (everything pending).
                     return
                 for row in rows:
                     fmt.echo(f"{row.dataset_id}  {fmt_revision(row.migration_revision)}")
+                    if row.migration_last_error:
+                        fmt.error(f"  last migration error: {row.migration_last_error}")
             else:
                 db_engine = get_relational_engine()
                 async with db_engine.get_async_session() as session:
@@ -269,6 +286,8 @@ migration has been applied (everything pending).
                     fmt.note("No global_database_version row yet — run `cognee upgrade`.")
                     return
                 fmt.echo(f"global  {fmt_revision(record.global_migration_revision)}")
+                if record.global_migration_last_error:
+                    fmt.error(f"  last migration error: {record.global_migration_last_error}")
 
         try:
             asyncio.run(run())

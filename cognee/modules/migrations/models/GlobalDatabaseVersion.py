@@ -37,6 +37,8 @@ class GlobalDatabaseVersion(Base):
     # (access control off only; one chain covers graph + vector + ledger).
     # NULL means "no recorded revision" -> all migrations run.
     global_migration_revision = Column(String, nullable=True)
+    # Why the last migration attempt failed (NULL when healthy).
+    global_migration_last_error = Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))

@@ -165,12 +165,12 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
             asyncio.run(startup.run_startup_migrations())
             self.assertFalse(startup._startup_migrations_done)
 
-        # Next call (now clean) runs again and sets the flag.
+        # The very next call retries immediately and (now clean) sets the flag.
         with (
             patch.object(startup, "run_relational_migrations", new=AsyncMock()) as relational,
             patch(
                 "cognee.modules.migrations.runner.run_database_migrations",
-                new=AsyncMock(return_value=[{"dataset_id": "x", "graph_migrations_applied": []}]),
+                new=AsyncMock(return_value=[{"dataset_id": "x", "migrations_applied": []}]),
             ),
         ):
             asyncio.run(startup.run_startup_migrations())

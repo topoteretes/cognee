@@ -158,6 +158,35 @@ async def _stamp_global(db_engine, revision: Optional[str]) -> None:
             await session.commit()
 
 
+def _error_text(error: Exception) -> str:
+    """Compact, persistable description of a migration failure."""
+    return f"{type(error).__name__}: {error}"[:500]
+
+
+async def _record_dataset_failure(db_engine, dataset_id: UUID, error: Exception) -> None:
+    """Persist why this dataset's migration failed (cleared on next success)."""
+    try:
+        async with db_engine.get_async_session() as session:
+            record = await session.get(DatasetDatabase, dataset_id)
+            if record is not None:
+                record.migration_last_error = _error_text(error)
+                await session.commit()
+    except Exception:  # noqa: BLE001 - never let bookkeeping mask the real failure
+        logger.exception("Could not persist migration failure for dataset '%s'.", dataset_id)
+
+
+async def _record_global_failure(db_engine, error: Exception) -> None:
+    """Persist why the global migration failed (cleared on next success)."""
+    try:
+        async with db_engine.get_async_session() as session:
+            record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+            if record is not None:
+                record.global_migration_last_error = _error_text(error)
+                await session.commit()
+    except Exception:  # noqa: BLE001 - never let bookkeeping mask the real failure
+        logger.exception("Could not persist global migration failure.")
+
+
 async def _record_deployment_version(current_version: str) -> GlobalDatabaseVersion:
     """Upsert the single ``global_database_version`` row's ``cognee_version``.
 
@@ -206,7 +235,15 @@ async def _run_global_migrations(current_version: str, target: str = "head") -> 
     unscoped — correct here, since the one global graph backs every dataset's
     ledger rows.
     """
-    row = await _record_deployment_version(current_version)
+    try:
+        row = await _record_deployment_version(current_version)
+    except (OperationalError, ProgrammingError, EntityNotFoundError) as error:
+        # Same missing-bookkeeping-table tolerance as the per-dataset branch.
+        logger.warning(
+            "Skipping graph/vector migrations. Could not access migration bookkeeping tables: %s",
+            error,
+        )
+        return []
     if not pending_migrations(MIGRATIONS, row.global_migration_revision, target):
         return [{"database": "global", "migrations_applied": []}]
 
@@ -219,7 +256,7 @@ async def _run_global_migrations(current_version: str, target: str = "head") -> 
             if record is None or not pending_migrations(
                 MIGRATIONS, record.global_migration_revision, target
             ):
-                return []
+                return [{"database": "global", "migrations_applied": []}]
             stored = record.global_migration_revision
 
             async def stamp(revision):
@@ -235,8 +272,17 @@ async def _run_global_migrations(current_version: str, target: str = "head") -> 
                 dataset_id=None,
             )
             applied = await _apply(migration_context, stored, target, stamp)
-    except Exception:
+            if applied:
+                async with db_engine.get_async_session() as session:
+                    record = await session.get(
+                        GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID
+                    )
+                    if record is not None and record.global_migration_last_error is not None:
+                        record.global_migration_last_error = None
+                        await session.commit()
+    except Exception as error:
         logger.exception("Database migrations failed for the global databases.")
+        await _record_global_failure(db_engine, error)
         return [{"database": "global", "result": "failed"}]
 
     if applied:
@@ -279,12 +325,22 @@ async def _migrate_dataset(db_engine, row, current_version: str, target: str) ->
             applied = await _apply(migration_context, stored, target, stamp)
 
         if applied:
-            # Audit only: the release that last migrated this dataset.
-            async with db_engine.get_async_session() as session:
-                record = await session.get(DatasetDatabase, row.dataset_id)
-                if record is not None:
-                    record.cognee_version = current_version
-                    await session.commit()
+            try:
+                # Audit/health bookkeeping: the release that last migrated this
+                # dataset, and clearing any recorded failure. Best-effort — the
+                # chain is already applied and stamped; a hiccup here must not
+                # report the migration itself as failed.
+                async with db_engine.get_async_session() as session:
+                    record = await session.get(DatasetDatabase, row.dataset_id)
+                    if record is not None:
+                        record.cognee_version = current_version
+                        record.migration_last_error = None
+                        await session.commit()
+            except Exception:  # noqa: BLE001 - audit only
+                logger.exception(
+                    "Could not record audit fields for dataset '%s' (migrations applied fine).",
+                    row.dataset_id,
+                )
 
     return {"dataset_id": str(row.dataset_id), "migrations_applied": applied}
 
@@ -298,6 +354,10 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
     per-database summary.
     """
     current_version = get_cognee_version()
+
+    # Validate the target up front: an unknown slug is an operator error and
+    # must fail the whole call fast, never as N per-dataset failures.
+    pending_migrations(MIGRATIONS, None, target)
 
     if not backend_access_control_enabled():
         return await _run_global_migrations(current_version, target)
@@ -332,11 +392,12 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
 
         try:
             summary = await _migrate_dataset(db_engine, row, current_version, target)
-        except Exception:
+        except Exception as error:
             logger.exception(
                 "Database migrations failed for dataset '%s'; continuing with remaining datasets.",
                 row.dataset_id,
             )
+            await _record_dataset_failure(db_engine, row.dataset_id, error)
             summaries.append({"dataset_id": str(row.dataset_id), "result": "failed"})
             continue
 
@@ -396,12 +457,26 @@ async def downgrade_database_migrations(
     EXPLICIT OPERATOR ACTION — never runs automatically. ``None`` target means
     "revert every applied migration" (the pre-chain state, revision NULL, so
     the next startup re-applies the whole chain). ``dataset_ids`` restricts
-    the operation to specific datasets (per-dataset mode only). The span is
+    the operation to specific datasets (per-dataset mode only; raises in
+    global mode rather than silently rewriting the shared pair). The span is
     validated before any down() executes, and the stored revision is stamped
     after EVERY reverted step, so a failure mid-span leaves bookkeeping
     consistent with the data.
     """
+    # Validate the target up front (operator error -> fail the whole call).
+    if target_revision is not None and target_revision not in (
+        migration.revision for migration in MIGRATIONS
+    ):
+        raise ValueError(
+            f"Target revision {target_revision!r} is unknown to the chain; cannot downgrade."
+        )
+
     if not backend_access_control_enabled():
+        if dataset_ids is not None:
+            raise ValueError(
+                "dataset_ids targeting requires backend access control; with it "
+                "disabled there is one GLOBAL database pair shared by every dataset."
+            )
         db_engine = get_relational_engine()
         try:
             async with _migration_lock(db_engine, _GLOBAL_MIGRATION_LOCK_KEY):
@@ -434,6 +509,12 @@ async def downgrade_database_migrations(
     rows = await get_dataset_databases()
     if dataset_ids is not None:
         wanted = set(dataset_ids)
+        missing = wanted - {row.dataset_id for row in rows}
+        if missing:
+            raise ValueError(
+                "No dataset_database row found for dataset id(s): "
+                + ", ".join(str(dataset_id) for dataset_id in sorted(missing))
+            )
         rows = [row for row in rows if row.dataset_id in wanted]
     db_engine = get_relational_engine()
     summaries: list[dict] = []
@@ -485,6 +566,11 @@ async def stamp_revisions(
     summaries: list[dict] = []
 
     if not backend_access_control_enabled():
+        if dataset_ids is not None:
+            raise ValueError(
+                "dataset_ids targeting requires backend access control; with it "
+                "disabled there is one GLOBAL database pair shared by every dataset."
+            )
         async with db_engine.get_async_session() as session:
             record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
             if record is None:
@@ -496,6 +582,12 @@ async def stamp_revisions(
     rows = await get_dataset_databases()
     if dataset_ids is not None:
         wanted = set(dataset_ids)
+        missing = wanted - {row.dataset_id for row in rows}
+        if missing:
+            raise ValueError(
+                "No dataset_database row found for dataset id(s): "
+                + ", ".join(str(dataset_id) for dataset_id in sorted(missing))
+            )
         rows = [row for row in rows if row.dataset_id in wanted]
 
     for row in rows:

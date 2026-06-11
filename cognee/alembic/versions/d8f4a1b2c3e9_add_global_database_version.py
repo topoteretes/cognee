@@ -35,6 +35,7 @@ def upgrade() -> None:
             sa.Column("id", sa.Integer(), primary_key=True),
             sa.Column("cognee_version", sa.String(), nullable=True),
             sa.Column("global_migration_revision", sa.String(), nullable=True),
+            sa.Column("global_migration_last_error", sa.String(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         )

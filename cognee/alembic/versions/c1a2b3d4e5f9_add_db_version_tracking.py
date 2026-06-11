@@ -22,6 +22,7 @@ TABLE_NAME = "dataset_database"
 NEW_COLUMNS = (
     "cognee_version",
     "migration_revision",
+    "migration_last_error",
 )
 
 
