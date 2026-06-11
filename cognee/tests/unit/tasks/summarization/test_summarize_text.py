@@ -17,7 +17,7 @@ def _document():
     )
 
 
-def _chunk(text="Chunk text", document=None):
+def _chunk(text="Chunk text", document=None, belongs_to_set=None):
     return DocumentChunk(
         text=text,
         chunk_size=len(text.split()),
@@ -25,12 +25,13 @@ def _chunk(text="Chunk text", document=None):
         cut_type="sentence_end",
         is_part_of=document or _document(),
         contains=[],
+        belongs_to_set=belongs_to_set,
     )
 
 
 @pytest.mark.asyncio
-async def test_summarize_text_sets_source_chunk_id():
-    chunk = _chunk()
+async def test_summarize_text_sets_source_chunk_reference_fields():
+    chunk = _chunk(belongs_to_set=["KEEP"])
 
     with patch(
         "cognee.tasks.summarization.summarize_text.extract_summary",
@@ -40,6 +41,7 @@ async def test_summarize_text_sets_source_chunk_id():
 
     assert len(summaries) == 1
     assert summaries[0].source_chunk_id == chunk.id
+    assert summaries[0].belongs_to_set == ["KEEP"]
     assert summaries[0].made_from == chunk
 
 

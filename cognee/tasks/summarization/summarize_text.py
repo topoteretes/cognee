@@ -74,6 +74,7 @@ async def summarize_text(
             id=uuid5(chunk.id, "TextSummary"),
             made_from=chunk,
             source_chunk_id=chunk.id,
+            belongs_to_set=chunk.belongs_to_set,
             text=chunk_summaries[chunk_index].summary,
             importance_weight=chunk.importance_weight,
         )

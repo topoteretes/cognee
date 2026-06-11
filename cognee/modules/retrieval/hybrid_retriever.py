@@ -78,10 +78,6 @@ class HybridRetriever(BaseRetriever):
         return {**chunk_objects, "entities": entities}
 
     async def _build_chunk_objects(self, query: str) -> Dict[str, Any]:
-        summary_limit = self._summary_candidate_limit()
-        if summary_limit <= 0:
-            return {"chunks": await self._build_legacy_chunks(query), "chunk_summaries": {}}
-
         candidate_limit = max(0, self.chunks_top_k * 2)
         bm25_chunks, vector_chunks, summary_hits = await asyncio.gather(
             self._search_bm25_chunks(query, limit=candidate_limit),
@@ -94,37 +90,27 @@ class HybridRetriever(BaseRetriever):
             self._search_collection(
                 "TextSummary_text",
                 query,
-                summary_limit,
-                apply_node_filter=False,
+                self._summary_candidate_limit(),
             ),
         )
-        chunks, chunk_summaries = await self._rank_summary_aware_chunks(
+        chunks, chunk_summaries = await self._select_ranked_chunks(
             bm25_chunks,
             vector_chunks,
             summary_hits,
         )
-        await self._fetch_final_chunk_summaries(chunks, chunk_summaries)
         return {"chunks": chunks, "chunk_summaries": chunk_summaries}
-
-    async def _build_legacy_chunks(self, query: str) -> List[Any]:
-        bm25_chunks, vector_chunks = await asyncio.gather(
-            self._search_bm25_chunks(query),
-            self._search_collection("DocumentChunk_text", query, self.chunks_top_k, required=True),
-        )
-        return _merge_chunks(bm25_chunks, vector_chunks, self.chunks_top_k)
 
     def _summary_candidate_limit(self) -> int:
         if self.text_summaries_top_k is None:
             return max(0, self.chunks_top_k)
         return self.text_summaries_top_k
 
-    async def _search_bm25_chunks(self, query: str, limit: Optional[int] = None) -> List[dict]:
-        bm25_top_k = limit if limit is not None else _bm25_chunk_limit(self.chunks_top_k)
-        if bm25_top_k <= 0:
+    async def _search_bm25_chunks(self, query: str, limit: int) -> List[dict]:
+        if limit <= 0:
             return []
 
         try:
-            retriever = BM25ChunksRetriever(top_k=bm25_top_k, with_scores=True)
+            retriever = BM25ChunksRetriever(top_k=limit, with_scores=True)
             scored_chunks = await retriever.get_retrieved_objects(query)
         except NoDataError:
             return []
@@ -176,86 +162,148 @@ class HybridRetriever(BaseRetriever):
             logger.debug("%s collection not found; using empty channel", collection_name)
             return []
 
-    async def _rank_summary_aware_chunks(
+    async def _select_ranked_chunks(
         self,
         bm25_chunks: List[Any],
         vector_chunks: List[Any],
         summary_hits: List[Any],
     ) -> tuple[List[Any], Dict[str, str]]:
-        summary_ranks, summary_text_by_chunk_id = _summary_signal(summary_hits)
-
-        candidate_by_key = {}
-        _add_chunk_candidates(candidate_by_key, bm25_chunks)
-        _add_chunk_candidates(candidate_by_key, vector_chunks)
-
-        missing_chunk_ids = [
-            key[1] for key in summary_ranks if key not in candidate_by_key and key[0] == "id"
+        chunk_summary_pairs = _chunk_summary_pairs(
+            bm25_chunks,
+            vector_chunks,
+            summary_hits,
+            self.node_name,
+            self.node_name_filter_operator,
+        )
+        source_chunk_ids_to_load = [
+            pair["chunk_id"]
+            for pair in chunk_summary_pairs
+            if pair["summary_rank"] is not None and pair["chunk"] is None and pair["chunk_id"]
         ]
-        if missing_chunk_ids:
-            _add_chunk_candidates(
-                candidate_by_key,
-                await self._fetch_summary_only_chunks(missing_chunk_ids),
+        if source_chunk_ids_to_load:
+            loaded_source_chunks = await self._load_source_chunks_for_summaries(
+                source_chunk_ids_to_load
             )
+            for chunk in loaded_source_chunks:
+                pair = _find_chunk_summary_pair(chunk_summary_pairs, _result_id(chunk), None)
+                if pair:
+                    _set_pair_chunk(pair, chunk)
 
-        bm25_ranks = _chunk_ranks(bm25_chunks)
-        vector_ranks = _chunk_ranks(vector_chunks)
-        ranked = _rank_chunk_candidates(
-            candidate_by_key,
-            [bm25_ranks, vector_ranks, summary_ranks],
+        ranked_pairs = _rank_chunk_summary_pairs(
+            chunk_summary_pairs,
             self.chunks_top_k,
             self.use_importance_weight,
         )
-        ranked_keys = {_chunk_key(chunk) for chunk in ranked}
-        final_summary_text = {
-            chunk_id: text
-            for chunk_id, text in summary_text_by_chunk_id.items()
-            if ("id", chunk_id) in ranked_keys
-        }
-        return ranked, final_summary_text
+        if self._summary_candidate_limit() > 0:
+            await self._load_summary_text_for_ranked_pairs(ranked_pairs)
 
-    async def _fetch_summary_only_chunks(self, chunk_ids: List[str]) -> List[Any]:
+        ranked_chunks = [pair["chunk"] for pair in ranked_pairs if pair["chunk"] is not None]
+
+        summary_text_by_chunk_id = {}
+        for pair in ranked_pairs:
+            if pair["chunk_id"] and pair["summary_text"]:
+                summary_text_by_chunk_id[pair["chunk_id"]] = pair["summary_text"]
+
+        return ranked_chunks, summary_text_by_chunk_id
+
+    async def _load_source_chunks_for_summaries(self, chunk_ids: List[str]) -> List[Any]:
         chunks = await self._unified_engine.vector.retrieve("DocumentChunk_text", chunk_ids)
-        return [
-            chunk
-            for chunk in chunks
+        found_ids = {_result_id(chunk) for chunk in chunks}
+        missing_ids = sorted(set(chunk_ids) - {chunk_id for chunk_id in found_ids if chunk_id})
+        if missing_ids:
+            logger.warning(
+                "TextSummary_text hit referenced missing DocumentChunk_text row(s): %s",
+                missing_ids,
+            )
+
+        source_chunks = []
+        filtered_ids = []
+        for chunk in chunks:
             if _payload_matches_node_filter(
                 _payload(chunk), self.node_name, self.node_name_filter_operator
-            )
-        ]
-
-    async def _fetch_final_chunk_summaries(
-        self,
-        chunks: List[Any],
-        summary_text_by_chunk_id: Dict[str, str],
-    ) -> None:
-        summary_ids_by_chunk_id = {}
-        for chunk in chunks:
-            chunk_id = _result_id(chunk)
-            if not chunk_id or chunk_id in summary_text_by_chunk_id:
+            ):
+                source_chunks.append(chunk)
                 continue
-            try:
-                chunk_uuid = UUID(chunk_id)
-            except (TypeError, ValueError):
+
+            chunk_id = _result_id(chunk)
+            if chunk_id:
+                filtered_ids.append(chunk_id)
+
+        if filtered_ids:
+            logger.warning(
+                "TextSummary_text source chunk failed node filter: %s",
+                sorted(filtered_ids),
+            )
+        return source_chunks
+
+    async def _load_summary_text_for_ranked_pairs(self, ranked_pairs: List[dict]) -> None:
+        summary_ids_by_chunk_id = {}
+        for pair in ranked_pairs:
+            if pair["summary_text"]:
+                continue
+
+            chunk_id = pair["chunk_id"]
+            if not chunk_id:
+                continue
+
+            summary_id = pair["summary_id"]
+            if summary_id is None:
+                summary_id = _summary_id_for_chunk(chunk_id)
+            if summary_id is None:
                 logger.debug("Cannot fetch paired TextSummary for non-UUID chunk id %s", chunk_id)
                 continue
-            summary_ids_by_chunk_id[chunk_id] = str(uuid5(chunk_uuid, "TextSummary"))
+
+            pair["summary_id"] = summary_id
+            summary_ids_by_chunk_id[chunk_id] = summary_id
 
         if not summary_ids_by_chunk_id:
             return
 
-        summaries = await self._unified_engine.vector.retrieve(
-            "TextSummary_text",
-            list(summary_ids_by_chunk_id.values()),
-        )
+        try:
+            summaries = await self._unified_engine.vector.retrieve(
+                "TextSummary_text",
+                list(summary_ids_by_chunk_id.values()),
+            )
+        except CollectionNotFoundError:
+            logger.warning("TextSummary_text collection missing while loading chunk summaries")
+            return
+
         summaries_by_id = {_result_id(summary): summary for summary in summaries}
-        for chunk_id, summary_id in summary_ids_by_chunk_id.items():
+        for pair in ranked_pairs:
+            chunk_id = pair["chunk_id"]
+            summary_id = pair["summary_id"]
+            if not chunk_id or not summary_id:
+                continue
+
             summary = summaries_by_id.get(summary_id)
             if summary is None:
-                logger.debug("No paired TextSummary found for chunk id %s", chunk_id)
+                logger.warning(
+                    "DocumentChunk_text row has no paired TextSummary_text row: chunk_id=%s",
+                    chunk_id,
+                )
                 continue
-            summary_text = _display_value(_payload(summary).get("text"))
-            if summary_text:
-                summary_text_by_chunk_id[chunk_id] = summary_text
+
+            summary_payload = _payload(summary)
+            summary_text = _display_value(summary_payload.get("text"))
+            if not summary_text:
+                logger.warning(
+                    "Paired TextSummary_text row has no text: chunk_id=%s summary_id=%s",
+                    chunk_id,
+                    summary_id,
+                )
+                continue
+
+            if not _payload_matches_node_filter(
+                summary_payload, self.node_name, self.node_name_filter_operator
+            ):
+                logger.warning(
+                    "Paired TextSummary_text row failed node filter: chunk_id=%s summary_id=%s",
+                    chunk_id,
+                    summary_id,
+                )
+                continue
+
+            pair["summary_text"] = summary_text
 
     async def _build_entities(self, entity_hits: List[Any]) -> List[dict]:
         if not entity_hits:
@@ -402,6 +450,14 @@ def _reject_query_batch(query_batch: Optional[List[str]]) -> None:
         raise QueryValidationError("HYBRID_COMPLETION does not support query_batch.")
 
 
+def _summary_id_for_chunk(chunk_id: str) -> Optional[str]:
+    try:
+        chunk_uuid = UUID(chunk_id)
+    except (TypeError, ValueError):
+        return None
+    return str(uuid5(chunk_uuid, "TextSummary"))
+
+
 def _payload(result: Any) -> dict:
     if isinstance(result, dict):
         return result
@@ -432,78 +488,108 @@ def _scored_payload(item: Any) -> tuple[Any, float]:
     return payload, float(score)
 
 
-def _bm25_chunk_limit(chunks_top_k: int) -> int:
-    if chunks_top_k <= 0:
-        return 0
-    return max(1, chunks_top_k // 2)
+def _chunk_summary_pairs(
+    bm25_chunks: List[Any],
+    vector_chunks: List[Any],
+    summary_hits: List[Any],
+    node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
+) -> List[dict]:
+    pairs = []
 
+    for rank_field, chunks in (("bm25_rank", bm25_chunks), ("vector_rank", vector_chunks)):
+        for rank, chunk in enumerate(chunks or []):
+            chunk_id = _result_id(chunk)
+            chunk_text = _display_value(_payload(chunk).get("text"))
+            if not chunk_id and not chunk_text:
+                continue
 
-def _merge_chunks(bm25_chunks: List[Any], vector_chunks: List[Any], limit: int) -> List[Any]:
-    if limit <= 0:
-        return []
+            pair = _find_chunk_summary_pair(pairs, chunk_id, chunk_text)
+            if pair is None:
+                pair = _new_chunk_summary_pair(chunk_id=chunk_id, chunk_text=chunk_text)
+                pairs.append(pair)
+            if pair["chunk"] is None:
+                _set_pair_chunk(pair, chunk)
+            if pair[rank_field] is None:
+                pair[rank_field] = rank
 
-    chunks = []
-    seen = set()
-    for chunk in [*(bm25_chunks or []), *(vector_chunks or [])]:
-        key = _chunk_key(chunk)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        chunks.append(chunk)
-        if len(chunks) >= limit:
-            break
-    return chunks
-
-
-def _add_chunk_candidates(candidate_by_key: dict, chunks: List[Any]) -> None:
-    for chunk in chunks or []:
-        key = _chunk_key(chunk)
-        if key and key not in candidate_by_key:
-            candidate_by_key[key] = chunk
-
-
-def _chunk_ranks(chunks: List[Any]) -> dict:
-    ranks = {}
-    for rank, chunk in enumerate(chunks or []):
-        key = _chunk_key(chunk)
-        if key and key not in ranks:
-            ranks[key] = rank
-    return ranks
-
-
-def _summary_signal(summary_hits: List[Any]) -> tuple[dict, Dict[str, str]]:
-    ranks = {}
-    summary_text_by_chunk_id = {}
     for rank, summary in enumerate(summary_hits or []):
         payload = _payload(summary)
-        chunk_id = _display_value(payload.get("source_chunk_id"))
-        if not chunk_id:
+        if not _payload_matches_node_filter(payload, node_name, node_name_filter_operator):
             continue
 
-        key = ("id", chunk_id)
-        if key not in ranks:
-            ranks[key] = rank
+        chunk_id = _display_value(payload.get("source_chunk_id"))
+        if not chunk_id:
+            logger.warning(
+                "TextSummary_text hit has no source_chunk_id: summary_id=%s", _result_id(summary)
+            )
+            continue
 
-        summary_text = _display_value(payload.get("text"))
-        if summary_text and chunk_id not in summary_text_by_chunk_id:
-            summary_text_by_chunk_id[chunk_id] = summary_text
+        pair = _find_chunk_summary_pair(pairs, chunk_id, None)
+        if pair is None:
+            pair = _new_chunk_summary_pair(chunk_id=chunk_id)
+            pairs.append(pair)
+        if pair["summary_rank"] is None:
+            pair["summary_rank"] = rank
+            pair["summary_id"] = _result_id(summary)
+            pair["summary_text"] = _display_value(payload.get("text"))
 
-    return ranks, summary_text_by_chunk_id
+    return pairs
 
 
-def _rank_chunk_candidates(
-    candidate_by_key: dict,
-    channel_ranks: List[dict],
+def _find_chunk_summary_pair(
+    pairs: List[dict], chunk_id: Optional[str], chunk_text: Optional[str]
+) -> Optional[dict]:
+    for pair in pairs:
+        if chunk_id and pair["chunk_id"] == chunk_id:
+            return pair
+        if chunk_text and pair["chunk_id"] is None and pair["chunk_text"] == chunk_text:
+            return pair
+    return None
+
+
+def _new_chunk_summary_pair(
+    chunk_id: Optional[str] = None,
+    chunk_text: Optional[str] = None,
+) -> dict:
+    return {
+        "chunk_id": chunk_id,
+        "chunk_text": chunk_text,
+        "summary_id": None,
+        "summary_text": None,
+        "chunk": None,
+        "bm25_rank": None,
+        "vector_rank": None,
+        "summary_rank": None,
+    }
+
+
+def _set_pair_chunk(pair: dict, chunk: Any) -> None:
+    pair["chunk"] = chunk
+    pair["chunk_id"] = _result_id(chunk) or pair["chunk_id"]
+    pair["chunk_text"] = _display_value(_payload(chunk).get("text")) or pair["chunk_text"]
+
+
+def _rank_chunk_summary_pairs(
+    pairs: List[dict],
     limit: int,
     use_importance_weight: bool,
-) -> List[Any]:
+) -> List[dict]:
     if limit <= 0:
         return []
 
     rrf_k = _rrf_k(limit)
     ranked = []
-    for key, chunk in candidate_by_key.items():
-        ranks = [ranks[key] for ranks in channel_ranks if key in ranks]
+    for pair in pairs:
+        chunk = pair["chunk"]
+        if chunk is None:
+            continue
+
+        ranks = [
+            rank
+            for rank in (pair["bm25_rank"], pair["vector_rank"], pair["summary_rank"])
+            if rank is not None
+        ]
         if not ranks:
             continue
 
@@ -512,11 +598,11 @@ def _rank_chunk_candidates(
         if use_importance_weight:
             final_score *= _importance_factor(chunk)
 
-        chunk_id = _result_id(chunk) or ""
-        ranked.append((final_score, rrf_score, min(ranks), chunk_id, chunk))
+        chunk_id = pair["chunk_id"] or _result_id(chunk) or ""
+        ranked.append((final_score, rrf_score, min(ranks), chunk_id, pair))
 
     ranked.sort(key=lambda item: (-item[0], -item[1], item[2], item[3]))
-    return [chunk for *_, chunk in ranked[:limit]]
+    return [pair for *_, pair in ranked[:limit]]
 
 
 def _rrf_k(chunks_top_k: int) -> int:
@@ -528,16 +614,6 @@ def _importance_factor(chunk: Any) -> float:
     importance = raw_importance if isinstance(raw_importance, (int, float)) else 0.5
     importance = max(0.0, min(1.0, importance))
     return 0.75 + 0.5 * importance
-
-
-def _chunk_key(chunk: Any) -> Optional[tuple[str, str]]:
-    chunk_id = _result_id(chunk)
-    if chunk_id:
-        return ("id", chunk_id)
-    text = _display_value(_payload(chunk).get("text"))
-    if text:
-        return ("text", text)
-    return None
 
 
 def _payload_matches_node_filter(

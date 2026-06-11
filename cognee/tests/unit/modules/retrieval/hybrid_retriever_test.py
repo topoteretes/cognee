@@ -171,7 +171,7 @@ async def test_chunk_search_receives_nodeset_filters():
 
 
 @pytest.mark.asyncio
-async def test_chunk_retrieval_uses_bm25_first_then_vector_fill_with_dedupe():
+async def test_chunk_retrieval_ranks_bm25_and_vector_channels_with_dedupe():
     bm25_retriever = MagicMock()
     bm25_retriever.get_retrieved_objects = AsyncMock(
         return_value=[
@@ -202,18 +202,18 @@ async def test_chunk_retrieval_uses_bm25_first_then_vector_fill_with_dedupe():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    bm25_cls.assert_called_once_with(top_k=2, with_scores=True)
+    bm25_cls.assert_called_once_with(top_k=8, with_scores=True)
     bm25_retriever.get_retrieved_objects.assert_awaited_once_with("q")
     assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == [
-        "BM25 first",
         "BM25 shared",
+        "BM25 first",
         "Semantic extra",
         "Second semantic extra",
     ]
 
 
 @pytest.mark.asyncio
-async def test_bm25_chunks_respect_nodeset_filter_before_merge():
+async def test_bm25_chunks_respect_nodeset_filter_before_ranking():
     bm25_retriever = MagicMock()
     bm25_retriever.get_retrieved_objects = AsyncMock(
         return_value=[
@@ -321,7 +321,7 @@ async def test_default_summary_search_participates_in_chunk_ranking():
 
 
 @pytest.mark.asyncio
-async def test_summary_retrieval_opt_out_uses_legacy_merge_path():
+async def test_summary_retrieval_opt_out_disables_summary_channel_only():
     bm25_retriever = MagicMock()
     bm25_retriever.get_retrieved_objects = AsyncMock(
         return_value=[({"id": "bm25", "text": "BM25"}, 2.0)]
@@ -355,7 +355,12 @@ async def test_summary_only_hit_fetches_source_chunk():
         summaries=[
             _result(
                 "summary",
-                {"id": "summary", "text": "Only summary", "source_chunk_id": "chunk-1"},
+                {
+                    "id": "summary",
+                    "text": "Only summary",
+                    "source_chunk_id": "chunk-1",
+                    "belongs_to_set": ["KEEP"],
+                },
             )
         ]
     )
@@ -417,7 +422,7 @@ async def test_summary_only_hit_respects_source_chunk_nodeset_filter():
 
 
 @pytest.mark.asyncio
-async def test_summary_search_does_not_receive_nodeset_filters():
+async def test_summary_search_receives_nodeset_filters():
     vector = MagicMock()
     vector.search = _vector_search()
     vector.retrieve = AsyncMock(return_value=[])
@@ -439,7 +444,8 @@ async def test_summary_search_does_not_receive_nodeset_filters():
     chunk_call = _search_call(vector, "DocumentChunk_text")
     summary_call = _search_call(vector, "TextSummary_text")
     assert chunk_call.kwargs["node_name"] == ["KEN"]
-    assert summary_call.kwargs["node_name"] is None
+    assert summary_call.kwargs["node_name"] == ["KEN"]
+    assert summary_call.kwargs["node_name_filter_operator"] == "AND"
 
 
 @pytest.mark.asyncio
@@ -581,6 +587,50 @@ async def test_final_raw_chunk_gets_paired_summary_text():
         retrieved = await retriever.get_retrieved_objects(query="q")
 
     assert retrieved["chunk_summaries"] == {str(chunk_id): "Paired summary"}
+
+
+@pytest.mark.asyncio
+async def test_paired_summary_text_respects_nodeset_filter():
+    chunk_id = uuid4()
+    summary_id = uuid5(chunk_id, "TextSummary")
+    vector = MagicMock()
+    vector.search = _vector_search(
+        chunks=[
+            _result(
+                str(chunk_id),
+                {"id": str(chunk_id), "text": "Raw chunk", "belongs_to_set": ["KEEP"]},
+            )
+        ]
+    )
+
+    async def retrieve(collection_name, ids):
+        if collection_name == "TextSummary_text":
+            assert ids == [str(summary_id)]
+            return [
+                _result(
+                    str(summary_id),
+                    {"id": str(summary_id), "text": "Out of scope", "belongs_to_set": ["DROP"]},
+                )
+            ]
+        return []
+
+    vector.retrieve = AsyncMock(side_effect=retrieve)
+    retriever = HybridRetriever(chunks_top_k=1, node_name=["KEEP"])
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(vector=vector),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
+        ),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert retrieved["chunk_summaries"] == {}
 
 
 @pytest.mark.asyncio
