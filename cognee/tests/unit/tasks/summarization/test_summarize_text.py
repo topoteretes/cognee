@@ -40,7 +40,7 @@ async def test_summarize_text_sets_source_chunk_reference_fields():
         summaries = await summarize_text([chunk], summarization_model=object)
 
     assert len(summaries) == 1
-    assert summaries[0].source_chunk_id == chunk.id
+    assert summaries[0].source_chunk_id == str(chunk.id)
     assert summaries[0].belongs_to_set == ["KEEP"]
     assert summaries[0].made_from == chunk
 

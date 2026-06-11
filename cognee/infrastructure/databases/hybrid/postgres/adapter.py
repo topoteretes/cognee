@@ -47,10 +47,6 @@ def _validate_table_name(name: str) -> str:
     return f'"{name}"'
 
 
-def _optional_str(value):
-    return None if value is None else str(value)
-
-
 class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     """Hybrid adapter backed by a single Postgres database.
 
@@ -344,7 +340,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                     document_id=getattr(dp, "document_id", None),
                     document_name=getattr(dp, "document_name", None),
                     chunk_index=getattr(dp, "chunk_index", None),
-                    source_chunk_id=_optional_str(getattr(dp, "source_chunk_id", None)),
+                    source_chunk_id=getattr(dp, "source_chunk_id", None),
                     importance_weight=getattr(dp, "importance_weight", None),
                     belongs_to_set=(dp.belongs_to_set or []),
                 )

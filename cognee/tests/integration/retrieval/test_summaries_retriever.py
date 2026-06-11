@@ -53,7 +53,7 @@ async def setup_test_environment_with_summaries():
     chunk1_summary = TextSummary(
         text="S.R.",
         made_from=chunk1,
-        source_chunk_id=chunk1.id,
+        source_chunk_id=str(chunk1.id),
         belongs_to_set=chunk1.belongs_to_set,
     )
     chunk2 = DocumentChunk(
@@ -67,7 +67,7 @@ async def setup_test_environment_with_summaries():
     chunk2_summary = TextSummary(
         text="M.B.",
         made_from=chunk2,
-        source_chunk_id=chunk2.id,
+        source_chunk_id=str(chunk2.id),
         belongs_to_set=chunk2.belongs_to_set,
     )
     chunk3 = DocumentChunk(
@@ -81,7 +81,7 @@ async def setup_test_environment_with_summaries():
     chunk3_summary = TextSummary(
         text="C.M.",
         made_from=chunk3,
-        source_chunk_id=chunk3.id,
+        source_chunk_id=str(chunk3.id),
         belongs_to_set=chunk3.belongs_to_set,
     )
     chunk4 = DocumentChunk(
@@ -95,7 +95,7 @@ async def setup_test_environment_with_summaries():
     chunk4_summary = TextSummary(
         text="R.R.",
         made_from=chunk4,
-        source_chunk_id=chunk4.id,
+        source_chunk_id=str(chunk4.id),
         belongs_to_set=chunk4.belongs_to_set,
     )
     chunk5 = DocumentChunk(
@@ -109,7 +109,7 @@ async def setup_test_environment_with_summaries():
     chunk5_summary = TextSummary(
         text="H.Y.",
         made_from=chunk5,
-        source_chunk_id=chunk5.id,
+        source_chunk_id=str(chunk5.id),
         belongs_to_set=chunk5.belongs_to_set,
     )
     chunk6 = DocumentChunk(
@@ -123,7 +123,7 @@ async def setup_test_environment_with_summaries():
     chunk6_summary = TextSummary(
         text="C.H.",
         made_from=chunk6,
-        source_chunk_id=chunk6.id,
+        source_chunk_id=str(chunk6.id),
         belongs_to_set=chunk6.belongs_to_set,
     )
 

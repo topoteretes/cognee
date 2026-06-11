@@ -38,10 +38,6 @@ QUERY_BATCH_SIZE = 1000
 _ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 2}
 
 
-def _optional_str(value):
-    return None if value is None else str(value)
-
-
 class IndexSchema(DataPoint):
     """
     Define a schema for indexing data points with a text field.
@@ -391,7 +387,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     document_id=getattr(data_point, "document_id", None),
                     document_name=getattr(data_point, "document_name", None),
                     chunk_index=getattr(data_point, "chunk_index", None),
-                    source_chunk_id=_optional_str(getattr(data_point, "source_chunk_id", None)),
+                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
                     importance_weight=getattr(data_point, "importance_weight", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )

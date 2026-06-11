@@ -51,10 +51,6 @@ _ORIGIN_DEFAULT_FACTORIES = {
 }
 
 
-def _optional_str(value):
-    return None if value is None else str(value)
-
-
 class IndexSchema(DataPoint):
     """
     Represents a schema for an index data point containing an ID and text.
@@ -1231,7 +1227,7 @@ class LanceDBAdapter(VectorDBInterface):
                     document_id=getattr(data_point, "document_id", None),
                     document_name=getattr(data_point, "document_name", None),
                     chunk_index=getattr(data_point, "chunk_index", None),
-                    source_chunk_id=_optional_str(getattr(data_point, "source_chunk_id", None)),
+                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
                     importance_weight=getattr(data_point, "importance_weight", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
