@@ -34,6 +34,14 @@ class MemorySource(ABC):
 
     source_system: str = "unknown"
 
+    # Whether ``records()`` may be called more than once, each call returning
+    # a fresh iterator over the same records. True for all built-in sources
+    # (they re-read a file on each call) and required for the streaming
+    # preserve-mode import, which passes over the records twice (nodes, then
+    # facts) to keep memory bounded. Set False on one-shot sources (e.g. live
+    # API cursors) to force the buffered import path instead.
+    replayable: bool = True
+
     def __init__(self, mode: str = "re-derive"):
         if mode not in IMPORT_MODES:
             raise ValueError(f"Unknown import mode {mode!r}. Expected one of {IMPORT_MODES}.")

@@ -400,6 +400,7 @@ class TestPush:
             "num_nodes",
             "num_edges",
             "remote_response",
+            "pipeline_run_id",
         }
         assert isinstance(result.status, str)
         assert isinstance(result.num_nodes, int)
@@ -410,7 +411,8 @@ class TestPush:
 class TestCloudClientTimeout:
     """The push transport must survive uploads + imports longer than 5 minutes (H6)."""
 
-    def test_session_has_no_total_timeout(self):
+    def test_session_default_keeps_total_timeout(self):
+        """Ordinary API calls keep a bounded total; only uploads are unbounded."""
         import aiohttp
 
         from cognee.api.v1.serve.cloud_client import CloudClient
@@ -425,6 +427,14 @@ class TestCloudClientTimeout:
 
         timeout = asyncio.run(get_timeout())
         assert isinstance(timeout, aiohttp.ClientTimeout)
-        assert timeout.total is None
+        assert timeout.total == 300
         assert timeout.sock_connect == 30
-        assert timeout.sock_read == 300
+
+    def test_upload_timeout_is_unbounded_and_scoped_to_archives(self):
+        """The per-request archive-upload timeout drops the total deadline."""
+        from cognee.api.v1.serve.cloud_client import CloudClient
+
+        assert CloudClient.UPLOAD_TIMEOUT.total is None
+        assert CloudClient.UPLOAD_TIMEOUT.sock_connect == 30
+        assert CloudClient.UPLOAD_TIMEOUT.sock_read == 300
+        assert CloudClient.DEFAULT_TIMEOUT.total == 300

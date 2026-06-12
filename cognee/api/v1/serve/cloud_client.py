@@ -23,14 +23,19 @@ class CloudClient:
         self.api_key = api_key
         self._session: Optional[aiohttp.ClientSession] = None
 
+    # Default for ordinary API calls: aiohttp's standard 5-minute total,
+    # with connect failures surfacing quickly.
+    DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=300, sock_connect=30)
+    # Archive uploads (cognee.push) plus the synchronous server-side import
+    # can legitimately exceed any fixed total; per-read inactivity stays
+    # bounded instead. Applied per-request, only to archive uploads.
+    UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300)
+
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            # No total timeout: large uploads (e.g. push archives) plus the
-            # server-side import can legitimately exceed aiohttp's 5-minute
-            # default. Connect and per-read inactivity stay bounded instead.
             self._session = aiohttp.ClientSession(
                 headers={"X-Api-Key": self.api_key},
-                timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300),
+                timeout=self.DEFAULT_TIMEOUT,
             )
         return self._session
 
@@ -96,7 +101,14 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
-        async with session.post(f"{self.service_url}/api/v1/remember", data=form) as resp:
+        timeout = (
+            self.UPLOAD_TIMEOUT
+            if kwargs.get("content_type") == "cogx-archive"
+            else self.DEFAULT_TIMEOUT
+        )
+        async with session.post(
+            f"{self.service_url}/api/v1/remember", data=form, timeout=timeout
+        ) as resp:
             if resp.status >= 400:
                 body = await resp.text()
                 raise RuntimeError(f"Remote remember failed ({resp.status}): {body}")

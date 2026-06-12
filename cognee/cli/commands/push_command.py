@@ -66,6 +66,15 @@ Examples:
             "--api-key",
             help="API key for the remote instance",
         )
+        parser.add_argument(
+            "--background",
+            "-b",
+            action="store_true",
+            help=(
+                "Schedule the remote import in the background and return after the "
+                "upload (recommended for large graphs); prints the pipeline run id"
+            ),
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -91,6 +100,7 @@ Examples:
                         args.dataset,
                         target_dataset=args.target_dataset,
                         mode=args.mode,
+                        run_in_background=args.background,
                         url=args.url,
                         api_key=args.api_key,
                         user=user,
@@ -100,10 +110,17 @@ Examples:
 
             result = asyncio.run(run_push())
 
-            fmt.success(
-                f"Pushed {result.num_nodes} nodes and {result.num_edges} edges "
-                f"to remote dataset '{result.target_dataset}'."
-            )
+            if args.background and result.status == "started":
+                fmt.success(
+                    f"Uploaded {result.num_nodes} nodes and {result.num_edges} edges; "
+                    f"remote import of dataset '{result.target_dataset}' is running in "
+                    f"the background (pipeline run id: {result.pipeline_run_id or 'n/a'})."
+                )
+            else:
+                fmt.success(
+                    f"Pushed {result.num_nodes} nodes and {result.num_edges} edges "
+                    f"to remote dataset '{result.target_dataset}'."
+                )
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e

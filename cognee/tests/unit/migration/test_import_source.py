@@ -26,6 +26,7 @@ pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 serve_state = importlib.import_module("cognee.api.v1.serve.state")
 shared_utils = importlib.import_module("cognee.shared.utils")
+storage_module = importlib.import_module("cognee.tasks.storage.add_data_points")
 
 UNRESOLVABLE_UUID = "0c113fd0-1234-4321-aaaa-bbbbccccdddd"
 
@@ -66,11 +67,27 @@ def _sample_records():
 
 
 def install_sinks(monkeypatch):
-    """Replace run_custom_pipeline, add, and the nested remember with recorders."""
-    sinks = SimpleNamespace(pipeline_calls=[], add_calls=[], remember_calls=[])
+    """Replace the orchestration seams with recorders.
+
+    ``run_custom_pipeline`` simulates blocking execution by running each
+    task's executable over the pipeline data, so the streaming import task
+    actually streams — its storage flushes land in ``graph_flushes`` via the
+    ``add_data_points`` sink. It returns a run-info dict so pipeline_run_id
+    propagation can be asserted.
+    """
+    sinks = SimpleNamespace(pipeline_calls=[], add_calls=[], remember_calls=[], graph_flushes=[])
 
     async def fake_run_custom_pipeline(**kwargs):
         sinks.pipeline_calls.append(kwargs)
+        for task in kwargs.get("tasks", []):
+            executable = getattr(task, "executable", None)
+            if executable is not None:
+                await executable(kwargs.get("data"))
+        return {"ds": SimpleNamespace(pipeline_run_id="run-123")}
+
+    async def fake_add_data_points(data_points, custom_edges=None, ctx=None):
+        sinks.graph_flushes.append({"nodes": list(data_points), "edges": list(custom_edges or [])})
+        return data_points
 
     async def fake_add(data, **kwargs):
         sinks.add_calls.append({"data": data, **kwargs})
@@ -82,9 +99,18 @@ def install_sinks(monkeypatch):
         return result
 
     monkeypatch.setattr(pipeline_module, "run_custom_pipeline", fake_run_custom_pipeline)
+    monkeypatch.setattr(storage_module, "add_data_points", fake_add_data_points)
     monkeypatch.setattr(add_module, "add", fake_add)
     monkeypatch.setattr(remember_module, "remember", fake_remember)
     return sinks
+
+
+def _flushed_nodes(sinks):
+    return [node for flush in sinks.graph_flushes for node in flush["nodes"]]
+
+
+def _flushed_edges(sinks):
+    return [edge for flush in sinks.graph_flushes for edge in flush["edges"]]
 
 
 def _summary_items(result):
@@ -124,14 +150,15 @@ class TestImportMemorySourceModes:
         # Nested remember processed 2 data items; no graph nodes to add.
         assert result.items_processed == 2
 
-    def test_preserve_fires_pipeline_and_add(self, monkeypatch):
+    def test_preserve_streams_graph_and_chunked_add(self, monkeypatch):
         sinks = install_sinks(monkeypatch)
         source = FakeSource(_sample_records(), mode="preserve")
 
         result = asyncio.run(import_memory_source(source, dataset_name="ds"))
 
-        # Preserve: graph batches go through run_custom_pipeline, raw content
-        # through add (no cognify), and the nested remember never fires.
+        # Preserve + replayable: the graph imports through ONE streaming
+        # pipeline task, raw content through chunked add (no cognify), and
+        # the nested remember never fires.
         assert len(sinks.pipeline_calls) == 1
         assert len(sinks.add_calls) == 1
         assert sinks.remember_calls == []
@@ -140,9 +167,16 @@ class TestImportMemorySourceModes:
         assert pipeline["dataset"] == "ds"
         assert pipeline["pipeline_name"] == "migration_import_pipeline"
         assert pipeline["run_in_background"] is False
-        batches = [item.data for item in pipeline["data"]]
-        assert sum(len(batch["nodes"]) for batch in batches) == 2
-        assert sum(len(batch["edges"]) for batch in batches) == 1
+        # The pipeline data is a single stream handle, not materialized batches.
+        assert len(pipeline["data"]) == 1
+        assert pipeline["data"][0].data["kind"] == "graph_stream"
+
+        # The streamed flushes carry the actual graph content.
+        nodes = _flushed_nodes(sinks)
+        edges = _flushed_edges(sinks)
+        assert sorted(node.name for node in nodes) == ["Alice", "Bob"]
+        assert len(edges) == 1
+        assert edges[0][2] == "knows"
 
         add_call = sinks.add_calls[0]
         assert add_call["dataset_name"] == "ds"
@@ -154,11 +188,69 @@ class TestImportMemorySourceModes:
         assert summary["graph_nodes"] == 2
         assert summary["graph_edges"] == 1
         assert summary["skipped_facts"] == 0
+        assert summary["pipeline_run_id"] == "run-123"
         # 1 raw data item + 2 graph nodes.
         assert result.items_processed == 3
         assert result.status == "completed"
+        assert result.pipeline_run_id == "run-123"
         assert result.dataset_name == "ds"
         assert result.elapsed_seconds is not None
+
+    def test_preserve_streaming_flushes_in_bounded_batches(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        loader_module = importlib.import_module("cognee.modules.migration.loader")
+        monkeypatch.setattr(loader_module, "BATCH_NODE_TARGET", 3)
+
+        records = [
+            COGXEntity(external_system="fake", external_id=f"n{i}", name=f"Entity{i}")
+            for i in range(8)
+        ]
+        source = FakeSource(records, mode="preserve")
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        # 8 entities with a target of 3 → at least 3 node flushes, none over
+        # the bound: memory stays bounded by one batch, not the whole graph.
+        node_flushes = [flush for flush in sinks.graph_flushes if flush["nodes"]]
+        assert len(node_flushes) >= 3
+        assert all(len(flush["nodes"]) <= 3 for flush in node_flushes)
+        assert len(_flushed_nodes(sinks)) == 8
+        (summary,) = _summary_items(result)
+        assert summary["graph_nodes"] == 8
+
+    def test_preserve_non_replayable_uses_buffered_batches(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = FakeSource(_sample_records(), mode="preserve")
+        source.replayable = False
+
+        result = asyncio.run(import_memory_source(source, dataset_name="ds"))
+
+        # One-shot sources cannot be re-streamed: the buffered path wraps
+        # bounded graph batches as pipeline data instead.
+        pipeline = sinks.pipeline_calls[0]
+        batches = [item.data for item in pipeline["data"]]
+        assert sum(len(batch["nodes"]) for batch in batches) == 2
+        assert sum(len(batch["edges"]) for batch in batches) == 1
+
+        (summary,) = _summary_items(result)
+        assert summary["graph_nodes"] == 2
+        assert summary["graph_edges"] == 1
+        assert summary["pipeline_run_id"] == "run-123"
+        assert result.pipeline_run_id == "run-123"
+
+    def test_preserve_background_reports_started(self, monkeypatch):
+        sinks = install_sinks(monkeypatch)
+        source = FakeSource(_sample_records(), mode="preserve")
+
+        result = asyncio.run(
+            import_memory_source(source, dataset_name="ds", run_in_background=True)
+        )
+
+        assert sinks.pipeline_calls[0]["run_in_background"] is True
+        assert result.status == "started"
+        assert result.pipeline_run_id == "run-123"
+        (summary,) = _summary_items(result)
+        assert summary["graph_import"] == "running"
 
     def test_hybrid_fires_pipeline_and_nested_remember(self, monkeypatch):
         sinks = install_sinks(monkeypatch)
@@ -224,8 +316,8 @@ class TestSkippedFacts:
         assert summary["graph_nodes"] == 1
 
         # The skipped fact must never fabricate a UUID-named entity.
-        nodes = [node for item in sinks.pipeline_calls[0]["data"] for node in item.data["nodes"]]
-        assert [node.name for node in nodes] == ["Alice"]
+        assert [node.name for node in _flushed_nodes(sinks)] == ["Alice"]
+        assert _flushed_edges(sinks) == []
 
 
 class TestRememberDispatch:

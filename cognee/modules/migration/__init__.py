@@ -17,7 +17,13 @@ from .cogx import (
 from .archive import ARCHIVE_SUFFIX, find_archive_root, pack_archive, unpack_archive
 from .export import EXPORT_FORMATS, ExportResult, export_dataset
 from .import_source import import_memory_source
-from .loader import TranslationResult, translate_record_stream, translate_records
+from .loader import (
+    TranslationResult,
+    data_item_from_record,
+    stream_graph_from_source,
+    translate_record_stream,
+    translate_records,
+)
 from .snapshot import GraphEdge, GraphSnapshot, build_snapshot, datapoint_registry, rehydrate_node
 from .sources import (
     IMPORT_MODES,
@@ -58,6 +64,8 @@ __all__ = [
     "export_dataset",
     "import_memory_source",
     "TranslationResult",
+    "data_item_from_record",
+    "stream_graph_from_source",
     "translate_record_stream",
     "translate_records",
     "IMPORT_MODES",

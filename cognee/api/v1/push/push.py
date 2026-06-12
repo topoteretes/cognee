@@ -32,11 +32,15 @@ class PushResult:
     num_nodes: int
     num_edges: int
     remote_response: dict
+    # Remote migration pipeline run id; poll it when run_in_background=True.
+    pipeline_run_id: Optional[str] = None
 
     def __repr__(self):
         return (
             f"PushResult(status={self.status!r}, dataset={self.dataset_name!r}, "
-            f"target={self.target_dataset!r}, nodes={self.num_nodes}, edges={self.num_edges})"
+            f"target={self.target_dataset!r}, nodes={self.num_nodes}, edges={self.num_edges}"
+            + (f", pipeline_run_id={self.pipeline_run_id!r}" if self.pipeline_run_id else "")
+            + ")"
         )
 
 
@@ -94,6 +98,7 @@ async def push(
     *,
     target_dataset: Optional[str] = None,
     mode: str = "preserve",
+    run_in_background: bool = False,
     url: Optional[str] = None,
     api_key: Optional[str] = None,
     user=None,
@@ -110,14 +115,17 @@ async def push(
             ``"hybrid"`` also cognifies the raw content;
             ``"re-derive"`` ignores the exported graph and rebuilds from
             raw content.
+        run_in_background: If True, the remote import is scheduled and the
+            call returns once the upload completes; poll the returned
+            ``pipeline_run_id`` for progress. Recommended for large graphs.
         url: Remote instance URL; falls back to the active ``serve()``
             connection, ``COGNEE_SERVICE_URL``, or saved credentials.
         api_key: API key; falls back like ``url``.
         user: Local user context for the export; defaults to the default user.
 
     Returns:
-        A :class:`PushResult` with the export counts and the raw remote
-        remember response.
+        A :class:`PushResult` with the export counts, the remote pipeline run
+        id (when available), and the raw remote remember response.
     """
     from cognee.api.v1.export.export import export
     from cognee.modules.migration.archive import ARCHIVE_SUFFIX, pack_archive
@@ -166,6 +174,7 @@ async def push(
                         dataset_name=target_dataset or result.dataset_name,
                         content_type="cogx-archive",
                         import_mode=mode,
+                        run_in_background=run_in_background,
                     )
 
             _verify_migration_import(response)
@@ -177,6 +186,7 @@ async def push(
                 num_nodes=result.num_nodes,
                 num_edges=result.num_edges,
                 remote_response=response,
+                pipeline_run_id=response.get("pipeline_run_id"),
             )
         finally:
             if created_client:

@@ -113,6 +113,7 @@ class TestPushCommand:
 
         command = PushCommand()
         args = argparse.Namespace(
+            background=False,
             dataset="my_dataset",
             target_dataset=None,
             mode="preserve",
@@ -127,6 +128,7 @@ class TestPushCommand:
             "my_dataset",
             target_dataset=None,
             mode="preserve",
+            run_in_background=False,
             url=None,
             api_key=None,
             user=user,
@@ -147,6 +149,7 @@ class TestPushCommand:
         command = PushCommand()
         # No user_id attribute at all — execute uses getattr(args, "user_id", None).
         args = argparse.Namespace(
+            background=False,
             dataset="main_dataset",
             target_dataset=None,
             mode="preserve",
@@ -174,6 +177,7 @@ class TestPushCommand:
 
         command = PushCommand()
         args = argparse.Namespace(
+            background=False,
             dataset="main_dataset",
             target_dataset="remote_name",
             mode="hybrid",
@@ -207,6 +211,7 @@ class TestPushCommand:
 
         command = PushCommand()
         args = argparse.Namespace(
+            background=False,
             dataset="main_dataset",
             target_dataset=None,
             mode="preserve",
@@ -226,6 +231,7 @@ class TestPushCommand:
         """Test execute handles exceptions properly"""
         command = PushCommand()
         args = argparse.Namespace(
+            background=False,
             dataset="main_dataset",
             target_dataset=None,
             mode="preserve",

@@ -120,6 +120,88 @@ def _looks_like_uuid(value: str) -> bool:
         return False
 
 
+def data_item_from_record(record: COGXRecord) -> Optional[DataItem]:
+    """Translate a content-bearing record into a DataItem; None for graph records."""
+    if record.kind == "document":
+        return _data_item_for(record, record.content, record.title)
+    if record.kind == "episode":
+        return _data_item_for(record, render_episode(record), record.title)
+    if record.kind == "memory":
+        content = record.content
+        if record.categories:
+            content = f"{content}\nCategories: {', '.join(record.categories)}"
+        return _data_item_for(record, content)
+    if record.kind == "memory_block":
+        return _data_item_for(record, f"{record.label}:\n{record.value}", record.label)
+    return None
+
+
+def _fact_edge_properties(fact: COGXFact) -> Dict[str, Any]:
+    properties: Dict[str, Any] = {
+        "relationship_name": fact.predicate,
+        "source_system": fact.external_system,
+        "source_external_id": fact.external_id,
+    }
+    if fact.fact_text:
+        properties["edge_text"] = fact.fact_text
+    if fact.valid_at:
+        properties["valid_at"] = _iso(fact.valid_at)
+    if fact.invalid_at:
+        properties["invalid_at"] = _iso(fact.invalid_at)
+    if fact.confidence is not None:
+        properties["confidence"] = fact.confidence
+    return properties
+
+
+def _register_entity(
+    record: COGXEntity,
+    *,
+    entity_types: Dict[str, EntityType],
+    by_node_id: Dict[UUID, Any],
+    by_external_id: Dict[str, Any],
+    first_external_id: Dict[UUID, str],
+) -> Any:
+    """Register an entity record, merging same-named records into one node."""
+
+    def _entity_type_for(name: str) -> EntityType:
+        key = name.lower()
+        if key not in entity_types:
+            entity_types[key] = EntityType(id=generate_node_id(name), name=name, description=name)
+        return entity_types[key]
+
+    node_id = generate_node_id(record.name)
+    description = record.description or record.name
+    if record.aliases:
+        description = f"{description} Also known as: {', '.join(record.aliases)}."
+    existing = by_node_id.get(node_id)
+    if existing is not None:
+        # Same-named source records merge into one node: combine their
+        # descriptions/aliases instead of keeping only the first.
+        if description and description not in (getattr(existing, "description", "") or ""):
+            merged = getattr(existing, "description", None)
+            existing.description = f"{merged}\n{description}" if merged else description
+        if getattr(existing, "is_a", None) is None and record.entity_type:
+            existing.is_a = _entity_type_for(record.entity_type)
+        logger.info(
+            "Merged same-named entity %r: external_ids %r and %r",
+            record.name,
+            first_external_id.get(node_id),
+            record.external_id,
+        )
+        by_external_id[record.external_id] = existing
+        return existing
+    entity = Entity(
+        id=node_id,
+        name=record.name,
+        description=description,
+        is_a=_entity_type_for(record.entity_type) if record.entity_type else None,
+    )
+    by_node_id[node_id] = entity
+    first_external_id[node_id] = record.external_id
+    by_external_id[record.external_id] = entity
+    return entity
+
+
 def _build_graph_batches(
     entities: List[COGXEntity], facts: List[COGXFact], raw_nodes: List[COGXRawNode]
 ) -> Tuple[List[Dict[str, Any]], int]:
@@ -146,12 +228,6 @@ def _build_graph_batches(
     by_node_id: Dict[UUID, Any] = {}
     first_external_id: Dict[UUID, str] = {}
 
-    def _entity_type_for(name: str) -> EntityType:
-        key = name.lower()
-        if key not in entity_types:
-            entity_types[key] = EntityType(id=generate_node_id(name), name=name, description=name)
-        return entity_types[key]
-
     for record in raw_nodes:
         properties = record.properties or {}
         node = rehydrate_node(properties)
@@ -161,36 +237,13 @@ def _build_graph_batches(
             by_external_id[str(external_id)] = node
 
     for record in entities:
-        node_id = generate_node_id(record.name)
-        description = record.description or record.name
-        if record.aliases:
-            description = f"{description} Also known as: {', '.join(record.aliases)}."
-        existing = by_node_id.get(node_id)
-        if existing is not None:
-            # Same-named source records merge into one node: combine their
-            # descriptions/aliases instead of keeping only the first.
-            if description and description not in (getattr(existing, "description", "") or ""):
-                merged = getattr(existing, "description", None)
-                existing.description = f"{merged}\n{description}" if merged else description
-            if getattr(existing, "is_a", None) is None and record.entity_type:
-                existing.is_a = _entity_type_for(record.entity_type)
-            logger.info(
-                "Merged same-named entity %r: external_ids %r and %r",
-                record.name,
-                first_external_id.get(node_id),
-                record.external_id,
-            )
-            by_external_id[record.external_id] = existing
-            continue
-        entity = Entity(
-            id=node_id,
-            name=record.name,
-            description=description,
-            is_a=_entity_type_for(record.entity_type) if record.entity_type else None,
+        _register_entity(
+            record,
+            entity_types=entity_types,
+            by_node_id=by_node_id,
+            by_external_id=by_external_id,
+            first_external_id=first_external_id,
         )
-        by_node_id[node_id] = entity
-        first_external_id[node_id] = record.external_id
-        by_external_id[record.external_id] = entity
 
     batches: List[Dict[str, Any]] = []
     batch_index_of: Dict[UUID, int] = {}
@@ -259,20 +312,9 @@ def _build_graph_batches(
                     batches[index]["nodes"].append(node)
                     duplicated.add(node.id)
 
-        properties: Dict[str, Any] = {
-            "relationship_name": fact.predicate,
-            "source_system": fact.external_system,
-            "source_external_id": fact.external_id,
-        }
-        if fact.fact_text:
-            properties["edge_text"] = fact.fact_text
-        if fact.valid_at:
-            properties["valid_at"] = _iso(fact.valid_at)
-        if fact.invalid_at:
-            properties["invalid_at"] = _iso(fact.invalid_at)
-        if fact.confidence is not None:
-            properties["confidence"] = fact.confidence
-        batches[index]["edges"].append((subject.id, target.id, fact.predicate, properties))
+        batches[index]["edges"].append(
+            (subject.id, target.id, fact.predicate, _fact_edge_properties(fact))
+        )
 
     batches = [batch for batch in batches if batch["nodes"] or batch["edges"]]
     return batches, skipped_facts
@@ -292,18 +334,9 @@ class _RecordTranslator:
         result = self.result
         result.counts[record.kind] = result.counts.get(record.kind, 0) + 1
 
-        if record.kind == "document":
-            result.data_items.append(_data_item_for(record, record.content, record.title))
-        elif record.kind == "episode":
-            result.data_items.append(_data_item_for(record, render_episode(record), record.title))
-        elif record.kind == "memory":
-            content = record.content
-            if record.categories:
-                content = f"{content}\nCategories: {', '.join(record.categories)}"
-            result.data_items.append(_data_item_for(record, content))
-        elif record.kind == "memory_block":
-            content = f"{record.label}:\n{record.value}"
-            result.data_items.append(_data_item_for(record, content, record.label))
+        data_item = data_item_from_record(record)
+        if data_item is not None:
+            result.data_items.append(data_item)
         elif record.kind == "entity":
             self.entities.append(record)
         elif record.kind == "fact":
@@ -407,6 +440,134 @@ def _provenance_ctx(ctx):
         data_item=SimpleNamespace(id=data_id) if data_id else None,
         extras=getattr(ctx, "extras", None),
     )
+
+
+# Edge batches can run larger than node batches: edges are small tuples and
+# add_data_points' per-node work (model traversal, embedding) does not apply.
+EDGE_BATCH_TARGET = 2 * BATCH_NODE_TARGET
+
+
+async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> Dict[str, int]:
+    """Two-pass streaming graph import for replayable preserve-mode sources.
+
+    Pass 1 streams the records once: raw nodes are rehydrated and flushed to
+    storage in bounded batches (only an id registry is kept), while entity
+    records buffer until the pass ends so same-name merging stays complete,
+    then flush in bounded batches too. Pass 2 streams the records again,
+    resolving each fact against the slim id registry and flushing edge
+    batches. Endpoint nodes are guaranteed to exist in the graph store by the
+    time edges arrive, so edges reference node ids without re-shipping nodes.
+
+    Peak memory is the entity set plus one in-flight batch — instead of every
+    rehydrated node and fact in the archive. ``stats`` (graph_nodes,
+    graph_edges, skipped_facts) is mutated in place so the caller can report
+    progress even when this task runs inside a background pipeline.
+    """
+    from cognee.tasks.storage.add_data_points import add_data_points
+
+    ctx = _provenance_ctx(ctx)
+
+    entity_types: Dict[str, EntityType] = {}
+    by_external_id: Dict[str, Any] = {}
+    by_node_id: Dict[UUID, Any] = {}
+    first_external_id: Dict[UUID, str] = {}
+    known_node_ids: Set[UUID] = set()
+    external_to_node_id: Dict[str, UUID] = {}
+
+    async def flush(nodes: List[Any], edges: Optional[List[Tuple]] = None) -> None:
+        if not nodes and not edges:
+            return
+        await add_data_points(list(nodes), custom_edges=list(edges) if edges else None, ctx=ctx)
+        stats["graph_nodes"] += len(nodes)
+        stats["graph_edges"] += len(edges or [])
+        logger.info("Streamed graph batch: %d nodes, %d edges", len(nodes), len(edges or []))
+
+    # Pass 1: raw nodes stream straight to storage; entities buffer for merging.
+    batch: List[Any] = []
+    async for record in source.records():
+        if record.kind == "raw_node":
+            properties = record.properties or {}
+            node = rehydrate_node(properties)
+            if node.id in known_node_ids:
+                continue
+            known_node_ids.add(node.id)
+            external_id = properties.get("id")
+            if external_id:
+                external_to_node_id[str(external_id)] = node.id
+            batch.append(node)
+            if len(batch) >= BATCH_NODE_TARGET:
+                await flush(batch)
+                batch = []
+        elif record.kind == "entity":
+            _register_entity(
+                record,
+                entity_types=entity_types,
+                by_node_id=by_node_id,
+                by_external_id=by_external_id,
+                first_external_id=first_external_id,
+            )
+    await flush(batch)
+
+    ordered_nodes = list(entity_types.values()) + list(by_node_id.values())
+    for start in range(0, len(ordered_nodes), BATCH_NODE_TARGET):
+        await flush(ordered_nodes[start : start + BATCH_NODE_TARGET])
+    known_node_ids.update(node.id for node in ordered_nodes)
+    for external_id, node in by_external_id.items():
+        external_to_node_id[external_id] = node.id
+    # Release the node objects; only the slim id registry survives into pass 2.
+    entity_types, by_node_id, by_external_id, ordered_nodes = {}, {}, {}, []
+
+    # Pass 2: facts resolve against the slim registry and flush as edge batches.
+    stub_batch: List[Any] = []
+    edge_batch: List[Tuple] = []
+    stubbed: Set[UUID] = set()
+
+    def resolve(ref: str) -> Tuple[Optional[UUID], Optional[Any]]:
+        """Resolve a fact ref to a node id; returns (id, new_stub_entity_or_None)."""
+        node_id = external_to_node_id.get(ref)
+        if node_id is not None:
+            return node_id, None
+        candidate = generate_node_id(ref)
+        if candidate in known_node_ids or candidate in stubbed:
+            return candidate, None
+        if _looks_like_uuid(ref):
+            return None, None
+        # Plain-name reference (cross-provider archives): create the entity.
+        return candidate, Entity(id=candidate, name=ref, description=ref)
+
+    async for record in source.records():
+        if record.kind != "fact":
+            continue
+        subject_id, subject_stub = resolve(record.subject_ref)
+        object_id, object_stub = resolve(record.object_ref)
+        if subject_id is None or object_id is None:
+            stats["skipped_facts"] += 1
+            unresolved = [
+                ref
+                for ref, node_id in (
+                    (record.subject_ref, subject_id),
+                    (record.object_ref, object_id),
+                )
+                if node_id is None
+            ]
+            logger.warning(
+                "Skipping fact %r (%s): unresolved UUID reference(s) %s",
+                record.external_id,
+                record.predicate,
+                ", ".join(unresolved),
+            )
+            continue
+        for stub in (subject_stub, object_stub):
+            if stub is not None and stub.id not in stubbed:
+                stub_batch.append(stub)
+                stubbed.add(stub.id)
+        edge_batch.append((subject_id, object_id, record.predicate, _fact_edge_properties(record)))
+        if len(edge_batch) >= EDGE_BATCH_TARGET or len(stub_batch) >= BATCH_NODE_TARGET:
+            await flush(stub_batch, edge_batch)
+            stub_batch, edge_batch = [], []
+    await flush(stub_batch, edge_batch)
+
+    return stats
 
 
 async def store_imported_graph(batches, ctx=None):
