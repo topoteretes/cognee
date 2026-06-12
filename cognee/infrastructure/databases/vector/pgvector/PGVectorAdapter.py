@@ -102,6 +102,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 dict(relational_config.pool_args) if relational_config.pool_args else {}
             )
 
+        # A per-dataset PGVector engine may connect to managed
+        # Postgres (Neon) which requires SSL. Reuse the relational connect_args
+        # (e.g. {"ssl": "require"} from DATABASE_CONNECT_ARGS); {} for in-cluster.
+        effective_connect_args = (
+            dict(relational_config.database_connect_args)
+            if relational_config.database_connect_args
+            else None
+        )
+
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
         db_name2 = make_url(self.db_uri).database
@@ -109,6 +118,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # If backend access control create new instances of engine and sessionmaker
             super().__init__(
                 connection_string=self.db_uri,
+                connect_args=effective_connect_args,
                 pool_args=effective_pool_args,
             )
             self._owns_engine = True
@@ -120,6 +130,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # If not postgreSQL and not backend access control create new instances of engine and sessionmaker
             super().__init__(
                 connection_string=self.db_uri,
+                connect_args=effective_connect_args,
                 pool_args=effective_pool_args,
             )
             self._owns_engine = True
