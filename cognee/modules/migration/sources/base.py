@@ -1,7 +1,7 @@
 """Base class for memory-migration sources.
 
 A :class:`MemorySource` adapts an external memory system (or an export file
-produced by one) into a stream of CMIF records. ``cognee.remember()`` accepts
+produced by one) into a stream of COGX records. ``cognee.remember()`` accepts
 any MemorySource instance and routes it through the migration loader, so
 
     await cognee.remember(Mem0Source("mem0_export.json"))
@@ -13,13 +13,13 @@ encapsulated in the source object.
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
-from cognee.modules.migration.cmif import CMIFRecord
+from cognee.modules.migration.cogx import COGXRecord
 
 IMPORT_MODES = ("re-derive", "preserve", "hybrid")
 
 
 class MemorySource(ABC):
-    """An async stream of CMIF records read from an external memory system.
+    """An async stream of COGX records read from an external memory system.
 
     Args:
         mode: Import fidelity mode.
@@ -40,5 +40,5 @@ class MemorySource(ABC):
         self.mode = mode
 
     @abstractmethod
-    def records(self) -> AsyncIterator[CMIFRecord]:
-        """Yield CMIF records from the source."""
+    def records(self) -> AsyncIterator[COGXRecord]:
+        """Yield COGX records from the source."""

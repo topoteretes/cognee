@@ -26,11 +26,11 @@ async def export(
               custom-model objects). Losslessly serializable:
               ``snapshot.model_dump_json()`` /
               ``GraphSnapshot.model_validate_json()``.
-            - ``"cmif"`` — re-importable archive directory
-              (``cognee.remember(CMIFArchiveSource(path))`` restores it)
+            - ``"cogx"`` — re-importable archive directory
+              (``cognee.remember(COGXArchiveSource(path))`` restores it)
             - ``"json"`` / ``"graphml"`` / ``"cypher"`` — file exports
         destination: Output path. Optional for ``pydantic`` (saves JSON when
-            given); a directory for ``cmif``; a file otherwise. File formats
+            given); a directory for ``cogx``; a file otherwise. File formats
             default to ``<dataset>_export.<ext>`` in the working directory.
         user: User context; defaults to the default user.
         link_relations: ``pydantic`` only — re-attach edges as object

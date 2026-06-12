@@ -2,9 +2,9 @@
 
 Reads a JSON export of a Zep or Graphiti (OSS) knowledge graph and yields:
 
-- episodes (verbatim ingested content) -> :class:`CMIFEpisode`
-- entity nodes                          -> :class:`CMIFEntity`
-- relation edges ("facts")              -> :class:`CMIFFact` carrying the
+- episodes (verbatim ingested content) -> :class:`COGXEpisode`
+- entity nodes                          -> :class:`COGXEntity`
+- relation edges ("facts")              -> :class:`COGXFact` carrying the
   bi-temporal ``valid_at``/``invalid_at``/``expired_at`` fields
 
 Expected shape (tolerant of key-name variants)::
@@ -25,13 +25,13 @@ import json
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Union
 
-from cognee.modules.migration.cmif import (
-    CMIFEntity,
-    CMIFEpisode,
-    CMIFFact,
-    CMIFRecord,
-    CMIFScope,
-    CMIFTurn,
+from cognee.modules.migration.cogx import (
+    COGXEntity,
+    COGXEpisode,
+    COGXFact,
+    COGXRecord,
+    COGXScope,
+    COGXTurn,
     parse_timestamp,
 )
 from cognee.modules.migration.sources.base import MemorySource
@@ -60,7 +60,7 @@ class ZepSource(MemorySource):
             raise ValueError("Unrecognized Zep/Graphiti export: expected a JSON object.")
         return data
 
-    async def records(self) -> AsyncIterator[CMIFRecord]:
+    async def records(self) -> AsyncIterator[COGXRecord]:
         data = self._load_raw()
 
         for index, episode in enumerate(_first_list(data, "episodes", "episodic_nodes")):
@@ -68,13 +68,13 @@ class ZepSource(MemorySource):
             if not isinstance(content, str) or not content.strip():
                 continue
             occurred_at = parse_timestamp(episode.get("valid_at") or episode.get("created_at"))
-            yield CMIFEpisode(
+            yield COGXEpisode(
                 external_system=self.source_system,
                 external_id=str(episode.get("uuid") or episode.get("id") or f"episode-{index}"),
                 title=episode.get("name"),
-                turns=[CMIFTurn(role="episode", content=content, occurred_at=occurred_at)],
+                turns=[COGXTurn(role="episode", content=content, occurred_at=occurred_at)],
                 created_at=parse_timestamp(episode.get("created_at")),
-                scope=CMIFScope(
+                scope=COGXScope(
                     user_id=episode.get("user_id"),
                     session_id=episode.get("group_id") or episode.get("session_id"),
                 ),
@@ -93,7 +93,7 @@ class ZepSource(MemorySource):
             if isinstance(labels, str):
                 labels = [labels]
             entity_type = next((label for label in labels if label != "Entity"), None)
-            yield CMIFEntity(
+            yield COGXEntity(
                 external_system=self.source_system,
                 external_id=str(node.get("uuid") or node.get("id") or f"entity-{index}"),
                 name=name,
@@ -101,7 +101,7 @@ class ZepSource(MemorySource):
                 description=node.get("summary") or node.get("description"),
                 attributes=node.get("attributes") or {},
                 created_at=parse_timestamp(node.get("created_at")),
-                scope=CMIFScope(session_id=node.get("group_id")),
+                scope=COGXScope(session_id=node.get("group_id")),
             )
 
         for index, edge in enumerate(_first_list(data, "facts", "edges", "entity_edges")):
@@ -109,7 +109,7 @@ class ZepSource(MemorySource):
             object_ref = edge.get("target_node_uuid") or edge.get("target")
             if not subject_ref or not object_ref:
                 continue
-            yield CMIFFact(
+            yield COGXFact(
                 external_system=self.source_system,
                 external_id=str(edge.get("uuid") or edge.get("id") or f"fact-{index}"),
                 subject_ref=str(subject_ref),
@@ -120,7 +120,7 @@ class ZepSource(MemorySource):
                 invalid_at=parse_timestamp(edge.get("invalid_at") or edge.get("expired_at")),
                 created_at=parse_timestamp(edge.get("created_at")),
                 provenance=[str(episode) for episode in edge.get("episodes") or []],
-                scope=CMIFScope(session_id=edge.get("group_id")),
+                scope=COGXScope(session_id=edge.get("group_id")),
             )
 
 

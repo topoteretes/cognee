@@ -1,6 +1,6 @@
 """Mem0 memory source.
 
-Reads a Mem0 export and yields CMIF memory records. Accepts the shapes
+Reads a Mem0 export and yields COGX memory records. Accepts the shapes
 produced by the Mem0 platform export API and by the OSS ``get_all()`` call:
 
 - a plain JSON list of memory objects
@@ -8,7 +8,7 @@ produced by the Mem0 platform export API and by the OSS ``get_all()`` call:
 - already-parsed Python lists/dicts (for live-API integration: fetch with the
   ``mem0ai`` client yourself and pass the response in)
 
-Each memory becomes a :class:`CMIFMemory` with scope taken from
+Each memory becomes a :class:`COGXMemory` with scope taken from
 ``user_id``/``agent_id``/``run_id`` and timestamps preserved.
 """
 
@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Union
 
-from cognee.modules.migration.cmif import CMIFMemory, CMIFRecord, CMIFScope, parse_timestamp
+from cognee.modules.migration.cogx import COGXMemory, COGXRecord, COGXScope, parse_timestamp
 from cognee.modules.migration.sources.base import MemorySource
 
 _CONTENT_KEYS = ("memory", "text", "data", "content")
@@ -47,7 +47,7 @@ class Mem0Source(MemorySource):
             raise ValueError("Unrecognized Mem0 export shape: expected a list of memories.")
         return [item for item in data if isinstance(item, dict)]
 
-    async def records(self) -> AsyncIterator[CMIFRecord]:
+    async def records(self) -> AsyncIterator[COGXRecord]:
         for index, item in enumerate(self._load_raw()):
             content = next(
                 (item[key] for key in _CONTENT_KEYS if isinstance(item.get(key), str)), None
@@ -57,12 +57,12 @@ class Mem0Source(MemorySource):
             categories = item.get("categories") or []
             if isinstance(categories, str):
                 categories = [categories]
-            yield CMIFMemory(
+            yield COGXMemory(
                 external_system=self.source_system,
                 external_id=str(item.get("id") or f"mem0-{index}"),
                 content=content,
                 categories=[str(category) for category in categories],
-                scope=CMIFScope(
+                scope=COGXScope(
                     user_id=item.get("user_id"),
                     agent_id=item.get("agent_id"),
                     run_id=item.get("run_id"),

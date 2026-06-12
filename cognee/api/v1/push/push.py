@@ -1,9 +1,9 @@
 """SDK entry point: push a local dataset's knowledge graph to Cognee Cloud.
 
-Bridges ``cognee.export(format="cmif")`` and the remote remember endpoint:
-the dataset's graph is exported to a CMIF archive, packed as a tarball, and
+Bridges ``cognee.export(format="cogx")`` and the remote remember endpoint:
+the dataset's graph is exported to a COGX archive, packed as a tarball, and
 uploaded via :class:`CloudClient`, where the receiving instance imports it
-through :class:`CMIFArchiveSource` — preserving the local graph instead of
+through :class:`COGXArchiveSource` — preserving the local graph instead of
 re-deriving it from raw files (which is what ``sync`` does).
 
 Authentication reuses the ``serve`` stack: run ``cognee-cli serve`` (or
@@ -104,10 +104,10 @@ async def push(
         )
         try:
             with tempfile.TemporaryDirectory() as temporary_directory:
-                archive_dir = Path(temporary_directory) / "cmif"
-                result = await export(dataset, format="cmif", destination=archive_dir, user=user)
-                if not isinstance(result, ExportResult):  # format="cmif" always returns one
-                    raise RuntimeError("CMIF export did not return an ExportResult.")
+                archive_dir = Path(temporary_directory) / "cogx"
+                result = await export(dataset, format="cogx", destination=archive_dir, user=user)
+                if not isinstance(result, ExportResult):  # format="cogx" always returns one
+                    raise RuntimeError("COGX export did not return an ExportResult.")
 
                 tar_path = Path(temporary_directory) / f"{result.dataset_name}{ARCHIVE_SUFFIX}"
                 pack_archive(archive_dir, tar_path)
@@ -124,7 +124,7 @@ async def push(
                     response = await client.remember(
                         archive_file,
                         dataset_name=target_dataset or result.dataset_name,
-                        content_type="cmif-archive",
+                        content_type="cogx-archive",
                         import_mode=mode,
                     )
 

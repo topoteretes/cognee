@@ -2,9 +2,9 @@
 
 Reads a Letta Agent File (``.af``, a JSON serialization of agents) and yields:
 
-- core memory blocks -> :class:`CMIFMemoryBlock`
-- message history    -> one :class:`CMIFEpisode` per agent
-- archival memory    -> one :class:`CMIFDocument` per passage
+- core memory blocks -> :class:`COGXMemoryBlock`
+- message history    -> one :class:`COGXEpisode` per agent
+- archival memory    -> one :class:`COGXDocument` per passage
 
 The parser is tolerant of key-name variations across Letta versions
 (``core_memory``/``blocks``/``memory_blocks``, ``messages``/``in_context_messages``,
@@ -16,13 +16,13 @@ import json
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Union
 
-from cognee.modules.migration.cmif import (
-    CMIFDocument,
-    CMIFEpisode,
-    CMIFMemoryBlock,
-    CMIFRecord,
-    CMIFScope,
-    CMIFTurn,
+from cognee.modules.migration.cogx import (
+    COGXDocument,
+    COGXEpisode,
+    COGXMemoryBlock,
+    COGXRecord,
+    COGXScope,
+    COGXTurn,
     parse_timestamp,
 )
 from cognee.modules.migration.sources.base import MemorySource
@@ -66,7 +66,7 @@ class LettaSource(MemorySource):
             raise ValueError("Unrecognized Letta agent file: expected a JSON object.")
         return data
 
-    async def records(self) -> AsyncIterator[CMIFRecord]:
+    async def records(self) -> AsyncIterator[COGXRecord]:
         data = self._load_raw()
         agents = _first_list(data, "agents")
         if not agents:
@@ -79,7 +79,7 @@ class LettaSource(MemorySource):
 
         for agent_index, agent in enumerate(agents):
             agent_name = str(agent.get("name") or f"agent-{agent_index}")
-            scope = CMIFScope(agent_id=agent_name)
+            scope = COGXScope(agent_id=agent_name)
 
             blocks = _first_list(agent, "core_memory", "blocks", "memory_blocks")
             if not blocks and shared_blocks:
@@ -90,7 +90,7 @@ class LettaSource(MemorySource):
                 if not isinstance(value, str) or not value.strip():
                     continue
                 label = str(block.get("label") or block.get("name") or f"block-{block_index}")
-                yield CMIFMemoryBlock(
+                yield COGXMemoryBlock(
                     external_system=self.source_system,
                     external_id=str(block.get("id") or f"{agent_name}:block:{label}"),
                     label=label,
@@ -107,7 +107,7 @@ class LettaSource(MemorySource):
                 if not text.strip() or role in ("system", "tool"):
                     continue
                 turns.append(
-                    CMIFTurn(
+                    COGXTurn(
                         role=role,
                         content=text,
                         occurred_at=parse_timestamp(
@@ -116,7 +116,7 @@ class LettaSource(MemorySource):
                     )
                 )
             if turns:
-                yield CMIFEpisode(
+                yield COGXEpisode(
                     external_system=self.source_system,
                     external_id=f"{agent_name}:messages",
                     title=f"Conversation history of agent {agent_name}",
@@ -129,7 +129,7 @@ class LettaSource(MemorySource):
                 text = passage.get("text") or passage.get("content")
                 if not isinstance(text, str) or not text.strip():
                     continue
-                yield CMIFDocument(
+                yield COGXDocument(
                     external_system=self.source_system,
                     external_id=str(passage.get("id") or f"{agent_name}:passage:{passage_index}"),
                     content=text,

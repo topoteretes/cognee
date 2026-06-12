@@ -1,4 +1,4 @@
-"""Unit tests for the memory-migration module (CMIF, sources, loader, formats).
+"""Unit tests for the memory-migration module (COGX, sources, loader, formats).
 
 All tests are pure: no databases, no LLM calls.
 """
@@ -8,15 +8,15 @@ import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-from cognee.modules.migration.cmif import (
-    CMIFArchiveWriter,
-    CMIFDocument,
-    CMIFEntity,
-    CMIFEpisode,
-    CMIFFact,
-    CMIFMemory,
-    CMIFMemoryBlock,
-    CMIFTurn,
+from cognee.modules.migration.cogx import (
+    COGXArchiveWriter,
+    COGXDocument,
+    COGXEntity,
+    COGXEpisode,
+    COGXFact,
+    COGXMemory,
+    COGXMemoryBlock,
+    COGXTurn,
     parse_timestamp,
     read_archive,
     read_manifest,
@@ -24,7 +24,7 @@ from cognee.modules.migration.cmif import (
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
 from cognee.modules.migration.loader import record_data_id, translate_records
 from cognee.modules.migration.sources import (
-    CMIFArchiveSource,
+    COGXArchiveSource,
     GraphitiSource,
     LettaSource,
     Mem0Source,
@@ -53,17 +53,17 @@ class TestParseTimestamp:
         assert parse_timestamp("not-a-date") is None
 
 
-class TestCMIFArchive:
+class TestCOGXArchive:
     def _sample_records(self):
         return [
-            CMIFDocument(external_system="test", external_id="d1", content="hello"),
-            CMIFEpisode(
+            COGXDocument(external_system="test", external_id="d1", content="hello"),
+            COGXEpisode(
                 external_system="test",
                 external_id="e1",
-                turns=[CMIFTurn(role="user", content="hi")],
+                turns=[COGXTurn(role="user", content="hi")],
             ),
-            CMIFEntity(external_system="test", external_id="n1", name="Alice"),
-            CMIFFact(
+            COGXEntity(external_system="test", external_id="n1", name="Alice"),
+            COGXFact(
                 external_system="test",
                 external_id="f1",
                 subject_ref="n1",
@@ -71,14 +71,14 @@ class TestCMIFArchive:
                 object_ref="Acme",
                 valid_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
             ),
-            CMIFMemory(external_system="test", external_id="m1", content="likes tea"),
-            CMIFMemoryBlock(external_system="test", external_id="b1", label="persona", value="x"),
+            COGXMemory(external_system="test", external_id="m1", content="likes tea"),
+            COGXMemoryBlock(external_system="test", external_id="b1", label="persona", value="x"),
         ]
 
     def test_roundtrip(self, tmp_path):
         archive_dir = tmp_path / "archive"
         records = self._sample_records()
-        with CMIFArchiveWriter(archive_dir, source_system="test") as writer:
+        with COGXArchiveWriter(archive_dir, source_system="test") as writer:
             for record in records:
                 writer.write(record)
 
@@ -96,11 +96,11 @@ class TestCMIFArchive:
 
     def test_archive_source_streams_records(self, tmp_path):
         archive_dir = tmp_path / "archive"
-        with CMIFArchiveWriter(archive_dir, source_system="test") as writer:
+        with COGXArchiveWriter(archive_dir, source_system="test") as writer:
             for record in self._sample_records():
                 writer.write(record)
 
-        source = CMIFArchiveSource(archive_dir)
+        source = COGXArchiveSource(archive_dir)
         assert source.source_system == "test"
         assert len(collect(source)) == 6
 
@@ -229,19 +229,19 @@ class TestZepSource:
 class TestTranslateRecords:
     def _records(self):
         return [
-            CMIFMemory(external_system="mem0", external_id="m1", content="likes tea"),
-            CMIFEpisode(
+            COGXMemory(external_system="mem0", external_id="m1", content="likes tea"),
+            COGXEpisode(
                 external_system="zep",
                 external_id="e1",
                 turns=[
-                    CMIFTurn(
+                    COGXTurn(
                         role="user",
                         content="hello",
                         occurred_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
                     )
                 ],
             ),
-            CMIFEntity(
+            COGXEntity(
                 external_system="zep",
                 external_id="n1",
                 name="Alice",
@@ -249,7 +249,7 @@ class TestTranslateRecords:
                 description="A person",
                 aliases=["Alice Smith"],
             ),
-            CMIFFact(
+            COGXFact(
                 external_system="zep",
                 external_id="f1",
                 subject_ref="n1",
@@ -275,7 +275,7 @@ class TestTranslateRecords:
         assert "valid from 2024-02-01" in fact_digest.data
 
     def test_deterministic_data_ids(self):
-        record = CMIFMemory(external_system="mem0", external_id="m1", content="x")
+        record = COGXMemory(external_system="mem0", external_id="m1", content="x")
         assert record_data_id(record) == record_data_id(record)
         first = translate_records(self._records(), "re-derive").data_items[0]
         second = translate_records(self._records(), "re-derive").data_items[0]
@@ -306,8 +306,8 @@ class TestTranslateRecords:
 
     def test_entity_merge_by_name(self):
         records = [
-            CMIFEntity(external_system="a", external_id="x1", name="Alice"),
-            CMIFEntity(external_system="b", external_id="x2", name="Alice"),
+            COGXEntity(external_system="a", external_id="x1", name="Alice"),
+            COGXEntity(external_system="b", external_id="x2", name="Alice"),
         ]
         batch = translate_records(records, "preserve").graph_batches[0]
         entities = [node for node in batch["nodes"] if type(node).__name__ == "Entity"]

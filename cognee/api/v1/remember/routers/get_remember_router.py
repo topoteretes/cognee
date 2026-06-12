@@ -23,11 +23,11 @@ logger = get_logger()
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 
-async def _import_cmif_archives(uploads, dataset_name: str, import_mode, user):
-    """Import uploaded CMIF archive tarballs (produced by ``cognee.push()``)."""
+async def _import_cogx_archives(uploads, dataset_name: str, import_mode, user):
+    """Import uploaded COGX archive tarballs (produced by ``cognee.push()``)."""
     import tempfile
 
-    from cognee.modules.migration import CMIFArchiveSource, import_memory_source
+    from cognee.modules.migration import COGXArchiveSource, import_memory_source
     from cognee.modules.migration.archive import unpack_archive
     from cognee.modules.migration.sources.base import IMPORT_MODES
 
@@ -42,22 +42,22 @@ async def _import_cmif_archives(uploads, dataset_name: str, import_mode, user):
         for upload in uploads:
             with tempfile.TemporaryDirectory() as temporary_directory:
                 archive_root = unpack_archive(upload.file, temporary_directory)
-                source = CMIFArchiveSource(archive_root, mode=import_mode or "preserve")
+                source = COGXArchiveSource(archive_root, mode=import_mode or "preserve")
                 result = await import_memory_source(source, dataset_name=dataset_name, user=user)
         if result is None:
             raise HTTPException(status_code=400, detail="No archive files were processed.")
         return jsonable_encoder(result.to_dict())
     except ValueError as error:
-        logger.error("CMIF archive import validation error: %s", error, exc_info=True)
+        logger.error("COGX archive import validation error: %s", error, exc_info=True)
         return JSONResponse(
             status_code=400,
-            content={"error": f"Invalid CMIF archive: {error}"},
+            content={"error": f"Invalid COGX archive: {error}"},
         )
     except Exception as error:
-        logger.error("CMIF archive import error: %s", error, exc_info=True)
+        logger.error("COGX archive import error: %s", error, exc_info=True)
         return JSONResponse(
             status_code=409,
-            content={"error": "An error occurred during CMIF archive import."},
+            content={"error": "An error occurred during COGX archive import."},
         )
 
 
@@ -91,7 +91,7 @@ def get_remember_router() -> APIRouter:
             default=None,
             examples=[""],
             description=(
-                "CMIF archive imports only: 'preserve' (default), 'hybrid', or 're-derive'."
+                "COGX archive imports only: 'preserve' (default), 'hybrid', or 're-derive'."
             ),
         ),
         user: User = Depends(get_authenticated_user),
@@ -137,18 +137,18 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        if content_type == "cmif-archive":
+        if content_type == "cogx-archive":
             if not data:
                 raise HTTPException(
                     status_code=400,
-                    detail="content_type 'cmif-archive' requires an uploaded archive file.",
+                    detail="content_type 'cogx-archive' requires an uploaded archive file.",
                 )
             if not datasetName:
                 raise HTTPException(
                     status_code=400,
-                    detail="datasetName must be provided for CMIF archive imports.",
+                    detail="datasetName must be provided for COGX archive imports.",
                 )
-            return await _import_cmif_archives(data, datasetName, import_mode, user)
+            return await _import_cogx_archives(data, datasetName, import_mode, user)
 
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService

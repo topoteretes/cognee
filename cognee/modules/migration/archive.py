@@ -1,6 +1,6 @@
-"""Pack and unpack CMIF archive directories as ``.tar.gz`` files for transport.
+"""Pack and unpack COGX archive directories as ``.tar.gz`` files for transport.
 
-A CMIF archive is a directory (see :mod:`cognee.modules.migration.cmif`);
+A COGX archive is a directory (see :mod:`cognee.modules.migration.cogx`);
 shipping one over HTTP requires a single file. ``pack_archive`` and
 ``unpack_archive`` are the two halves of that transport encoding, used by
 ``cognee.push()`` on the sending side and the remember endpoint on the
@@ -11,13 +11,13 @@ import tarfile
 from pathlib import Path
 from typing import IO, Union
 
-from cognee.modules.migration.cmif import MANIFEST_FILE
+from cognee.modules.migration.cogx import MANIFEST_FILE
 
-ARCHIVE_SUFFIX = ".cmif.tar.gz"
+ARCHIVE_SUFFIX = ".cogx.tar.gz"
 
 
 def pack_archive(archive_dir: Union[str, Path], tar_path: Union[str, Path]) -> Path:
-    """Tar a CMIF archive directory so its files sit at the tarball root."""
+    """Tar a COGX archive directory so its files sit at the tarball root."""
     archive_dir = Path(archive_dir)
     tar_path = Path(tar_path)
     with tarfile.open(tar_path, "w:gz") as tar:
@@ -27,7 +27,7 @@ def pack_archive(archive_dir: Union[str, Path], tar_path: Union[str, Path]) -> P
 
 
 def unpack_archive(fileobj: IO[bytes], destination: Union[str, Path]) -> Path:
-    """Extract a packed CMIF archive and return the directory holding the manifest.
+    """Extract a packed COGX archive and return the directory holding the manifest.
 
     Members with absolute paths or ``..`` components are rejected; anything
     that is not a plain file or directory (symlinks, devices) is skipped.
@@ -57,4 +57,4 @@ def find_archive_root(directory: Union[str, Path]) -> Path:
     subdirectories = [path for path in directory.iterdir() if path.is_dir()]
     if len(subdirectories) == 1 and (subdirectories[0] / MANIFEST_FILE).exists():
         return subdirectories[0]
-    raise ValueError(f"No CMIF {MANIFEST_FILE} found in archive.")
+    raise ValueError(f"No COGX {MANIFEST_FILE} found in archive.")

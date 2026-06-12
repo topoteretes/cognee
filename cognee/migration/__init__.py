@@ -15,23 +15,23 @@ Exporting (``cognee.export``)::
 
 Restoring / Cognee-to-Cognee migration::
 
-    await cognee.export("main_dataset", format="cmif", destination="backup_cmif")
-    await cognee.remember(CMIFArchiveSource("backup_cmif"))
+    await cognee.export("main_dataset", format="cogx", destination="backup_cogx")
+    await cognee.remember(COGXArchiveSource("backup_cogx"))
 """
 
 from cognee.modules.migration import (
-    CMIF_VERSION,
-    CMIFArchiveSource,
-    CMIFDocument,
-    CMIFEntity,
-    CMIFEpisode,
-    CMIFFact,
-    CMIFManifest,
-    CMIFMemory,
-    CMIFMemoryBlock,
-    CMIFRecord,
-    CMIFScope,
-    CMIFTurn,
+    COGX_VERSION,
+    COGXArchiveSource,
+    COGXDocument,
+    COGXEntity,
+    COGXEpisode,
+    COGXFact,
+    COGXManifest,
+    COGXMemory,
+    COGXMemoryBlock,
+    COGXRecord,
+    COGXScope,
+    COGXTurn,
     EXPORT_FORMATS,
     ExportResult,
     GraphEdge,
@@ -51,18 +51,18 @@ from cognee.modules.migration import (
 )
 
 __all__ = [
-    "CMIF_VERSION",
-    "CMIFArchiveSource",
-    "CMIFDocument",
-    "CMIFEntity",
-    "CMIFEpisode",
-    "CMIFFact",
-    "CMIFManifest",
-    "CMIFMemory",
-    "CMIFMemoryBlock",
-    "CMIFRecord",
-    "CMIFScope",
-    "CMIFTurn",
+    "COGX_VERSION",
+    "COGXArchiveSource",
+    "COGXDocument",
+    "COGXEntity",
+    "COGXEpisode",
+    "COGXFact",
+    "COGXManifest",
+    "COGXMemory",
+    "COGXMemoryBlock",
+    "COGXRecord",
+    "COGXScope",
+    "COGXTurn",
     "EXPORT_FORMATS",
     "ExportResult",
     "GraphitiSource",

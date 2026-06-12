@@ -5,8 +5,8 @@ Formats:
 - ``pydantic`` — a :class:`GraphSnapshot` of typed DataPoint instances (the
   Pydantic-native export: real ``Entity``/``DocumentChunk``/custom-model
   objects, losslessly serializable via ``model_dump_json``)
-- ``cmif``    — a CMIF archive directory (the canonical portable dump;
-  re-importable via :class:`CMIFArchiveSource`)
+- ``cogx``    — a COGX archive directory (the canonical portable dump;
+  re-importable via :class:`COGXArchiveSource`)
 - ``json``    — full-fidelity nodes/edges JSON
 - ``graphml`` — Gephi/yEd/NetworkX interop
 - ``cypher`` — MERGE script loadable into any Neo4j-compatible database
@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Optional, Union
 from uuid import UUID
 
-from cognee.modules.migration.cmif import (
-    CMIFArchiveWriter,
-    CMIFDocument,
-    CMIFEntity,
-    CMIFFact,
+from cognee.modules.migration.cogx import (
+    COGXArchiveWriter,
+    COGXDocument,
+    COGXEntity,
+    COGXFact,
     parse_timestamp,
 )
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
@@ -30,7 +30,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("migration.export")
 
-EXPORT_FORMATS = ("pydantic", "cmif", "json", "graphml", "cypher")
+EXPORT_FORMATS = ("pydantic", "cogx", "json", "graphml", "cypher")
 
 _FORMAT_SUFFIX = {"json": ".json", "graphml": ".graphml", "cypher": ".cypher"}
 
@@ -51,16 +51,16 @@ class ExportResult:
         )
 
 
-def _write_cmif(nodes, edges, destination: Path, dataset_name: str) -> None:
-    """Map graph nodes/edges onto typed CMIF records; keep the rest raw."""
-    with CMIFArchiveWriter(destination, source_system="cognee") as writer:
+def _write_cogx(nodes, edges, destination: Path, dataset_name: str) -> None:
+    """Map graph nodes/edges onto typed COGX records; keep the rest raw."""
+    with COGXArchiveWriter(destination, source_system="cognee") as writer:
         writer.add_note(f"Exported from Cognee dataset {dataset_name!r}.")
         for node_id, properties in nodes:
             properties = properties or {}
             node_type = properties.get("type")
             if node_type == "Entity" and properties.get("name"):
                 writer.write(
-                    CMIFEntity(
+                    COGXEntity(
                         external_system="cognee",
                         external_id=str(node_id),
                         name=properties["name"],
@@ -71,7 +71,7 @@ def _write_cmif(nodes, edges, destination: Path, dataset_name: str) -> None:
                 )
             elif node_type == "DocumentChunk" and properties.get("text"):
                 writer.write(
-                    CMIFDocument(
+                    COGXDocument(
                         external_system="cognee",
                         external_id=str(node_id),
                         content=properties["text"],
@@ -88,7 +88,7 @@ def _write_cmif(nodes, edges, destination: Path, dataset_name: str) -> None:
                 continue
             properties = properties or {}
             writer.write(
-                CMIFFact(
+                COGXFact(
                     external_system="cognee",
                     external_id=f"{source}:{relationship}:{target}",
                     subject_ref=str(source),
@@ -157,11 +157,11 @@ async def export_dataset(
 
     if destination is None:
         suffix = _FORMAT_SUFFIX.get(format, "")
-        destination = f"{dataset_obj.name}_export{suffix}" if suffix else f"{dataset_obj.name}_cmif"
+        destination = f"{dataset_obj.name}_export{suffix}" if suffix else f"{dataset_obj.name}_cogx"
     destination = Path(destination)
 
-    if format == "cmif":
-        _write_cmif(nodes, edges, destination, dataset_obj.name)
+    if format == "cogx":
+        _write_cogx(nodes, edges, destination, dataset_obj.name)
     elif format == "json":
         write_json(nodes, edges, destination)
     elif format == "graphml":

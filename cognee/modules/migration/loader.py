@@ -1,4 +1,4 @@
-"""Translate CMIF records into Cognee ingestion inputs.
+"""Translate COGX records into Cognee ingestion inputs.
 
 Two targets, selected by the source's import mode:
 
@@ -19,11 +19,11 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.migration.cmif import (
-    CMIFEntity,
-    CMIFEpisode,
-    CMIFFact,
-    CMIFRecord,
+from cognee.modules.migration.cogx import (
+    COGXEntity,
+    COGXEpisode,
+    COGXFact,
+    COGXRecord,
 )
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
@@ -42,16 +42,16 @@ class TranslationResult:
     cognify_data_items: bool = True
 
 
-def record_data_id(record: CMIFRecord) -> UUID:
+def record_data_id(record: COGXRecord) -> UUID:
     """Deterministic data id so re-importing the same record is idempotent."""
-    return uuid5(NAMESPACE_OID, f"cmif:{record.external_system}:{record.external_id}")
+    return uuid5(NAMESPACE_OID, f"cogx:{record.external_system}:{record.external_id}")
 
 
 def _iso(value: Optional[datetime]) -> Optional[str]:
     return value.isoformat() if value else None
 
 
-def _record_external_metadata(record: CMIFRecord) -> Dict[str, Any]:
+def _record_external_metadata(record: COGXRecord) -> Dict[str, Any]:
     metadata: Dict[str, Any] = {
         "external_system": record.external_system,
         "external_id": record.external_id,
@@ -68,7 +68,7 @@ def _record_external_metadata(record: CMIFRecord) -> Dict[str, Any]:
     return metadata
 
 
-def render_episode(episode: CMIFEpisode) -> str:
+def render_episode(episode: COGXEpisode) -> str:
     """Render an episode as a timestamped transcript."""
     lines = []
     if episode.title:
@@ -83,7 +83,7 @@ def render_episode(episode: CMIFEpisode) -> str:
     return "\n".join(lines)
 
 
-def _render_fact_line(fact: CMIFFact) -> str:
+def _render_fact_line(fact: COGXFact) -> str:
     line = fact.fact_text or f"{fact.subject_ref} {fact.predicate} {fact.object_ref}"
     qualifiers = []
     if fact.valid_at:
@@ -95,7 +95,7 @@ def _render_fact_line(fact: CMIFFact) -> str:
     return line
 
 
-def _data_item_for(record: CMIFRecord, content: str, label: Optional[str] = None) -> DataItem:
+def _data_item_for(record: COGXRecord, content: str, label: Optional[str] = None) -> DataItem:
     return DataItem(
         data=content,
         label=label,
@@ -105,7 +105,7 @@ def _data_item_for(record: CMIFRecord, content: str, label: Optional[str] = None
 
 
 def _build_graph_batch(
-    entities: List[CMIFEntity], facts: List[CMIFFact]
+    entities: List[COGXEntity], facts: List[COGXFact]
 ) -> Optional[Dict[str, Any]]:
     """Map entity/fact records onto native Entity DataPoints and edge tuples.
 
@@ -178,11 +178,11 @@ def _build_graph_batch(
     return {"nodes": nodes, "edges": edges}
 
 
-def translate_records(records: Iterable[CMIFRecord], mode: str) -> TranslationResult:
-    """Translate CMIF records according to the import fidelity mode."""
+def translate_records(records: Iterable[COGXRecord], mode: str) -> TranslationResult:
+    """Translate COGX records according to the import fidelity mode."""
     result = TranslationResult(cognify_data_items=mode != "preserve")
-    entities: List[CMIFEntity] = []
-    facts: List[CMIFFact] = []
+    entities: List[COGXEntity] = []
+    facts: List[COGXFact] = []
 
     for record in records:
         result.counts[record.kind] = result.counts.get(record.kind, 0) + 1
@@ -210,7 +210,7 @@ def translate_records(records: Iterable[CMIFRecord], mode: str) -> TranslationRe
         described = [e for e in entities if e.description]
         if described:
             lines = [f"{e.name}: {e.description}" for e in described]
-            digest = CMIFEntity(
+            digest = COGXEntity(
                 external_system=described[0].external_system,
                 external_id="entities-digest",
                 name="entities-digest",
@@ -220,7 +220,7 @@ def translate_records(records: Iterable[CMIFRecord], mode: str) -> TranslationRe
             )
         for start in range(0, len(facts), FACTS_PER_DIGEST):
             chunk = facts[start : start + FACTS_PER_DIGEST]
-            digest = CMIFFact(
+            digest = COGXFact(
                 external_system=chunk[0].external_system,
                 external_id=f"facts-digest-{start // FACTS_PER_DIGEST}",
                 subject_ref="-",
@@ -256,7 +256,7 @@ def wrap_graph_batch(batch: Dict[str, Any], source_system: str, index: int) -> D
         data=batch,
         label=f"migration-graph-batch-{index}",
         external_metadata={"external_system": source_system, "kind": "graph_batch"},
-        data_id=uuid5(NAMESPACE_OID, f"cmif-graph:{source_system}:{fingerprint}"),
+        data_id=uuid5(NAMESPACE_OID, f"cogx-graph:{source_system}:{fingerprint}"),
     )
 
 

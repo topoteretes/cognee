@@ -1,4 +1,4 @@
-"""Unit tests for cognee.push() and the CMIF archive transport helpers.
+"""Unit tests for cognee.push() and the COGX archive transport helpers.
 
 All tests are pure: no databases, no LLM calls, no network.
 """
@@ -16,21 +16,21 @@ from cognee.modules.migration.archive import (
     pack_archive,
     unpack_archive,
 )
-from cognee.modules.migration.cmif import (
-    CMIFArchiveWriter,
-    CMIFEntity,
-    CMIFFact,
+from cognee.modules.migration.cogx import (
+    COGXArchiveWriter,
+    COGXEntity,
+    COGXFact,
     read_archive,
     read_manifest,
 )
 
 
 def _write_sample_archive(directory):
-    with CMIFArchiveWriter(directory, source_system="cognee") as writer:
-        writer.write(CMIFEntity(external_system="cognee", external_id="e1", name="Alice"))
-        writer.write(CMIFEntity(external_system="cognee", external_id="e2", name="Bob"))
+    with COGXArchiveWriter(directory, source_system="cognee") as writer:
+        writer.write(COGXEntity(external_system="cognee", external_id="e1", name="Alice"))
+        writer.write(COGXEntity(external_system="cognee", external_id="e2", name="Bob"))
         writer.write(
-            CMIFFact(
+            COGXFact(
                 external_system="cognee",
                 external_id="e1:knows:e2",
                 subject_ref="e1",
@@ -42,7 +42,7 @@ def _write_sample_archive(directory):
 
 class TestArchiveTransport:
     def test_pack_unpack_round_trip(self, tmp_path):
-        archive_dir = tmp_path / "cmif"
+        archive_dir = tmp_path / "cogx"
         _write_sample_archive(archive_dir)
         tar_path = tmp_path / f"sample{ARCHIVE_SUFFIX}"
 
@@ -167,7 +167,7 @@ class TestResolveClient:
 
 
 class TestPush:
-    def test_push_uploads_cmif_archive(self, monkeypatch, tmp_path):
+    def test_push_uploads_cogx_archive(self, monkeypatch, tmp_path):
         push_module = importlib.import_module("cognee.api.v1.push.push")
         from cognee.modules.migration.export import ExportResult
 
@@ -209,7 +209,7 @@ class TestPush:
 
         assert result == {"status": "completed", "num_nodes": 2, "num_edges": 1}
         assert captured["dataset_name"] == "main_dataset"
-        assert captured["kwargs"]["content_type"] == "cmif-archive"
+        assert captured["kwargs"]["content_type"] == "cogx-archive"
         assert captured["kwargs"]["import_mode"] == "hybrid"
         assert FakeClient.closed is True
 

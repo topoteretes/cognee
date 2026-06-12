@@ -14,7 +14,7 @@ class PushCommand(SupportsCliCommand):
     description = """
 Upload a local dataset's knowledge graph to a Cognee Cloud instance.
 
-The dataset's graph is exported as a CMIF archive and imported on the remote
+The dataset's graph is exported as a COGX archive and imported on the remote
 instance, preserving locally extracted entities and relationships instead of
 re-deriving them from raw files.
 

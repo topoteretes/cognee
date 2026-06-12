@@ -692,8 +692,8 @@ async def remember(
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
 
-    # Migration dispatch: a MemorySource streams CMIF records from an external
-    # memory system (Mem0, Zep/Graphiti, Letta, a CMIF archive, ...). The
+    # Migration dispatch: a MemorySource streams COGX records from an external
+    # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
     # migration loader routes them through add/cognify or direct graph storage
     # depending on the source's fidelity mode.
     if isinstance(data, MemorySource):
