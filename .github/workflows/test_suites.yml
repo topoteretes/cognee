@@ -245,6 +245,9 @@ jobs:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
+  # NOTE: intentionally excluded from the `notify` aggregator below — this is
+  # external infra (Modal + Azure secrets), informational only; it must not gate
+  # merges. (`continue-on-error` is not allowed on a reusable-workflow job.)
   distributed-tests:
     name: Distributed Cognee Test
     needs: [ build-ci-env ]
@@ -286,7 +289,6 @@ jobs:
       temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
-      distributed-tests,
       db-examples-tests,
     ]
     runs-on: ubuntu-latest
@@ -314,7 +316,6 @@ jobs:
                 "${{ needs.temporal-graph-tests.result }}" == "success" &&
                 "${{ needs.search-db-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
-                "${{ needs.distributed-tests.result }}" == "success" &&
                 "${{ needs.db-examples-tests.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
           else
