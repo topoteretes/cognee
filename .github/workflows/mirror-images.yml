@@ -11,6 +11,12 @@ name: Mirror external images to GHCR
 # this repo (public, or repo-linked) so service pulls with GITHUB_TOKEN succeed.
 
 on:
+  # Self-seeds and re-mirrors whenever this file changes (incl. this PR), so the
+  # GHCR image exists before the test workflows reference it — no default-branch
+  # workflow_dispatch needed to bootstrap.
+  push:
+    paths:
+      - ".github/workflows/mirror-images.yml"
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC
   workflow_dispatch: {}
