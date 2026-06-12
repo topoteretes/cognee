@@ -1,7 +1,7 @@
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import and_, delete, exists, select
+from sqlalchemy import and_, delete, distinct, select
 from sqlalchemy.orm import aliased, attributes as orm_attributes
 
 from cognee.context_global_variables import multi_user_support_possible
@@ -37,17 +37,6 @@ def _extract_data_ids(data_ingestion_info: Any) -> set[UUID]:
         if maybe_data_id:
             data_ids.add(maybe_data_id)
     return data_ids
-
-
-def _deduplicate_by_id(rows: Iterable[Any]) -> list[Any]:
-    seen_ids = set()
-    deduplicated = []
-    for row in rows:
-        if row.id in seen_ids:
-            continue
-        seen_ids.add(row.id)
-        deduplicated.append(row)
-    return deduplicated
 
 
 async def cognify_rollback_handler(
@@ -106,49 +95,45 @@ async def cognify_rollback_handler(
             | _extract_data_ids(data_ingestion_info)
         )
 
-        target_node_ids = [node.id for node in target_nodes]
-        target_edge_ids = [edge.id for edge in target_edges]
-
         unique_nodes = []
         if target_nodes:
+            target_node_ids = [node.id for node in target_nodes]
+            target_node_slugs = list({node.slug for node in target_nodes})
             node_alias = aliased(Node)
-            for node in target_nodes:
-                shared_query = (
-                    select(node_alias.id)
-                    .where(node_alias.slug == node.slug)
-                    .where(node_alias.id.not_in(target_node_ids))
+            shared_node_slugs_query = (
+                select(distinct(node_alias.slug))
+                .where(node_alias.slug.in_(target_node_slugs))
+                .where(node_alias.id.not_in(target_node_ids))
+            )
+            if multi_user_support_possible():
+                shared_node_slugs_query = shared_node_slugs_query.where(
+                    node_alias.dataset_id == dataset_id
                 )
-                if multi_user_support_possible():
-                    shared_query = shared_query.where(node_alias.dataset_id == dataset_id)
 
-                shared_exists = (
-                    await session.execute(select(exists(shared_query).label("has_shared")))
-                ).scalar()
-
-                if not shared_exists:
-                    unique_nodes.append(node)
+            shared_node_slugs = set(
+                (await session.execute(shared_node_slugs_query)).scalars().all()
+            )
+            unique_nodes = [node for node in target_nodes if node.slug not in shared_node_slugs]
 
         unique_edges = []
         if target_edges:
+            target_edge_ids = [edge.id for edge in target_edges]
+            target_edge_slugs = list({edge.slug for edge in target_edges})
             edge_alias = aliased(Edge)
-            for edge in target_edges:
-                shared_query = (
-                    select(edge_alias.id)
-                    .where(edge_alias.slug == edge.slug)
-                    .where(edge_alias.id.not_in(target_edge_ids))
+            shared_edge_slugs_query = (
+                select(distinct(edge_alias.slug))
+                .where(edge_alias.slug.in_(target_edge_slugs))
+                .where(edge_alias.id.not_in(target_edge_ids))
+            )
+            if multi_user_support_possible():
+                shared_edge_slugs_query = shared_edge_slugs_query.where(
+                    edge_alias.dataset_id == dataset_id
                 )
-                if multi_user_support_possible():
-                    shared_query = shared_query.where(edge_alias.dataset_id == dataset_id)
 
-                shared_exists = (
-                    await session.execute(select(exists(shared_query).label("has_shared")))
-                ).scalar()
-
-                if not shared_exists:
-                    unique_edges.append(edge)
-
-        unique_nodes = _deduplicate_by_id(unique_nodes)
-        unique_edges = _deduplicate_by_id(unique_edges)
+            shared_edge_slugs = set(
+                (await session.execute(shared_edge_slugs_query)).scalars().all()
+            )
+            unique_edges = [edge for edge in target_edges if edge.slug not in shared_edge_slugs]
 
     # Important ordering for robust retries:
     # 1) Delete graph/vector artifacts first
