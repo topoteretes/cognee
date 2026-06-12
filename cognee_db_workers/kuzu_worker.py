@@ -9,6 +9,9 @@ working without churn.
 
 from __future__ import annotations
 
+import sys
+import time
+
 from ._kuzu_helpers import install_json_extension_local
 from .harness import (
     DEFAULT_DISPATCH,
@@ -136,6 +139,12 @@ def _install_json(registry: HandleRegistry, req: Request) -> None:
     return None
 
 
+# INSTALL downloads the extension from the network; ride out transient
+# failures (observed as intermittent CI flakes) with a few short retries.
+INSTALL_ATTEMPTS = 3
+INSTALL_RETRY_DELAY_SECONDS = 2.0
+
+
 def _load_extension(registry: HandleRegistry, req: Request) -> None:
     conn = registry.get(req.handle_id)
     extension_name = req.args[0]
@@ -146,9 +155,22 @@ def _load_extension(registry: HandleRegistry, req: Request) -> None:
             raise
         # The warm-up INSTALL on the throwaway database is best-effort and
         # can fail silently (e.g. a transient network error downloading the
-        # extension on a fresh machine). Install on the live connection and
-        # retry once; if INSTALL fails here it raises with the real cause.
-        conn.execute(f"INSTALL {extension_name};")
+        # extension on a fresh machine). Install on the live connection —
+        # retrying through transient download failures — then retry the
+        # LOAD once; if INSTALL keeps failing it raises with the real cause.
+        for attempt in range(1, INSTALL_ATTEMPTS + 1):
+            try:
+                conn.execute(f"INSTALL {extension_name};")
+                break
+            except Exception as install_error:
+                if attempt == INSTALL_ATTEMPTS:
+                    raise
+                print(
+                    f"[ladybug worker] INSTALL {extension_name} attempt {attempt} "
+                    f"failed ({install_error!r}); retrying...",
+                    file=sys.stderr,
+                )
+                time.sleep(INSTALL_RETRY_DELAY_SECONDS)
         conn.execute(f"LOAD EXTENSION {extension_name};")
     return None
 

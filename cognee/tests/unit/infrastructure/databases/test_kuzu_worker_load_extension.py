@@ -73,3 +73,61 @@ def test_unrelated_load_errors_propagate_without_install():
     with pytest.raises(RuntimeError, match="database is locked"):
         _load_extension(FakeRegistry(conn), _request())
     assert conn.executed == ["LOAD EXTENSION JSON;"]
+
+
+def test_install_retries_through_transient_failures(monkeypatch):
+    """A transient network failure during INSTALL must not kill the load."""
+    import cognee_db_workers.kuzu_worker as worker
+
+    monkeypatch.setattr(worker.time, "sleep", lambda seconds: None)
+
+    class FlakyConnection:
+        def __init__(self, install_failures: int):
+            self.install_failures = install_failures
+            self.installed = False
+            self.executed = []
+
+        def execute(self, query: str):
+            self.executed.append(query)
+            if query.startswith("LOAD EXTENSION") and not self.installed:
+                raise RuntimeError(
+                    "Binder exception: Extension: json is an official extension and "
+                    "has not been installed."
+                )
+            if query.startswith("INSTALL"):
+                if self.install_failures > 0:
+                    self.install_failures -= 1
+                    raise RuntimeError("IO exception: download failed")
+                self.installed = True
+
+    conn = FlakyConnection(install_failures=2)
+    _load_extension(FakeRegistry(conn), _request())
+    assert conn.executed == [
+        "LOAD EXTENSION JSON;",
+        "INSTALL JSON;",
+        "INSTALL JSON;",
+        "INSTALL JSON;",
+        "LOAD EXTENSION JSON;",
+    ]
+
+
+def test_install_gives_up_after_max_attempts(monkeypatch):
+    import cognee_db_workers.kuzu_worker as worker
+
+    monkeypatch.setattr(worker.time, "sleep", lambda seconds: None)
+
+    class AlwaysFailingConnection:
+        def __init__(self):
+            self.install_attempts = 0
+
+        def execute(self, query: str):
+            if query.startswith("LOAD EXTENSION"):
+                raise RuntimeError("Extension: json ... has not been installed.")
+            if query.startswith("INSTALL"):
+                self.install_attempts += 1
+                raise RuntimeError("IO exception: download failed")
+
+    conn = AlwaysFailingConnection()
+    with pytest.raises(RuntimeError, match="download failed"):
+        _load_extension(FakeRegistry(conn), _request())
+    assert conn.install_attempts == worker.INSTALL_ATTEMPTS
