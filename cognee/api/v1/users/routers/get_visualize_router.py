@@ -1,8 +1,8 @@
 from typing import List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_authenticated_user, get_user
@@ -17,15 +17,37 @@ logger = get_logger()
 
 
 class UserDatasetPair(BaseModel):
-    user_id: UUID
-    dataset_id: UUID
+    user_id: UUID = Field(
+        description=(
+            "UUID of the user who owns the dataset "
+            "(superuser-only endpoint; obtain via the permissions/users APIs)."
+        ),
+        examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+    )
+    dataset_id: UUID = Field(
+        description=(
+            "UUID of the dataset to include in the combined visualization "
+            "(must be readable by user_id)."
+        ),
+        examples=["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+    )
 
 
 def get_visualize_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("", response_model=None)
-    async def visualize(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+    async def visualize(
+        dataset_id: UUID = Query(
+            ...,
+            description=(
+                "UUID of the dataset to visualize. "
+                "List your datasets via GET /api/v1/datasets to find it."
+            ),
+            examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Generate an HTML visualization of the dataset's knowledge graph.
 
@@ -41,9 +63,8 @@ def get_visualize_router() -> APIRouter:
         Returns an HTML page containing the interactive graph visualization.
 
         ## Error Codes
-        - **404 Not Found**: Dataset doesn't exist
-        - **403 Forbidden**: User doesn't have permission to read the dataset
-        - **500 Internal Server Error**: Error generating visualization
+        - **409 Conflict**: Dataset not found, permission denied, or visualization
+          failed (detail in the `error` field)
 
         ## Notes
         - User must have read permissions on the dataset
@@ -92,6 +113,11 @@ def get_visualize_router() -> APIRouter:
 
         ## Response
         Returns an HTML page containing the combined interactive graph visualization.
+
+        ## Error Codes
+        - **403 Forbidden**: Caller is not a superuser
+        - **409 Conflict**: A user/dataset pair does not exist, is not readable,
+          or visualization failed (detail in the `error` field)
 
         ## Notes
         - Requires superuser privileges to view other users' data

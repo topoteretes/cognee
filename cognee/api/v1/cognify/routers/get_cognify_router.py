@@ -39,32 +39,80 @@ logger = get_logger("api.cognify")
 
 
 class CognifyPayloadDTO(InDTO):
-    datasets: Optional[List[str]] = Field(default=None)
-    dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
-    run_in_background: Optional[bool] = Field(default=False)
-    graph_model: Optional[dict] = Field(default=None, examples=[{}])
+    # Examples double as the Swagger try-it-out prefill, which is SUBMITTED
+    # as-is on Execute — keep them behavior-neutral (empty/None) for every
+    # field where a value changes processing.
+    datasets: Optional[List[str]] = Field(
+        default=None,
+        examples=[["default_dataset"]],
+        description=(
+            "Dataset names to process; resolved against datasets owned by the authenticated user."
+        ),
+    )
+    dataset_ids: Optional[List[UUID]] = Field(
+        default=None,
+        examples=[[]],
+        description=(
+            "Dataset UUIDs to process (required for datasets shared with you). "
+            "Takes precedence over the datasets name list when both are provided."
+        ),
+    )
+    run_in_background: Optional[bool] = Field(
+        default=False,
+        description=(
+            "If true, the request returns immediately with a pipeline_run_id while the "
+            "graph builds server-side — track completion via GET /v1/datasets/status or "
+            "the /v1/cognify/subscribe WebSocket. If false, the request blocks until the "
+            "knowledge graph is fully built, which can take minutes for large datasets."
+        ),
+    )
+    graph_model: Optional[dict] = Field(
+        default=None,
+        examples=[{}],
+        description=(
+            "JSON schema describing a custom graph model for entity extraction, including a "
+            "top-level 'title' key. When omitted or {}, the default KnowledgeGraph model is "
+            "used — a restrictive schema here can produce an empty graph."
+        ),
+    )
     custom_prompt: Optional[str] = Field(
-        default="", description="Custom prompt for entity extraction and graph generation"
+        default="",
+        examples=[""],
+        description=(
+            "Replaces the default entity-extraction prompt to steer which entities and "
+            "relationships get extracted (e.g. 'Extract entities focusing on technical "
+            "concepts and their relationships.'). Leave empty for the default prompt."
+        ),
     )
     chunk_size: Optional[int] = Field(
         default=None,
-        description="Maximum tokens per chunk. Defaults to automatic model-based sizing.",
-        examples=[4096, 8192],
+        examples=[None],
+        description=(
+            "Maximum tokens per chunk (e.g. 4096). Leave null for automatic model-based "
+            "sizing. Larger chunks give more context per LLM extraction pass; smaller "
+            "chunks give finer-grained extraction at higher LLM cost."
+        ),
     )
     ontology_key: Optional[List[str]] = Field(
         default=None,
         examples=[[]],
-        description="Reference to one or more previously uploaded ontologies",
+        description=(
+            "Keys of previously uploaded ontologies (see /v1/ontologies) to ground "
+            "entity extraction. Leave empty to process without an ontology."
+        ),
     )
     chunks_per_batch: Optional[int] = Field(
         default=None,
-        description="Number of chunks to process per task batch in Cognify (overrides default).",
-        examples=[36, 50, 100],
+        examples=[None],
+        description=(
+            "Number of chunks to process per task batch (e.g. 36). Controls processing "
+            "parallelism/throughput; leave null for the pipeline default."
+        ),
     )
     data_per_batch: Optional[int] = Field(
         default=20,
+        examples=[20],
         description="Maximum number of data items to process concurrently within a dataset.",
-        examples=[20, 30, 50],
     )
 
 
@@ -77,6 +125,7 @@ def get_cognify_router() -> APIRouter:
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
             500: {"model": ErrorResponse},
         },
@@ -102,10 +151,12 @@ def get_cognify_router() -> APIRouter:
         - **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.
         - **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
+        - **graph_model** (Optional[dict]): JSON schema describing a custom graph model for entity extraction. When omitted or {}, the default KnowledgeGraph model is used.
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction and graph generation. If provided, this prompt will be used instead of the default prompts for knowledge graph extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk. If omitted, Cognee chooses
           a size from the configured LLM and embedding limits.
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
+        - **chunks_per_batch** (Optional[int]): Number of chunks to process per task batch in Cognify. Uses the pipeline default when omitted.
         - **data_per_batch** (Optional[int]): Maximum number of data items to process concurrently within a dataset. Defaults to 20.
 
         ## Response
@@ -113,8 +164,9 @@ def get_cognify_router() -> APIRouter:
         - **Background execution**: Pipeline run metadata including pipeline_run_id for status monitoring via WebSocket subscription
 
         ## Error Codes
-        - **400 Bad Request**: When neither datasets nor dataset_ids are provided, or when specified datasets don't exist
-        - **409 Conflict**: When processing fails due to system errors, missing LLM API keys, database connection failures, or corrupted content
+        - **400 Bad Request**: When neither datasets nor dataset_ids are provided
+        - **409 Conflict**: When a referenced ontology_key does not exist
+        - **500 Internal Server Error**: When the pipeline run errors (e.g. missing LLM API key, database connection failure, or a dataset that does not exist)
 
         ## Example Request
         ```json
