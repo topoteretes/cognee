@@ -44,6 +44,14 @@ class PostgresAdapter(GraphDBInterface):
 
         relational_config = get_relational_config()
         pool_args: dict = dict(relational_config.pool_args) if relational_config.pool_args else {}
+        # Managed Postgres (e.g. Neon, RDS) requires SSL;
+        # reuse the relational DATABASE_CONNECT_ARGS (asyncpg `ssl`) for the graph
+        # engine too. Empty dict is a no-op for in-cluster Postgres.
+        connect_args: dict = (
+            dict(relational_config.database_connect_args)
+            if relational_config.database_connect_args
+            else {}
+        )
 
         # Serialize JSONB columns once, at execute time, with the UUID/datetime-aware
         # encoder. This lets add_nodes/add_edges pass raw property dicts straight through
@@ -53,6 +61,7 @@ class PostgresAdapter(GraphDBInterface):
         self.engine = create_async_engine(
             self.db_uri,
             json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
+            connect_args=connect_args,
             **pool_args,
         )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
