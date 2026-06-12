@@ -1,12 +1,45 @@
 """SDK entry point: export a dataset's memory to a portable format."""
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union, overload
 from uuid import UUID
 
 from cognee.modules.migration.export import ExportResult, export_dataset
 from cognee.modules.migration.snapshot import GraphSnapshot
 from cognee.modules.observability import new_span, COGNEE_DATASET_NAME
+
+_FileFormat = Literal["cogx", "json", "graphml", "cypher"]
+
+
+@overload
+async def export(
+    dataset: Union[str, UUID] = "main_dataset",
+    format: Literal["pydantic"] = "pydantic",
+    destination: Optional[Union[str, Path]] = None,
+    user=None,
+    link_relations: bool = False,
+) -> GraphSnapshot: ...
+
+
+@overload
+async def export(
+    dataset: Union[str, UUID],
+    format: _FileFormat,
+    destination: Optional[Union[str, Path]] = None,
+    user=None,
+    link_relations: bool = False,
+) -> ExportResult: ...
+
+
+@overload
+async def export(
+    dataset: Union[str, UUID] = "main_dataset",
+    *,
+    format: _FileFormat,
+    destination: Optional[Union[str, Path]] = None,
+    user=None,
+    link_relations: bool = False,
+) -> ExportResult: ...
 
 
 async def export(

@@ -105,15 +105,28 @@ def _cypher_label(value: Any) -> str:
     return "".join(ch for ch in label if ch.isalnum() or ch == "_") or "Node"
 
 
+# Shared label on every exported node so edge MATCH clauses are index-backed.
+_SHARED_LABEL = "CogneeNode"
+
+
 def write_cypher(nodes: List[Node], edges: List[Edge], destination: Path) -> None:
-    """A Cypher script of MERGE statements loadable into any Neo4j-compatible DB."""
-    lines = ["// Cognee graph export — load with cypher-shell or neo4j browser"]
+    """A Cypher script of MERGE statements loadable into any Neo4j-compatible DB.
+
+    Every node gets the shared ``:CogneeNode`` label (its sanitized ``type``
+    becomes a secondary label), and an index on ``(:CogneeNode).id`` is created
+    up front so per-edge MATCH clauses are index lookups instead of full scans.
+    """
+    lines = [
+        "// Cognee graph export — load with cypher-shell or neo4j browser",
+        f"CREATE INDEX IF NOT EXISTS FOR (n:{_SHARED_LABEL}) ON (n.id);",
+    ]
     for node_id, properties in nodes:
         properties = dict(properties or {})
         label = _cypher_label(properties.get("type"))
         properties["id"] = str(node_id)
         lines.append(
-            f"MERGE (n:`{label}` {{id: {json.dumps(str(node_id))}}}) SET n += {_cypher_props(properties)};"
+            f"MERGE (n:{_SHARED_LABEL} {{id: {json.dumps(str(node_id))}}}) "
+            f"SET n:`{label}`, n += {_cypher_props(properties)};"
         )
 
     for source, target, relationship, properties in edges:
@@ -124,7 +137,8 @@ def write_cypher(nodes: List[Node], edges: List[Edge], destination: Path) -> Non
         }
         rel_type = _cypher_label(relationship)
         lines.append(
-            f"MATCH (a {{id: {json.dumps(str(source))}}}), (b {{id: {json.dumps(str(target))}}}) "
+            f"MATCH (a:{_SHARED_LABEL} {{id: {json.dumps(str(source))}}}), "
+            f"(b:{_SHARED_LABEL} {{id: {json.dumps(str(target))}}}) "
             f"MERGE (a)-[r:`{rel_type}`]->(b) SET r += {_cypher_props(properties)};"
         )
     destination.write_text("\n".join(lines), encoding="utf-8")

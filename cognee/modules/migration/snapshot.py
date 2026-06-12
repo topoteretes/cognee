@@ -7,7 +7,7 @@ models, ...). Because DataPoint *is* a Pydantic model, the full round trip is
 native:
 
     snapshot = await cognee.export("main_dataset", format="pydantic")
-    alice = snapshot.find(name="Alice")          # a real Entity instance
+    alice = snapshot.find(name="Alice")[0]       # a real Entity instance
     blob = snapshot.model_dump_json()            # lossless serialization
     again = GraphSnapshot.model_validate_json(blob)  # typed objects restored
 

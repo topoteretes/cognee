@@ -10,6 +10,7 @@ record kind. Records are Pydantic models discriminated by their ``kind`` field.
 """
 
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional, Union
@@ -20,15 +21,23 @@ COGX_VERSION = "0.1"
 
 
 def parse_timestamp(value: Any) -> Optional[datetime]:
-    """Parse a timestamp from ISO strings, epoch seconds, or epoch milliseconds."""
+    """Parse a timestamp from ISO strings or epoch seconds/milli/micro/nanoseconds."""
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
         return value
     if isinstance(value, (int, float)):
-        # Heuristic: values past the year ~2603 in seconds are milliseconds.
-        seconds = value / 1000 if value > 2e10 else value
-        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        # Heuristic: values past the year ~2603 in seconds are a finer epoch
+        # unit (milli/micro/nanoseconds); scale down until plausible.
+        seconds = float(value)
+        if not math.isfinite(seconds):
+            return None
+        while abs(seconds) > 2e10:
+            seconds /= 1000
+        try:
+            return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            return None
     if isinstance(value, str):
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -125,7 +134,27 @@ class COGXMemoryBlock(COGXRecordBase):
     limit: Optional[int] = None
 
 
-COGXRecord = Union[COGXDocument, COGXEpisode, COGXEntity, COGXFact, COGXMemory, COGXMemoryBlock]
+class COGXRawNode(BaseModel):
+    """A graph node persisted verbatim (full fidelity) when no typed mapping exists.
+
+    ``properties`` is the raw node property dict, including its ``id`` and
+    ``type``. On import these are rehydrated back into DataPoint instances so
+    facts referencing them stay resolvable.
+    """
+
+    kind: Literal["raw_node"] = "raw_node"
+    properties: Dict[str, Any] = Field(default_factory=dict)
+
+
+COGXRecord = Union[
+    COGXDocument,
+    COGXEpisode,
+    COGXEntity,
+    COGXFact,
+    COGXMemory,
+    COGXMemoryBlock,
+    COGXRawNode,
+]
 
 _record_adapter: TypeAdapter = TypeAdapter(COGXRecord)
 
@@ -155,15 +184,37 @@ def parse_record(data: Dict[str, Any]) -> COGXRecord:
     return _record_adapter.validate_python(data)
 
 
+def validate_cogx_version(version: str) -> None:
+    """Reject archives written by a newer major COGX version than this reader."""
+    try:
+        archive_major = int(str(version).split(".")[0])
+        current_major = int(COGX_VERSION.split(".")[0])
+    except (ValueError, IndexError):
+        raise ValueError(f"Unrecognized COGX version {version!r} (reader supports {COGX_VERSION}).")
+    if archive_major > current_major:
+        raise ValueError(
+            f"COGX archive version {version} is newer than this reader "
+            f"supports ({COGX_VERSION}). Upgrade cognee to import it."
+        )
+
+
 class COGXArchiveWriter:
-    """Writes COGX records into an archive directory, one JSONL file per kind."""
+    """Writes COGX records into an archive directory, one JSONL file per kind.
+
+    The destination is treated as owned by the writer: any record files or
+    manifest left by a previous export session are removed at init so a
+    re-export never appends duplicates next to a stale manifest.
+    """
 
     def __init__(self, directory: Union[str, Path], source_system: str = "cognee"):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
+        for file_name in (*RECORD_FILES.values(), RAW_NODES_FILE, MANIFEST_FILE):
+            (self.directory / file_name).unlink(missing_ok=True)
         self.source_system = source_system
         self.counts: Dict[str, int] = {}
         self.notes: List[str] = []
+        self.embedding_model: Optional[str] = None
         self._handles: Dict[str, Any] = {}
 
     def __enter__(self) -> "COGXArchiveWriter":
@@ -202,6 +253,7 @@ class COGXArchiveWriter:
                 source_system=self.source_system,
                 exported_at=datetime.now(timezone.utc),
                 counts=self.counts,
+                embedding_model=self.embedding_model,
                 notes=self.notes,
             )
             manifest_path = self.directory / MANIFEST_FILE
@@ -212,11 +264,18 @@ def read_manifest(directory: Union[str, Path]) -> Optional[COGXManifest]:
     manifest_path = Path(directory) / MANIFEST_FILE
     if not manifest_path.exists():
         return None
-    return COGXManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    manifest = COGXManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    validate_cogx_version(manifest.cogx_version)
+    return manifest
 
 
 def read_archive(directory: Union[str, Path]) -> Iterator[COGXRecord]:
-    """Stream typed records from a COGX archive directory."""
+    """Stream typed records from a COGX archive directory.
+
+    Raw graph nodes (``nodes.jsonl``) are yielded as :class:`COGXRawNode`
+    records after the typed record files, so importers can restore them with
+    full fidelity.
+    """
     directory = Path(directory)
     if not directory.is_dir():
         raise FileNotFoundError(f"COGX archive directory not found: {directory}")
@@ -229,3 +288,10 @@ def read_archive(directory: Union[str, Path]) -> Iterator[COGXRecord]:
                 line = line.strip()
                 if line:
                     yield parse_record(json.loads(line))
+    raw_nodes_path = directory / RAW_NODES_FILE
+    if raw_nodes_path.exists():
+        with open(raw_nodes_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if line:
+                    yield COGXRawNode(properties=json.loads(line))

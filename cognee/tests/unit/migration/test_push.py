@@ -25,6 +25,18 @@ from cognee.modules.migration.cogx import (
 )
 
 
+def _make_tarball(files):
+    """Build an in-memory ``.tar.gz`` from ``{name: payload_bytes}``."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, payload in files.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+    buffer.seek(0)
+    return buffer
+
+
 def _write_sample_archive(directory):
     with COGXArchiveWriter(directory, source_system="cognee") as writer:
         writer.write(COGXEntity(external_system="cognee", external_id="e1", name="Alice"))
@@ -100,6 +112,50 @@ class TestArchiveTransport:
             find_archive_root(tmp_path / "empty")
 
 
+class TestArchiveExtractionLimits:
+    """Decompression-bomb caps on ``unpack_archive`` (H4)."""
+
+    def test_rejects_too_many_members(self, tmp_path):
+        tarball = _make_tarball({f"file{i}.jsonl": b"{}" for i in range(4)})
+        with pytest.raises(ValueError, match="more than 3 members"):
+            unpack_archive(tarball, tmp_path / "out", max_members=3)
+
+    def test_rejects_oversized_member(self, tmp_path):
+        tarball = _make_tarball({"big.jsonl": b"x" * 100})
+        with pytest.raises(ValueError, match="per-member limit"):
+            unpack_archive(tarball, tmp_path / "out", max_member_bytes=10)
+
+    def test_rejects_oversized_total(self, tmp_path):
+        # Each member fits the per-member cap; together they exceed the total.
+        tarball = _make_tarball({"a.jsonl": b"x" * 60, "b.jsonl": b"y" * 60})
+        with pytest.raises(ValueError, match="in total"):
+            unpack_archive(tarball, tmp_path / "out", max_member_bytes=80, max_total_bytes=100)
+
+    def test_aborted_extraction_cleans_up(self, tmp_path):
+        tarball = _make_tarball({"a.jsonl": b"x" * 60, "b.jsonl": b"y" * 60})
+        destination = tmp_path / "out"
+        with pytest.raises(ValueError):
+            unpack_archive(tarball, destination, max_member_bytes=80, max_total_bytes=100)
+        # The first member was extracted before the abort; it must be removed.
+        assert list(destination.iterdir()) == []
+
+    def test_limits_within_bounds_extracts_normally(self, tmp_path):
+        archive_dir = tmp_path / "cogx"
+        _write_sample_archive(archive_dir)
+        tar_path = tmp_path / f"sample{ARCHIVE_SUFFIX}"
+        pack_archive(archive_dir, tar_path)
+
+        with open(tar_path, "rb") as archive_file:
+            root = unpack_archive(
+                archive_file,
+                tmp_path / "out",
+                max_members=10,
+                max_member_bytes=1024 * 1024,
+                max_total_bytes=1024 * 1024,
+            )
+        assert len(list(read_archive(root))) == 3
+
+
 class TestResolveClient:
     def _clear_sources(self, monkeypatch):
         from cognee.api.v1.serve import credentials as credentials_module
@@ -158,6 +214,24 @@ class TestResolveClient:
         assert client.service_url == "https://env.example"
         assert client.api_key == "env-key"
 
+    def test_env_beats_saved_credentials(self, monkeypatch):
+        """Precedence matches serve(): COGNEE_SERVICE_URL wins over saved creds."""
+        from cognee.api.v1.push.push import _resolve_client
+        from cognee.api.v1.serve import credentials as credentials_module
+        from cognee.api.v1.serve.credentials import CloudCredentials
+
+        self._clear_sources(monkeypatch)
+        creds = CloudCredentials(
+            access_token="t", service_url="https://saved.example", api_key="saved-key"
+        )
+        monkeypatch.setattr(credentials_module, "load_credentials", lambda: creds)
+        monkeypatch.setenv("COGNEE_SERVICE_URL", "https://env.example")
+        monkeypatch.setenv("COGNEE_API_KEY", "env-key")
+        client, created = _resolve_client(None, None)
+        assert created is True
+        assert client.service_url == "https://env.example"
+        assert client.api_key == "env-key"
+
     def test_no_connection_raises(self, monkeypatch):
         from cognee.api.v1.push.push import _resolve_client
 
@@ -166,23 +240,44 @@ class TestResolveClient:
             _resolve_client(None, None)
 
 
+# A remote response whose items prove the server ran the migration import path.
+_MIGRATION_RESPONSE = {
+    "status": "completed",
+    "items": [{"kind": "migration_import", "entities": 2, "facts": 1}],
+}
+
+
+def _fake_export(dataset_name="main_dataset", num_nodes=2, num_edges=1):
+    from cognee.modules.migration.export import ExportResult
+
+    async def fake_export(dataset, format, destination, user):
+        _write_sample_archive(destination)
+        return ExportResult(
+            format=format,
+            destination=str(destination),
+            dataset_name=dataset_name,
+            dataset_id="d-1",
+            num_nodes=num_nodes,
+            num_edges=num_edges,
+        )
+
+    return fake_export
+
+
 class TestPush:
-    def test_push_uploads_cogx_archive(self, monkeypatch, tmp_path):
+    def _patch(self, monkeypatch, fake_export, fake_client):
         push_module = importlib.import_module("cognee.api.v1.push.push")
-        from cognee.modules.migration.export import ExportResult
+        # The package re-exports the function, shadowing the submodule for
+        # plain attribute access — resolve the real module via importlib.
+        export_module = importlib.import_module("cognee.api.v1.export.export")
+        monkeypatch.setattr(export_module, "export", fake_export)
+        monkeypatch.setattr(
+            push_module, "_resolve_client", lambda url, api_key: (fake_client, True)
+        )
+        return push_module
 
+    def test_push_uploads_cogx_archive(self, monkeypatch, tmp_path):
         captured = {}
-
-        async def fake_export(dataset, format, destination, user):
-            _write_sample_archive(destination)
-            return ExportResult(
-                format=format,
-                destination=str(destination),
-                dataset_name="main_dataset",
-                dataset_id="d-1",
-                num_nodes=2,
-                num_edges=1,
-            )
 
         class FakeClient:
             service_url = "https://fake.example"
@@ -192,22 +287,21 @@ class TestPush:
                 captured["dataset_name"] = dataset_name
                 captured["kwargs"] = kwargs
                 captured["payload"] = data.read()
-                return {"status": "completed"}
+                return dict(_MIGRATION_RESPONSE)
 
             async def close(self):
                 FakeClient.closed = True
 
-        # The package re-exports the function, shadowing the submodule for
-        # plain attribute access — resolve the real module via importlib.
-        export_module = importlib.import_module("cognee.api.v1.export.export")
-        monkeypatch.setattr(export_module, "export", fake_export)
-        monkeypatch.setattr(
-            push_module, "_resolve_client", lambda url, api_key: (FakeClient(), True)
-        )
+        push_module = self._patch(monkeypatch, _fake_export(), FakeClient())
 
         result = asyncio.run(push_module.push("main_dataset", mode="hybrid"))
 
-        assert result == {"status": "completed", "num_nodes": 2, "num_edges": 1}
+        assert result.status == "completed"
+        assert result.dataset_name == "main_dataset"
+        assert result.target_dataset == "main_dataset"
+        assert result.num_nodes == 2
+        assert result.num_edges == 1
+        assert result.remote_response["status"] == "completed"
         assert captured["dataset_name"] == "main_dataset"
         assert captured["kwargs"]["content_type"] == "cogx-archive"
         assert captured["kwargs"]["import_mode"] == "hybrid"
@@ -218,45 +312,119 @@ class TestPush:
         assert len(list(read_archive(root))) == 3
 
     def test_push_target_dataset_override(self, monkeypatch):
-        push_module = importlib.import_module("cognee.api.v1.push.push")
-        from cognee.modules.migration.export import ExportResult
-
         captured = {}
-
-        async def fake_export(dataset, format, destination, user):
-            _write_sample_archive(destination)
-            return ExportResult(
-                format=format,
-                destination=str(destination),
-                dataset_name="local_name",
-                dataset_id="d-1",
-                num_nodes=0,
-                num_edges=0,
-            )
 
         class FakeClient:
             service_url = "https://fake.example"
 
             async def remember(self, data, dataset_name, **kwargs):
                 captured["dataset_name"] = dataset_name
-                return {"status": "completed"}
+                return dict(_MIGRATION_RESPONSE)
 
             async def close(self):
                 pass
 
-        # The package re-exports the function, shadowing the submodule for
-        # plain attribute access — resolve the real module via importlib.
-        export_module = importlib.import_module("cognee.api.v1.export.export")
-        monkeypatch.setattr(export_module, "export", fake_export)
-        monkeypatch.setattr(
-            push_module, "_resolve_client", lambda url, api_key: (FakeClient(), True)
+        push_module = self._patch(
+            monkeypatch, _fake_export(dataset_name="local_name"), FakeClient()
         )
 
-        asyncio.run(push_module.push("local_name", target_dataset="remote_name"))
+        result = asyncio.run(push_module.push("local_name", target_dataset="remote_name"))
         assert captured["dataset_name"] == "remote_name"
+        assert result.target_dataset == "remote_name"
+
+    def test_push_empty_dataset_raises_before_upload(self, monkeypatch):
+        class FakeClient:
+            service_url = "https://fake.example"
+            remember_called = False
+
+            async def remember(self, data, dataset_name, **kwargs):
+                FakeClient.remember_called = True
+                return dict(_MIGRATION_RESPONSE)
+
+            async def close(self):
+                pass
+
+        push_module = self._patch(monkeypatch, _fake_export(num_nodes=0, num_edges=0), FakeClient())
+
+        with pytest.raises(ValueError, match="exported 0 nodes"):
+            asyncio.run(push_module.push("main_dataset"))
+        assert FakeClient.remember_called is False
+
+    def test_push_rejects_non_migration_response(self, monkeypatch):
+        """A pre-migration server ingests the tarball as a plain file; push must fail loudly."""
+
+        class FakeClient:
+            service_url = "https://fake.example"
+
+            async def remember(self, data, dataset_name, **kwargs):
+                return {"status": "completed", "items": [{"name": "main_dataset.cogx.tar.gz"}]}
+
+            async def close(self):
+                pass
+
+        push_module = self._patch(monkeypatch, _fake_export(), FakeClient())
+
+        with pytest.raises(RuntimeError, match="did not perform a COGX archive import"):
+            asyncio.run(push_module.push("main_dataset"))
 
     def test_push_invalid_mode(self):
         from cognee.api.v1.push.push import push
 
         with pytest.raises(ValueError, match="Unknown push mode"):
             asyncio.run(push("main_dataset", mode="bogus"))
+
+    def test_push_result_is_typed_dataclass(self, monkeypatch):
+        """push() returns a PushResult dataclass, not a mutated raw dict."""
+        import dataclasses
+
+        from cognee.api.v1.push.push import PushResult
+
+        class FakeClient:
+            service_url = "https://fake.example"
+
+            async def remember(self, data, dataset_name, **kwargs):
+                return dict(_MIGRATION_RESPONSE)
+
+            async def close(self):
+                pass
+
+        push_module = self._patch(monkeypatch, _fake_export(), FakeClient())
+        result = asyncio.run(push_module.push("main_dataset"))
+
+        assert isinstance(result, PushResult)
+        assert dataclasses.is_dataclass(result)
+        assert {field.name for field in dataclasses.fields(result)} == {
+            "status",
+            "dataset_name",
+            "target_dataset",
+            "num_nodes",
+            "num_edges",
+            "remote_response",
+        }
+        assert isinstance(result.status, str)
+        assert isinstance(result.num_nodes, int)
+        assert isinstance(result.num_edges, int)
+        assert isinstance(result.remote_response, dict)
+
+
+class TestCloudClientTimeout:
+    """The push transport must survive uploads + imports longer than 5 minutes (H6)."""
+
+    def test_session_has_no_total_timeout(self):
+        import aiohttp
+
+        from cognee.api.v1.serve.cloud_client import CloudClient
+
+        async def get_timeout():
+            client = CloudClient("https://fake.example", "key")
+            session = await client._get_session()
+            try:
+                return session.timeout
+            finally:
+                await client.close()
+
+        timeout = asyncio.run(get_timeout())
+        assert isinstance(timeout, aiohttp.ClientTimeout)
+        assert timeout.total is None
+        assert timeout.sock_connect == 30
+        assert timeout.sock_read == 300

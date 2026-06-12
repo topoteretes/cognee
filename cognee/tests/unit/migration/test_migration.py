@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 from cognee.modules.migration.cogx import (
+    COGX_VERSION,
     COGXArchiveWriter,
     COGXDocument,
     COGXEntity,
@@ -16,12 +17,14 @@ from cognee.modules.migration.cogx import (
     COGXFact,
     COGXMemory,
     COGXMemoryBlock,
+    COGXRawNode,
     COGXTurn,
     parse_timestamp,
     read_archive,
     read_manifest,
 )
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
+from cognee.modules.migration import loader
 from cognee.modules.migration.loader import record_data_id, translate_records
 from cognee.modules.migration.sources import (
     COGXArchiveSource,
@@ -48,9 +51,16 @@ class TestParseTimestamp:
         milliseconds = parse_timestamp(1709294400000)
         assert seconds == milliseconds
 
+    def test_epoch_micro_and_nanoseconds(self):
+        seconds = parse_timestamp(1709294400)
+        assert parse_timestamp(1709294400000000) == seconds
+        assert parse_timestamp(1709294400000000000) == seconds
+
     def test_invalid_values(self):
         assert parse_timestamp(None) is None
         assert parse_timestamp("not-a-date") is None
+        # Out-of-range epochs return None instead of raising.
+        assert parse_timestamp(float("inf")) is None
 
 
 class TestCOGXArchive:
@@ -102,7 +112,50 @@ class TestCOGXArchive:
 
         source = COGXArchiveSource(archive_dir)
         assert source.source_system == "test"
+        assert source.mode == "preserve"
         assert len(collect(source)) == 6
+
+    def test_raw_nodes_roundtrip(self, tmp_path):
+        archive_dir = tmp_path / "archive"
+        raw = {"id": "11111111-1111-1111-1111-111111111111", "type": "EntityType", "name": "Person"}
+        with COGXArchiveWriter(archive_dir, source_system="test") as writer:
+            writer.write(self._sample_records()[2])
+            writer.write_raw_node(raw)
+
+        loaded = list(read_archive(archive_dir))
+        raw_nodes = [record for record in loaded if record.kind == "raw_node"]
+        assert len(raw_nodes) == 1
+        assert isinstance(raw_nodes[0], COGXRawNode)
+        assert raw_nodes[0].properties == raw
+        assert read_manifest(archive_dir).counts["raw_node"] == 1
+
+    def test_writer_starts_from_clean_slate(self, tmp_path):
+        archive_dir = tmp_path / "archive"
+        for _ in range(2):
+            with COGXArchiveWriter(archive_dir, source_system="test") as writer:
+                writer.write(self._sample_records()[2])
+                writer.write_raw_node({"id": "raw-1", "type": "NodeSet"})
+
+        assert len((archive_dir / "entities.jsonl").read_text().splitlines()) == 1
+        assert len((archive_dir / "nodes.jsonl").read_text().splitlines()) == 1
+        manifest = read_manifest(archive_dir)
+        assert manifest.counts == {"entity": 1, "raw_node": 1}
+
+    def test_future_major_version_rejected(self, tmp_path):
+        archive_dir = tmp_path / "archive"
+        with COGXArchiveWriter(archive_dir, source_system="test") as writer:
+            writer.write(self._sample_records()[2])
+        manifest_path = archive_dir / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["cogx_version"] = "99.0"
+        manifest_path.write_text(json.dumps(manifest))
+
+        try:
+            COGXArchiveSource(archive_dir)
+            raise AssertionError("expected ValueError")
+        except ValueError as error:
+            assert "99.0" in str(error)
+            assert COGX_VERSION in str(error)
 
 
 class TestMem0Source:
@@ -313,6 +366,93 @@ class TestTranslateRecords:
         entities = [node for node in batch["nodes"] if type(node).__name__ == "Entity"]
         assert len(entities) == 1
 
+    def test_entity_merge_combines_descriptions(self):
+        records = [
+            COGXEntity(external_system="a", external_id="x1", name="Alice", description="Founder"),
+            COGXEntity(
+                external_system="b",
+                external_id="x2",
+                name="Alice",
+                description="Engineer",
+                aliases=["Alice Smith"],
+                entity_type="Person",
+            ),
+        ]
+        batch = translate_records(records, "preserve").graph_batches[0]
+        alice = next(node for node in batch["nodes"] if getattr(node, "name", "") == "Alice")
+        assert "Founder" in alice.description
+        assert "Engineer" in alice.description
+        assert "Alice Smith" in alice.description
+        assert alice.is_a is not None and alice.is_a.name == "Person"
+
+    def test_raw_nodes_resolve_uuid_fact_refs(self):
+        chunk_id = "0c113fd0-1111-2222-3333-444444444444"
+        records = [
+            COGXRawNode(properties={"id": chunk_id, "type": "DocumentChunk", "text": "hello"}),
+            COGXEntity(
+                external_system="cognee",
+                external_id="55555555-5555-5555-5555-555555555555",
+                name="Alice",
+            ),
+            COGXFact(
+                external_system="cognee",
+                external_id="f1",
+                subject_ref=chunk_id,
+                predicate="contains",
+                object_ref="55555555-5555-5555-5555-555555555555",
+            ),
+        ]
+        result = translate_records(records, "preserve")
+        assert result.skipped_facts == 0
+        batch = result.graph_batches[0]
+        # The raw node was rehydrated with its original id, not fabricated.
+        assert any(str(node.id) == chunk_id for node in batch["nodes"])
+        assert not any(getattr(node, "name", "") == chunk_id for node in batch["nodes"])
+        assert len(batch["edges"]) == 1
+        assert str(batch["edges"][0][0]) == chunk_id
+
+    def test_unresolved_uuid_fact_refs_are_skipped(self):
+        records = [
+            COGXEntity(external_system="z", external_id="n1", name="Alice"),
+            COGXFact(
+                external_system="z",
+                external_id="f1",
+                subject_ref="n1",
+                predicate="mentions",
+                object_ref="99999999-9999-9999-9999-999999999999",
+            ),
+        ]
+        result = translate_records(records, "preserve")
+        assert result.skipped_facts == 1
+        batch = result.graph_batches[0]
+        assert batch["edges"] == []
+        # No Entity literally named by the dangling UUID.
+        node_names = {getattr(node, "name", None) for node in batch["nodes"]}
+        assert "99999999-9999-9999-9999-999999999999" not in node_names
+
+    def test_graph_batches_are_bounded(self, monkeypatch):
+        monkeypatch.setattr(loader, "BATCH_NODE_TARGET", 3)
+        records = [
+            COGXEntity(external_system="z", external_id=f"n{i}", name=f"Entity {i}")
+            for i in range(8)
+        ] + [
+            COGXFact(
+                external_system="z",
+                external_id="f-cross",
+                subject_ref="n0",
+                predicate="knows",
+                object_ref="n7",
+            )
+        ]
+        result = translate_records(records, "preserve")
+        assert len(result.graph_batches) > 1
+        assert all(len(batch["nodes"]) <= 4 for batch in result.graph_batches)
+        # The cross-batch fact's batch contains both endpoints.
+        edge_batch = next(batch for batch in result.graph_batches if batch["edges"])
+        source_id, target_id, _, _ = edge_batch["edges"][0]
+        node_ids = {node.id for node in edge_batch["nodes"]}
+        assert source_id in node_ids and target_id in node_ids
+
 
 class TestFormatEmitters:
     NODES = [
@@ -342,7 +482,9 @@ class TestFormatEmitters:
         destination = tmp_path / "graph.cypher"
         write_cypher(self.NODES, self.EDGES, destination)
         script = destination.read_text()
-        assert 'MERGE (n:`Entity` {id: "id-1"})' in script
+        # Indexed shared label keeps edge MATCH clauses off AllNodesScan plans.
+        assert "CREATE INDEX IF NOT EXISTS FOR (n:CogneeNode) ON (n.id);" in script
+        assert 'MERGE (n:CogneeNode {id: "id-1"}) SET n:`Entity`' in script
         assert "MERGE (a)-[r:`lives_in`]->(b)" in script
         # Non-scalar property serialized as JSON string, not raw repr.
         assert '"[\\"city\\", \\"capital\\"]"' in script

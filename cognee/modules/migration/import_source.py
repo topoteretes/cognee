@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Optional
 
 from cognee.modules.migration.loader import (
     store_imported_graph,
-    translate_records,
+    translate_record_stream,
     wrap_graph_batch,
 )
 from cognee.modules.migration.sources.base import MemorySource
@@ -39,17 +39,24 @@ async def import_memory_source(
     """
     from cognee.api.v1.remember.remember import RememberResult
 
-    records = [record async for record in source.records()]
-    translation = translate_records(records, source.mode)
+    # Translate the record stream directly: no full raw-record list is kept,
+    # so peak memory is bounded by the translation output alone.
+    translation = await translate_record_stream(source.records(), source.mode)
     node_set = node_set or [f"import:{source.source_system}"]
 
     logger.info(
         "Importing %d records from %s (mode=%s): %s",
-        len(records),
+        sum(translation.counts.values()),
         source.source_system,
         source.mode,
         translation.counts,
     )
+    if translation.skipped_facts:
+        logger.warning(
+            "Skipped %d facts with unresolvable UUID references during import from %s.",
+            translation.skipped_facts,
+            source.source_system,
+        )
 
     graph_nodes = sum(len(batch["nodes"]) for batch in translation.graph_batches)
     graph_edges = sum(len(batch["edges"]) for batch in translation.graph_batches)
@@ -60,6 +67,7 @@ async def import_memory_source(
         "record_counts": translation.counts,
         "graph_nodes": graph_nodes,
         "graph_edges": graph_edges,
+        "skipped_facts": translation.skipped_facts,
     }
 
     if translation.graph_batches:
@@ -75,6 +83,7 @@ async def import_memory_source(
             data=wrapped_batches,
             dataset=dataset_name,
             user=user,
+            run_in_background=run_in_background,
             pipeline_name="migration_import_pipeline",
         )
 

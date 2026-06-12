@@ -12,6 +12,7 @@ Authentication reuses the ``serve`` stack: run ``cognee-cli serve`` (or
 
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 from uuid import UUID
@@ -21,12 +22,30 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("push")
 
 
+@dataclass
+class PushResult:
+    """Outcome of a ``cognee.push()`` call."""
+
+    status: str
+    dataset_name: str
+    target_dataset: str
+    num_nodes: int
+    num_edges: int
+    remote_response: dict
+
+    def __repr__(self):
+        return (
+            f"PushResult(status={self.status!r}, dataset={self.dataset_name!r}, "
+            f"target={self.target_dataset!r}, nodes={self.num_nodes}, edges={self.num_edges})"
+        )
+
+
 def _resolve_client(url: Optional[str], api_key: Optional[str]):
     """Build or reuse a CloudClient. Returns ``(client, created)``.
 
-    Precedence: explicit ``url`` argument → live ``serve()`` connection →
-    saved credentials from ``cognee-cli serve`` → ``COGNEE_SERVICE_URL`` /
-    ``COGNEE_API_KEY`` environment variables.
+    Precedence (matching ``serve()``): explicit ``url`` argument → live
+    ``serve()`` connection → ``COGNEE_SERVICE_URL`` / ``COGNEE_API_KEY``
+    environment variables → saved credentials from ``cognee-cli serve``.
     """
     from cognee.api.v1.serve.cloud_client import CloudClient
     from cognee.api.v1.serve.credentials import load_credentials
@@ -39,18 +58,35 @@ def _resolve_client(url: Optional[str], api_key: Optional[str]):
     if client is not None:
         return client, False
 
-    credentials = load_credentials()
-    if credentials and credentials.service_url:
-        return CloudClient(credentials.service_url, api_key or credentials.api_key), True
-
     env_url = os.getenv("COGNEE_SERVICE_URL")
     if env_url:
         return CloudClient(env_url, api_key or os.getenv("COGNEE_API_KEY", "")), True
+
+    credentials = load_credentials()
+    if credentials and credentials.service_url:
+        return CloudClient(credentials.service_url, api_key or credentials.api_key), True
 
     raise RuntimeError(
         "No Cognee Cloud connection configured. Run `cognee-cli serve` to log in, "
         "pass url/api_key, or set COGNEE_SERVICE_URL and COGNEE_API_KEY."
     )
+
+
+def _verify_migration_import(response: dict) -> None:
+    """Ensure the remote server actually ran a COGX migration import.
+
+    Servers that predate COGX archive support accept the upload but ingest the
+    tarball as a regular file; their response lacks the ``migration_import``
+    item the import path always emits.
+    """
+    items = response.get("items") or []
+    if not any(isinstance(item, dict) and item.get("kind") == "migration_import" for item in items):
+        raise RuntimeError(
+            "The remote server did not perform a COGX archive import — it likely runs an "
+            "older Cognee version without migration support. The uploaded archive was NOT "
+            "imported as a knowledge graph (it may have been ingested as a plain file). "
+            "Upgrade the remote instance, or use cognee.sync()/remember() with raw data."
+        )
 
 
 async def push(
@@ -61,7 +97,7 @@ async def push(
     url: Optional[str] = None,
     api_key: Optional[str] = None,
     user=None,
-) -> dict:
+) -> PushResult:
     """Upload a local dataset's knowledge graph to a Cognee Cloud instance.
 
     Args:
@@ -73,19 +109,18 @@ async def push(
             directly into the remote graph with zero LLM calls;
             ``"hybrid"`` also cognifies the raw content;
             ``"re-derive"`` ignores the exported graph and rebuilds from
-            raw content (works against older cloud versions).
+            raw content.
         url: Remote instance URL; falls back to the active ``serve()``
-            connection, saved credentials, or ``COGNEE_SERVICE_URL``.
+            connection, ``COGNEE_SERVICE_URL``, or saved credentials.
         api_key: API key; falls back like ``url``.
         user: Local user context for the export; defaults to the default user.
 
     Returns:
-        The remote remember response, with ``num_nodes``/``num_edges``
-        export counts added.
+        A :class:`PushResult` with the export counts and the raw remote
+        remember response.
     """
     from cognee.api.v1.export.export import export
     from cognee.modules.migration.archive import ARCHIVE_SUFFIX, pack_archive
-    from cognee.modules.migration.export import ExportResult
     from cognee.modules.migration.sources.base import IMPORT_MODES
     from cognee.modules.observability import COGNEE_DATASET_NAME, new_span
     from cognee.shared.utils import send_telemetry
@@ -106,8 +141,13 @@ async def push(
             with tempfile.TemporaryDirectory() as temporary_directory:
                 archive_dir = Path(temporary_directory) / "cogx"
                 result = await export(dataset, format="cogx", destination=archive_dir, user=user)
-                if not isinstance(result, ExportResult):  # format="cogx" always returns one
-                    raise RuntimeError("COGX export did not return an ExportResult.")
+
+                if result.num_nodes == 0:
+                    raise ValueError(
+                        f"Dataset {result.dataset_name!r} exported 0 nodes — nothing to push. "
+                        "Run cognee.cognify() (or cognee.remember()) on the dataset first to "
+                        "build its knowledge graph."
+                    )
 
                 tar_path = Path(temporary_directory) / f"{result.dataset_name}{ARCHIVE_SUFFIX}"
                 pack_archive(archive_dir, tar_path)
@@ -128,9 +168,16 @@ async def push(
                         import_mode=mode,
                     )
 
-            response["num_nodes"] = result.num_nodes
-            response["num_edges"] = result.num_edges
-            return response
+            _verify_migration_import(response)
+
+            return PushResult(
+                status=str(response.get("status", "unknown")),
+                dataset_name=result.dataset_name,
+                target_dataset=target_dataset or result.dataset_name,
+                num_nodes=result.num_nodes,
+                num_edges=result.num_edges,
+                remote_response=response,
+            )
         finally:
             if created_client:
                 await client.close()

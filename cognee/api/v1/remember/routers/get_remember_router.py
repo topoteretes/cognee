@@ -23,13 +23,24 @@ logger = get_logger()
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 
-async def _import_cogx_archives(uploads, dataset_name: str, import_mode, user):
+async def _import_cogx_archives(
+    uploads,
+    dataset_name,
+    dataset_id,
+    import_mode,
+    user,
+    run_in_background: bool = False,
+):
     """Import uploaded COGX archive tarballs (produced by ``cognee.push()``)."""
+    import tarfile
     import tempfile
 
     from cognee.modules.migration import COGXArchiveSource, import_memory_source
     from cognee.modules.migration.archive import unpack_archive
     from cognee.modules.migration.sources.base import IMPORT_MODES
+    from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+        resolve_authorized_user_datasets,
+    )
 
     if import_mode and import_mode not in IMPORT_MODES:
         raise HTTPException(
@@ -37,17 +48,38 @@ async def _import_cogx_archives(uploads, dataset_name: str, import_mode, user):
             detail=f"Unknown import_mode {import_mode!r}. Expected one of {IMPORT_MODES}.",
         )
 
-    result = None
     try:
+        if not dataset_name:
+            # The endpoint contract accepts datasetId in place of datasetName;
+            # resolve the name the same way the main remember path does.
+            _, authorized_datasets = await resolve_authorized_user_datasets(dataset_id, user)
+            dataset_name = authorized_datasets[0].name
+
+        results = []
         for upload in uploads:
             with tempfile.TemporaryDirectory() as temporary_directory:
                 archive_root = unpack_archive(upload.file, temporary_directory)
                 source = COGXArchiveSource(archive_root, mode=import_mode or "preserve")
-                result = await import_memory_source(source, dataset_name=dataset_name, user=user)
-        if result is None:
+                results.append(
+                    await import_memory_source(
+                        source,
+                        dataset_name=dataset_name,
+                        user=user,
+                        run_in_background=run_in_background,
+                    )
+                )
+        if not results:
             raise HTTPException(status_code=400, detail="No archive files were processed.")
-        return jsonable_encoder(result.to_dict())
-    except ValueError as error:
+
+        aggregate = results[-1].to_dict()
+        aggregate["items_processed"] = sum(result.items_processed for result in results)
+        items = [item for result in results for item in result.items]
+        if items:
+            aggregate["items"] = items
+        return jsonable_encoder(aggregate)
+    except HTTPException:
+        raise
+    except (ValueError, tarfile.TarError) as error:
         logger.error("COGX archive import validation error: %s", error, exc_info=True)
         return JSONResponse(
             status_code=400,
@@ -143,12 +175,14 @@ def get_remember_router() -> APIRouter:
                     status_code=400,
                     detail="content_type 'cogx-archive' requires an uploaded archive file.",
                 )
-            if not datasetName:
-                raise HTTPException(
-                    status_code=400,
-                    detail="datasetName must be provided for COGX archive imports.",
-                )
-            return await _import_cogx_archives(data, datasetName, import_mode, user)
+            return await _import_cogx_archives(
+                data,
+                datasetName,
+                datasetId if datasetId else None,
+                import_mode,
+                user,
+                run_in_background=run_in_background or False,
+            )
 
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService

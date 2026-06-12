@@ -62,8 +62,10 @@ from .api.v1 import (
     disconnect,
     visualize,
     push,
+    PushResult,
+    export,
+    ExportResult,
 )
-from .api.v1.export import export, ExportResult
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
 
 # Memory migration (cognee.migration has the provider sources:

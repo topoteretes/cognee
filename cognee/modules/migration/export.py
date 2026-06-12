@@ -51,10 +51,13 @@ class ExportResult:
         )
 
 
-def _write_cogx(nodes, edges, destination: Path, dataset_name: str) -> None:
+def _write_cogx(
+    nodes, edges, destination: Path, dataset_name: str, embedding_model: Optional[str] = None
+) -> None:
     """Map graph nodes/edges onto typed COGX records; keep the rest raw."""
     with COGXArchiveWriter(destination, source_system="cognee") as writer:
         writer.add_note(f"Exported from Cognee dataset {dataset_name!r}.")
+        writer.embedding_model = embedding_model
         for node_id, properties in nodes:
             properties = properties or {}
             node_type = properties.get("type")
@@ -78,14 +81,16 @@ def _write_cogx(nodes, edges, destination: Path, dataset_name: str) -> None:
                         created_at=parse_timestamp(properties.get("created_at")),
                     )
                 )
+                # Also persist the chunk as a raw node: preserve-mode restore
+                # rehydrates it as a graph node so facts referencing the chunk
+                # (e.g. DocumentChunk -contains-> Entity) keep their topology
+                # instead of dangling. The COGXDocument record above carries
+                # the chunk's content for re-derive/cross-provider imports.
+                writer.write_raw_node({"id": str(node_id), **properties})
             else:
                 writer.write_raw_node({"id": str(node_id), **properties})
 
         for source, target, relationship, properties in edges:
-            # Ladybug's get_graph_data() synthesizes "SELF" self-loops when a
-            # graph has no edges; they are not real facts.
-            if relationship == "SELF" and source == target:
-                continue
             properties = properties or {}
             writer.write(
                 COGXFact(
@@ -137,6 +142,10 @@ async def export_dataset(
         graph_engine = await get_graph_engine()
         nodes, edges = await graph_engine.get_graph_data()
 
+    # Ladybug's get_graph_data() synthesizes "SELF" self-loops when a graph
+    # has no edges; they are not real relationships, so no emitter sees them.
+    edges = [edge for edge in edges if not (edge[2] == "SELF" and edge[0] == edge[1])]
+
     if format == "pydantic":
         snapshot = build_snapshot(
             nodes,
@@ -161,7 +170,16 @@ async def export_dataset(
     destination = Path(destination)
 
     if format == "cogx":
-        _write_cogx(nodes, edges, destination, dataset_obj.name)
+        embedding_model = None
+        try:
+            from cognee.infrastructure.databases.vector.embeddings.config import (
+                get_embedding_context_config,
+            )
+
+            embedding_model = get_embedding_context_config().embedding_model
+        except Exception as error:  # noqa: BLE001 — manifest metadata is best effort
+            logger.debug("Could not determine embedding model for manifest: %s", error)
+        _write_cogx(nodes, edges, destination, dataset_obj.name, embedding_model=embedding_model)
     elif format == "json":
         write_json(nodes, edges, destination)
     elif format == "graphml":

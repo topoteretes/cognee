@@ -1,3 +1,3 @@
-from .push import push
+from .push import PushResult, push
 
-__all__ = ["push"]
+__all__ = ["PushResult", "push"]

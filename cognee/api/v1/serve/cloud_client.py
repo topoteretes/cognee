@@ -25,8 +25,12 @@ class CloudClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            # No total timeout: large uploads (e.g. push archives) plus the
+            # server-side import can legitimately exceed aiohttp's 5-minute
+            # default. Connect and per-read inactivity stay bounded instead.
             self._session = aiohttp.ClientSession(
                 headers={"X-Api-Key": self.api_key},
+                timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300),
             )
         return self._session
 

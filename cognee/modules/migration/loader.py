@@ -14,7 +14,7 @@ Two targets, selected by the source's import mode:
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tuple
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
@@ -23,14 +23,19 @@ from cognee.modules.migration.cogx import (
     COGXEntity,
     COGXEpisode,
     COGXFact,
+    COGXRawNode,
     COGXRecord,
 )
+from cognee.modules.migration.snapshot import rehydrate_node
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("migration.loader")
 
 FACTS_PER_DIGEST = 200
+# Target node count per graph batch: keeps each add_data_points call (gather,
+# dedup, deep copies, relational transaction) bounded on bulk imports.
+BATCH_NODE_TARGET = 2000
 
 
 @dataclass
@@ -38,6 +43,9 @@ class TranslationResult:
     data_items: List[DataItem] = field(default_factory=list)
     graph_batches: List[Dict[str, Any]] = field(default_factory=list)
     counts: Dict[str, int] = field(default_factory=dict)
+    # Facts dropped because a subject/object UUID reference could not be
+    # resolved to any exported node (never fabricated as UUID-named entities).
+    skipped_facts: int = 0
     # False in preserve mode: data items are stored raw, without cognify.
     cognify_data_items: bool = True
 
@@ -104,21 +112,39 @@ def _data_item_for(record: COGXRecord, content: str, label: Optional[str] = None
     )
 
 
-def _build_graph_batch(
-    entities: List[COGXEntity], facts: List[COGXFact]
-) -> Optional[Dict[str, Any]]:
-    """Map entity/fact records onto native Entity DataPoints and edge tuples.
+def _looks_like_uuid(value: str) -> bool:
+    try:
+        UUID(str(value))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
+def _build_graph_batches(
+    entities: List[COGXEntity], facts: List[COGXFact], raw_nodes: List[COGXRawNode]
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Map entity/fact/raw-node records onto bounded graph batches.
 
     Entity ids come from ``generate_node_id(name)`` — the same scheme cognify
     uses — so preserved facts merge into the existing graph vocabulary instead
-    of forming a disconnected parallel graph.
+    of forming a disconnected parallel graph. Raw nodes are rehydrated back
+    into DataPoint instances (keeping their original ids) so facts referencing
+    them stay resolvable. Facts whose subject/object UUID reference cannot be
+    resolved are skipped — never fabricated as UUID-named entities.
+
+    Nodes are split into batches of ~``BATCH_NODE_TARGET``; each fact lands in
+    a batch containing one of its endpoints, with the other endpoint included
+    as a (deterministic-id, hence idempotent) duplicate where batches split.
+
+    Returns the batches plus the count of skipped facts.
     """
-    if not entities and not facts:
-        return None
+    if not entities and not facts and not raw_nodes:
+        return [], 0
 
     entity_types: Dict[str, EntityType] = {}
-    by_external_id: Dict[str, Entity] = {}
-    by_node_id: Dict[UUID, Entity] = {}
+    by_external_id: Dict[str, Any] = {}
+    by_node_id: Dict[UUID, Any] = {}
+    first_external_id: Dict[UUID, str] = {}
 
     def _entity_type_for(name: str) -> EntityType:
         key = name.lower()
@@ -126,39 +152,113 @@ def _build_graph_batch(
             entity_types[key] = EntityType(id=generate_node_id(name), name=name, description=name)
         return entity_types[key]
 
-    def _register(entity: Entity, external_id: Optional[str]) -> Entity:
-        existing = by_node_id.get(entity.id)
-        if existing is None:
-            by_node_id[entity.id] = entity
-            existing = entity
+    for record in raw_nodes:
+        properties = record.properties or {}
+        node = rehydrate_node(properties)
+        node = by_node_id.setdefault(node.id, node)
+        external_id = properties.get("id")
         if external_id:
-            by_external_id[external_id] = existing
-        return existing
+            by_external_id[str(external_id)] = node
 
     for record in entities:
+        node_id = generate_node_id(record.name)
         description = record.description or record.name
         if record.aliases:
             description = f"{description} Also known as: {', '.join(record.aliases)}."
+        existing = by_node_id.get(node_id)
+        if existing is not None:
+            # Same-named source records merge into one node: combine their
+            # descriptions/aliases instead of keeping only the first.
+            if description and description not in (getattr(existing, "description", "") or ""):
+                merged = getattr(existing, "description", None)
+                existing.description = f"{merged}\n{description}" if merged else description
+            if getattr(existing, "is_a", None) is None and record.entity_type:
+                existing.is_a = _entity_type_for(record.entity_type)
+            logger.info(
+                "Merged same-named entity %r: external_ids %r and %r",
+                record.name,
+                first_external_id.get(node_id),
+                record.external_id,
+            )
+            by_external_id[record.external_id] = existing
+            continue
         entity = Entity(
-            id=generate_node_id(record.name),
+            id=node_id,
             name=record.name,
             description=description,
             is_a=_entity_type_for(record.entity_type) if record.entity_type else None,
         )
-        _register(entity, record.external_id)
+        by_node_id[node_id] = entity
+        first_external_id[node_id] = record.external_id
+        by_external_id[record.external_id] = entity
 
-    def _resolve_ref(ref: str) -> Entity:
-        entity = by_external_id.get(ref)
-        if entity is not None:
-            return entity
-        # Unknown reference: treat it as an entity name.
+    batches: List[Dict[str, Any]] = []
+    batch_index_of: Dict[UUID, int] = {}
+    ordered_nodes = list(entity_types.values()) + list(by_node_id.values())
+    for start in range(0, len(ordered_nodes), BATCH_NODE_TARGET):
+        chunk = ordered_nodes[start : start + BATCH_NODE_TARGET]
+        batches.append({"nodes": list(chunk), "edges": []})
+        for node in chunk:
+            batch_index_of[node.id] = len(batches) - 1
+
+    def _resolve_ref(ref: str) -> Optional[Any]:
+        node = by_external_id.get(ref)
+        if node is not None:
+            return node
+        node = by_node_id.get(generate_node_id(ref))
+        if node is not None:
+            return node
+        if _looks_like_uuid(ref):
+            # A UUID pointing at a node the archive does not contain: skip the
+            # fact rather than fabricate an Entity literally named by a UUID.
+            return None
+        # Plain-name reference (cross-provider archives): treat it as an
+        # entity name and create the entity.
         entity = Entity(id=generate_node_id(ref), name=ref, description=ref)
-        return _register(entity, None)
+        by_node_id[entity.id] = entity
+        return entity
 
-    edges: List[Tuple[UUID, UUID, str, Dict[str, Any]]] = []
+    duplicated_in_batch: Dict[int, Set[UUID]] = {}
+    skipped_facts = 0
+
     for fact in facts:
         subject = _resolve_ref(fact.subject_ref)
         target = _resolve_ref(fact.object_ref)
+        if subject is None or target is None:
+            skipped_facts += 1
+            unresolved = [
+                ref
+                for ref, node in ((fact.subject_ref, subject), (fact.object_ref, target))
+                if node is None
+            ]
+            logger.warning(
+                "Skipping fact %r (%s): unresolved UUID reference(s) %s",
+                fact.external_id,
+                fact.predicate,
+                ", ".join(unresolved),
+            )
+            continue
+
+        index = batch_index_of.get(subject.id)
+        if index is None:
+            index = batch_index_of.get(target.id)
+        if index is None:
+            if not batches:
+                batches.append({"nodes": [], "edges": []})
+            index = len(batches) - 1
+        for node in (subject, target):
+            if node.id not in batch_index_of:
+                # Newly created name-stub entity: place it with this fact.
+                batches[index]["nodes"].append(node)
+                batch_index_of[node.id] = index
+            elif batch_index_of[node.id] != index:
+                # Endpoint lives in another batch: include a duplicate so the
+                # edge's batch is self-contained (deterministic ids merge).
+                duplicated = duplicated_in_batch.setdefault(index, set())
+                if node.id not in duplicated:
+                    batches[index]["nodes"].append(node)
+                    duplicated.add(node.id)
+
         properties: Dict[str, Any] = {
             "relationship_name": fact.predicate,
             "source_system": fact.external_system,
@@ -172,19 +272,24 @@ def _build_graph_batch(
             properties["invalid_at"] = _iso(fact.invalid_at)
         if fact.confidence is not None:
             properties["confidence"] = fact.confidence
-        edges.append((subject.id, target.id, fact.predicate, properties))
+        batches[index]["edges"].append((subject.id, target.id, fact.predicate, properties))
 
-    nodes: List[Any] = list(entity_types.values()) + list(by_node_id.values())
-    return {"nodes": nodes, "edges": edges}
+    batches = [batch for batch in batches if batch["nodes"] or batch["edges"]]
+    return batches, skipped_facts
 
 
-def translate_records(records: Iterable[COGXRecord], mode: str) -> TranslationResult:
-    """Translate COGX records according to the import fidelity mode."""
-    result = TranslationResult(cognify_data_items=mode != "preserve")
-    entities: List[COGXEntity] = []
-    facts: List[COGXFact] = []
+class _RecordTranslator:
+    """Incremental record translator shared by the sync and async entry points."""
 
-    for record in records:
+    def __init__(self, mode: str):
+        self.mode = mode
+        self.result = TranslationResult(cognify_data_items=mode != "preserve")
+        self.entities: List[COGXEntity] = []
+        self.facts: List[COGXFact] = []
+        self.raw_nodes: List[COGXRawNode] = []
+
+    def add(self, record: COGXRecord) -> None:
+        result = self.result
         result.counts[record.kind] = result.counts.get(record.kind, 0) + 1
 
         if record.kind == "document":
@@ -200,46 +305,69 @@ def translate_records(records: Iterable[COGXRecord], mode: str) -> TranslationRe
             content = f"{record.label}:\n{record.value}"
             result.data_items.append(_data_item_for(record, content, record.label))
         elif record.kind == "entity":
-            entities.append(record)
+            self.entities.append(record)
         elif record.kind == "fact":
-            facts.append(record)
+            self.facts.append(record)
+        elif record.kind == "raw_node":
+            # Graph-fidelity payload: only meaningful for preserve/hybrid.
+            self.raw_nodes.append(record)
 
-    if mode == "re-derive":
-        # Render the source's derived knowledge as digest documents so it is
-        # not lost, and let cognify re-extract it.
-        described = [e for e in entities if e.description]
-        if described:
-            lines = [f"{e.name}: {e.description}" for e in described]
-            digest = COGXEntity(
-                external_system=described[0].external_system,
-                external_id="entities-digest",
-                name="entities-digest",
-            )
-            result.data_items.append(
-                _data_item_for(digest, "\n".join(lines), "Imported entity descriptions")
-            )
-        for start in range(0, len(facts), FACTS_PER_DIGEST):
-            chunk = facts[start : start + FACTS_PER_DIGEST]
-            digest = COGXFact(
-                external_system=chunk[0].external_system,
-                external_id=f"facts-digest-{start // FACTS_PER_DIGEST}",
-                subject_ref="-",
-                predicate="-",
-                object_ref="-",
-            )
-            result.data_items.append(
-                _data_item_for(
-                    digest,
-                    "\n".join(_render_fact_line(fact) for fact in chunk),
-                    "Imported facts",
+    def finish(self) -> TranslationResult:
+        result, entities, facts = self.result, self.entities, self.facts
+        if self.mode == "re-derive":
+            # Render the source's derived knowledge as digest documents so it
+            # is not lost, and let cognify re-extract it. Raw nodes carry no
+            # standalone text and are intentionally dropped in this mode.
+            described = [e for e in entities if e.description]
+            if described:
+                lines = [f"{e.name}: {e.description}" for e in described]
+                digest = COGXEntity(
+                    external_system=described[0].external_system,
+                    external_id="entities-digest",
+                    name="entities-digest",
                 )
-            )
-    else:
-        batch = _build_graph_batch(entities, facts)
-        if batch:
-            result.graph_batches.append(batch)
+                result.data_items.append(
+                    _data_item_for(digest, "\n".join(lines), "Imported entity descriptions")
+                )
+            for start in range(0, len(facts), FACTS_PER_DIGEST):
+                chunk = facts[start : start + FACTS_PER_DIGEST]
+                digest = COGXFact(
+                    external_system=chunk[0].external_system,
+                    external_id=f"facts-digest-{start // FACTS_PER_DIGEST}",
+                    subject_ref="-",
+                    predicate="-",
+                    object_ref="-",
+                )
+                result.data_items.append(
+                    _data_item_for(
+                        digest,
+                        "\n".join(_render_fact_line(fact) for fact in chunk),
+                        "Imported facts",
+                    )
+                )
+        else:
+            batches, skipped_facts = _build_graph_batches(entities, facts, self.raw_nodes)
+            result.graph_batches.extend(batches)
+            result.skipped_facts = skipped_facts
+        return result
 
-    return result
+
+def translate_records(records: Iterable[COGXRecord], mode: str) -> TranslationResult:
+    """Translate COGX records according to the import fidelity mode."""
+    translator = _RecordTranslator(mode)
+    for record in records:
+        translator.add(record)
+    return translator.finish()
+
+
+async def translate_record_stream(
+    records: AsyncIterable[COGXRecord], mode: str
+) -> TranslationResult:
+    """Translate an async record stream without first materializing it as a list."""
+    translator = _RecordTranslator(mode)
+    async for record in records:
+        translator.add(record)
+    return translator.finish()
 
 
 def wrap_graph_batch(batch: Dict[str, Any], source_system: str, index: int) -> DataItem:

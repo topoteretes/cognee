@@ -6,6 +6,9 @@ from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
+# Tiny constants-only import; the cognee package is already loaded by the CLI.
+from cognee.modules.migration.sources.base import IMPORT_MODES
+
 
 class PushCommand(SupportsCliCommand):
     command_string = "push"
@@ -48,13 +51,16 @@ Examples:
         )
         parser.add_argument(
             "--mode",
-            choices=["preserve", "hybrid", "re-derive"],
+            choices=list(IMPORT_MODES),
             default="preserve",
             help="Remote import mode (default: preserve)",
         )
         parser.add_argument(
             "--url",
-            help="Remote instance URL (default: saved serve credentials)",
+            help=(
+                "Remote instance URL (default: active serve connection, "
+                "COGNEE_SERVICE_URL, or saved serve credentials)"
+            ),
         )
         parser.add_argument(
             "--api-key",
@@ -69,22 +75,34 @@ Examples:
 
             async def run_push():
                 try:
+                    from cognee.api.v1.push.push import _resolve_client
+                    from cognee.cli.user_resolution import resolve_cli_user
+
+                    # Resolve once up front so the target host is visible
+                    # before the upload starts.
+                    client, created = _resolve_client(args.url, args.api_key)
+                    fmt.echo(f"Remote instance: {client.service_url}")
+                    if created:
+                        await client.close()
+
+                    user = await resolve_cli_user(getattr(args, "user_id", None))
+
                     return await cognee.push(
                         args.dataset,
                         target_dataset=args.target_dataset,
                         mode=args.mode,
                         url=args.url,
                         api_key=args.api_key,
+                        user=user,
                     )
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to push: {str(e)}") from e
 
             result = asyncio.run(run_push())
 
-            target = args.target_dataset or args.dataset
             fmt.success(
-                f"Pushed {result.get('num_nodes', '?')} nodes and "
-                f"{result.get('num_edges', '?')} edges to remote dataset '{target}'."
+                f"Pushed {result.num_nodes} nodes and {result.num_edges} edges "
+                f"to remote dataset '{result.target_dataset}'."
             )
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

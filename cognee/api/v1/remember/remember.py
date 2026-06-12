@@ -697,14 +697,48 @@ async def remember(
     # migration loader routes them through add/cognify or direct graph storage
     # depending on the source's fidelity mode.
     if isinstance(data, MemorySource):
+        from cognee.api.v1.serve.state import get_remote_client
         from cognee.modules.migration.import_source import import_memory_source
 
-        return await import_memory_source(
-            data,
-            dataset_name=dataset_name,
-            run_in_background=run_in_background,
-            **kwargs,
-        )
+        if get_remote_client() is not None:
+            raise ValueError(
+                "remember() cannot import a MemorySource while connected to a remote "
+                "Cognee instance — the import would write to the local graph, not the "
+                "remote one. Call cognee.disconnect() first to import locally, or use "
+                "cognee.push() to upload the data to the remote instance."
+            )
+
+        if session_id is not None:
+            raise ValueError(
+                "session_id is not applicable to MemorySource imports; imported "
+                "records are stored in the permanent graph, not a session cache."
+            )
+
+        with new_span("cognee.api.remember.import") as span:
+            span.set_attribute(COGNEE_DATASET_NAME, dataset_name)
+            span.set_attribute(COGNEE_OPERATION_MODE, data.mode)
+            span.set_attribute("cognee.source_system", data.source_system)
+            send_telemetry(
+                "cognee.remember.import",
+                kwargs.get("user", "sdk"),
+                additional_properties={
+                    "source_system": data.source_system,
+                    "mode": data.mode,
+                    "dataset_name": dataset_name,
+                    "run_in_background": run_in_background,
+                    "cognee_version": cognee_version,
+                },
+            )
+            return await import_memory_source(
+                data,
+                dataset_name=dataset_name,
+                run_in_background=run_in_background,
+                chunk_size=chunk_size,
+                chunker=chunker,
+                custom_prompt=custom_prompt,
+                self_improvement=self_improvement,
+                **kwargs,
+            )
 
     # Typed MemoryEntry dispatch: trace steps, rich QA, feedback, and
     # explicit skill-run scores. These short-circuit the add+cognify path.

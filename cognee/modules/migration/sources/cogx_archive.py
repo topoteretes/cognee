@@ -12,11 +12,25 @@ from cognee.modules.migration.sources.base import MemorySource
 
 
 class COGXArchiveSource(MemorySource):
+    """Stream records from a COGX archive directory.
+
+    Defaults to ``mode="preserve"``: cognee-origin archives already carry an
+    extracted graph (plus raw nodes for full fidelity), so the restore is
+    zero-LLM — matching the default of ``cognee.push()`` and the remember
+    router. Pass ``mode="hybrid"`` to additionally re-cognify the raw content,
+    or ``mode="re-derive"`` for extraction-only imports.
+
+    Raises ValueError when the archive was written by a newer major COGX
+    version than this reader supports.
+    """
+
     source_system = "cogx"
 
-    def __init__(self, directory: Union[str, Path], mode: str = "hybrid"):
+    def __init__(self, directory: Union[str, Path], mode: str = "preserve"):
         super().__init__(mode=mode)
         self.directory = Path(directory)
+        # read_manifest validates the archive's cogx_version (raises ValueError
+        # when the archive is ahead of this reader).
         manifest = read_manifest(self.directory)
         if manifest is not None:
             self.source_system = manifest.source_system
