@@ -108,6 +108,8 @@ jobs:
           echo "notes_markdown=${OUTPUT_DIR}/branch_notes.md" >> "${GITHUB_OUTPUT}"
           echo "assessment_json=${OUTPUT_DIR}/docs_assessment.json" >> "${GITHUB_OUTPUT}"
           echo "assessment_markdown=${OUTPUT_DIR}/docs_assessment.md" >> "${GITHUB_OUTPUT}"
+          echo "docs_edit_scope_json=${OUTPUT_DIR}/docs_edit_scope.json" >> "${GITHUB_OUTPUT}"
+          echo "docs_edit_scope_markdown=${OUTPUT_DIR}/docs_edit_scope.md" >> "${GITHUB_OUTPUT}"
           echo "docs_scope_plan=${OUTPUT_DIR}/docs_scope_plan.md" >> "${GITHUB_OUTPUT}"
 
       - name: Generate branch notes
@@ -157,10 +159,6 @@ jobs:
             --short-sha "${{ matrix.short_sha }}" \
             --pr-number "${{ matrix.pr_number }}"
 
-      - name: Skip docs PR creation when docs are not needed
-        if: ${{ steps.assessment.outputs.needs_update != 'true' }}
-        run: echo "Assessment says no documentation update is needed for ${{ matrix.branch_name }}; skipping docs PR."
-
       - name: Check out docs repository
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         uses: actions/checkout@v6
@@ -186,11 +184,17 @@ jobs:
       - name: Prepare docs edit scope
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
         id: docs_scope
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 tools/prepare_docs_edit_scope.py \
-            --first-parent "${{ matrix.first_parent }}" \
-            --second-parent "${{ matrix.second_parent }}" \
-            --docs-root docs-repo
+            --repo "${{ github.repository }}" \
+            --pr-number "${{ matrix.pr_number }}" \
+            --docs-root docs-repo \
+            --notes-json "${{ steps.branch_paths.outputs.notes_json }}" \
+            --assessment-json "${{ steps.branch_paths.outputs.assessment_json }}" \
+            --scope-json-output "${{ steps.branch_paths.outputs.docs_edit_scope_json }}" \
+            --scope-markdown-output "${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}"
 
       - name: Plan docs changes with Claude
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
@@ -210,16 +214,8 @@ jobs:
             - Second parent: `${{ matrix.second_parent }}`
             - Scope plan output: `./${{ steps.branch_paths.outputs.docs_scope_plan }}`
 
-            - **Branch notes** (`./${{ steps.branch_paths.outputs.notes_markdown }}`): Summary of the merged branch.
-            - **Documentation assessment** (`./${{ steps.branch_paths.outputs.assessment_markdown }}`): Candidate docs areas and rationale for the update.
-
-            ## Precomputed scope
-
-            Changed source files:
-            ${{ steps.docs_scope.outputs.changed_source_files }}
-
-            Likely documentation targets:
-            ${{ steps.docs_scope.outputs.candidate_doc_files }}
+            - **Prepared documentation edit scope** (`./${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}`): Curated source files, docs candidates, assessment summary, and out-of-scope files.
+            - **Prepared documentation edit scope JSON** (`./${{ steps.branch_paths.outputs.docs_edit_scope_json }}`): Machine-readable copy of the prepared scope.
           claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 35"
 
       - name: Validate docs scope plan
@@ -232,8 +228,15 @@ jobs:
             exit 1
           fi
 
-      - name: Generate docs changes with Claude
+      - name: Read docs scope plan outputs
         if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        id: scope_plan
+        run: |
+          python3 tools/write_docs_scope_plan_outputs.py \
+            --scope-plan "${{ steps.branch_paths.outputs.docs_scope_plan }}"
+
+      - name: Generate docs changes with Claude
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -259,7 +262,7 @@ jobs:
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep,Bash --max-turns 50"
 
       - name: Prepare docs PR content
-        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: pr_content
         env:
           NOTES_JSON: ${{ steps.branch_paths.outputs.notes_json }}
@@ -277,7 +280,7 @@ jobs:
             --docs-root docs-repo
 
       - name: Create docs draft commit
-        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: commit_docs
         working-directory: docs-repo
         run: |
@@ -292,12 +295,12 @@ jobs:
           echo "changes_made=true" >> "$GITHUB_OUTPUT"
 
       - name: Push docs draft branch
-        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' && steps.commit_docs.outputs.changes_made == 'true' }}
         working-directory: docs-repo
         run: git push --force-with-lease origin "${{ steps.assessment.outputs.docs_branch }}"
 
       - name: Create or update docs pull request
-        if: ${{ steps.assessment.outputs.needs_update == 'true' }}
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         id: manage_pr
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
@@ -314,6 +317,7 @@ jobs:
             --changes-made "${CHANGES_MADE}"
 
       - name: Summarize docs PR result
+        if: ${{ steps.assessment.outputs.needs_update == 'true' && steps.scope_plan.outputs.docs_needed == 'true' }}
         env:
           CHANGED_FILES: ${{ steps.pr_content.outputs.changed_files }}
         run: |
