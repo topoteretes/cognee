@@ -113,11 +113,15 @@ class BedrockAdapter(LLMInterface):
     ) -> BaseModel:
         """Generate structured output from AWS Bedrock API."""
 
+        from cognee.modules.session_lifecycle.usage_tracking import capture_llm_usage
+
         try:
             request_params = self._create_bedrock_request(
                 text_input, system_prompt, response_model, **kwargs
             )
-            return await self.aclient.chat.completions.create(**request_params)
+            result = await self.aclient.chat.completions.create(**request_params)
+            capture_llm_usage(result)
+            return result
 
         except (
             ContentPolicyViolationError,

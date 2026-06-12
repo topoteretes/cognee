@@ -17,6 +17,7 @@ time via ``get_effective_status_sql`` against
 ``SESSION_ABANDON_AFTER_SECONDS`` (defaults to 30 min).
 """
 
+import asyncio
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -31,7 +32,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
 
-from .models import SessionModelUsage, SessionRecord
+from .models import OperationModelUsage, OperationRecord, SessionModelUsage, SessionRecord
 
 logger = get_logger("session_lifecycle")
 
@@ -59,6 +60,77 @@ def _dialect_name(bind) -> str:
         return ""
 
 
+async def _ensure_and_touch_row(
+    *,
+    record_cls,
+    id_field: str,
+    id_value: str,
+    user_id: UUIDType,
+    dataset_id: Optional[UUIDType],
+    extra_values: dict,
+) -> None:
+    """Upsert a lifecycle row (session or operation) in one round trip.
+
+    Creates the row if absent (status=running). If present AND still
+    running, bumps ``last_activity_at``. Terminal rows are left untouched
+    so a late straggler can't accidentally resurrect them. Also fills in
+    ``dataset_id`` when currently null. Shared by ``ensure_and_touch_session``
+    and ``ensure_and_touch_operation``.
+    """
+    now = datetime.now(timezone.utc)
+    engine = get_relational_engine()
+    id_col = getattr(record_cls, id_field)
+
+    async with engine.get_async_session() as session:
+        bind = await session.connection()
+        dialect = _dialect_name(bind)
+
+        values = {
+            id_field: id_value,
+            "user_id": user_id,
+            "dataset_id": dataset_id,
+            "status": SessionStatus.RUNNING.value,
+            "started_at": now,
+            "last_activity_at": now,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_usd": 0.0,
+            **extra_values,
+        }
+
+        if dialect in ("sqlite", "postgresql"):
+            insert = sqlite_insert if dialect == "sqlite" else pg_insert
+            stmt = insert(record_cls).values(**values)
+            set_ = {"last_activity_at": now}
+            # Back-fill a previously-unset dataset_id.
+            set_["dataset_id"] = case(
+                (record_cls.dataset_id.is_(None), dataset_id),
+                else_=record_cls.dataset_id,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[id_field, "user_id"],
+                set_=set_,
+                where=record_cls.status == SessionStatus.RUNNING.value,
+            )
+            await session.execute(stmt)
+            await session.commit()
+            return
+
+        # Portable fallback: SELECT-then-INSERT/UPDATE. Two round trips.
+        existing = (
+            await session.execute(
+                select(record_cls).where(and_(id_col == id_value, record_cls.user_id == user_id))
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(record_cls(**values))
+        elif existing.status == SessionStatus.RUNNING.value:
+            existing.last_activity_at = now
+            if existing.dataset_id is None and dataset_id is not None:
+                existing.dataset_id = dataset_id
+        await session.commit()
+
+
 async def ensure_and_touch_session(
     *,
     session_id: str,
@@ -72,61 +144,134 @@ async def ensure_and_touch_session(
     untouched so a late straggler can't accidentally resurrect them.
     Also fills in ``dataset_id`` when currently null.
     """
-    now = datetime.now(timezone.utc)
+    await _ensure_and_touch_row(
+        record_cls=SessionRecord,
+        id_field="session_id",
+        id_value=session_id,
+        user_id=user_id,
+        dataset_id=dataset_id,
+        extra_values={"error_count": 0},
+    )
+
+
+async def _accumulate_usage_row(
+    *,
+    record_cls,
+    model_usage_cls,
+    id_field: str,
+    id_value: str,
+    user_id: UUIDType,
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    cost_usd: float = 0.0,
+    model: Optional[str] = None,
+    errored: bool = False,
+    touch_activity_on_model: bool = False,
+) -> None:
+    """Atomically add usage counters to a lifecycle row + its per-model row.
+
+    Only mutates rows in ``running`` state — terminal rows are frozen.
+    Per-model accumulation runs against ``model_usage_cls`` via an upsert so
+    mixed-model runs attribute correctly in ``cost-by-model``. Shared by
+    ``accumulate_usage`` and ``accumulate_operation_usage``.
+
+    ``errored`` bumps ``error_count`` — only ``SessionRecord`` has that
+    column, so operations must pass ``errored=False`` (the default).
+    ``touch_activity_on_model`` additionally bumps ``last_activity_at``
+    when a model is credited (``accumulate_operation_usage``'s behavior).
+    """
     engine = get_relational_engine()
+    id_col = getattr(record_cls, id_field)
+    model_id_col = getattr(model_usage_cls, id_field)
 
     async with engine.get_async_session() as session:
-        bind = await session.connection()
-        dialect = _dialect_name(bind)
+        # 1) Row-level aggregate. Gated on running status so a terminal
+        #    row doesn't accrue straggler charges.
+        values = {}
+        if tokens_in:
+            values["tokens_in"] = record_cls.tokens_in + tokens_in
+        if tokens_out:
+            values["tokens_out"] = record_cls.tokens_out + tokens_out
+        if cost_usd:
+            values["cost_usd"] = record_cls.cost_usd + cost_usd
+        if errored:
+            values["error_count"] = record_cls.error_count + 1
+        if model:
+            values["last_model"] = model
+            if touch_activity_on_model:
+                values["last_activity_at"] = datetime.now(timezone.utc)
 
-        values = {
-            "session_id": session_id,
-            "user_id": user_id,
-            "dataset_id": dataset_id,
-            "status": SessionStatus.RUNNING.value,
-            "started_at": now,
-            "last_activity_at": now,
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "cost_usd": 0.0,
-            "error_count": 0,
-        }
-
-        if dialect in ("sqlite", "postgresql"):
-            insert = sqlite_insert if dialect == "sqlite" else pg_insert
-            stmt = insert(SessionRecord).values(**values)
-            set_ = {"last_activity_at": now}
-            # Back-fill a previously-unset dataset_id.
-            set_["dataset_id"] = case(
-                (SessionRecord.dataset_id.is_(None), dataset_id),
-                else_=SessionRecord.dataset_id,
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["session_id", "user_id"],
-                set_=set_,
-                where=SessionRecord.status == SessionStatus.RUNNING.value,
-            )
-            await session.execute(stmt)
-            await session.commit()
-            return
-
-        # Portable fallback: SELECT-then-INSERT/UPDATE. Two round trips.
-        existing = (
+        if values:
             await session.execute(
-                select(SessionRecord).where(
+                update(record_cls)
+                .where(
                     and_(
-                        SessionRecord.session_id == session_id,
-                        SessionRecord.user_id == user_id,
+                        id_col == id_value,
+                        record_cls.user_id == user_id,
+                        record_cls.status == SessionStatus.RUNNING.value,
                     )
                 )
+                .values(**values)
             )
-        ).scalar_one_or_none()
-        if existing is None:
-            session.add(SessionRecord(**values))
-        elif existing.status == SessionStatus.RUNNING.value:
-            existing.last_activity_at = now
-            if existing.dataset_id is None and dataset_id is not None:
-                existing.dataset_id = dataset_id
+
+        # 2) Per-model row — only when there's usage to credit.
+        if model and (tokens_in or tokens_out or cost_usd):
+            now = datetime.now(timezone.utc)
+            bind = await session.connection()
+            dialect = _dialect_name(bind)
+
+            if dialect in ("sqlite", "postgresql"):
+                insert = sqlite_insert if dialect == "sqlite" else pg_insert
+                stmt = insert(model_usage_cls).values(
+                    **{id_field: id_value},
+                    user_id=user_id,
+                    model=model,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    cost_usd=cost_usd,
+                    updated_at=now,
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[id_field, "user_id", "model"],
+                    set_={
+                        "tokens_in": model_usage_cls.tokens_in + tokens_in,
+                        "tokens_out": model_usage_cls.tokens_out + tokens_out,
+                        "cost_usd": model_usage_cls.cost_usd + cost_usd,
+                        "updated_at": now,
+                    },
+                )
+                await session.execute(stmt)
+            else:
+                # Portable fallback: SELECT then INSERT/UPDATE.
+                existing = (
+                    await session.execute(
+                        select(model_usage_cls).where(
+                            and_(
+                                model_id_col == id_value,
+                                model_usage_cls.user_id == user_id,
+                                model_usage_cls.model == model,
+                            )
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing is None:
+                    session.add(
+                        model_usage_cls(
+                            **{id_field: id_value},
+                            user_id=user_id,
+                            model=model,
+                            tokens_in=tokens_in,
+                            tokens_out=tokens_out,
+                            cost_usd=cost_usd,
+                            updated_at=now,
+                        )
+                    )
+                else:
+                    existing.tokens_in = existing.tokens_in + tokens_in
+                    existing.tokens_out = existing.tokens_out + tokens_out
+                    existing.cost_usd = existing.cost_usd + cost_usd
+                    existing.updated_at = now
+
         await session.commit()
 
 
@@ -150,94 +295,46 @@ async def accumulate_usage(
     if tokens_in == 0 and tokens_out == 0 and cost_usd == 0.0 and not errored and model is None:
         return
 
+    await _accumulate_usage_row(
+        record_cls=SessionRecord,
+        model_usage_cls=SessionModelUsage,
+        id_field="session_id",
+        id_value=session_id,
+        user_id=user_id,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cost_usd=cost_usd,
+        model=model,
+        errored=errored,
+    )
+
+
+async def _mark_ended_row(
+    *,
+    record_cls,
+    id_field: str,
+    id_value: str,
+    user_id: UUIDType,
+    status: SessionStatus,
+    label: str,
+) -> None:
+    """Transition a lifecycle row to a terminal status (completed / failed).
+
+    Shared by ``mark_ended`` and ``mark_operation_ended``.
+    """
+    if status == SessionStatus.RUNNING or status == SessionStatus.ABANDONED:
+        raise ValueError(f"{label} requires a terminal status (completed/failed), got {status}")
+
+    now = datetime.now(timezone.utc)
     engine = get_relational_engine()
-
+    id_col = getattr(record_cls, id_field)
     async with engine.get_async_session() as session:
-        # 1) Session-level aggregate. Gated on running status so a
-        #    terminal session doesn't accrue straggler charges.
-        values = {}
-        if tokens_in:
-            values["tokens_in"] = SessionRecord.tokens_in + tokens_in
-        if tokens_out:
-            values["tokens_out"] = SessionRecord.tokens_out + tokens_out
-        if cost_usd:
-            values["cost_usd"] = SessionRecord.cost_usd + cost_usd
-        if errored:
-            values["error_count"] = SessionRecord.error_count + 1
-        if model:
-            values["last_model"] = model
-
-        if values:
-            await session.execute(
-                update(SessionRecord)
-                .where(
-                    and_(
-                        SessionRecord.session_id == session_id,
-                        SessionRecord.user_id == user_id,
-                        SessionRecord.status == SessionStatus.RUNNING.value,
-                    )
-                )
-                .values(**values)
-            )
-
-        # 2) Per-model row — only when there's usage to credit.
-        if model and (tokens_in or tokens_out or cost_usd):
-            now = datetime.now(timezone.utc)
-            bind = await session.connection()
-            dialect = _dialect_name(bind)
-
-            if dialect in ("sqlite", "postgresql"):
-                insert = sqlite_insert if dialect == "sqlite" else pg_insert
-                stmt = insert(SessionModelUsage).values(
-                    session_id=session_id,
-                    user_id=user_id,
-                    model=model,
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
-                    cost_usd=cost_usd,
-                    updated_at=now,
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["session_id", "user_id", "model"],
-                    set_={
-                        "tokens_in": SessionModelUsage.tokens_in + tokens_in,
-                        "tokens_out": SessionModelUsage.tokens_out + tokens_out,
-                        "cost_usd": SessionModelUsage.cost_usd + cost_usd,
-                        "updated_at": now,
-                    },
-                )
-                await session.execute(stmt)
-            else:
-                # Portable fallback: SELECT then INSERT/UPDATE.
-                existing = (
-                    await session.execute(
-                        select(SessionModelUsage).where(
-                            and_(
-                                SessionModelUsage.session_id == session_id,
-                                SessionModelUsage.user_id == user_id,
-                                SessionModelUsage.model == model,
-                            )
-                        )
-                    )
-                ).scalar_one_or_none()
-                if existing is None:
-                    session.add(
-                        SessionModelUsage(
-                            session_id=session_id,
-                            user_id=user_id,
-                            model=model,
-                            tokens_in=tokens_in,
-                            tokens_out=tokens_out,
-                            cost_usd=cost_usd,
-                            updated_at=now,
-                        )
-                    )
-                else:
-                    existing.tokens_in = existing.tokens_in + tokens_in
-                    existing.tokens_out = existing.tokens_out + tokens_out
-                    existing.cost_usd = existing.cost_usd + cost_usd
-                    existing.updated_at = now
-
+        stmt = (
+            update(record_cls)
+            .where(and_(id_col == id_value, record_cls.user_id == user_id))
+            .values(status=status.value, ended_at=now)
+        )
+        await session.execute(stmt)
         await session.commit()
 
 
@@ -248,24 +345,14 @@ async def mark_ended(
     status: SessionStatus,
 ) -> None:
     """Transition to a terminal status (completed / failed)."""
-    if status == SessionStatus.RUNNING or status == SessionStatus.ABANDONED:
-        raise ValueError(f"mark_ended requires a terminal status (completed/failed), got {status}")
-
-    now = datetime.now(timezone.utc)
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        stmt = (
-            update(SessionRecord)
-            .where(
-                and_(
-                    SessionRecord.session_id == session_id,
-                    SessionRecord.user_id == user_id,
-                )
-            )
-            .values(status=status.value, ended_at=now)
-        )
-        await session.execute(stmt)
-        await session.commit()
+    await _mark_ended_row(
+        record_cls=SessionRecord,
+        id_field="session_id",
+        id_value=session_id,
+        user_id=user_id,
+        status=status,
+        label="mark_ended",
+    )
 
 
 def get_effective_status_sql():
@@ -444,6 +531,104 @@ async def list_session_rows(
             limit=limit,
             offset=offset,
         )
+
+
+# Operation lifecycle functions -----------------------------------------------
+
+# In-process locks serializing writes per (operation_id, user_id). Pipelines
+# like cognify issue many LLM calls concurrently (asyncio.gather) within a
+# single operation scope; without this, each completion opens its own DB
+# session and they all race to write the same OperationRecord row, thrashing
+# SQLite's single-writer lock / Postgres row locks. Popped in
+# mark_operation_ended. (Background operations that finish successfully never
+# call mark_operation_ended today, so their lock entry outlives the request —
+# a small, bounded memory cost consistent with their row also living on
+# indefinitely until read-time abandonment.)
+_operation_write_locks: dict[tuple[str, UUIDType], asyncio.Lock] = {}
+
+
+def _get_operation_lock(operation_id: str, user_id: UUIDType) -> asyncio.Lock:
+    key = (operation_id, user_id)
+    lock = _operation_write_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _operation_write_locks[key] = lock
+    return lock
+
+
+async def ensure_and_touch_operation(
+    *,
+    operation_id: str,
+    user_id: UUIDType,
+    operation_type: str,
+    dataset_id: Optional[UUIDType] = None,
+) -> None:
+    """Upsert the operation row in one round trip.
+
+    Creates the row if absent (status=running). If present AND still
+    running, bumps ``last_activity_at``. Terminal operations are left
+    untouched. Mirrors ``ensure_and_touch_session``.
+    """
+    await _ensure_and_touch_row(
+        record_cls=OperationRecord,
+        id_field="operation_id",
+        id_value=operation_id,
+        user_id=user_id,
+        dataset_id=dataset_id,
+        extra_values={"operation_type": operation_type},
+    )
+
+
+async def accumulate_operation_usage(
+    *,
+    operation_id: str,
+    user_id: UUIDType,
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    cost_usd: float = 0.0,
+    model: Optional[str] = None,
+) -> None:
+    """Atomically add usage counters to the operation row + per-model row.
+
+    Only mutates operations in ``running`` state. Mirrors ``accumulate_usage``.
+    Serialized per-operation via ``_get_operation_lock`` since concurrent LLM
+    calls within one pipeline run would otherwise all write the same row at
+    once.
+    """
+    if tokens_in == 0 and tokens_out == 0 and cost_usd == 0.0 and model is None:
+        return
+
+    async with _get_operation_lock(operation_id, user_id):
+        await _accumulate_usage_row(
+            record_cls=OperationRecord,
+            model_usage_cls=OperationModelUsage,
+            id_field="operation_id",
+            id_value=operation_id,
+            user_id=user_id,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost_usd,
+            model=model,
+            touch_activity_on_model=True,
+        )
+
+
+async def mark_operation_ended(
+    *,
+    operation_id: str,
+    user_id: UUIDType,
+    status: SessionStatus,
+) -> None:
+    """Transition an operation to a terminal status (completed / failed)."""
+    await _mark_ended_row(
+        record_cls=OperationRecord,
+        id_field="operation_id",
+        id_value=operation_id,
+        user_id=user_id,
+        status=status,
+        label="mark_operation_ended",
+    )
+    _operation_write_locks.pop((operation_id, user_id), None)
 
 
 # Backward-compatibility shims ------------------------------------------------

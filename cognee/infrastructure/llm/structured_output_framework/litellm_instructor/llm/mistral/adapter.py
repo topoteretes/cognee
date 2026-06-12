@@ -108,6 +108,8 @@ class MistralAdapter(GenericAPIAdapter):
         --------
             - BaseModel: An instance of BaseModel containing the structured response.
         """
+        from cognee.modules.session_lifecycle.usage_tracking import capture_llm_usage
+
         try:
             messages = [
                 {
@@ -130,6 +132,7 @@ class MistralAdapter(GenericAPIAdapter):
                         response_model=response_model,
                         **merged_kwargs,
                     )
+                capture_llm_usage(response)
                 if (
                     response.choices
                     and response.choices[0].message is not None

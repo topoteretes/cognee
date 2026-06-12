@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, List, Optional, Union
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, status
 from fastapi.encoders import jsonable_encoder
@@ -220,26 +220,28 @@ def get_search_router() -> APIRouter:
         )
 
         from cognee.api.v1.search import search as cognee_search
+        from cognee.modules.session_lifecycle.usage_tracking import track_operation_usage
 
         try:
-            results = await cognee_search(
-                query_text=payload.query,
-                query_type=payload.search_type,
-                user=user,
-                datasets=payload.datasets
-                if not payload.dataset_ids
-                else None,  # If dataset_ids are provided, ignore datasets by name to avoid confusion and potential mismatches.
-                dataset_ids=payload.dataset_ids,
-                system_prompt=payload.system_prompt,
-                node_name=payload.node_name,
-                top_k=payload.top_k,
-                verbose=payload.verbose,
-                only_context=payload.only_context,
-                skills=payload.skills,
-                tools=payload.tools,
-                max_iter=payload.max_iter,
-                include_references=payload.include_references,
-            )
+            async with track_operation_usage(str(uuid4()), user.id, "search"):
+                results = await cognee_search(
+                    query_text=payload.query,
+                    query_type=payload.search_type,
+                    user=user,
+                    datasets=payload.datasets
+                    if not payload.dataset_ids
+                    else None,  # If dataset_ids are provided, ignore datasets by name to avoid confusion and potential mismatches.
+                    dataset_ids=payload.dataset_ids,
+                    system_prompt=payload.system_prompt,
+                    node_name=payload.node_name,
+                    top_k=payload.top_k,
+                    verbose=payload.verbose,
+                    only_context=payload.only_context,
+                    skills=payload.skills,
+                    tools=payload.tools,
+                    max_iter=payload.max_iter,
+                    include_references=payload.include_references,
+                )
 
             return jsonable_encoder(results)
         except PermissionDeniedError as e:

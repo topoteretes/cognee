@@ -300,6 +300,7 @@ def get_remember_router() -> APIRouter:
 
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService
+        from cognee.modules.session_lifecycle.usage_tracking import track_operation_usage
         from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
         # Validate graph_model before the generic try/except so failures
@@ -346,25 +347,37 @@ def get_remember_router() -> APIRouter:
                     }
                 }
 
-            result = await cognee_remember(
-                data,
-                dataset_name=datasetName,
-                session_id=session_id or None,
-                user=user,
-                dataset_id=datasetId if datasetId else None,
-                node_set=[tag for tag in (node_set or []) if tag] or None,
-                run_in_background=run_in_background or False,
-                custom_prompt=custom_prompt or None,
-                chunk_size=chunk_size,
-                chunks_per_batch=chunks_per_batch,
-                # Swagger UI submits every rendered form field, so an untouched
-                # content_type arrives as "" — treat it as omitted.
-                content_type=content_type or None,
-                skills_text=skills_text or None,
-                skill_name=skill_name or None,
-                **({"config": config_to_use} if config_to_use else {}),
-                **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
-            )
+            from uuid import uuid4
+
+            dataset_id_for_op = datasetId if datasetId else None
+            async with track_operation_usage(
+                str(uuid4()),
+                user.id,
+                "remember",
+                dataset_id=dataset_id_for_op,
+                background=run_in_background or False,
+            ) as operation_outcome:
+                result = await cognee_remember(
+                    data,
+                    dataset_name=datasetName,
+                    session_id=session_id or None,
+                    user=user,
+                    dataset_id=datasetId if datasetId else None,
+                    node_set=[tag for tag in (node_set or []) if tag] or None,
+                    run_in_background=run_in_background or False,
+                    custom_prompt=custom_prompt or None,
+                    chunk_size=chunk_size,
+                    chunks_per_batch=chunks_per_batch,
+                    # Swagger UI submits every rendered form field, so an untouched
+                    # content_type arrives as "" — treat it as omitted.
+                    content_type=content_type or None,
+                    skills_text=skills_text or None,
+                    skill_name=skill_name or None,
+                    **({"config": config_to_use} if config_to_use else {}),
+                    **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
+                )
+                if result.status == "errored":
+                    operation_outcome.mark_failed()
 
             # A blocking run that ended errored must not look like a success
             # to status-code-checking clients.

@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -99,16 +99,27 @@ def get_memify_router() -> APIRouter:
 
         try:
             from cognee.modules.memify import memify as cognee_memify
+            from cognee.modules.session_lifecycle.usage_tracking import track_operation_usage
 
-            memify_run = await cognee_memify(
-                extraction_tasks=payload.extraction_tasks,
-                enrichment_tasks=payload.enrichment_tasks,
-                data=payload.data,
-                dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
-                node_name=payload.node_name,
-                user=user,
-                run_in_background=payload.run_in_background,
-            )
+            dataset_id = payload.dataset_id if payload.dataset_id else None
+            async with track_operation_usage(
+                str(uuid4()),
+                user.id,
+                "memify",
+                dataset_id=dataset_id,
+                background=payload.run_in_background,
+            ) as operation_outcome:
+                memify_run = await cognee_memify(
+                    extraction_tasks=payload.extraction_tasks,
+                    enrichment_tasks=payload.enrichment_tasks,
+                    data=payload.data,
+                    dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
+                    node_name=payload.node_name,
+                    user=user,
+                    run_in_background=payload.run_in_background,
+                )
+                if isinstance(memify_run, PipelineRunErrored):
+                    operation_outcome.mark_failed()
 
             if isinstance(memify_run, PipelineRunErrored):
                 detail = getattr(memify_run, "error", None) or str(memify_run)
