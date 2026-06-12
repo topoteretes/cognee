@@ -6,6 +6,9 @@ from cognee.modules.retrieval.hybrid.results import first_display_value, payload
 
 MIN_FACT_WORD_COUNT = 3
 
+# Fixed template used for chunk->entity "contains" edges in expand_with_nodes_and_edges.
+CONTAINS_FACT_PREFIX = "Document chunk mentions "
+
 
 def connection_edge_type_id(edge: dict) -> Optional[str]:
     """Recompute the EdgeType vector row id for a graph connection edge.
@@ -47,8 +50,16 @@ def select_facts(edge_hits: list[Any], exclude_ids: set[str], facts_top_k: int) 
             continue
 
         used_ids.add(hit_id)
-        facts.append({"id": hit_id, "text": text})
+        facts.append({"id": hit_id, "text": _fact_display_text(text)})
     return facts
+
+
+def _fact_display_text(text: str) -> str:
+    """Contains-edge texts read awkwardly outside their chunk; render them as 'Name: description'."""
+    if not text.startswith(CONTAINS_FACT_PREFIX):
+        return text
+    stripped = text[len(CONTAINS_FACT_PREFIX) :]
+    return stripped[:1].upper() + stripped[1:]
 
 
 def format_facts(facts: list[dict]) -> str:

@@ -93,6 +93,15 @@ def test_select_facts_falls_back_to_relationship_name_payload():
     assert [fact["text"] for fact in facts] == ["Alice works at Acme."]
 
 
+def test_select_facts_rewrites_contains_edge_texts_as_glossary_entries():
+    hit = _hit("Document chunk mentions frostline: Project that tracks temperature risk.")
+
+    facts = select_facts([hit], set(), 5)
+
+    assert [fact["text"] for fact in facts] == ["Frostline: Project that tracks temperature risk."]
+    assert facts[0]["id"] == hit.id
+
+
 def test_select_facts_returns_empty_for_empty_hits_or_zero_top_k():
     assert select_facts([], set(), 5) == []
     assert select_facts([_hit("Alice works at Acme.")], set(), 0) == []

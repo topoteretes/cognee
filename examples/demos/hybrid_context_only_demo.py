@@ -85,6 +85,7 @@ def _print_retrieved_objects(retrieved_objects: dict) -> None:
     chunks = retrieved_objects.get("chunks", [])
     summaries = retrieved_objects.get("chunk_summaries", {})
     entities = retrieved_objects.get("entities", [])
+    facts = retrieved_objects.get("facts", [])
 
     print("\nRETRIEVED CHUNKS")
     if not chunks:
@@ -104,6 +105,12 @@ def _print_retrieved_objects(retrieved_objects: dict) -> None:
         print(f"  {index}. {entity.get('name') or entity.get('id')}")
         for edge in entity.get("edges", [])[:3]:
             print(f"     - {_short(edge.get('text'), limit=180)}")
+
+    print("\nRETRIEVED FACTS")
+    if not facts:
+        print("  [none]")
+    for index, fact in enumerate(facts, start=1):
+        print(f"  {index}. {_short(fact.get('text'), limit=180)}")
 
 
 async def _run_manual_hybrid_flow(query: str, skip_completion: bool) -> None:
