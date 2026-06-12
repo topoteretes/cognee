@@ -105,7 +105,10 @@ jobs:
       container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
       services:
         postgres:
-          image: pgvector/pgvector:pg17
+          image: ghcr.io/topoteretes/pgvector:pg17
+          credentials:
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
           env:
             POSTGRES_USER: cognee
             POSTGRES_PASSWORD: cognee
@@ -172,7 +175,10 @@ jobs:
           --health-timeout=5s
           --health-retries=5
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
