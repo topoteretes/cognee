@@ -55,33 +55,37 @@ async def recover_stale_cognify_runs_on_startup() -> None:
     """
     db_engine = get_relational_engine()
 
-    async with db_engine.get_async_session() as session:
-        latest_per_dataset = (
-            select(
-                PipelineRun,
-                func.row_number()
-                .over(
-                    partition_by=PipelineRun.dataset_id,
-                    order_by=PipelineRun.created_at.desc(),
+    try:
+        async with db_engine.get_async_session() as session:
+            latest_per_dataset = (
+                select(
+                    PipelineRun,
+                    func.row_number()
+                    .over(
+                        partition_by=PipelineRun.dataset_id,
+                        order_by=PipelineRun.created_at.desc(),
+                    )
+                    .label("rn"),
                 )
-                .label("rn"),
+                .where(PipelineRun.pipeline_name == "cognify_pipeline")
+                .subquery()
             )
-            .where(PipelineRun.pipeline_name == "cognify_pipeline")
-            .subquery()
-        )
 
-        latest_run = aliased(PipelineRun, latest_per_dataset)
-        recovery_candidates = (
-            (
-                await session.execute(
-                    select(latest_run)
-                    .where(latest_per_dataset.c.rn == 1)
-                    .where(latest_run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED)
+            latest_run = aliased(PipelineRun, latest_per_dataset)
+            recovery_candidates = (
+                (
+                    await session.execute(
+                        select(latest_run)
+                        .where(latest_per_dataset.c.rn == 1)
+                        .where(latest_run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED)
+                    )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
+    except Exception:
+        logger.error("Failed to recover latest cognify run which did not successfully finish.")
+        return
 
     for pipeline_run in recovery_candidates:
         if not _is_older_than_threshold(getattr(pipeline_run, "created_at", None)):
