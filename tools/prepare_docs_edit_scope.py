@@ -52,7 +52,9 @@ IGNORED_SOURCE_SUFFIXES = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare docs edit scope candidates")
     parser.add_argument("--repo", required=True, help="GitHub repository in owner/repo form")
-    parser.add_argument("--pr-number", required=True, type=int, help="Pull request number to inspect")
+    parser.add_argument(
+        "--pr-number", required=True, type=int, help="Pull request number to inspect"
+    )
     parser.add_argument("--docs-root", default="docs-repo", type=Path)
     parser.add_argument("--notes-json", required=True, type=Path)
     parser.add_argument("--assessment-json", required=True, type=Path)
@@ -81,8 +83,7 @@ def get_pr_changed_files(repo: str, pr_number: int) -> list[str]:
     changed_files: list[str] = []
     for page in range(1, 11):
         payload = github_api_json(
-            f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files"
-            f"?per_page=100&page={page}"
+            f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files?per_page=100&page={page}"
         )
         if not isinstance(payload, list):
             raise RuntimeError(f"Unexpected GitHub API response for PR #{pr_number} files.")
@@ -240,7 +241,9 @@ def build_scope_payload(
 ) -> dict[str, Any]:
     source_files_to_inspect = get_source_files_to_inspect(changed_files, notes, assessment)
     ignored_files = [
-        changed_file for changed_file in changed_files if changed_file not in source_files_to_inspect
+        changed_file
+        for changed_file in changed_files
+        if changed_file not in source_files_to_inspect
     ]
     return {
         "pr_number": pr_number,

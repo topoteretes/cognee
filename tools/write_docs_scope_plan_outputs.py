@@ -30,10 +30,7 @@ def parse_docs_needed(scope_plan: str) -> bool:
     if value == "false":
         return False
 
-    raise ValueError(
-        "Expected '## Docs Needed' to contain `true` or `false`, "
-        f"but got {value!r}."
-    )
+    raise ValueError(f"Expected '## Docs Needed' to contain `true` or `false`, but got {value!r}.")
 
 
 def main() -> None:
