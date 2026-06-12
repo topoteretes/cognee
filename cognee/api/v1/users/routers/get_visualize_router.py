@@ -68,7 +68,7 @@ def get_visualize_router() -> APIRouter:
             # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
             await set_database_global_context_variables(dataset[0].id, dataset[0].owner_id)
 
-            html_visualization = await visualize_graph()
+            html_visualization = await visualize_graph(datasets=[dataset[0].id], user=user)
             return HTMLResponse(html_visualization)
 
         except Exception as error:
