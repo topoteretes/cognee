@@ -169,6 +169,18 @@ async def run_benchmark(
 ) -> dict:
     import cognee
 
+    # Register community adapters before any engine is created. Comma-separated
+    # module names; a module-level register() is called if present (some
+    # adapters register on import alone).
+    import importlib
+
+    for module_name in filter(None, os.environ.get("COGNEE_REGISTER_ADAPTERS", "").split(",")):
+        module = importlib.import_module(module_name)
+        register = getattr(module, "register", None)
+        if callable(register):
+            register()
+        print(f"Registered adapter module: {module_name}")
+
     llm_model = config["llm_model"]
     llm_provider = config["llm_provider"]
     embedding_model = config["embedding_model"]
