@@ -115,6 +115,7 @@ async def get_search_type_retriever_instance(
                 "use_importance_weight": retriever_specific_config.get(
                     "use_importance_weight", True
                 ),
+                "facts_top_k": retriever_specific_config.get("facts_top_k", top_k),
             },
         ),
         SearchType.TRIPLET_COMPLETION: (

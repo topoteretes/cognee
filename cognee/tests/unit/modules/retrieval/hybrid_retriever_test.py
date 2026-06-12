@@ -5,6 +5,7 @@ from uuid import uuid4, uuid5
 import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.engine.utils import generate_edge_id
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
@@ -23,7 +24,9 @@ def _unified(vector=None, graph=None):
     return unified
 
 
-def _vector_search(chunks=None, entities=None, summaries=None, missing_collections=None):
+def _vector_search(
+    chunks=None, entities=None, summaries=None, edge_types=None, missing_collections=None
+):
     missing_collections = set(missing_collections or [])
 
     async def search(collection_name, *args, **kwargs):
@@ -35,6 +38,8 @@ def _vector_search(chunks=None, entities=None, summaries=None, missing_collectio
             return summaries or []
         if collection_name == "Entity_name":
             return entities or []
+        if collection_name == "EdgeType_relationship_name":
+            return edge_types or []
         return []
 
     return AsyncMock(side_effect=search)
@@ -676,7 +681,7 @@ async def test_independent_retrieval_channels_run_concurrently():
     ):
         retrieved = await asyncio.wait_for(retriever.get_retrieved_objects(query="q"), timeout=1)
 
-    assert retrieved == {"chunks": [], "chunk_summaries": {}, "entities": []}
+    assert retrieved == {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
 
 
 @pytest.mark.asyncio
@@ -912,7 +917,7 @@ async def test_missing_entity_collection_returns_empty_channel():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    assert retrieved == {"chunks": [], "chunk_summaries": {}, "entities": []}
+    assert retrieved == {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
 
 
 @pytest.mark.asyncio
@@ -1127,3 +1132,148 @@ def _payload_text(chunk):
     if isinstance(chunk, dict):
         return chunk.get("text")
     return chunk.payload.get("text")
+
+
+def _edge_hit(text):
+    return _result(str(generate_edge_id(text)), {"text": text})
+
+
+def _connection(source_name, relationship, target_name, edge_text=None):
+    edge = {"relationship_name": relationship}
+    if edge_text:
+        edge["edge_text"] = edge_text
+    return (
+        {"id": f"{source_name}-id", "name": source_name},
+        edge,
+        {"id": f"{target_name}-id", "name": target_name},
+    )
+
+
+def _graph(connections):
+    graph = MagicMock()
+    graph.is_empty = AsyncMock(return_value=False)
+    graph.get_connections = AsyncMock(return_value=connections)
+    return graph
+
+
+@pytest.mark.asyncio
+async def test_edge_hits_rank_entity_bullets_and_fill_facts_section():
+    ranked_bullet = "Alice works at Acme."
+    unranked_bullet = "Alice plays tennis."
+    fact = "Acme acquired Initech."
+    vector = MagicMock()
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
+        edge_types=[_edge_hit(fact), _edge_hit(ranked_bullet), _edge_hit("works at")],
+    )
+    graph = _graph(
+        [
+            _connection("Alice", "plays", "Tennis", edge_text=unranked_bullet),
+            _connection("Alice", "works_at", "Acme", edge_text=ranked_bullet),
+            _connection("Alice", "is_a", "Person"),
+        ]
+    )
+    retriever = HybridRetriever(facts_top_k=2)
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    bullets = [edge["text"] for edge in retrieved["entities"][0]["edges"]]
+    assert bullets == ["Alice -- is_a -- Person", ranked_bullet, unranked_bullet]
+    assert [item["text"] for item in retrieved["facts"]] == [fact]
+
+
+@pytest.mark.asyncio
+async def test_scoped_search_keeps_bullet_ranking_but_hides_facts():
+    ranked_bullet = "Alice works at Acme."
+    vector = MagicMock()
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
+        edge_types=[_edge_hit(ranked_bullet)],
+    )
+    graph = _graph(
+        [
+            _connection("Alice", "plays", "Tennis", edge_text="Alice plays tennis."),
+            _connection("Alice", "works_at", "Acme", edge_text=ranked_bullet),
+        ]
+    )
+    retriever = HybridRetriever(node_name=["KEN"])
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert retrieved["facts"] == []
+    assert _search_call(vector, "EdgeType_relationship_name").kwargs["node_name"] is None
+    bullets = [edge["text"] for edge in retrieved["entities"][0]["edges"]]
+    assert bullets == [ranked_bullet, "Alice plays tennis."]
+
+
+@pytest.mark.asyncio
+async def test_facts_top_k_zero_disables_facts_and_sizes_edge_search_for_ranking():
+    vector = MagicMock()
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
+        edge_types=[_edge_hit("Alice works at Acme.")],
+    )
+    graph = _graph([_connection("Alice", "works_at", "Acme", edge_text="Alice works at Acme.")])
+    retriever = HybridRetriever(entities_top_k=4, max_edges_per_entity=3, facts_top_k=0)
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert retrieved["facts"] == []
+    assert _search_call(vector, "EdgeType_relationship_name").kwargs["limit"] == 12
+    assert retrieved["entities"][0]["edges"][0]["text"] == "Alice works at Acme."
+
+
+@pytest.mark.asyncio
+async def test_missing_edge_collection_keeps_bullets_and_returns_no_facts():
+    vector = MagicMock()
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
+        missing_collections={"EdgeType_relationship_name"},
+    )
+    graph = _graph([_connection("Alice", "works_at", "Acme", edge_text="Alice works at Acme.")])
+    retriever = HybridRetriever()
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert retrieved["facts"] == []
+    assert retrieved["entities"][0]["edges"][0]["text"] == "Alice works at Acme."
+
+
+@pytest.mark.asyncio
+async def test_facts_section_renders_after_entities():
+    retriever = HybridRetriever()
+
+    context = await retriever.get_context_from_objects(
+        query="q",
+        retrieved_objects={
+            "chunks": [_result(payload={"text": "Passage"})],
+            "entities": [{"name": "Alice", "edges": [{"text": "Alice works at Acme."}]}],
+            "facts": [{"id": "fact-1", "text": "Acme acquired Initech."}],
+        },
+    )
+
+    assert context == (
+        "## Relevant passages\nPassage\n\n"
+        "## Relevant entities\n### Alice\n- Alice works at Acme.\n\n"
+        "## Related facts\n- Acme acquired Initech."
+    )

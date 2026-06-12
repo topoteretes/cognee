@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, Optional
 
+from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import (
     display_value,
     first_display_value,
@@ -9,7 +10,12 @@ from cognee.modules.retrieval.hybrid.results import (
 )
 
 
-async def build_entities(graph_engine: Any, entity_hits: list[Any], max_edges_per_entity: int):
+async def build_entities(
+    graph_engine: Any,
+    entity_hits: list[Any],
+    max_edges_per_entity: int,
+    edge_ranks: Optional[dict[str, int]] = None,
+):
     if not entity_hits:
         return []
 
@@ -21,7 +27,9 @@ async def build_entities(graph_engine: Any, entity_hits: list[Any], max_edges_pe
         *[graph_engine.get_connections(entity["id"]) for entity in entities]
     )
     for entity, connections in zip(entities, connections_by_entity):
-        entity["edges"] = _edge_bullets_from_connections(connections, max_edges_per_entity)
+        entity["edges"] = _edge_bullets_from_connections(
+            connections, max_edges_per_entity, edge_ranks or {}
+        )
     return entities
 
 
@@ -80,7 +88,9 @@ def _entity_type(result_payload: dict) -> Optional[str]:
     return None
 
 
-def _edge_bullets_from_connections(connections: list[Any], max_edges: int) -> list[dict]:
+def _edge_bullets_from_connections(
+    connections: list[Any], max_edges: int, edge_ranks: dict[str, int]
+) -> list[dict]:
     if max_edges <= 0:
         return []
 
@@ -108,8 +118,18 @@ def _edge_bullets_from_connections(connections: list[Any], max_edges: int) -> li
         else:
             seen_texts.add(bullet["text"])
         edges.append(bullet)
-    edges.sort(key=lambda edge: 0 if _is_type_edge(edge) else 1)
+    edges.sort(key=lambda edge: _edge_sort_key(edge, edge_ranks))
     return edges[:max_edges]
+
+
+def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
+    """Pinned type edges first, then query-ranked edges, then legacy graph order."""
+    if _is_type_edge(edge):
+        return (0, 0)
+    rank = edge_ranks.get(edge.get("edge_type_id"))
+    if rank is None:
+        return (2, 0)
+    return (1, rank)
 
 
 def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
@@ -138,6 +158,7 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
         "source_id": display_value(source.get("id")),
         "relationship": relationship,
         "target_id": display_value(target.get("id")),
+        "edge_type_id": connection_edge_type_id(edge),
     }
 
 
