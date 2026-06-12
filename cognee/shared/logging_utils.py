@@ -458,6 +458,10 @@ def setup_logging(log_level=None, name=None) -> bool:
         # Normal path - hand back to original hook
         sys.__excepthook__(exc_type, exc_value, tb)
 
+    # Install the exception handler so uncaught exceptions are logged
+    # through structlog before the default hook prints and exits.
+    sys.excepthook = handle_exception
+
     # Create console formatter for standard library logging
     console_formatter = structlog.stdlib.ProcessorFormatter(
         processor=structlog.dev.ConsoleRenderer(

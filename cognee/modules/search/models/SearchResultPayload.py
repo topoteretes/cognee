@@ -16,7 +16,9 @@ class SearchResultPayload(BaseModel):
 
     result_object: Any = None
     context: Optional[Union[str, List[str]]] = None
-    completion: Optional[Union[str, List[str], List[dict], BaseModel, List[BaseModel]]] = None
+    # NOTE: dict must precede BaseModel in the union so a plain dict validates
+    # as-is instead of being coerced into an empty bare BaseModel.
+    completion: Optional[Union[str, List[str], List[dict], dict, BaseModel, List[BaseModel]]] = None
 
     # TODO: Add return_type info
     search_type: SearchType
