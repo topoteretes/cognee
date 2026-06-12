@@ -217,9 +217,10 @@ async def test_hybrid_completion_get_retriever_output_smoke():
         return []
 
     vector.search = AsyncMock(side_effect=search)
+    vector.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2]])
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(return_value=[])
+    graph.get_neighborhood = AsyncMock(return_value=([], []))
     unified = MagicMock()
     unified.vector = vector
     unified.graph = graph

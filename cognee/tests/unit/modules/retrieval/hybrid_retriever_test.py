@@ -1,6 +1,6 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4, uuid5
+from uuid import UUID, uuid4, uuid5
 
 import pytest
 
@@ -8,6 +8,9 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.modules.engine.utils import generate_edge_id
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+
+
+QUERY_VECTOR = [0.1, 0.2, 0.3]
 
 
 def _result(result_id="result-id", payload=None):
@@ -20,6 +23,7 @@ def _result(result_id="result-id", payload=None):
 def _unified(vector=None, graph=None):
     unified = MagicMock()
     unified.vector = vector or MagicMock()
+    unified.vector.embedding_engine.embed_text = AsyncMock(return_value=[QUERY_VECTOR])
     unified.graph = graph or MagicMock()
     return unified
 
@@ -106,9 +110,7 @@ async def test_empty_graph_does_not_prevent_chunk_search():
         chunks=[_result("chunk-1", {"id": "chunk-1", "text": "Chunk text"})],
         entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})],
     )
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=True)
-    graph.get_connections = AsyncMock()
+    graph = _graph()
 
     retriever = HybridRetriever()
 
@@ -121,8 +123,10 @@ async def test_empty_graph_does_not_prevent_chunk_search():
 
     assert retrieved["chunks"][0].payload["text"] == "Chunk text"
     assert retrieved["entities"][0]["name"] == "Entity"
-    graph.get_connections.assert_not_awaited()
-    assert _search_call(vector, "DocumentChunk_text").args[:2] == ("DocumentChunk_text", "q")
+    assert retrieved["entities"][0]["edges"] == []
+    chunk_call = _search_call(vector, "DocumentChunk_text")
+    assert chunk_call.args[:2] == ("DocumentChunk_text", None)
+    assert chunk_call.kwargs["query_vector"] == QUERY_VECTOR
 
 
 @pytest.mark.asyncio
@@ -170,9 +174,47 @@ async def test_chunk_search_receives_nodeset_filters():
         await retriever.get_retrieved_objects(query="q")
 
     chunk_call = _search_call(vector, "DocumentChunk_text")
-    assert chunk_call.args[:2] == ("DocumentChunk_text", "q")
+    assert chunk_call.args[:2] == ("DocumentChunk_text", None)
+    assert chunk_call.kwargs["query_vector"] == QUERY_VECTOR
     assert chunk_call.kwargs["node_name"] == ["KEN"]
     assert chunk_call.kwargs["node_name_filter_operator"] == "AND"
+
+
+@pytest.mark.asyncio
+async def test_idless_bm25_chunk_adopts_vector_id_and_gets_paired_summary():
+    # Regression: BM25 payloads from some graph adapters used to lack "id"; the pair
+    # then kept chunk_id=None after the text-merge with the vector hit, so the summary
+    # could not be paired by source_chunk_id and the chunk rendered raw.
+    chunk_id = str(uuid4())
+    summary_id = str(uuid5(UUID(chunk_id), "TextSummary"))
+    bm25_retriever = MagicMock()
+    bm25_retriever.get_retrieved_objects = AsyncMock(
+        return_value=[({"text": "Shared chunk text"}, 2.0)]
+    )
+    vector = MagicMock()
+    vector.search = _vector_search(
+        chunks=[_result(chunk_id, {"id": chunk_id, "text": "Shared chunk text"})],
+        summaries=[
+            _result(summary_id, {"id": summary_id, "text": "Summary", "source_chunk_id": chunk_id})
+        ],
+    )
+    retriever = HybridRetriever(chunks_top_k=2)
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(vector=vector),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
+            return_value=bm25_retriever,
+        ),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == ["Shared chunk text"]
+    assert retrieved["chunk_summaries"] == {chunk_id: "Summary"}
 
 
 @pytest.mark.asyncio
@@ -696,8 +738,7 @@ async def test_independent_retrieval_channels_run_concurrently():
 async def test_entity_fields_fall_back_from_name_to_text_to_id(payload, expected_name):
     vector = MagicMock()
     vector.search = _vector_search(entities=[_result("fallback-id", payload)])
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=True)
+    graph = _graph()
     retriever = HybridRetriever()
 
     with patch(
@@ -748,8 +789,7 @@ async def test_entity_type_prefers_domain_type_over_index_schema():
             )
         ]
     )
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=True)
+    graph = _graph()
     retriever = HybridRetriever()
 
     with patch(
@@ -764,31 +804,20 @@ async def test_entity_type_prefers_domain_type_over_index_schema():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("edge", "expected_text"),
+    ("edge_properties", "expected_text"),
     [
-        ({"edge_text": "Direct text", "relationship_name": "REL"}, "Direct text"),
-        (
-            {"properties": {"edge_text": "Nested text"}, "relationship_name": "REL"},
-            "Nested text",
-        ),
-        ({"relationship_name": "REL"}, "Source -- REL -- Target"),
+        ({"edge_text": "Edge text"}, "Edge text"),
+        ({}, "Source -- REL -- Target"),
     ],
 )
-async def test_edge_text_fallbacks(edge, expected_text):
+async def test_edge_text_fallbacks(edge_properties, expected_text):
     vector = MagicMock()
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(
-        return_value=[
-            (
-                {"id": "source-1", "name": "Source"},
-                edge,
-                {"id": "target-1", "name": "Target"},
-            )
-        ]
+    graph = _graph(
+        nodes=[("entity-1", {"name": "Source"}), ("target-1", {"name": "Target"})],
+        edges=[("entity-1", "target-1", "REL", edge_properties)],
     )
     retriever = HybridRetriever()
 
@@ -808,14 +837,13 @@ async def test_duplicate_edges_are_removed_and_max_edges_caps_results():
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(
-        return_value=[
-            ({"id": "s1", "name": "S1"}, {"edge_text": "same"}, {"id": "t1", "name": "T1"}),
-            ({"id": "s2", "name": "S2"}, {"edge_text": "same"}, {"id": "t2", "name": "T2"}),
-            ({"id": "s3", "name": "S3"}, {"edge_text": "other"}, {"id": "t3", "name": "T3"}),
-        ]
+    graph = _graph(
+        nodes=[("entity-1", {"name": "Entity"}), ("t1", {"name": "T1"}), ("t2", {"name": "T2"})],
+        edges=[
+            ("entity-1", "t1", "", {"edge_text": "same"}),
+            ("entity-1", "t2", "", {"edge_text": "same"}),
+            ("entity-1", "t3", "", {"edge_text": "other"}),
+        ],
     )
     retriever = HybridRetriever(max_edges_per_entity=1)
 
@@ -835,26 +863,13 @@ async def test_same_edge_text_does_not_collapse_distinct_relationships():
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(
-        return_value=[
-            (
-                {"id": "s1", "name": "S1"},
-                {"edge_text": "related", "relationship_name": "REL"},
-                {"id": "t1", "name": "T1"},
-            ),
-            (
-                {"id": "s2", "name": "S2"},
-                {"edge_text": "related", "relationship_name": "REL"},
-                {"id": "t2", "name": "T2"},
-            ),
-            (
-                {"id": "s1", "name": "S1"},
-                {"edge_text": "related", "relationship_name": "REL"},
-                {"id": "t1", "name": "T1"},
-            ),
-        ]
+    graph = _graph(
+        nodes=[("entity-1", {"name": "Entity"}), ("t1", {"name": "T1"}), ("t2", {"name": "T2"})],
+        edges=[
+            ("entity-1", "t1", "REL", {"edge_text": "related"}),
+            ("entity-1", "t2", "REL", {"edge_text": "related"}),
+            ("entity-1", "t1", "REL", {"edge_text": "related"}),
+        ],
     )
     retriever = HybridRetriever(max_edges_per_entity=5)
 
@@ -865,7 +880,7 @@ async def test_same_edge_text_does_not_collapse_distinct_relationships():
     ):
         retrieved = await retriever.get_retrieved_objects(query="q")
 
-    assert [edge["source_id"] for edge in retrieved["entities"][0]["edges"]] == ["s1", "s2"]
+    assert [edge["target_id"] for edge in retrieved["entities"][0]["edges"]] == ["t1", "t2"]
 
 
 @pytest.mark.asyncio
@@ -874,21 +889,16 @@ async def test_is_a_edge_is_prioritized_before_edge_cap():
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(
-        return_value=[
-            (
-                {"id": "entity-1", "name": "Lisbon office"},
-                {"edge_text": "Lisbon office owns HarborLens", "relationship_name": "owns"},
-                {"id": "project-1", "name": "HarborLens"},
-            ),
-            (
-                {"id": "entity-1", "name": "Lisbon office"},
-                {"edge_text": "Lisbon office is a Office", "relationship_name": "is_a"},
-                {"id": "type-1", "name": "Office"},
-            ),
-        ]
+    graph = _graph(
+        nodes=[
+            ("entity-1", {"name": "Lisbon office"}),
+            ("project-1", {"name": "HarborLens"}),
+            ("type-1", {"name": "Office"}),
+        ],
+        edges=[
+            ("entity-1", "project-1", "owns", {"edge_text": "Lisbon office owns HarborLens"}),
+            ("entity-1", "type-1", "is_a", {"edge_text": "Lisbon office is a Office"}),
+        ],
     )
     retriever = HybridRetriever(max_edges_per_entity=1)
 
@@ -926,9 +936,7 @@ async def test_entity_search_receives_nodeset_filters_and_expands_connections():
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(return_value=[])
+    graph = _graph()
     retriever = HybridRetriever(node_name=["KEN"], node_name_filter_operator="AND")
 
     with patch(
@@ -939,25 +947,26 @@ async def test_entity_search_receives_nodeset_filters_and_expands_connections():
         await retriever.get_retrieved_objects(query="q")
 
     entity_call = _search_call(vector, "Entity_name")
-    assert entity_call.args[:2] == ("Entity_name", "q")
+    assert entity_call.args[:2] == ("Entity_name", None)
+    assert entity_call.kwargs["query_vector"] == QUERY_VECTOR
     assert entity_call.kwargs["node_name"] == ["KEN"]
     assert entity_call.kwargs["node_name_filter_operator"] == "AND"
-    graph.get_connections.assert_awaited_once_with("entity-1")
+    graph.get_neighborhood.assert_awaited_once_with(["entity-1"], depth=1)
 
 
 @pytest.mark.asyncio
-async def test_malformed_connection_rows_are_skipped_without_dropping_entity():
+async def test_malformed_neighborhood_rows_are_skipped_without_dropping_entity():
     vector = MagicMock()
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Entity"})]
     )
-    graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(
-        return_value=[
+    graph = _graph(
+        nodes=[("entity-1", {"name": "Source"}), "not-a-tuple"],
+        edges=[
             {"not": "a tuple"},
-            ({"id": "source", "name": "Source"}, {"relationship_name": "REL"}, {"id": "target"}),
-        ]
+            ("entity-1", "target-1"),
+            ("entity-1", "target-1", "REL"),
+        ],
     )
     retriever = HybridRetriever()
 
@@ -969,7 +978,7 @@ async def test_malformed_connection_rows_are_skipped_without_dropping_entity():
         retrieved = await retriever.get_retrieved_objects(query="q")
 
     assert retrieved["entities"][0]["name"] == "Entity"
-    assert retrieved["entities"][0]["edges"][0]["text"] == "Source -- REL -- target"
+    assert retrieved["entities"][0]["edges"][0]["text"] == "Source -- REL -- target-1"
 
 
 @pytest.mark.asyncio
@@ -1033,7 +1042,7 @@ async def test_global_context_is_prepended_when_enabled():
     assert context.startswith("## Global context\nWorld summary:\nRoot summary")
     assert "\n\n## Relevant passages\nChunk" in context
     get_unified.assert_awaited_once()
-    search_summaries.assert_awaited_once_with("q", 3, vector)
+    search_summaries.assert_awaited_once_with("q", 3, vector, query_vector=None)
 
 
 @pytest.mark.asyncio
@@ -1138,21 +1147,9 @@ def _edge_hit(text):
     return _result(str(generate_edge_id(text)), {"text": text})
 
 
-def _connection(source_name, relationship, target_name, edge_text=None):
-    edge = {"relationship_name": relationship}
-    if edge_text:
-        edge["edge_text"] = edge_text
-    return (
-        {"id": f"{source_name}-id", "name": source_name},
-        edge,
-        {"id": f"{target_name}-id", "name": target_name},
-    )
-
-
-def _graph(connections):
+def _graph(nodes=None, edges=None):
     graph = MagicMock()
-    graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(return_value=connections)
+    graph.get_neighborhood = AsyncMock(return_value=(nodes or [], edges or []))
     return graph
 
 
@@ -1167,11 +1164,17 @@ async def test_edge_hits_rank_entity_bullets_and_fill_facts_section():
         edge_types=[_edge_hit(fact), _edge_hit(ranked_bullet), _edge_hit("works at")],
     )
     graph = _graph(
-        [
-            _connection("Alice", "plays", "Tennis", edge_text=unranked_bullet),
-            _connection("Alice", "works_at", "Acme", edge_text=ranked_bullet),
-            _connection("Alice", "is_a", "Person"),
-        ]
+        nodes=[
+            ("entity-1", {"name": "Alice"}),
+            ("tennis-id", {"name": "Tennis"}),
+            ("acme-id", {"name": "Acme"}),
+            ("person-id", {"name": "Person"}),
+        ],
+        edges=[
+            ("entity-1", "tennis-id", "plays", {"edge_text": unranked_bullet}),
+            ("entity-1", "acme-id", "works_at", {"edge_text": ranked_bullet}),
+            ("entity-1", "person-id", "is_a", {}),
+        ],
     )
     retriever = HybridRetriever(facts_top_k=2)
 
@@ -1188,6 +1191,33 @@ async def test_edge_hits_rank_entity_bullets_and_fill_facts_section():
 
 
 @pytest.mark.asyncio
+async def test_edge_between_two_retrieved_entities_appears_under_both():
+    vector = MagicMock()
+    vector.search = _vector_search(
+        entities=[
+            _result("alice-id", {"id": "alice-id", "name": "Alice"}),
+            _result("acme-id", {"id": "acme-id", "name": "Acme"}),
+        ]
+    )
+    graph = _graph(
+        nodes=[("alice-id", {"name": "Alice"}), ("acme-id", {"name": "Acme"})],
+        edges=[("alice-id", "acme-id", "works_at", {"edge_text": "Alice works at Acme."})],
+    )
+    retriever = HybridRetriever()
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    bullet_texts = [[edge["text"] for edge in entity["edges"]] for entity in retrieved["entities"]]
+    assert bullet_texts == [["Alice works at Acme."], ["Alice works at Acme."]]
+    graph.get_neighborhood.assert_awaited_once_with(["alice-id", "acme-id"], depth=1)
+
+
+@pytest.mark.asyncio
 async def test_scoped_search_keeps_bullet_ranking_but_hides_facts():
     ranked_bullet = "Alice works at Acme."
     vector = MagicMock()
@@ -1196,10 +1226,15 @@ async def test_scoped_search_keeps_bullet_ranking_but_hides_facts():
         edge_types=[_edge_hit(ranked_bullet)],
     )
     graph = _graph(
-        [
-            _connection("Alice", "plays", "Tennis", edge_text="Alice plays tennis."),
-            _connection("Alice", "works_at", "Acme", edge_text=ranked_bullet),
-        ]
+        nodes=[
+            ("entity-1", {"name": "Alice"}),
+            ("tennis-id", {"name": "Tennis"}),
+            ("acme-id", {"name": "Acme"}),
+        ],
+        edges=[
+            ("entity-1", "tennis-id", "plays", {"edge_text": "Alice plays tennis."}),
+            ("entity-1", "acme-id", "works_at", {"edge_text": ranked_bullet}),
+        ],
     )
     retriever = HybridRetriever(node_name=["KEN"])
 
@@ -1223,7 +1258,10 @@ async def test_facts_top_k_zero_disables_facts_and_sizes_edge_search_for_ranking
         entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
         edge_types=[_edge_hit("Alice works at Acme.")],
     )
-    graph = _graph([_connection("Alice", "works_at", "Acme", edge_text="Alice works at Acme.")])
+    graph = _graph(
+        nodes=[("entity-1", {"name": "Alice"}), ("acme-id", {"name": "Acme"})],
+        edges=[("entity-1", "acme-id", "works_at", {"edge_text": "Alice works at Acme."})],
+    )
     retriever = HybridRetriever(entities_top_k=4, max_edges_per_entity=3, facts_top_k=0)
 
     with patch(
@@ -1245,7 +1283,10 @@ async def test_missing_edge_collection_keeps_bullets_and_returns_no_facts():
         entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
         missing_collections={"EdgeType_relationship_name"},
     )
-    graph = _graph([_connection("Alice", "works_at", "Acme", edge_text="Alice works at Acme.")])
+    graph = _graph(
+        nodes=[("entity-1", {"name": "Alice"}), ("acme-id", {"name": "Acme"})],
+        edges=[("entity-1", "acme-id", "works_at", {"edge_text": "Alice works at Acme."})],
+    )
     retriever = HybridRetriever()
 
     with patch(
