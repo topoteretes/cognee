@@ -9,6 +9,8 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
@@ -63,6 +65,8 @@ async def run_tasks(
     data_per_batch: int = 20,
     extras: Optional[dict] = None,
     rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -85,7 +89,12 @@ async def run_tasks(
 
     # Note: Setting of global context has to be done after yielding PipelineRunStarted due to running in
     #       background mode requiring the pipeline run started yield.
-    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+    async with set_database_global_context_variables(
+        dataset.id,
+        dataset.owner_id,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
+    ):
         try:
             if not isinstance(data, list):
                 data = [data]

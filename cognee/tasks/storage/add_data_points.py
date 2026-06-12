@@ -5,6 +5,7 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+from cognee.infrastructure.databases.relational import get_async_session
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
@@ -91,31 +92,39 @@ async def add_data_points(
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
     if user and dataset and data_item:
-        await upsert_nodes(
-            nodes,
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            dataset_id=dataset.id,
-            data_id=data_item.id,
-            pipeline_run_id=pipeline_run_id,
-        )
-        await upsert_edges(
-            edges,
-            tenant_id=user.tenant_id,
-            user_id=user.id,
-            dataset_id=dataset.id,
-            data_id=data_item.id,
-            pipeline_run_id=pipeline_run_id,
-        )
-        if custom_edges:
-            await upsert_edges(
-                custom_edges,
+        # Single session for all upserts: one transaction, one commit. The
+        # rollback ledger is written BEFORE the graph/vector writes so a
+        # failed write can always be swept by the rollback handler.
+        async with get_async_session() as session:
+            await upsert_nodes(
+                nodes,
                 tenant_id=user.tenant_id,
                 user_id=user.id,
                 dataset_id=dataset.id,
                 data_id=data_item.id,
+                session=session,
                 pipeline_run_id=pipeline_run_id,
             )
+            await upsert_edges(
+                edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data_item.id,
+                session=session,
+                pipeline_run_id=pipeline_run_id,
+            )
+            if custom_edges:
+                await upsert_edges(
+                    custom_edges,
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    dataset_id=dataset.id,
+                    data_id=data_item.id,
+                    session=session,
+                    pipeline_run_id=pipeline_run_id,
+                )
+            await session.commit()
 
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)

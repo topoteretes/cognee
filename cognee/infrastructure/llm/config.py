@@ -276,3 +276,17 @@ def get_llm_config() -> LLMConfig:
           LLM.
     """
     return LLMConfig()
+
+
+def get_llm_context_config() -> LLMConfig:
+    """Get the appropriate LLM config based on the current async context.
+
+    Mirrors the graph/vector context-config pattern: if an ``LLMConfig`` has been
+    set on the ``llm_config`` ContextVar (via
+    ``set_database_global_context_variables``), return it so that different async
+    tasks, threads and processes can use different LLM configurations. Otherwise
+    fall back to the cached global config.
+    """
+    from cognee.context_global_variables import llm_config
+
+    return llm_config.get() or get_llm_config()

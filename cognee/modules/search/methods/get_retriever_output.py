@@ -36,7 +36,7 @@ async def get_retriever_output(
         span.set_attribute("cognee.retrieval.retriever", retriever_class)
         span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
         retrieved_objects = await retriever_instance.get_retrieved_objects(query=query_text)
-        obj_count = len(retrieved_objects) if isinstance(retrieved_objects, list) else 1
+        obj_count = _count_retrieved_objects(retrieved_objects)
         span.set_attribute(COGNEE_RESULT_COUNT, obj_count)
         span.set_attribute(
             COGNEE_RESULT_SUMMARY,
@@ -89,3 +89,18 @@ async def get_retriever_output(
     )
 
     return search_result
+
+
+def _count_retrieved_objects(retrieved_objects) -> int:
+    if retrieved_objects is None:
+        return 0
+    if isinstance(retrieved_objects, list):
+        return len(retrieved_objects)
+    if isinstance(retrieved_objects, dict):
+        list_counts = [
+            len(value) for value in retrieved_objects.values() if isinstance(value, list)
+        ]
+        if list_counts:
+            return sum(list_counts)
+        return 1
+    return 1

@@ -15,6 +15,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
 from distributed.utils import override_distributed
 from distributed.tasks.queued_add_data_points import queued_add_data_points
@@ -32,6 +33,10 @@ from .serialize_data import serialize_data
 logger = get_logger("PGVectorAdapter")
 QUERY_BATCH_SIZE = 1000
 
+# Default pool sizing for per-dataset PGVector engines when ENABLE_BACKEND_ACCESS_CONTROL=True.
+# Much smaller than the relational default (20+20) to limit connection fan-out across datasets.
+_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 2}
+
 
 class IndexSchema(DataPoint):
     """
@@ -43,6 +48,15 @@ class IndexSchema(DataPoint):
     """
 
     text: str
+
+    # Optional reference scalars carried for the search "Evidence" feature.
+    # They stay None for non-chunk data points, so this schema remains
+    # compatible with every indexed DataPoint type.
+    document_id: Optional[str] = None
+    document_name: Optional[str] = None
+    chunk_index: Optional[int] = None
+    source_chunk_id: Optional[str] = None
+    importance_weight: Optional[float] = 0.5
 
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: List[str] = []
@@ -66,31 +80,49 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.VECTOR_DB_LOCK = asyncio.Lock()
         self._write_locks: dict[str, asyncio.Lock] = {}
         self._metadata = MetaData()
+        # True when this adapter created its own engine and must dispose it on close().
+        # False when the engine is borrowed from the relational adapter.
+        self._owns_engine: bool = False
 
         relational_db = get_relational_engine()
         relational_config = get_relational_config()
+        vector_config = get_vectordb_config()
+
+        # Resolve effective pool_args for any new PGVector engine we create:
+        # 1. Explicit VECTOR_POOL_ARGS always wins.
+        # 2. When access control is on, each dataset gets its own engine — use a small default
+        #    to avoid connection fan-out (N datasets × pool_size).
+        # 3. Otherwise inherit the relational pool config.
+        if vector_config.vector_pool_args is not None:
+            effective_pool_args = dict(vector_config.vector_pool_args)
+        elif backend_access_control_enabled():
+            effective_pool_args = _ACCESS_CONTROL_DEFAULT_POOL_ARGS
+        else:
+            effective_pool_args = (
+                dict(relational_config.pool_args) if relational_config.pool_args else {}
+            )
 
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
         db_name2 = make_url(self.db_uri).database
         if backend_access_control_enabled() and (db_name1 != db_name2):
             # If backend access control create new instances of engine and sessionmaker
-            # To make sure we use the same pool_args as for the relational database, we create the engine via the SQLAlchemy constructor
             super().__init__(
                 connection_string=self.db_uri,
-                pool_args=dict(relational_config.pool_args) if relational_config.pool_args else {},
+                pool_args=effective_pool_args,
             )
+            self._owns_engine = True
         elif relational_db.engine.dialect.name == "postgresql":
             # If postgreSQL is used and not backend access control we must use the same engine and sessionmaker
             self.engine = relational_db.engine
             self.sessionmaker = relational_db.sessionmaker
         else:
             # If not postgreSQL and not backend access control create new instances of engine and sessionmaker
-            # To make sure we use the same pool_args as for the relational database, we create the engine via the SQLAlchemy constructor
             super().__init__(
                 connection_string=self.db_uri,
-                pool_args=dict(relational_config.pool_args) if relational_config.pool_args else {},
+                pool_args=effective_pool_args,
             )
+            self._owns_engine = True
 
         # Has to be imported at class level
         # Functions reading tables from database need to know what a Vector column type is
@@ -103,6 +135,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         Reset SQLAlchemy metadata reflection cache for this adapter instance.
         """
         self._metadata = MetaData()
+
+    async def close(self) -> None:
+        """
+        Release connection-pool resources held by this adapter.
+
+        Only disposes the engine when this adapter owns it. When the engine is
+        borrowed from the relational adapter (shared-engine mode), disposal is
+        left to the relational adapter so the pool is not torn down while the
+        relational layer is still using it.
+
+        Called automatically by ``closing_lru_cache`` when this adapter is
+        evicted from ``_create_vector_engine``'s cache.
+        """
+        if self._owns_engine:
+            await self.engine.dispose(close=True)
 
     def _get_write_lock(self, collection_name: str) -> asyncio.Lock:
         if collection_name not in self._write_locks:
@@ -334,6 +381,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 IndexSchema(
                     id=data_point.id,
                     text=DataPoint.get_embeddable_data(data_point),
+                    # Reference scalars for search "Evidence". Pulled via getattr
+                    # so non-chunk data points (which lack these fields) simply
+                    # fall back to None instead of raising.
+                    document_id=getattr(data_point, "document_id", None),
+                    document_name=getattr(data_point, "document_name", None),
+                    chunk_index=getattr(data_point, "chunk_index", None),
+                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
+                    importance_weight=getattr(data_point, "importance_weight", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points

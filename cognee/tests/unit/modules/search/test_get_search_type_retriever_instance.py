@@ -1,7 +1,11 @@
+import importlib
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.types import SearchType
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     DecompositionMode,
@@ -136,14 +140,140 @@ async def test_chunks_retriever_receives_nodeset_filter_arguments():
 
 
 @pytest.mark.asyncio
-async def test_chunks_lexical_returns_jaccard_tools():
+async def test_hybrid_completion_retriever_receives_config():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
-    from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+        session_id="session-1",
+        retriever_specific_config={
+            "chunks_top_k": 7,
+            "entities_top_k": 8,
+            "max_edges_per_entity": 3,
+            "include_global_context_index": True,
+            "global_context_index_top_k": 2,
+            "text_summaries_top_k": 0,
+            "use_importance_weight": False,
+        },
+    )
+
+    assert isinstance(retriever_instance, HybridRetriever)
+    assert retriever_instance.chunks_top_k == 7
+    assert retriever_instance.entities_top_k == 8
+    assert retriever_instance.max_edges_per_entity == 3
+    assert retriever_instance.node_name == ["KEN", "src_type:figure"]
+    assert retriever_instance.node_name_filter_operator == "AND"
+    assert retriever_instance.session_id == "session-1"
+    assert retriever_instance.include_global_context_index is True
+    assert retriever_instance.global_context_index_top_k == 2
+    assert retriever_instance.text_summaries_top_k == 0
+    assert retriever_instance.use_importance_weight is False
+
+
+@pytest.mark.asyncio
+async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        top_k=11,
+    )
+
+    assert isinstance(retriever_instance, HybridRetriever)
+    assert retriever_instance.chunks_top_k == 11
+    assert retriever_instance.entities_top_k == 11
+    assert retriever_instance.text_summaries_top_k is None
+    assert retriever_instance.use_importance_weight is True
+
+
+@pytest.mark.asyncio
+async def test_hybrid_completion_get_retriever_output_smoke():
+    retriever_output_module = importlib.import_module(
+        "cognee.modules.search.methods.get_retriever_output"
+    )
+
+    chunk = MagicMock()
+    chunk.id = "chunk-result"
+    chunk.payload = {"id": "chunk-1", "text": "Chunk context"}
+    entity = MagicMock()
+    entity.id = "entity-result"
+    entity.payload = {"id": "entity-1", "name": "Entity"}
+
+    vector = MagicMock()
+
+    async def search(collection_name, *args, **kwargs):
+        if collection_name == "DocumentChunk_text":
+            return [chunk]
+        if collection_name == "Entity_name":
+            return [entity]
+        return []
+
+    vector.search = AsyncMock(side_effect=search)
+    graph = MagicMock()
+    graph.is_empty = AsyncMock(return_value=False)
+    graph.get_connections = AsyncMock(return_value=[])
+    unified = MagicMock()
+    unified.vector = vector
+    unified.graph = graph
+    bm25_retriever = MagicMock()
+    bm25_retriever.get_retrieved_objects = AsyncMock(return_value=[])
+
+    with (
+        patch.object(
+            retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=graph,
+        ),
+        patch.object(
+            retriever_output_module,
+            "update_node_access_timestamps",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=unified,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
+            return_value=bm25_retriever,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.generate_completion",
+            new_callable=AsyncMock,
+            return_value="answer",
+        ),
+    ):
+        payload = await retriever_output_module.get_retriever_output(
+            SearchType.HYBRID_COMPLETION, "q"
+        )
+
+    assert payload.search_type is SearchType.HYBRID_COMPLETION
+    assert payload.result_object["chunks"] == [chunk]
+    assert payload.result_object["entities"][0]["id"] == "entity-1"
+    assert (
+        payload.context == "## Relevant passages\nChunk context\n\n## Relevant entities\n### Entity"
+    )
+    assert payload.completion == ["answer"]
+    assert retriever_output_module._count_retrieved_objects(payload.result_object) == 2
+
+
+@pytest.mark.asyncio
+async def test_chunks_lexical_returns_bm25_retriever():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 
     retriever_instance = await mod.get_search_type_retriever_instance(
         SearchType.CHUNKS_LEXICAL, query_text="q", top_k=3
     )
-    assert isinstance(retriever_instance, JaccardChunksRetriever)
+    assert isinstance(retriever_instance, BM25ChunksRetriever)
+    assert retriever_instance.top_k == 3
 
 
 @pytest.mark.asyncio
