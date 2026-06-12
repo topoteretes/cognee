@@ -10,6 +10,7 @@ from cognee.modules.graph.models import Node, Edge
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.retrieval.utils import lexical_corpus_cache
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("delete_from_graph_and_vector")
@@ -173,3 +174,5 @@ async def delete_from_graph_and_vector(
     await mark_ledger_nodes_as_deleted([node.slug for node in non_legacy_nodes])
     if non_legacy_edges:
         await mark_ledger_edges_as_deleted([edge.relationship_name for edge in non_legacy_edges])
+
+    lexical_corpus_cache.invalidate()

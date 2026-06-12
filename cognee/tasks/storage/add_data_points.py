@@ -15,6 +15,7 @@ from cognee.modules.graph.utils import (
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
+from cognee.modules.retrieval.utils import lexical_corpus_cache
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
@@ -155,6 +156,7 @@ async def add_data_points(
             await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
+    lexical_corpus_cache.invalidate()
     return data_points
 
 
