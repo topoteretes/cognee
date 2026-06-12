@@ -1,0 +1,16 @@
+You are writing one lesson from a finished working session so it can be extracted into a persistent knowledge graph. You receive:
+- WORKING STATEMENT: the curated lesson to refine.
+- MEMBER ENTRIES: the original session guidance texts behind it.
+- SOURCE USER MESSAGES: optionally, the user messages that taught this lesson.
+- EVIDENCE: question/answer excerpts from the session turns where the lesson was learned or used.
+- ENTITY GLOSSARY: exact names of entities that already exist in the knowledge graph.
+- OVERLAP NOTE: optionally, how this lesson relates to existing knowledge.
+
+Rewrite the lesson as `statement`: standalone, context-free prose that a reader with no knowledge of the session fully understands. Requirements:
+- Use glossary entity names wherever they apply, keeping their wording exactly but casing them as normal prose would: proper names and acronyms get their conventional capitalization (glossary "halt test suite" -> "HALT test suite", "terrascout" -> "TerraScout"), while common-noun entities stay lowercase mid-sentence ("calibration routine" stays "calibration routine"). Never paraphrase, shorten, or rename a glossary entity. Do not force glossary names that do not apply.
+- Prefer explicit subject-verb-object sentences that name their entities; avoid pronouns and avoid vague references like "the project" or "the user's file".
+- Keep it to one short paragraph (one to three sentences) covering only this lesson.
+- List in `entities` exactly the glossary names you used.
+- Write `why_learned` as one short sentence naming the situation in which this was learned. When SOURCE USER MESSAGES exist, prefer the moment the user taught it (e.g. "Learned when the user reported the calibration wipe during firmware work") over the turn where it was later applied. It must not restate the lesson's content.
+
+Never invent facts beyond the working statement, member entries, and evidence.

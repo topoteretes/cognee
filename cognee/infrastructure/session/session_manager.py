@@ -17,6 +17,10 @@ from cognee.infrastructure.session.feedback_models import (
     AgentTraceFeedbackSummary,
     SessionTurnAnalysis,
 )
+from cognee.infrastructure.session.session_embeddings import (
+    embed_text_safe,
+    select_hybrid_qa_entries,
+)
 from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.modules.observability import (
     COGNEE_DATA_SIZE_BYTES,
@@ -200,6 +204,7 @@ class SessionManager:
             )
 
             qa_id = str(uuid.uuid4())
+            embedding = await embed_text_safe(f"{question or ''}\n{answer or ''}")
             await self._cache.create_qa_entry(
                 user_id=user_id,
                 session_id=session_id,
@@ -211,6 +216,7 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 used_session_context_ids=used_session_context_ids,
+                embedding=embedding,
             )
             await _record_session_activity(user_id, session_id)
             return qa_id
@@ -336,8 +342,38 @@ class SessionManager:
         cache_config = CacheConfig()
         return bool(cache_config.caching)
 
-    async def _get_formatted_history(self, user_id: str, session_id: str) -> str:
-        """Load session and return formatted conversation history string."""
+    async def _get_formatted_history(
+        self,
+        user_id: str,
+        session_id: str,
+        query_embedding: list[float] | None = None,
+    ) -> str:
+        """Load session history and return it as a formatted conversation string.
+
+        With a query embedding, history is the union of the last N turns and the most
+        semantically relevant older turns, in chronological order. Without one (or on
+        any failure), this is exactly the plain last-N recency window.
+        """
+        if query_embedding is not None:
+            try:
+                entries = await self.get_session(
+                    user_id=user_id,
+                    session_id=session_id,
+                    formatted=False,
+                )
+                if isinstance(entries, list):
+                    selected = select_hybrid_qa_entries(
+                        entries,
+                        query_embedding,
+                        last_n=self.session_history_last_n,
+                    )
+                    return self.format_entries(
+                        [self._coerce_last_qa_entry(entry) for entry in selected],
+                        include_context=False,
+                    )
+            except Exception as error:
+                logger.warning("SessionManager: hybrid history failed open: %s", error)
+
         history: str | list = await self.get_session(
             user_id=user_id,
             session_id=session_id,
@@ -582,7 +618,11 @@ class SessionManager:
             or (effective_query or "").strip()
             or query
         )
-        conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
+        # One embedding per turn, shared by hybrid history retrieval and context ranking.
+        query_embedding = await embed_text_safe(answer_query)
+        conversation_history = await self._get_formatted_history(
+            str(user_id), resolved_session_id, query_embedding=query_embedding
+        )
 
         cache_config = CacheConfig()
         session_context_on = cache_config.caching and cache_config.auto_feedback
@@ -594,6 +634,7 @@ class SessionManager:
                 user_id=str(user_id),
                 session_id=resolved_session_id,
                 query=answer_query,
+                query_embedding=query_embedding,
             )
 
         # Prepend graph knowledge snapshot (from improve() sync) if available
@@ -651,6 +692,7 @@ class SessionManager:
         user_id: str,
         session_id: str,
         query: str,
+        query_embedding: list[float] | None = None,
     ) -> tuple[str, list[str]]:
         """Render the active session-context guidance block. Fail-open -> ("", [])."""
         try:
@@ -663,6 +705,7 @@ class SessionManager:
                 user_id=user_id,
                 session_id=session_id,
                 query=query,
+                query_embedding=query_embedding,
             )
         except Exception as e:
             logger.warning("SessionManager: build_active_context_block failed: %s", e)
