@@ -1280,20 +1280,27 @@ var isDragging=false,dragNode=null,isPanning=false;
 // doing so unpinned the clicked node and let repulsion push it off into
 // space (the layout anchors are much weaker than the charge force).
 var dragStarted=false;
-var DRAG_THRESHOLD=3;
+// 6px: trackpad clicks routinely jitter 3-5px, and treating that as a
+// drag reheated the simulation — a plain click sent the dot (and, in
+// Force mode, the whole layout) flying.
+var DRAG_THRESHOLD=6;
 var lastMx=0,lastMy=0,downMx=0,downMy=0;
 
 function releaseDragNode(){
   if(!dragNode)return;
   if(layoutMode==="story"){
     // Story pins every node into its lane; snap the dragged node back so
-    // interaction can never degrade the deterministic grid.
-    dragNode.fx=(typeof dragNode._targetX==="number")?dragNode._targetX:null;
-    dragNode.fy=(typeof dragNode._targetY==="number")?dragNode._targetY:null;
+    // interaction can never degrade the deterministic grid. The sim is
+    // not running in story drags, so restore x/y directly too.
+    if(typeof dragNode._targetX==="number"){dragNode.fx=dragNode._targetX;dragNode.x=dragNode._targetX}
+    else{dragNode.fx=null}
+    if(typeof dragNode._targetY==="number"){dragNode.fy=dragNode._targetY;dragNode.y=dragNode._targetY}
+    else{dragNode.fy=null}
+    if(dragStarted){rebuildQuadtree();draw()}
   }else{
     dragNode.fx=null;dragNode.fy=null;
+    if(dragStarted)simulation.alphaTarget(0);
   }
-  if(dragStarted)simulation.alphaTarget(0);
 }
 
 canvas.addEventListener("mousedown",function(ev){
@@ -1316,10 +1323,18 @@ canvas.addEventListener("mousemove",function(ev){
       var dx=mx-downMx,dy=my-downMy;
       if(dx*dx+dy*dy<DRAG_THRESHOLD*DRAG_THRESHOLD){lastMx=mx;lastMy=my;return}
       dragStarted=true;
-      simulation.alphaTarget(0.3).restart();
+      // Story is a fully pinned grid — reheating the simulation only
+      // agitates it (and a hot sim is what made clicked dots shoot off).
+      // Drive the node directly instead; other layouts use the standard
+      // d3 drag reheat so neighbors respond to the drag.
+      if(layoutMode!=="story")simulation.alphaTarget(0.3).restart();
     }
     var w=screenToWorld(mx,my);
     dragNode.fx=w.x;dragNode.fy=w.y;
+    if(layoutMode==="story"){
+      dragNode.x=w.x;dragNode.y=w.y;
+      draw();
+    }
   }else if(isPanning){
     tx+=mx-lastMx;ty+=my-lastMy;
     draw();
@@ -1566,6 +1581,20 @@ function drawRankColumns(vp,_light){
       ctx.lineWidth=1/scale;
       ctx.stroke();
     }
+  });
+  ctx.restore();
+}
+
+// Stage label pills are drawn in a SEPARATE pass at the END of draw() —
+// after edges, nodes and node labels — so a dense graph panned toward
+// the top of the viewport can never paint over them.
+function drawRankColumnLabels(vp,_light){
+  if((layoutMode!=="ranked"&&layoutMode!=="story")||rankColumns.length<2)return;
+  ctx.save();
+  var topY=vp.y1+TOP_CHROME_PAD/scale;
+  rankColumns.forEach(function(column){
+    var half=rankColumnGap/2;
+    if(column.x+half<vp.x1||column.x-half>vp.x2)return;
 
     if(scale>0.12){
       // Pill-style stage header drawn below the tab bar
@@ -2005,6 +2034,9 @@ function draw(){
       ctx.fillText(label2,hn.x,hn.y+yOff2);
     }
   }
+
+  // Stage label pills last — always readable above the node mass.
+  drawRankColumnLabels(vp,_light);
 
   ctx.restore();
 
