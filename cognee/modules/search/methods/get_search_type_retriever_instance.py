@@ -111,6 +111,10 @@ async def get_search_type_retriever_instance(
                 "global_context_index_top_k": retriever_specific_config.get(
                     "global_context_index_top_k", 3
                 ),
+                "text_summaries_top_k": retriever_specific_config.get("text_summaries_top_k"),
+                "use_importance_weight": retriever_specific_config.get(
+                    "use_importance_weight", True
+                ),
             },
         ),
         SearchType.TRIPLET_COMPLETION: (
