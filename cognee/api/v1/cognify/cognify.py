@@ -39,17 +39,25 @@ from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_
 logger = get_logger("cognify")
 
 
-async def _ensure_migrations_run() -> None:
+async def _ensure_migrations_run(datasets, user) -> None:
     """Run startup migrations on the first local cognify in this process.
 
     The full set (relational schema + graph/vector revision chains), The once-per-process guard
     (flag, lock, bootstrap fallback, retry-on-failure) lives inside
     ``run_startup_migrations``, so on the API server (already migrated in the
     lifespan) and on every later call this is a flag check.
+
+    A failed migration BLOCKS the cognify for the AFFECTED dataset(s) only:
+    writing new-scheme nodes/edges into a store still on the old scheme is the
+    mixed-state corruption the migration exists to prevent. The failure is
+    recorded and retried on the next call, so cognify succeeds once the
+    migration does (cognifying a different, healthy dataset is never blocked).
     """
     from cognee.run_migrations import run_startup_migrations
+    from cognee.modules.migrations.startup import abort_write_if_migration_blocked
 
-    await run_startup_migrations()
+    failed = await run_startup_migrations()
+    await abort_write_if_migration_blocked(failed, datasets, user)
 
 
 async def cognify(
@@ -228,7 +236,7 @@ async def cognify(
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
 
-        await _ensure_migrations_run()
+        await _ensure_migrations_run(datasets, user)
 
         if config is None:
             ontology_config = get_ontology_env_config()

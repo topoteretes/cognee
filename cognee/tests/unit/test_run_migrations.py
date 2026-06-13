@@ -228,6 +228,40 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
             asyncio.run(startup.run_startup_migrations())
             relational.assert_awaited_once()
 
+    def test_returns_failed_databases_so_write_paths_can_block(self):
+        """The failed-database ids are RETURNED (not just logged): write entry
+        points (cognify/remember) treat a non-empty result as a hard stop so
+        new-scheme writes can't land in an un-migrated store."""
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+
+        with (
+            patch.object(startup, "run_relational_migrations", new=AsyncMock()),
+            patch(
+                "cognee.modules.migrations.runner.run_database_migrations",
+                new=AsyncMock(
+                    return_value=[
+                        {"dataset_id": "ds-1", "result": "failed"},
+                        {"dataset_id": "ds-2", "migrations_applied": []},
+                    ]
+                ),
+            ),
+        ):
+            failed = asyncio.run(startup.run_startup_migrations())
+        self.assertEqual(failed, ["ds-1"])
+
+    def test_returns_empty_list_when_all_succeed(self):
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+
+        with (
+            patch.object(startup, "run_relational_migrations", new=AsyncMock()),
+            patch(
+                "cognee.modules.migrations.runner.run_database_migrations",
+                new=AsyncMock(return_value=[{"dataset_id": "ds-1", "migrations_applied": []}]),
+            ),
+        ):
+            failed = asyncio.run(startup.run_startup_migrations())
+        self.assertEqual(failed, [])
+
 
 if __name__ == "__main__":
     unittest.main()

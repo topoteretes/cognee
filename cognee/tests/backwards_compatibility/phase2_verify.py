@@ -30,6 +30,15 @@ is inaccessible:
   the migration could have moved still resolves to a live graph node (a stale
   ledger id silently orphans nodes on delete);
 * vector — a CHUNKS search (raw vector retrieval) must return results.
+* delete — hard-delete the documents ONE BY ONE and, after each, diff the
+  graph against ledger-derived expectations: exactly the nodes/edges owned
+  solely by the deleted document disappear, shared ones survive until their
+  last owner goes, and after the last document the graph is completely empty.
+  Deletion resolves graph nodes through the relational ledger (``nodes.slug``),
+  so this is the end-to-end proof that the migration kept the ledger and the
+  remapped graph in lockstep: a stale ledger id makes delete silently miss
+  (orphan) the migrated node, which only this check — not the static
+  id-resolution check above — can catch for the full flow.
 
 Completion searches are still exercised afterwards as a smoke check (must not
 raise), just not used as the accessibility gate.
@@ -47,6 +56,7 @@ from cognee.context_global_variables import set_database_global_context_variable
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods.get_dataset_databases import get_dataset_databases
+from cognee.modules.data.models import DatasetData
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
@@ -251,6 +261,182 @@ async def _verify_access(stage: str) -> None:
     print("  [smoke] GRAPH_COMPLETION + RAG_COMPLETION + SUMMARIES ran without error — OK")
 
 
+async def _snapshot_dataset_graph(dataset_id, owner_by_dataset):
+    """(node_ids, props_by_id, edge_keys) for the graph holding ``dataset_id``.
+
+    ``owner_by_dataset`` is the dataset_id→owner_id map from dataset_database
+    rows when access control is on (per-dataset graphs), or ``None`` when off
+    (one global graph). Edge keys are (source, target, relationship_name) with
+    Ladybug's synthetic SELF self-loops dropped.
+    """
+    if owner_by_dataset is None:
+        graph_engine = await get_graph_engine()
+        nodes, edges = await graph_engine.get_graph_data()
+    else:
+        async with set_database_global_context_variables(dataset_id, owner_by_dataset[dataset_id]):
+            graph_engine = await get_graph_engine()
+            nodes, edges = await graph_engine.get_graph_data()
+
+    node_ids = {str(node_id) for node_id, _ in nodes}
+    props_by_id = {str(node_id): props for node_id, props in nodes}
+    edge_keys = {
+        (str(s), str(t), str(r)) for s, t, r, _ in edges if not (r == "SELF" and str(s) == str(t))
+    }
+    return node_ids, props_by_id, edge_keys
+
+
+async def _ledger_expectations(data_id, dataset_id, scope_to_dataset: bool):
+    """Compute what THIS document's hard delete may remove, from the live ledger.
+
+    A slug/edge is expected to be deleted only when no other live document
+    references it; anything referenced by another document must survive (the
+    two phase documents share most entities, so this is genuinely exercised).
+    ``scope_to_dataset`` limits "other documents" to the same dataset when
+    access control is on (each dataset has its own physical graph; the same
+    deterministic slug in another dataset lives in a different graph and must
+    not be counted as a survivor here).
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        node_rows = (await session.scalars(select(Node))).all()
+        edge_rows = (await session.scalars(select(Edge))).all()
+
+    if scope_to_dataset:
+        node_rows = [row for row in node_rows if row.dataset_id == dataset_id]
+        edge_rows = [row for row in edge_rows if row.dataset_id == dataset_id]
+
+    def _is_doc_row(row):
+        return row.data_id == data_id and row.dataset_id == dataset_id
+
+    doc_nodes = {str(row.slug) for row in node_rows if _is_doc_row(row)}
+    other_nodes = {str(row.slug) for row in node_rows if not _is_doc_row(row)}
+
+    def _edge_key(row):
+        return (
+            str(row.source_node_id),
+            str(row.destination_node_id),
+            str(row.label or row.relationship_name),
+        )
+
+    doc_edges = {_edge_key(row) for row in edge_rows if _is_doc_row(row)}
+    other_edges = {_edge_key(row) for row in edge_rows if not _is_doc_row(row)}
+
+    return doc_nodes - other_nodes, doc_edges - other_edges
+
+
+async def _verify_delete(stage: str) -> None:
+    """Hard-delete documents ONE BY ONE, verifying graph precision after each.
+
+    Deletion resolves graph nodes by the relational ledger's ``nodes.slug``
+    (see ``delete_from_graph_and_vector``), so deleting data that was seeded
+    on the legacy version and remapped by the migration proves the ledger and
+    the graph migrated in lockstep. If the migration had left ledger slugs
+    stale, the delete would not raise — it would silently miss the remapped
+    nodes — so the gate is the graph state afterwards, not the call.
+
+    After every document's delete, assert against a before/after graph diff:
+      * every node/edge owned ONLY by that document is gone (no orphans);
+      * nothing else disappeared (no collateral damage) — shared nodes/edges
+        survive until their last owning document is deleted. EdgeType nodes
+        are exempt: they are derived per-relationship-text bookkeeping with no
+        ledger provenance, garbage-collected when their last edge goes;
+      * nothing new appeared.
+    After the last document: the graph must be completely empty — no documents
+    left means no nodes and no edges left.
+    """
+    print(f"\n[{stage}] Hard-deleting documents one by one, verifying the graph after each")
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        pairs = (await session.execute(select(DatasetData.data_id, DatasetData.dataset_id))).all()
+
+    if not pairs:
+        _fail(f"[{stage}] no dataset_data rows found — nothing to delete, seed is broken.")
+
+    dataset_rows = await get_dataset_databases()
+    owner_by_dataset = {row.dataset_id: row.owner_id for row in dataset_rows} or None
+
+    for index, (data_id, dataset_id) in enumerate(pairs, start=1):
+        expected_gone_nodes, expected_gone_edges = await _ledger_expectations(
+            data_id, dataset_id, scope_to_dataset=owner_by_dataset is not None
+        )
+        before_nodes, before_props, before_edges = await _snapshot_dataset_graph(
+            dataset_id, owner_by_dataset
+        )
+
+        await cognee.delete(data_id=data_id, dataset_id=dataset_id, mode="hard")
+
+        after_nodes, _, after_edges = await _snapshot_dataset_graph(dataset_id, owner_by_dataset)
+        doc_tag = f"document {index}/{len(pairs)} ({data_id})"
+
+        missed_nodes = expected_gone_nodes & after_nodes
+        if missed_nodes:
+            _fail(
+                f"[{stage}] {doc_tag}: {len(missed_nodes)} solely-owned node(s) survived the "
+                f"hard delete (e.g. {next(iter(missed_nodes))}) — delete missed migrated nodes."
+            )
+
+        disappeared_nodes = before_nodes - after_nodes
+        allowed_gone = expected_gone_nodes | {
+            node_id for node_id in before_nodes if before_props[node_id].get("type") == "EdgeType"
+        }
+        collateral_nodes = disappeared_nodes - allowed_gone
+        if collateral_nodes:
+            sample = next(iter(collateral_nodes))
+            _fail(
+                f"[{stage}] {doc_tag}: {len(collateral_nodes)} node(s) NOT owned solely by this "
+                f"document were deleted (e.g. {sample}, type="
+                f"{before_props[sample].get('type')}) — delete removed shared/foreign nodes."
+            )
+
+        appeared_nodes = after_nodes - before_nodes
+        if appeared_nodes:
+            _fail(
+                f"[{stage}] {doc_tag}: {len(appeared_nodes)} node(s) appeared during delete "
+                f"(e.g. {next(iter(appeared_nodes))})."
+            )
+
+        missed_edges = expected_gone_edges & after_edges
+        if missed_edges:
+            _fail(
+                f"[{stage}] {doc_tag}: {len(missed_edges)} solely-owned edge(s) survived the "
+                f"hard delete (e.g. {next(iter(missed_edges))})."
+            )
+
+        # An edge may legitimately vanish without its own ledger ownership when
+        # either endpoint node was (legitimately) deleted — detach-delete.
+        collateral_edges = {
+            key
+            for key in before_edges - after_edges
+            if key not in expected_gone_edges
+            and key[0] not in disappeared_nodes
+            and key[1] not in disappeared_nodes
+        }
+        if collateral_edges:
+            _fail(
+                f"[{stage}] {doc_tag}: {len(collateral_edges)} edge(s) between surviving nodes "
+                f"were deleted (e.g. {next(iter(collateral_edges))}) — collateral edge loss."
+            )
+
+        print(
+            f"  [delete] {doc_tag}: -{len(disappeared_nodes)} nodes "
+            f"-{len(before_edges - after_edges)} edges, "
+            f"{len(after_nodes)} nodes / {len(after_edges)} edges remain — "
+            "only this document's data removed — OK"
+        )
+
+    # No documents left → no graph left.
+    nodes, edges = await _collect_graph()
+    real_edges = [(s, t, r) for s, t, r, _ in edges if not (r == "SELF" and str(s) == str(t))]
+    if nodes or real_edges:
+        type_counts = Counter(props.get("type") for _, props in nodes)
+        _fail(
+            f"[{stage}] graph is not empty after deleting every document: "
+            f"{len(nodes)} node(s) {dict(type_counts)}, {len(real_edges)} edge(s) remain."
+        )
+    print("  [delete] all documents deleted; graph is completely empty — OK")
+
+
 async def main():
     print(f"Running Phase 2 with cognee version: {cognee.__version__}")
 
@@ -268,6 +454,10 @@ async def main():
 
     # ── Step 3: data must still be accessible after re-cognify ────────────────
     await _verify_access("Step 3 — after re-cognify")
+
+    # ── Step 4: migrated data must be deletable (ledger-driven hard delete) ───
+    # Destructive on purpose, so it runs last.
+    await _verify_delete("Step 4 — delete migrated data")
 
     print("\nAll Phase 2 checks passed.")
 

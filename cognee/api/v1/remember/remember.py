@@ -36,17 +36,24 @@ from cognee.modules.observability import (
 logger = get_logger("remember")
 
 
-async def _ensure_migrations_run():
+async def _ensure_migrations_run(datasets, user):
     """Run startup migrations on the first local SDK call.
 
     The full set (relational schema + graph/vector revision chains), not just
     vector schema — an SDK process is otherwise capable of writing new-scheme
     data into an unmigrated store. The once-per-process guard (flag, lock,
     retry-on-failure) lives inside ``run_startup_migrations`` itself.
+
+    A failed migration BLOCKS the call for the AFFECTED dataset(s) only: writing
+    new-scheme data into a store still on the old scheme is the mixed-state
+    corruption the migration exists to prevent. The failure is recorded and
+    retried on the next call; a different, healthy dataset is never blocked.
     """
     from cognee.run_migrations import run_startup_migrations
+    from cognee.modules.migrations.startup import abort_write_if_migration_blocked
 
-    await run_startup_migrations()
+    failed = await run_startup_migrations()
+    await abort_write_if_migration_blocked(failed, datasets, user)
 
 
 class RememberKwargs(TypedDict, total=False):
@@ -773,8 +780,9 @@ async def _remember_inner(
 
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
-    # writes, even when the API server was never started.
-    await _ensure_migrations_run()
+    # writes, even when the API server was never started. Scoped to the
+    # dataset this call targets (dataset_id override, else dataset_name).
+    await _ensure_migrations_run(kwargs.get("dataset_id") or dataset_name, kwargs.get("user"))
 
     content_type = kwargs.pop("content_type", None)
     skill_improvement = kwargs.pop("skill_improvement", None)

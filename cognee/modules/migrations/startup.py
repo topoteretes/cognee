@@ -59,6 +59,59 @@ class MigrationError(Exception):
     """Raised when migrations fail."""
 
 
+async def abort_write_if_migration_blocked(failed: list[str], datasets, user) -> None:
+    """Raise ``MigrationError`` if a database THIS write targets failed migration.
+
+    ``failed`` is the result of :func:`run_startup_migrations` (the ids of the
+    databases whose migration failed). Writing new-scheme data into a store still
+    on the old scheme is the mixed-scheme corruption the migration exists to
+    prevent — but the block is scoped, not global:
+
+    * access control OFF — one global graph/vector pair backs EVERY dataset, so
+      a failure is not dataset-scoped and any failure blocks all writes.
+    * access control ON — each dataset has its own database pair, so block only
+      when a dataset this call writes to is among the failed set. A brand-new
+      dataset has no databases yet (so it cannot be in ``failed``);
+      ``get_authorized_existing_datasets`` resolves existing datasets only and
+      never creates one, so the check has no side effects.
+
+    ``datasets`` is the caller's dataset selector (name(s)/UUID(s), or ``None``
+    for "all of the user's datasets"); ``user`` may be ``None`` (default user).
+    """
+    if not failed:
+        return
+
+    from cognee.context_global_variables import backend_access_control_enabled
+
+    if not backend_access_control_enabled():
+        raise MigrationError(
+            "Write aborted: database migration failed for the global database "
+            f"({', '.join(failed)}). Writing now would mix id schemes. Inspect with "
+            "`cognee-cli current`; it retries automatically on the next call."
+        )
+
+    from uuid import UUID
+
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.modules.users.methods import get_default_user
+
+    if isinstance(datasets, (str, UUID)):
+        datasets = [datasets]
+    if user is None:
+        user = await get_default_user()
+
+    failed_set = set(failed)
+    targets = await get_authorized_existing_datasets(datasets, "write", user)
+    blocked = [dataset for dataset in targets if str(dataset.id) in failed_set]
+    if blocked:
+        names = ", ".join(f"{dataset.name} ({dataset.id})" for dataset in blocked)
+        raise MigrationError(
+            f"Write aborted: database migration failed for dataset(s) {names}. "
+            "Writing now would mix id schemes. Inspect with `cognee-cli current`; "
+            "it retries automatically on the next call."
+        )
+
+
 def _auto_migrations_enabled() -> bool:
     """Read ENABLE_AUTO_MIGRATIONS dynamically — tests/embedders set it via
     os.environ after import, so it must not be frozen at module load."""
@@ -112,23 +165,32 @@ async def run_relational_migrations():
     logger.info("Migration completed successfully.")
 
 
-async def run_startup_migrations():
+async def run_startup_migrations() -> list[str]:
     """Run all startup migrations: relational schema first, then the graph +
     vector revision chains. Once per process (see module docstring); a failed
-    run is retried on the next call."""
+    run is retried on the next call.
+
+    Returns the identifiers of the databases whose migration FAILED (empty list
+    means everything is at head). Callers that are about to WRITE new-scheme
+    data — ``cognify()`` / ``remember()`` — must treat a non-empty result as a
+    hard stop: writing into an un-migrated store is exactly the mixed-scheme
+    corruption the migration exists to prevent. Non-write callers (the API
+    lifespan) may ignore it; per-request writes still block via those entry
+    points, so the server can come up and migrations retry on the next call.
+    """
     global _startup_migrations_done
     if not _auto_migrations_enabled():
         logger.info(
             "Automatic migrations are disabled (ENABLE_AUTO_MIGRATIONS=false); "
             "run `cognee-cli upgrade` to migrate explicitly."
         )
-        return
+        return []
     if _startup_migrations_done:
-        return
+        return []
 
     async with _get_startup_lock():
         if _startup_migrations_done:
-            return
+            return []
 
         from cognee.modules.migrations.runner import run_database_migrations
 
@@ -163,11 +225,13 @@ async def run_startup_migrations():
         ]
         if failed:
             logger.warning(
-                "Migrations FAILED for %d database(s): %s. Writes into them may duplicate "
-                "entities until they migrate. Inspect with `cognee-cli current` (shows the "
-                "recorded error); retried on the next call/startup.",
+                "Migrations FAILED for %d database(s): %s. Writes into them are blocked "
+                "(would duplicate entities until they migrate). Inspect with `cognee-cli "
+                "current` (shows the recorded error); retried on the next call/startup.",
                 len(failed),
                 ", ".join(failed),
             )
         else:
             _startup_migrations_done = True
+
+        return failed
