@@ -70,6 +70,7 @@ class TestMissingBookkeepingTables(unittest.TestCase):
 
         with (
             patch.object(runner, "backend_access_control_enabled", return_value=True),
+            patch.object(runner, "_read_deployment_version", new=AsyncMock(return_value=None)),
             patch.object(runner, "_record_deployment_version", new=AsyncMock(side_effect=error)),
         ):
             result = asyncio.run(runner.run_database_migrations())
@@ -105,6 +106,7 @@ class TestMissingBookkeepingTables(unittest.TestCase):
 
         with (
             patch.object(runner, "backend_access_control_enabled", return_value=True),
+            patch.object(runner, "_read_deployment_version", new=AsyncMock(return_value=None)),
             patch.object(runner, "_record_deployment_version", new=AsyncMock(return_value=None)),
             patch.object(
                 runner,

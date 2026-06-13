@@ -4,10 +4,12 @@ Two stages, in order:
 
 1. relational schema (Alembic) — must run first: it creates the revision
    columns / tables the next stage reads.
-2. graph + vector script migrations (revision chains, ``runner.py``) — this
-   includes the vector adapter's own storage-schema migration, which is a
-   chain entry (``adapter_storage_migration``), so it is gated, locked and
-   failure-isolated exactly like every other migration.
+2. graph + vector script migrations (revision chain, ``runner.py``), followed
+   by the vector adapter's own storage-schema sync. The chain runs once per
+   database (gated by the stored revision slug); the adapter sync instead runs
+   on every Cognee version change (gated by a library-vs-recorded
+   ``cognee_version`` mismatch), after the chain — both under the same per-
+   database lock and failure isolation.
 
 Triggered from the FastAPI lifespan on every server start, from the first
 ``remember()``/``cognify()`` call in an SDK process, and explicitly via

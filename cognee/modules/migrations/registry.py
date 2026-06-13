@@ -15,10 +15,6 @@ cheap on empty stores; see README.md in this package for the full contract.
 """
 
 from cognee.modules.migrations.migration import Migration, order_migrations
-from cognee.modules.migrations.versions.adapter_storage_migration import (
-    downgrade as adapter_storage_migration_down,
-    migrate as adapter_storage_migration,
-)
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import (
     downgrade as namespace_entity_type_node_ids_down,
     migrate as namespace_entity_type_node_ids,
@@ -28,17 +24,15 @@ from cognee.modules.migrations.versions.namespace_edge_type_point_ids import (
     migrate as namespace_edge_type_point_ids,
 )
 
+# NOTE: the vector adapter's own storage-schema sync (LanceDB adding columns to
+# existing collections) is NOT in this chain. A chain entry runs ONCE per
+# database (gated by the stored revision slug), but that sync must run on EVERY
+# Cognee version change — a later release can change the stored shape without
+# adding any data migration. The runner triggers it separately, gated on a
+# library-vs-recorded cognee_version mismatch, after this chain finishes
+# (``runner._sync_vector_adapter_storage`` / ``versions.adapter_storage_migration``).
+
 MIGRATIONS: list[Migration] = [
-    # Vector adapters' own storage-schema migration (e.g. LanceDB adding the
-    # belongs_to_set column). Runs first: data migrations below operate on the
-    # current storage shape.
-    Migration(
-        slug="adapter_storage_migration",
-        cognee_version="1.2.0",
-        up=adapter_storage_migration,
-        down_revision=None,
-        down=adapter_storage_migration_down,
-    ),
     # PR #2515: Entity/EntityType node IDs gained "Entity:" / "EntityType:"
     # namespacing so Entity("x") and EntityType("x") stop colliding on one
     # UUID. Remaps graph nodes, vector points, triplet points and ledger rows.
@@ -46,7 +40,7 @@ MIGRATIONS: list[Migration] = [
         slug="namespace_entity_type_node_ids",
         cognee_version="1.2.0",
         up=namespace_entity_type_node_ids,
-        down_revision="adapter_storage_migration",
+        down_revision=None,
         down=namespace_entity_type_node_ids_down,
     ),
     # EdgeType vector points moved from the bare hand-rolled uuid5 to the

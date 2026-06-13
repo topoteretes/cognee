@@ -54,6 +54,9 @@ from cognee.modules.migrations.migration import (
 )
 from cognee.modules.migrations.models import GLOBAL_DATABASE_VERSION_ROW_ID, GlobalDatabaseVersion
 from cognee.modules.migrations.registry import MIGRATIONS
+from cognee.modules.migrations.versions.adapter_storage_migration import (
+    migrate as _run_adapter_storage_migration,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +190,36 @@ async def _record_global_failure(db_engine, error: Exception) -> None:
         logger.exception("Could not persist global migration failure.")
 
 
+async def _read_deployment_version() -> Optional[str]:
+    """The Cognee version recorded for this deployment, or ``None`` if never
+    recorded (fresh database, or bookkeeping table not created yet).
+
+    Read-only, and read BEFORE ``_record_deployment_version`` overwrites it, so a
+    caller can detect a Cognee version change — the gate for the vector adapter
+    storage sync (which must run on every version change, unlike the once-per-
+    database revision chain).
+    """
+    db_engine = get_relational_engine()
+    try:
+        async with db_engine.get_async_session() as session:
+            record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+            return record.cognee_version if record is not None else None
+    except (OperationalError, ProgrammingError, EntityNotFoundError):
+        return None
+
+
+async def _sync_vector_adapter_storage(migration_context: MigrationContext) -> None:
+    """Run the vector adapter's storage-schema sync for this database.
+
+    Idempotent; invoked only on a Cognee version change, AFTER the revision
+    chain has finished, so the adapter's stored shape (e.g. LanceDB collection
+    columns) is brought up to what the running code expects. A failure here
+    propagates like any migration failure for this database (caught by the
+    caller, which records the failure and blocks writes).
+    """
+    await _run_adapter_storage_migration(migration_context)
+
+
 async def _record_deployment_version(current_version: str) -> GlobalDatabaseVersion:
     """Upsert the single ``global_database_version`` row's ``cognee_version``.
 
@@ -226,7 +259,9 @@ async def _record_deployment_version(current_version: str) -> GlobalDatabaseVers
             return existing
 
 
-async def _run_global_migrations(current_version: str, target: str = "head") -> list[dict]:
+async def _run_global_migrations(
+    current_version: str, version_changed: bool, target: str = "head"
+) -> list[dict]:
     """Migrate the single global graph/vector pair (access control disabled).
 
     Same lock + re-check + migrate + per-step stamp sequence as the
@@ -234,6 +269,10 @@ async def _run_global_migrations(current_version: str, target: str = "head") -> 
     migration context carries ``dataset_id=None``, so ledger updates apply
     unscoped — correct here, since the one global graph backs every dataset's
     ledger rows.
+
+    ``version_changed`` (library ``cognee_version`` differs from the recorded
+    one) additionally triggers the vector adapter storage sync after the chain,
+    even when no chain migration is pending.
     """
     try:
         row = await _record_deployment_version(current_version)
@@ -244,7 +283,10 @@ async def _run_global_migrations(current_version: str, target: str = "head") -> 
             error,
         )
         return []
-    if not pending_migrations(MIGRATIONS, row.global_migration_revision, target):
+    if (
+        not pending_migrations(MIGRATIONS, row.global_migration_revision, target)
+        and not version_changed
+    ):
         return [{"database": "global", "migrations_applied": []}]
 
     db_engine = get_relational_engine()
@@ -253,8 +295,9 @@ async def _run_global_migrations(current_version: str, target: str = "head") -> 
             # Re-read under the lock: a concurrent worker may have finished.
             async with db_engine.get_async_session() as session:
                 record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
-            if record is None or not pending_migrations(
-                MIGRATIONS, record.global_migration_revision, target
+            if record is None or (
+                not pending_migrations(MIGRATIONS, record.global_migration_revision, target)
+                and not version_changed
             ):
                 return [{"database": "global", "migrations_applied": []}]
             stored = record.global_migration_revision
@@ -272,7 +315,10 @@ async def _run_global_migrations(current_version: str, target: str = "head") -> 
                 dataset_id=None,
             )
             applied = await _apply(migration_context, stored, target, stamp)
-            if applied:
+            # Version bumped -> sync the vector adapter's stored schema, last.
+            if version_changed:
+                await _sync_vector_adapter_storage(migration_context)
+            if applied or version_changed:
                 async with db_engine.get_async_session() as session:
                     record = await session.get(
                         GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID
@@ -290,7 +336,9 @@ async def _run_global_migrations(current_version: str, target: str = "head") -> 
     return [{"database": "global", "migrations_applied": applied}]
 
 
-async def _migrate_dataset(db_engine, row, current_version: str, target: str) -> Optional[dict]:
+async def _migrate_dataset(
+    db_engine, row, current_version: str, version_changed: bool, target: str
+) -> Optional[dict]:
     """Run pending migrations for one dataset's database pair, under its lock.
 
     Relational transactions stay SHORT: one read after acquiring the lock, the
@@ -298,6 +346,10 @@ async def _migrate_dataset(db_engine, row, current_version: str, target: str) ->
     after each applied migration. Returns a summary dict, or ``None`` when
     there was nothing to do (or the row vanished — dataset deleted
     concurrently).
+
+    ``version_changed`` (deployment ``cognee_version`` differs from the library)
+    also triggers the vector adapter storage sync for this dataset's vector
+    database after the chain, even with no chain migration pending.
     """
     async with _migration_lock(db_engine, _advisory_key(row.dataset_id)):
         # Re-read under the lock: a concurrent worker may have finished.
@@ -306,7 +358,7 @@ async def _migrate_dataset(db_engine, row, current_version: str, target: str) ->
             if record is None:
                 return None
             stored = record.migration_revision
-        if not pending_migrations(MIGRATIONS, stored, target):
+        if not pending_migrations(MIGRATIONS, stored, target) and not version_changed:
             return None
 
         async def stamp(revision):
@@ -323,8 +375,11 @@ async def _migrate_dataset(db_engine, row, current_version: str, target: str) ->
                 dataset_id=row.dataset_id,
             )
             applied = await _apply(migration_context, stored, target, stamp)
+            # Version bumped -> sync this dataset's vector adapter schema, last.
+            if version_changed:
+                await _sync_vector_adapter_storage(migration_context)
 
-        if applied:
+        if applied or version_changed:
             try:
                 # Audit/health bookkeeping: the release that last migrated this
                 # dataset, and clearing any recorded failure. Best-effort — the
@@ -359,8 +414,14 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
     # must fail the whole call fast, never as N per-dataset failures.
     pending_migrations(MIGRATIONS, None, target)
 
+    # Read the deployment's recorded version BEFORE it is overwritten below, so
+    # a Cognee version change is detectable. It gates the vector adapter storage
+    # sync, which (unlike the once-per-database revision chain) must run on every
+    # version change — even a release that ships no data migration.
+    version_changed = await _read_deployment_version() != current_version
+
     if not backend_access_control_enabled():
-        return await _run_global_migrations(current_version, target)
+        return await _run_global_migrations(current_version, version_changed, target)
 
     try:
         # Record the deployment-wide version even in per-dataset mode (the
@@ -384,14 +445,19 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
     summaries: list[dict] = []
 
     for row in rows:
-        # Fast path: nothing pending per this row's snapshot — skip without
-        # locking, opening the dataset's databases, or writing anything.
-        if not pending_migrations(MIGRATIONS, row.migration_revision, target):
+        # Fast path: nothing pending AND no version change for this row — skip
+        # without locking, opening the dataset's databases, or writing anything.
+        if (
+            not pending_migrations(MIGRATIONS, row.migration_revision, target)
+            and not version_changed
+        ):
             summaries.append({"dataset_id": str(row.dataset_id), "migrations_applied": []})
             continue
 
         try:
-            summary = await _migrate_dataset(db_engine, row, current_version, target)
+            summary = await _migrate_dataset(
+                db_engine, row, current_version, version_changed, target
+            )
         except Exception as error:
             logger.exception(
                 "Database migrations failed for dataset '%s'; continuing with remaining datasets.",

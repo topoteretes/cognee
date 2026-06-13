@@ -140,8 +140,9 @@ def test_shipped_slugs_are_pinned():
     """These slugs are stored in customer databases. They are APPEND-ONLY:
     if this test fails because a slug changed or vanished, every stamped
     deployment silently stops migrating — fix the chain, not this test."""
+    # The vector adapter storage sync is intentionally NOT in this chain — it is
+    # version-gated and run by the runner after the chain (see registry.py).
     assert [m.slug for m in order_migrations(MIGRATIONS)] == [
-        "adapter_storage_migration",
         "namespace_entity_type_node_ids",
         "namespace_edge_type_point_ids",
     ]
@@ -303,6 +304,11 @@ def test_runner_routes_to_global_path_without_access_control(monkeypatch):
 
     monkeypatch.setattr(runner, "backend_access_control_enabled", lambda: False)
 
+    async def _read_version():
+        return None  # avoid touching a real engine; value is irrelevant here
+
+    monkeypatch.setattr(runner, "_read_deployment_version", _read_version)
+
     async def _explode():
         raise AssertionError("must not query dataset databases in OFF mode")
 
@@ -310,10 +316,81 @@ def test_runner_routes_to_global_path_without_access_control(monkeypatch):
 
     sentinel = [{"database": "global", "graph_migrations_applied": ["x"]}]
 
-    async def _fake_global(current_version, target="head"):
+    async def _fake_global(current_version, version_changed, target="head"):
         assert current_version
         return sentinel
 
     monkeypatch.setattr(runner, "_run_global_migrations", _fake_global)
 
     assert asyncio.run(runner.run_database_migrations()) == sentinel
+
+
+# ── vector adapter storage sync: version-gated, not chain-gated ───────────────
+
+
+def test_adapter_storage_sync_runs_on_version_change_even_at_chain_head(monkeypatch, tmp_path):
+    """The vector adapter storage sync must run on a Cognee VERSION change even
+    when the revision chain is already at head (the bug: as a chain entry it
+    would never re-run). Drives the real global runner path against a real
+    SQLite engine, with the chain stamped at head and the recorded version
+    older than the library."""
+    import cognee.modules.migrations.runner as runner
+    from cognee.infrastructure.databases.relational.create_relational_engine import (
+        create_relational_engine,
+    )
+    from cognee.modules.migrations.models import (
+        GLOBAL_DATABASE_VERSION_ROW_ID,
+        GlobalDatabaseVersion,
+    )
+
+    async def scenario():
+        eng = create_relational_engine(str(tmp_path), "ver.db", "", "", "", "", "sqlite")
+        await eng.create_database()
+        # Chain already at head, recorded version OLDER than the library version.
+        async with eng.get_async_session() as session:
+            session.add(
+                GlobalDatabaseVersion(
+                    id=GLOBAL_DATABASE_VERSION_ROW_ID,
+                    cognee_version="0.0.0-old",
+                    global_migration_revision=head_revision(MIGRATIONS),
+                )
+            )
+            await session.commit()
+
+        run_migrations = _AsyncCounter()
+        fake_vector = type("V", (), {"run_migrations": run_migrations})()
+
+        monkeypatch.setattr(runner, "backend_access_control_enabled", lambda: False)
+        monkeypatch.setattr(runner, "get_relational_engine", lambda: eng)
+        monkeypatch.setattr(runner, "get_cognee_version", lambda: "9.9.9-new")
+
+        async def _fake_graph():
+            return object()
+
+        monkeypatch.setattr(runner, "get_graph_engine", _fake_graph)
+        monkeypatch.setattr(runner, "get_vector_engine", lambda: fake_vector)
+
+        # version changed (0.0.0-old != 9.9.9-new) -> adapter sync runs once,
+        # even though the chain is at head (no data migration applied).
+        result = await runner.run_database_migrations()
+        assert result == [{"database": "global", "migrations_applied": []}]
+        assert run_migrations.calls == 1
+
+        # Second pass: version now recorded as current -> no version change ->
+        # adapter sync does NOT run again.
+        result2 = await runner.run_database_migrations()
+        assert result2 == [{"database": "global", "migrations_applied": []}]
+        assert run_migrations.calls == 1
+
+        await eng.engine.dispose(close=True)
+
+    asyncio.run(scenario())
+
+
+class _AsyncCounter:
+    def __init__(self):
+        self.calls = 0
+
+    async def __call__(self, *args, **kwargs):
+        self.calls += 1
+        return None
