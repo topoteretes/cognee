@@ -8,6 +8,7 @@ revision changed meaning, which is forbidden).
 """
 
 import asyncio
+import os
 
 import pytest
 
@@ -394,3 +395,47 @@ class _AsyncCounter:
     async def __call__(self, *args, **kwargs):
         self.calls += 1
         return None
+
+
+# ── cross-process migration lock (SQLite) ────────────────────────────────────
+
+
+def test_sqlite_migration_lock_is_a_real_cross_process_file_lock(tmp_path):
+    """On SQLite the migrate-then-stamp sequence holds an OS file lock: while a
+    process is inside ``_migration_lock``, an independent ``FileLock`` on the
+    same path (standing in for a second process / worker) cannot acquire it; it
+    frees on exit. The lock file lives next to the database, keyed per migration."""
+    import cognee.modules.migrations.runner as runner
+    from cognee.infrastructure.databases.relational.create_relational_engine import (
+        create_relational_engine,
+    )
+    from filelock import FileLock, Timeout
+
+    async def scenario():
+        eng = create_relational_engine(str(tmp_path), "lock.db", "", "", "", "", "sqlite")
+        key = 7
+        path = runner._file_lock_path(eng, key)
+        assert path is not None
+        assert os.path.dirname(path) == os.path.abspath(str(tmp_path))
+
+        async with runner._migration_lock(eng, key):
+            with pytest.raises(Timeout):
+                FileLock(path).acquire(timeout=0.2)  # a "second process" is blocked
+
+        freed = FileLock(path)  # released on context exit
+        freed.acquire(timeout=0.2)
+        assert freed.is_locked
+        freed.release()
+        await eng.engine.dispose(close=True)
+
+    asyncio.run(scenario())
+
+
+def test_migration_lock_path_skips_in_memory_sqlite():
+    """An in-memory / pathless DB has nothing to coordinate across processes."""
+    import cognee.modules.migrations.runner as runner
+
+    fake = type(
+        "E", (), {"engine": type("X", (), {"url": type("U", (), {"database": ":memory:"})()})()}
+    )()
+    assert runner._file_lock_path(fake, 1) is None

@@ -14,17 +14,19 @@ version). The stamp is advanced after EVERY applied/reverted step, so a crash
 or failure mid-chain leaves the bookkeeping pointing at exactly the last
 consistent state.
 
-Concurrency: the migrate-then-stamp sequence runs under a cross-process mutex.
-On Postgres this is a session-scoped advisory lock held on a dedicated
-connection with NO open transaction, so a long migration neither blocks row
-access nor trips idle-in-transaction timeouts; the stored revision is re-read
-after acquiring the lock, so the loser of a startup race sees the winner's
-stamp and skips. On SQLite there is NO cross-process lock — running multiple
-workers against one SQLite metadata store during a migration window is not
-supported (the post-lock re-read narrows the race but cannot close it).
+Concurrency: the migrate-then-stamp sequence runs under a cross-process mutex
+(see ``_migration_lock``), and the stored revision is re-read after acquiring
+it, so the loser of a startup race sees the winner's stamp and skips. On
+Postgres the mutex is a session-scoped advisory lock on a dedicated connection
+with NO open transaction (also serializes across hosts). On SQLite it is an OS
+advisory file lock (``filelock``) next to the database — serializing multiple
+processes on ONE host (multi-worker servers, parallel SDK runs), but not across
+hosts / NFS, for which Postgres metadata is required.
 """
 
+import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 from uuid import UUID
@@ -69,6 +71,22 @@ def _advisory_key(dataset_id: UUID) -> int:
     return int.from_bytes(dataset_id.bytes[:8], "big", signed=True)
 
 
+def _file_lock_path(db_engine, key: int) -> Optional[str]:
+    """Sidecar lock-file path next to the SQLite database, keyed per migration.
+
+    Lives in the database file's own directory so every process pointing at the
+    same SQLite store resolves the same lock file; the ``key`` (per-dataset or
+    the global key) keeps unrelated datasets from serializing against each
+    other. Returns ``None`` for an in-memory / pathless database, where there is
+    nothing to coordinate across processes.
+    """
+    db_path = db_engine.engine.url.database
+    if not db_path or db_path == ":memory:":
+        return None
+    directory = os.path.dirname(os.path.abspath(db_path))
+    return os.path.join(directory, f".cognee-migration-{key}.lock")
+
+
 @asynccontextmanager
 async def _migration_lock(db_engine, key: int):
     """Cross-process mutex around one database's migrate-then-stamp sequence.
@@ -76,22 +94,44 @@ async def _migration_lock(db_engine, key: int):
     Postgres: session-scoped ``pg_advisory_lock`` on a dedicated connection.
     The transaction is committed immediately after acquiring (advisory session
     locks survive commit), so nothing relational stays locked or open while
-    the migration runs. Other dialects (SQLite): no cross-process primitive
-    exists — yields without locking; see the module docstring.
+    the migration runs — and it serializes across HOSTS too.
+
+    SQLite (and other file-based stores): an OS advisory file lock (``filelock``,
+    portable across Linux/macOS/Windows) on a sidecar file next to the database.
+    The OS releases it automatically if the holder dies, so a crashed migrator
+    never wedges the others. This serializes processes on ONE host sharing a
+    local filesystem (multi-worker servers, parallel SDK processes); it does NOT
+    work across hosts or over NFS — use Postgres metadata for multi-host.
     """
     engine = db_engine.engine
-    if engine.dialect.name != "postgresql":
+    if engine.dialect.name == "postgresql":
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
+            await connection.commit()
+            try:
+                yield
+            finally:
+                await connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+                await connection.commit()
+        return
+
+    lock_path = _file_lock_path(db_engine, key)
+    if lock_path is None:
+        # In-memory / pathless DB: not shareable across processes anyway.
         yield
         return
 
-    async with engine.connect() as connection:
-        await connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": key})
-        await connection.commit()
-        try:
-            yield
-        finally:
-            await connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
-            await connection.commit()
+    from filelock import FileLock
+
+    # Blocking acquire/release run off the event loop. The OS lock is bound to
+    # the file descriptor (process-wide, not thread-local), so acquiring and
+    # releasing from different worker threads is safe.
+    lock = FileLock(lock_path)
+    await asyncio.to_thread(lock.acquire)
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(lock.release)
 
 
 async def _apply(

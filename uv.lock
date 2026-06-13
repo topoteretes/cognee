@@ -1192,7 +1192,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "1.1.2"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1206,6 +1206,7 @@ dependencies = [
     { name = "fakeredis", extra = ["lua"] },
     { name = "fastapi" },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
+    { name = "filelock" },
     { name = "filetype" },
     { name = "gunicorn" },
     { name = "instructor" },
@@ -1430,6 +1431,7 @@ requires-dist = [
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=15.0.2" },
     { name = "fastembed", marker = "python_full_version < '3.14' and extra == 'codegraph'", specifier = "<=0.8.0" },
     { name = "fastembed", marker = "extra == 'fastembed'", specifier = "<=0.8.0" },
+    { name = "filelock", specifier = ">=3.12.0,<4.0.0" },
     { name = "filetype", specifier = ">=1.2.0,<2.0.0" },
     { name = "gdown", marker = "extra == 'evals'", specifier = ">=5.2.0,<6" },
     { name = "gitpython", marker = "extra == 'dev'", specifier = ">=3.1.43,<4" },

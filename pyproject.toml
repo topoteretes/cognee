@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.1.2"
+version = "1.2.0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -28,6 +28,7 @@ dependencies = [
     "numpy>=1.26.4, <=4.0.0",
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
+    "filelock>=3.12.0,<4.0.0",  # cross-process migration lock for SQLite (Linux/macOS/Windows)
     "tiktoken>=0.8.0,<1.0.0",
     "litellm>=1.83.7",
     "instructor>=1.9.1,<2.0.0",
