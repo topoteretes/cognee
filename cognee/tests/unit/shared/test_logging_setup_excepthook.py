@@ -23,7 +23,7 @@ class TestExcepthookInstallation:
         finally:
             sys.excepthook = original_hook
 
-    def test_handler_falls_back_to_plain_traceback_when_rendering_raises(self, monkeypatch, capfd):
+    def test_handler_falls_back_to_plain_traceback_when_rendering_raises(self, monkeypatch):
         """If structlog/rich rendering raises, the handler must still print a
         plain traceback instead of dying inside the hook."""
         import structlog
@@ -44,14 +44,19 @@ class TestExcepthookInstallation:
             except ValueError:
                 exc_type, exc_value, tb = sys.exc_info()
 
-            handler(exc_type, exc_value, tb)
+            # Capture with redirect_stdout/stderr (StringIO), NOT capsys/capfd:
+            # setup_logging() enables colored output, so on Windows colorama is
+            # init'd with strip=False (force_colors) and routes writes through the
+            # Win32 console API — bypassing both capsys (Python streams) and capfd
+            # (fds). Replacing the streams with StringIO sidesteps colorama entirely.
+            import io
+            from contextlib import redirect_stderr, redirect_stdout
 
-            # capfd (file-descriptor capture), not capsys: setup_logging() builds a
-            # colored ConsoleRenderer, so on Windows colorama wraps sys.stdout/stderr
-            # and the handler's plain print/traceback go to the real fds — which
-            # capsys (Python-level) misses but capfd catches.
-            captured = capfd.readouterr()
-            combined = captured.out + captured.err
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                handler(exc_type, exc_value, tb)
+
+            combined = out.getvalue() + err.getvalue()
             assert "the original error" in combined
             assert "plain traceback" in combined.lower()
         finally:
