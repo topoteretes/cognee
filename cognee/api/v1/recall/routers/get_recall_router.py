@@ -65,7 +65,7 @@ class RecallPayloadDTO(InDTO):
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
     include_references: bool = Field(
-        default=True,
+        default=False,
         description="Include source/provenance references in completion results.",
     )
     session_id: Optional[str] = Field(

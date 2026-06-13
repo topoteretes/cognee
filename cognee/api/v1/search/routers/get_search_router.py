@@ -92,7 +92,7 @@ class SearchPayloadDTO(InDTO):
         ),
     )
     include_references: bool = Field(
-        default=True,
+        default=False,
         description="Attach source references to completion-type results.",
     )
 
