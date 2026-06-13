@@ -156,6 +156,8 @@ async def test_hybrid_completion_retriever_receives_config():
             "max_edges_per_entity": 3,
             "include_global_context_index": True,
             "global_context_index_top_k": 2,
+            "text_summaries_top_k": 0,
+            "use_importance_weight": False,
         },
     )
 
@@ -168,6 +170,8 @@ async def test_hybrid_completion_retriever_receives_config():
     assert retriever_instance.session_id == "session-1"
     assert retriever_instance.include_global_context_index is True
     assert retriever_instance.global_context_index_top_k == 2
+    assert retriever_instance.text_summaries_top_k == 0
+    assert retriever_instance.use_importance_weight is False
 
 
 @pytest.mark.asyncio
@@ -183,6 +187,8 @@ async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
     assert isinstance(retriever_instance, HybridRetriever)
     assert retriever_instance.chunks_top_k == 11
     assert retriever_instance.entities_top_k == 11
+    assert retriever_instance.text_summaries_top_k is None
+    assert retriever_instance.use_importance_weight is True
 
 
 @pytest.mark.asyncio
@@ -235,7 +241,7 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             return_value=unified,
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ),
         patch(

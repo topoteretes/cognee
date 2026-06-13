@@ -68,7 +68,7 @@ jobs:
 
       - name: Run unit tests
         shell: bash
-        run: uv run pytest cognee/tests/unit/
+        run: uv run pytest cognee/tests/unit/ --timeout=300 --timeout-method=thread
         env:
           PYTHONUTF8: 1
           LLM_PROVIDER: openai
