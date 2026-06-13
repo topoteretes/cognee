@@ -10,7 +10,7 @@ from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
-from cognee.modules.retrieval.utils.references import format_chunk_references
+from cognee.modules.retrieval.utils.references import append_chunk_evidence
 
 logger = get_logger("CompletionRetriever")
 
@@ -28,7 +28,7 @@ class CompletionRetriever(BaseRetriever):
         top_k: Optional[int] = 1,
         session_id: Optional[str] = None,
         response_model: Type = str,
-        include_references: bool = True,
+        include_references: bool = False,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -100,25 +100,6 @@ class CompletionRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
-    def _append_chunk_evidence(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
-        """Append a code-assembled chunk Evidence block to string completions.
-
-        Evidence is appended only when references are enabled, the completion is a
-        plain string (never corrupt a structured response_model), and the built
-        Evidence block is non-empty. The block already carries its own header.
-        """
-        if not self.include_references or self.response_model is not str:
-            return completions
-
-        evidence = format_chunk_references(retrieved_objects)
-        if not evidence:
-            return completions
-
-        return [
-            f"{completion}\n\n{evidence}" if isinstance(completion, str) else completion
-            for completion in completions
-        ]
-
     async def get_completion_from_context(
         self,
         query: str,
@@ -171,5 +152,11 @@ class CompletionRetriever(BaseRetriever):
             completions = await self._generate_completion_without_session(query, context)
 
         # Both the session/cache branch and the non-session branch rejoin here so
-        # logged-in/cached calls also receive references.
-        return self._append_chunk_evidence(completions, retrieved_objects)
+        # logged-in/cached calls also receive references. Evidence is grounded in
+        # each completion's own text, so a cache-hit answer never cites chunks
+        # that share nothing with it.
+        return append_chunk_evidence(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
+        )

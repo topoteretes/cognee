@@ -1,12 +1,15 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import sys
+from types import SimpleNamespace
+from uuid import uuid4
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
+from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage.add_data_points import (
     add_data_points,
     InvalidDataPointsInAddDataPointsError,
@@ -511,3 +514,77 @@ async def test_add_data_points_hybrid_write_path(
     # Standard index_data_points and index_graph_edges should NOT be called
     mock_index_nodes.assert_not_awaited()
     mock_index_edges.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "upsert_edges")
+@patch.object(adp_module, "upsert_nodes")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_relational_upserts_happen_before_graph_and_vector_writes(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_upsert_nodes,
+    mock_upsert_edges,
+    mock_index_nodes,
+    mock_index_edges,
+):
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    custom_edges = [(str(dp2.id), str(dp1.id), "custom_edge", {})]
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    call_order = []
+
+    async def _upsert_nodes(*_args, **_kwargs):
+        call_order.append("upsert_nodes")
+
+    async def _upsert_edges(*_args, **_kwargs):
+        call_order.append("upsert_edges")
+
+    async def _add_nodes(*_args, **_kwargs):
+        call_order.append("graph_add_nodes")
+
+    async def _add_edges(*_args, **_kwargs):
+        call_order.append("graph_add_edges")
+
+    async def _index_nodes(*_args, **_kwargs):
+        call_order.append("index_nodes")
+
+    async def _index_edges(*_args, **_kwargs):
+        call_order.append("index_edges")
+
+    mock_upsert_nodes.side_effect = _upsert_nodes
+    mock_upsert_edges.side_effect = _upsert_edges
+    graph_engine.add_nodes.side_effect = _add_nodes
+    graph_engine.add_edges.side_effect = _add_edges
+    mock_index_nodes.side_effect = _index_nodes
+    mock_index_edges.side_effect = _index_edges
+
+    ctx = PipelineContext(
+        user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
+        dataset=SimpleNamespace(id=uuid4()),
+        data_item=SimpleNamespace(id=uuid4()),
+        pipeline_name="cognify_pipeline",
+        pipeline_run_id=uuid4(),
+    )
+
+    await add_data_points([dp1, dp2], custom_edges=custom_edges, ctx=ctx)
+
+    first_graph_index = min(
+        call_order.index("graph_add_nodes"),
+        call_order.index("index_nodes"),
+        call_order.index("graph_add_edges"),
+        call_order.index("index_edges"),
+    )
+    assert call_order[:3] == ["upsert_nodes", "upsert_edges", "upsert_edges"]
+    assert first_graph_index >= 3
