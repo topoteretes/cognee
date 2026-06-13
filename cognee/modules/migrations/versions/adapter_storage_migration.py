@@ -18,7 +18,7 @@ async def migrate(context: MigrationContext) -> None:
     """Run the vector adapter's storage-schema migration, if it has one."""
     migrate_method = getattr(context.vector_engine, "run_migrations", None)
     if migrate_method is None:
-        logger.info("Vector engine has no run_migrations method; nothing to do.")
+        logger.debug("Vector engine has no run_migrations method; nothing to do.")
         return
     result = await migrate_method()
     if result is not None:
@@ -26,6 +26,4 @@ async def migrate(context: MigrationContext) -> None:
 
 
 async def downgrade(context: MigrationContext) -> None:
-    """Adapter storage-schema migrations are additive and backward-compatible
-    (older releases read the upgraded shape fine), so reverting is a no-op."""
-    logger.info("Adapter storage migration downgrade: no-op (schema is backward-compatible).")
+    pass
