@@ -295,8 +295,11 @@ async def add(
     )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
-    # standard DataItems before the pipeline sees them.
-    data = await resolve_dlt_sources(
+    # standard DataItems before the pipeline sees them. orphan_cleanup (when
+    # not None) deletes dlt rows no longer present in the source; it is
+    # deferred until after the fresh rows are committed to avoid a data-loss
+    # window on a mid-ingest failure.
+    data, orphan_cleanup = await resolve_dlt_sources(
         data,
         dataset_name=dataset_name,
         user=user,
@@ -306,6 +309,12 @@ async def add(
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.
     if run_in_background:
+        # Detached pipelines run one-at-a-time (to avoid DB write conflicts)
+        # and commit later, so we cannot safely defer cleanup past their commit
+        # from here without racing them. Run it up front instead.
+        if orphan_cleanup is not None:
+            await orphan_cleanup()
+            orphan_cleanup = None
         data = await _materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
