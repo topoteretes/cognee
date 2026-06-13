@@ -23,7 +23,7 @@ class TestExcepthookInstallation:
         finally:
             sys.excepthook = original_hook
 
-    def test_handler_falls_back_to_plain_traceback_when_rendering_raises(self, monkeypatch, capsys):
+    def test_handler_falls_back_to_plain_traceback_when_rendering_raises(self, monkeypatch, capfd):
         """If structlog/rich rendering raises, the handler must still print a
         plain traceback instead of dying inside the hook."""
         import structlog
@@ -46,7 +46,11 @@ class TestExcepthookInstallation:
 
             handler(exc_type, exc_value, tb)
 
-            captured = capsys.readouterr()
+            # capfd (file-descriptor capture), not capsys: setup_logging() builds a
+            # colored ConsoleRenderer, so on Windows colorama wraps sys.stdout/stderr
+            # and the handler's plain print/traceback go to the real fds — which
+            # capsys (Python-level) misses but capfd catches.
+            captured = capfd.readouterr()
             combined = captured.out + captured.err
             assert "the original error" in combined
             assert "plain traceback" in combined.lower()
