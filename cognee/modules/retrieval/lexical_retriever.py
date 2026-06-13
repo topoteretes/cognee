@@ -4,10 +4,8 @@ from typing import Any, Callable, Optional, List, Union
 from heapq import nlargest
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.modules.retrieval.utils import lexical_corpus_cache
 from cognee.shared.logging_utils import get_logger
 
 
@@ -46,98 +44,49 @@ class LexicalRetriever(BaseRetriever):
         self._init_lock = asyncio.Lock()
 
     async def initialize(self):
-        """Initialize retriever from the corpus cache, loading from the graph on a miss."""
+        """Initialize retriever by reading all DocumentChunks from graph_engine."""
         async with self._init_lock:
             if self._initialized:
                 return
 
-            cache_key = self._corpus_cache_key()
-            if cache_key is None:
-                await self._load_corpus()
-                self._initialized = True
-                return
+            logger.info("Initializing LexicalRetriever by loading DocumentChunks from graph engine")
 
-            if self._restore_if_cached(cache_key):
-                return
-
-            async with lexical_corpus_cache.lock(cache_key):
-                if self._restore_if_cached(cache_key):
-                    return
-                await self._load_corpus()
-                lexical_corpus_cache.put(cache_key, self._cache_state())
-                self._initialized = True
-
-    def _restore_if_cached(self, cache_key) -> bool:
-        state = lexical_corpus_cache.get(cache_key)
-        if state is None:
-            return False
-        self._restore_cache_state(state)
-        self._initialized = True
-        return True
-
-    def _corpus_cache_key(self) -> Optional[tuple]:
-        """Cache key scoped to the current graph context, or None when not cacheable."""
-        tokenizer_key = self._tokenizer_cache_key()
-        if tokenizer_key is None:
-            return None
-        graph_config = get_graph_context_config()
-        config_key = tuple(sorted((str(key), str(value)) for key, value in graph_config.items()))
-        return (config_key, type(self).__name__, tokenizer_key)
-
-    def _tokenizer_cache_key(self) -> Optional[tuple]:
-        """Subclasses with a hashable tokenizer config opt into corpus caching here.
-
-        The base class accepts arbitrary tokenizer callables, which cannot be keyed
-        safely, so it returns None and skips the cache.
-        """
-        return None
-
-    def _cache_state(self) -> dict:
-        return {"chunks": self.chunks, "payloads": self.payloads}
-
-    def _restore_cache_state(self, state: dict) -> None:
-        self.chunks = state["chunks"]
-        self.payloads = state["payloads"]
-
-    async def _load_corpus(self):
-        """Read all DocumentChunks from the graph engine and tokenize them."""
-        logger.info("Initializing LexicalRetriever by loading DocumentChunks from graph engine")
-
-        try:
-            graph_engine = await get_graph_engine()
-            nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["DocumentChunk"]}])
-        except Exception as e:
-            logger.error("Graph engine initialization failed")
-            raise NoDataError("Graph engine initialization failed") from e
-
-        chunk_count = 0
-        for node in nodes:
             try:
-                chunk_id, document = node
-            except Exception:
-                logger.warning("Skipping node with unexpected shape: %r", node)
-                continue
+                graph_engine = await get_graph_engine()
+                nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["DocumentChunk"]}])
+            except Exception as e:
+                logger.error("Graph engine initialization failed")
+                raise NoDataError("Graph engine initialization failed") from e
 
-            if document.get("type") == "DocumentChunk" and document.get("text"):
+            chunk_count = 0
+            for node in nodes:
                 try:
-                    tokens = self.tokenizer(document["text"])
-                    if not tokens:
-                        continue
-                    # Some graph adapters (e.g. kuzu) omit "id" from node payloads;
-                    # downstream consumers match chunks across channels by payload id.
-                    document_id = str(document.get("id") or chunk_id)
-                    document.setdefault("id", document_id)
-                    self.chunks[document_id] = tokens
-                    self.payloads[document_id] = document
-                    chunk_count += 1
-                except Exception as e:
-                    logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
+                    chunk_id, document = node
+                except Exception:
+                    logger.warning("Skipping node with unexpected shape: %r", node)
+                    continue
 
-        if chunk_count == 0:
-            logger.error("Initialization completed but no valid chunks were loaded.")
-            raise NoDataError("No valid chunks loaded during initialization.")
+                if document.get("type") == "DocumentChunk" and document.get("text"):
+                    try:
+                        tokens = self.tokenizer(document["text"])
+                        if not tokens:
+                            continue
+                        # Some graph adapters (e.g. kuzu) omit "id" from node payloads;
+                        # downstream consumers match chunks across channels by payload id.
+                        document_id = str(document.get("id") or chunk_id)
+                        document.setdefault("id", document_id)
+                        self.chunks[document_id] = tokens
+                        self.payloads[document_id] = document
+                        chunk_count += 1
+                    except Exception as e:
+                        logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
 
-        logger.info("Initialized with %d document chunks", len(self.chunks))
+            if chunk_count == 0:
+                logger.error("Initialization completed but no valid chunks were loaded.")
+                raise NoDataError("No valid chunks loaded during initialization.")
+
+            self._initialized = True
+            logger.info("Initialized with %d document chunks", len(self.chunks))
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """Retrieves relevant chunks for the given query."""

@@ -2,14 +2,6 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
-from cognee.modules.retrieval.utils import lexical_corpus_cache
-
-
-@pytest.fixture(autouse=True)
-def _clear_corpus_cache():
-    lexical_corpus_cache.invalidate()
-    yield
-    lexical_corpus_cache.invalidate()
 
 
 def _patch_graph(corpus: dict[str, str]):
@@ -127,64 +119,3 @@ async def test_no_match_query_returns_zero_scored_chunks():
     # LexicalRetriever still returns top_k payloads for a no-match query; all score 0.0.
     assert len(results) == 2
     assert all(score == 0.0 for _, score in results)
-
-
-def _engine_with_corpus(corpus: dict[str, str]):
-    nodes = [
-        (chunk_id, {"id": chunk_id, "type": "DocumentChunk", "text": text})
-        for chunk_id, text in corpus.items()
-    ]
-    engine = AsyncMock()
-    engine.get_filtered_graph_data = AsyncMock(return_value=(nodes, {}))
-    return engine
-
-
-@pytest.mark.asyncio
-async def test_corpus_is_cached_across_retriever_instances():
-    engine = _engine_with_corpus({"chunk_a": "alpha project", "chunk_b": "beta archive"})
-
-    with patch(
-        "cognee.modules.retrieval.lexical_retriever.get_graph_engine",
-        AsyncMock(return_value=engine),
-    ):
-        first = await BM25ChunksRetriever(top_k=2, with_scores=True).get_retrieved_objects(
-            "project"
-        )
-        second = await BM25ChunksRetriever(top_k=2, with_scores=True).get_retrieved_objects(
-            "project"
-        )
-
-    assert engine.get_filtered_graph_data.await_count == 1
-    # Scores must match exactly: the cached BM25 stats (idf, avg length) were restored.
-    assert [(payload["id"], score) for payload, score in first] == [
-        (payload["id"], score) for payload, score in second
-    ]
-
-
-@pytest.mark.asyncio
-async def test_invalidate_forces_corpus_reload():
-    engine = _engine_with_corpus({"chunk_a": "alpha project"})
-
-    with patch(
-        "cognee.modules.retrieval.lexical_retriever.get_graph_engine",
-        AsyncMock(return_value=engine),
-    ):
-        await BM25ChunksRetriever(top_k=1).get_retrieved_objects("project")
-        lexical_corpus_cache.invalidate()
-        await BM25ChunksRetriever(top_k=1).get_retrieved_objects("project")
-
-    assert engine.get_filtered_graph_data.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_different_stop_words_use_separate_cache_entries():
-    engine = _engine_with_corpus({"chunk_a": "the alpha project"})
-
-    with patch(
-        "cognee.modules.retrieval.lexical_retriever.get_graph_engine",
-        AsyncMock(return_value=engine),
-    ):
-        await BM25ChunksRetriever(top_k=1).get_retrieved_objects("project")
-        await BM25ChunksRetriever(top_k=1, stop_words=[]).get_retrieved_objects("project")
-
-    assert engine.get_filtered_graph_data.await_count == 2

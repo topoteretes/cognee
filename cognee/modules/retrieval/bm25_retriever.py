@@ -48,6 +48,7 @@ class BM25ChunksRetriever(LexicalRetriever):
         # Corpus statistics, populated once by initialize().
         self.idf: dict[str, float] = {}
         self.avg_chunk_length: float = 0.0
+        self._stats_built = False
 
         super().__init__(
             tokenizer=self._tokenizer, scorer=self._scorer, top_k=top_k, with_scores=with_scores
@@ -57,26 +58,17 @@ class BM25ChunksRetriever(LexicalRetriever):
         """Lowercases, splits on word characters (w+), filters stopwords."""
         return tokenize_words(text, self.stop_words)
 
-    async def _load_corpus(self):
-        """Load chunks via the parent, then build BM25 corpus statistics once."""
-        await super()._load_corpus()
+    async def initialize(self):
+        """Load chunks via the parent, then build BM25 corpus statistics once.
+
+        The parent owns ``_initialized`` and returns early on re-entry, so a separate
+        ``_stats_built`` guard is needed to avoid recomputing stats on a repeated call.
+        """
+        await super().initialize()
+        if self._stats_built:
+            return
         self._build_corpus_stats()
-
-    def _tokenizer_cache_key(self) -> tuple:
-        """Tokenization depends only on the stop-word set, so the corpus is cacheable."""
-        return ("bm25", tuple(sorted(self.stop_words)))
-
-    def _cache_state(self) -> dict:
-        return {
-            **super()._cache_state(),
-            "idf": self.idf,
-            "avg_chunk_length": self.avg_chunk_length,
-        }
-
-    def _restore_cache_state(self, state: dict) -> None:
-        super()._restore_cache_state(state)
-        self.idf = state["idf"]
-        self.avg_chunk_length = state["avg_chunk_length"]
+        self._stats_built = True
 
     def _build_corpus_stats(self):
         """Compute average chunk length and per-token IDF from the tokenized chunks."""

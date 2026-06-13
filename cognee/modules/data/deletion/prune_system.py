@@ -19,7 +19,6 @@ from cognee.infrastructure.databases.cache import (
     get_cache_engine,
 )
 from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
-from cognee.modules.retrieval.utils import lexical_corpus_cache
 from cognee.modules.users.models import DatasetDatabase
 from cognee.shared.logging_utils import get_logger
 
@@ -91,5 +90,3 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
             cache_engine = get_cache_engine()
             if cache_engine:
                 await cache_engine.prune()
-
-    lexical_corpus_cache.invalidate()
