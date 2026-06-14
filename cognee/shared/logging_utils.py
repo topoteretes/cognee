@@ -436,22 +436,30 @@ def setup_logging(log_level=None, name=None) -> bool:
     )
 
     # Set up system-wide exception handling
-    def handle_exception(exc_type, exc_value, traceback) -> None:
-        """Handle any uncaught exception."""
+    def handle_exception(exc_type, exc_value, tb) -> None:
+        """Handle any uncaught exception safely."""
         if issubclass(exc_type, KeyboardInterrupt):
             # Let KeyboardInterrupt pass through
-            sys.__excepthook__(exc_type, exc_value, traceback)
+            sys.__excepthook__(exc_type, exc_value, tb)
             return
 
-        logger = structlog.get_logger()
-        logger.error(
-            "Exception",
-            exc_info=(exc_type, exc_value, traceback),
-        )
-        # Hand back to the original hook → prints traceback and exits
-        sys.__excepthook__(exc_type, exc_value, traceback)
+        try:
+            logger = structlog.get_logger()
+            logger.error(
+                "Exception",
+                exc_info=(exc_type, exc_value, tb),
+            )
+        except Exception:
+            print("\n[Warning] Could not render rich traceback. Falling back to plain traceback.\n")
+            traceback.print_exception(exc_type, exc_value, tb)
+            sys.__excepthook__(exc_type, exc_value, tb)
+            return
 
-    # Install exception handlers
+        # Normal path - hand back to original hook
+        sys.__excepthook__(exc_type, exc_value, tb)
+
+    # Install the exception handler so uncaught exceptions are logged
+    # through structlog before the default hook prints and exits.
     sys.excepthook = handle_exception
 
     # Create console formatter for standard library logging

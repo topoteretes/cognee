@@ -32,6 +32,7 @@ class TextSummary(DataPoint):
 
     text: str
     made_from: DocumentChunk
+    source_chunk_id: Optional[str] = None
     summarized_in: Optional[GlobalContextSummary] = None
     global_context_bucket_id: Optional[str] = None
     metadata: dict = {"index_fields": ["text"]}

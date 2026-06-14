@@ -5,7 +5,7 @@ One-to-many expansion (one DLT source → many rows) happens here; the
 per-item pipeline model downstream stays unchanged.
 """
 
-from typing import Any, List, Optional, Set
+from typing import Any, Callable, List, Optional, Set
 from uuid import UUID
 
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
@@ -37,8 +37,11 @@ async def resolve_dlt_sources(
     ``ingest_dlt_source`` and each resulting row is wrapped in a ``DataItem``
     with stable ``data_id``, enriched text, and ``external_metadata``.
 
-    Returns the (possibly expanded) data — either a single item, a list, or
-    unchanged if nothing was DLT.
+    Returns a ``(data, orphan_cleanup)`` tuple. ``data`` is the (possibly
+    expanded) data — a single item, a list, or unchanged if nothing was DLT.
+    ``orphan_cleanup`` is an async callable that deletes dlt rows no longer in
+    the source, or ``None`` when there is nothing to clean up; the caller must
+    await it *after* the fresh rows are committed (see Phase 3).
     """
     # Lazy-import DLT types so the dlt package is not a hard dependency
     try:
@@ -46,7 +49,7 @@ async def resolve_dlt_sources(
         from dlt.extract.source import DltSource
     except ImportError:
         # dlt not installed — nothing to resolve
-        return data
+        return data, None
 
     primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
     write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
@@ -74,7 +77,7 @@ async def resolve_dlt_sources(
 
     if not dlt_items:
         # Nothing to expand — return original data unchanged
-        return data
+        return data, None
 
     # --- Run DLT pipelines and collect rows ---------------------------------
     all_rows: List[DltRowData] = []
@@ -99,7 +102,25 @@ async def resolve_dlt_sources(
         row_identifier = f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
         data_id = await get_unique_data_id(row_identifier, user)
         row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)] = data_id
-        fk_lookup[(row.table_name, row.primary_key_value)] = data_id
+
+        fk_key = (row.table_name, row.primary_key_value)
+        existing = fk_lookup.get(fk_key)
+        if existing is not None and existing != data_id:
+            # Duplicate primary key within a table: row_id_lookup keeps both
+            # rows (it is keyed by content_hash too), but fk_lookup can only
+            # hold one target per (table, pk). FK edges pointing at this key
+            # will resolve to the last row seen; earlier rows are shadowed.
+            # ingest_dlt_source already warns on duplicate PKs at load time;
+            # warn here too so the ambiguity is visible at FK-resolution time.
+            logger.warning(
+                "Duplicate primary key during FK resolution: table=%s pk=%s. "
+                "FK edges targeting this key resolve to the last row "
+                "(content_hash=%s); earlier rows with this key are shadowed.",
+                row.table_name,
+                row.primary_key_value,
+                row.content_hash,
+            )
+        fk_lookup[fk_key] = data_id
 
     # --- Phase 2: create DataItems ------------------------------------------
     # Build table-level metadata once per table so all rows share the same
@@ -117,11 +138,14 @@ async def resolve_dlt_sources(
         return _table_meta_cache[row.table_name]
 
     expanded_items: list[DataItem] = []
+    # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
+    # was not loaded — collected here and reported once after the loop.
+    missing_fk_targets: list[tuple[str, str, str, str]] = []
     for row in all_rows:
         data_id = row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)]
 
         enriched_text = _build_schema_context_text(row)
-        fk_references = _resolve_fk_references(row, fk_lookup)
+        fk_references = _resolve_fk_references(row, fk_lookup, missing_fk_targets)
         table_meta = _get_table_meta(row)
 
         ext_metadata = {
@@ -147,15 +171,39 @@ async def resolve_dlt_sources(
 
     logger.info("Resolved %d DLT source(s) into %d DataItems.", len(dlt_items), len(expanded_items))
 
-    # --- Phase 3: delete orphaned dlt rows no longer in the source ----------
+    if missing_fk_targets:
+        sample = ", ".join(
+            f"{src}.{col} -> {ref}:{val}" for src, col, ref, val in missing_fk_targets[:5]
+        )
+        logger.warning(
+            "%d foreign key reference(s) could not be resolved to a loaded row "
+            "and were dropped (no edge created). The target row was likely not "
+            "ingested (e.g. it is beyond max_rows_per_table). "
+            "Sample (source_table.column -> ref_table:value): %s",
+            len(missing_fk_targets),
+            sample,
+        )
+
+    # --- Phase 3: prepare deferred orphan cleanup ---------------------------
+    # Deletion of orphaned dlt rows is deferred to *after* the fresh rows are
+    # committed by the add pipeline, to avoid a data-loss window: if ingestion
+    # failed between deletion and commit, the orphans would be gone and the
+    # replacements never stored. We return a cleanup coroutine for the caller
+    # to await post-commit instead of deleting here.
+    #
     # Skip orphan deletion for "append" disposition — each run intentionally
     # adds new rows, so prior batches should not be treated as orphans.
+    orphan_cleanup: Optional[Callable[[], Any]] = None
     if write_disposition != "append":
         fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
-        await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+
+        async def _cleanup() -> None:
+            await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+
+        orphan_cleanup = _cleanup
 
     result = non_dlt_items + expanded_items
-    return result
+    return result, orphan_cleanup
 
 
 # ---------------------------------------------------------------------------
@@ -213,12 +261,20 @@ def _build_schema_context_text(dlt_row: DltRowData) -> str:
     return "\n".join(lines)
 
 
-def _resolve_fk_references(dlt_row: DltRowData, row_id_lookup: dict) -> list:
+def _resolve_fk_references(
+    dlt_row: DltRowData,
+    row_id_lookup: dict,
+    missing_targets: Optional[list] = None,
+) -> list:
     """Resolve foreign key columns to target data_ids for graph edge creation.
 
     Returns a list of dicts:
     [{"column": "dept_id", "target_table": "departments", "target_pk_value": "10",
       "target_data_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
+
+    When ``missing_targets`` is provided, FK references whose target row was not
+    loaded are appended to it as ``(source_table, column, ref_table, value)`` so
+    the caller can report the dropped edges instead of silently losing them.
     """
     references = []
     for fk in dlt_row.foreign_keys:
@@ -250,6 +306,8 @@ def _resolve_fk_references(dlt_row: DltRowData, row_id_lookup: dict) -> list:
                     "relationship_name": relationship_name,
                 }
             )
+        elif missing_targets is not None:
+            missing_targets.append((dlt_row.table_name, fk_column, ref_table, fk_value_str))
 
     return references
 
@@ -302,14 +360,31 @@ async def _delete_dlt_orphans(
         dataset_name,
     )
 
+    failed: list = []
     for orphan in orphans:
         try:
             if await has_data_related_nodes(dataset.id, orphan.id):
                 await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
             await delete_data(orphan, dataset.id)
         except Exception:
+            failed.append(orphan.id)
             logger.warning(
                 "Failed to delete orphaned dlt row data_id=%s, skipping.",
                 orphan.id,
                 exc_info=True,
             )
+
+    if failed:
+        # Surface partial-cleanup failures loudly: the stale rows remain across
+        # the relational, graph, and vector stores and will be retried on the
+        # next ingest. We log rather than raise — the fresh rows are already
+        # committed by this point and best-effort cleanup should not fail an
+        # otherwise-successful add.
+        logger.error(
+            "Failed to delete %d of %d orphaned dlt row(s) from dataset '%s'. "
+            "Stale data remains and will be retried on the next ingest. data_ids=%s",
+            len(failed),
+            len(orphans),
+            dataset_name,
+            ", ".join(str(i) for i in failed),
+        )

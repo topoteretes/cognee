@@ -1,8 +1,8 @@
 """Unit tests for the LLM-free reference (Evidence) helpers.
 
-Covers ``format_chunk_references`` (sync, payload-driven) and
-``build_graph_reference_context`` (async, GraphDBInterface-driven), including the
-old-data graceful-degradation cases and the non-traversable-backend case.
+Covers ``format_chunk_references`` (sync, payload-driven, answer-grounded) and
+``build_answer_grounded_chunk_references`` (async, vector-engine-driven),
+including the old-data graceful-degradation cases and backend-failure cases.
 """
 
 from unittest.mock import AsyncMock
@@ -11,13 +11,13 @@ import pytest
 
 from cognee.modules.retrieval.utils.references import (
     EVIDENCE_HEADER,
-    build_graph_reference_context,
+    build_answer_grounded_chunk_references,
     format_chunk_references,
 )
 
 
 # ---------------------------------------------------------------------------
-# format_chunk_references
+# format_chunk_references (no answer: legacy retrieval-order behavior)
 # ---------------------------------------------------------------------------
 
 
@@ -136,108 +136,118 @@ def test_format_chunk_references_snippet_truncated():
 
 
 # ---------------------------------------------------------------------------
-# build_graph_reference_context
+# format_chunk_references (answer-grounded filtering and ranking)
 # ---------------------------------------------------------------------------
 
 
-def _entity_node():
-    return {"id": "entity-1", "name": "Acme Corp", "type": "Entity"}
+def test_answer_filtering_drops_chunks_without_overlap():
+    """Chunks sharing no significant terms with the answer are not cited."""
+    matching = _payload(document_name="report.pdf", chunk_index=0, text="Revenue grew 12 percent.")
+    unrelated = _payload(
+        document_name="other.pdf", chunk_index=1, text="Penguins live in Antarctica."
+    )
+
+    result = format_chunk_references([matching, unrelated], answer="Revenue grew 12 percent.")
+
+    assert "report.pdf" in result
+    assert "other.pdf" not in result
 
 
-def _chunk_node(with_flat_name=True):
-    node = {"id": "chunk-1", "name": "chunk-1", "type": "DocumentChunk", "chunk_index": 2}
-    if with_flat_name:
-        node["document_name"] = "annual_report.pdf"
-    return node
+def test_answer_filtering_empty_when_nothing_overlaps():
+    """No candidate overlaps the answer -> Evidence omitted entirely."""
+    unrelated = _payload(text="Penguins live in Antarctica.")
+
+    assert format_chunk_references([unrelated], answer="Quarterly revenue increased.") == ""
 
 
-def _document_node():
-    return {"id": "doc-1", "name": "annual_report.pdf", "type": "Document"}
+def test_answer_filtering_ranks_by_overlap():
+    """Higher answer-term overlap is cited before lower overlap."""
+    weak = _payload(document_name="weak.pdf", chunk_index=0, text="Revenue is mentioned once.")
+    strong = _payload(
+        document_name="strong.pdf",
+        chunk_index=1,
+        text="Revenue grew twelve percent in the fourth quarter.",
+    )
+
+    result = format_chunk_references(
+        [weak, strong], answer="Revenue grew twelve percent in the fourth quarter."
+    )
+
+    assert result.index("strong.pdf") < result.index("weak.pdf")
+
+
+def test_answer_with_no_significant_terms_yields_no_evidence():
+    """An answer made of stopwords/stubs cannot be grounded -> empty string."""
+    assert format_chunk_references([_payload()], answer="It is.") == ""
+
+
+def test_answer_none_keeps_all_usable_candidates():
+    """answer=None preserves the unfiltered retrieval-order behavior."""
+    unrelated = _payload(text="Penguins live in Antarctica.")
+
+    assert "Penguins" in format_chunk_references([unrelated], answer=None)
+
+
+# ---------------------------------------------------------------------------
+# build_answer_grounded_chunk_references
+# ---------------------------------------------------------------------------
+
+
+def _scored(payload, id_):
+    class FakeScored:
+        def __init__(self, payload, id_):
+            self.payload = payload
+            self.id = id_
+
+    return FakeScored(payload, id_)
 
 
 @pytest.mark.asyncio
-async def test_build_graph_reference_context_uses_flat_document_name():
-    """Entity -> contains -> chunk with a flat document_name resolves directly."""
+async def test_answer_grounded_references_query_chunk_index_with_answer():
+    """The answer text is run as the vector query and grounds the bullets."""
     engine = AsyncMock()
-    engine.get_connections.return_value = [
-        (_entity_node(), {"relationship_name": "contains"}, _chunk_node(with_flat_name=True)),
+    engine.search.return_value = [
+        _scored(
+            _payload(document_name="report.pdf", chunk_index=2, text="Revenue grew 12 percent."),
+            "chunk-1",
+        )
     ]
 
-    result = await build_graph_reference_context(["entity-1"], engine)
+    result = await build_answer_grounded_chunk_references("Revenue grew 12 percent.", engine)
 
     assert result.startswith(EVIDENCE_HEADER + "\n")
-    assert "- Entity Acme Corp appears in chunk 3 of document annual_report.pdf" in result
-    # Only the single get_connections call was needed (flat name short-circuits).
-    engine.get_connections.assert_awaited_once_with("entity-1")
+    assert "- chunk 3 of document report.pdf:" in result
+    engine.search.assert_awaited_once()
+    assert engine.search.await_args.args[0] == "DocumentChunk_text"
+    assert engine.search.await_args.args[1] == "Revenue grew 12 percent."
 
 
 @pytest.mark.asyncio
-async def test_build_graph_reference_context_falls_back_to_is_part_of():
-    """Without a flat name, it walks is_part_of -> Document for the name."""
+async def test_answer_grounded_references_drop_unrelated_results():
+    """Vector hits that share no terms with the answer are filtered out."""
     engine = AsyncMock()
-
-    async def get_connections(node_id):
-        if node_id == "entity-1":
-            return [
-                (
-                    _entity_node(),
-                    {"relationship_name": "contains"},
-                    _chunk_node(with_flat_name=False),
-                )
-            ]
-        if node_id == "chunk-1":
-            return [
-                (
-                    _chunk_node(with_flat_name=False),
-                    {"relationship_name": "is_part_of"},
-                    _document_node(),
-                )
-            ]
-        return []
-
-    engine.get_connections.side_effect = get_connections
-
-    result = await build_graph_reference_context(["entity-1"], engine)
-
-    assert "- Entity Acme Corp appears in chunk 3 of document annual_report.pdf" in result
-
-
-@pytest.mark.asyncio
-async def test_build_graph_reference_context_returns_empty_on_not_implemented():
-    """Non-traversable backend (Postgres-graph) raises NotImplementedError -> empty, no raise."""
-    engine = AsyncMock()
-    engine.get_connections.side_effect = NotImplementedError("graph traversal not supported")
-
-    result = await build_graph_reference_context(["entity-1"], engine)
-
-    assert result == ""
-
-
-@pytest.mark.asyncio
-async def test_build_graph_reference_context_returns_empty_on_attribute_error():
-    """Engine missing get_connections -> AttributeError -> empty, no raise."""
-    engine = AsyncMock()
-    engine.get_connections.side_effect = AttributeError("no get_connections")
-
-    result = await build_graph_reference_context(["entity-1"], engine)
-
-    assert result == ""
-
-
-@pytest.mark.asyncio
-async def test_build_graph_reference_context_empty_for_no_node_ids_or_engine():
-    assert await build_graph_reference_context([], AsyncMock()) == ""
-    assert await build_graph_reference_context(["entity-1"], None) == ""
-
-
-@pytest.mark.asyncio
-async def test_build_graph_reference_context_empty_when_no_chunk_connections():
-    """Entity with no contains->DocumentChunk connection produces no evidence."""
-    engine = AsyncMock()
-    engine.get_connections.return_value = [
-        (_entity_node(), {"relationship_name": "related_to"}, _entity_node()),
+    engine.search.return_value = [
+        _scored(_payload(text="Penguins live in Antarctica."), "chunk-1"),
     ]
 
-    result = await build_graph_reference_context(["entity-1"], engine)
+    result = await build_answer_grounded_chunk_references("Quarterly revenue increased.", engine)
 
     assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_answer_grounded_references_empty_on_search_failure():
+    """A missing collection or backend failure degrades to no Evidence, no raise."""
+    engine = AsyncMock()
+    engine.search.side_effect = RuntimeError("collection not found")
+
+    result = await build_answer_grounded_chunk_references("Revenue grew.", engine)
+
+    assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_answer_grounded_references_empty_for_blank_answer_or_engine():
+    assert await build_answer_grounded_chunk_references("", AsyncMock()) == ""
+    assert await build_answer_grounded_chunk_references("   ", AsyncMock()) == ""
+    assert await build_answer_grounded_chunk_references("Revenue grew.", None) == ""
