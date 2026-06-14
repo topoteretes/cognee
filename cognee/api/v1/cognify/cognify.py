@@ -4,6 +4,7 @@ from typing import Union, Optional
 from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
@@ -271,6 +272,7 @@ async def cognify(
             use_pipeline_cache=True,
             pipeline_name="cognify_pipeline",
             data_per_batch=data_per_batch,
+            rollback_handler=cognify_rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
         )

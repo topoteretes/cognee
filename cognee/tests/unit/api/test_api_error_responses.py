@@ -146,6 +146,8 @@ class TestRememberEndpoint:
         remember_pkg = importlib.import_module("cognee.api.v1.remember")
 
         class RememberResultStub:
+            status = "completed"
+
             def to_dict(self):
                 return {"status": "completed", "dataset_name": "test_dataset"}
 

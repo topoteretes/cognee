@@ -1,6 +1,6 @@
 import asyncio
 from uuid import UUID
-from typing import Optional, Union
+from typing import Awaitable, Callable, Optional, Union
 
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
@@ -43,6 +43,7 @@ async def run_pipeline(
     graph_db_config: Optional[dict] = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
+    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ):
@@ -63,6 +64,7 @@ async def run_pipeline(
             use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
+            rollback_handler=rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
         ):
@@ -78,6 +80,7 @@ async def run_pipeline_per_dataset(
     use_pipeline_cache=False,
     incremental_loading=False,
     data_per_batch: int = 20,
+    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ):
@@ -109,6 +112,7 @@ async def run_pipeline_per_dataset(
         pipeline_name,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
+        rollback_handler=rollback_handler,
         llm_config=llm_config,
         embedding_config=embedding_config,
     )

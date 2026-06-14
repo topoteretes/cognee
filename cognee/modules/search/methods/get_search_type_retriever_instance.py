@@ -69,7 +69,7 @@ async def get_search_type_retriever_instance(
     session_id = kwargs.get("session_id")
     neighborhood_depth = kwargs.get("neighborhood_depth")
     neighborhood_seed_top_k = kwargs.get("neighborhood_seed_top_k")
-    include_references = kwargs.get("include_references", True)
+    include_references = kwargs.get("include_references", False)
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
@@ -110,6 +110,10 @@ async def get_search_type_retriever_instance(
                 ),
                 "global_context_index_top_k": retriever_specific_config.get(
                     "global_context_index_top_k", 3
+                ),
+                "text_summaries_top_k": retriever_specific_config.get("text_summaries_top_k"),
+                "use_importance_weight": retriever_specific_config.get(
+                    "use_importance_weight", True
                 ),
             },
         ),
