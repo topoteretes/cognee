@@ -46,7 +46,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         feedback_influence: float = 0.0,
         session_id: Optional[str] = None,
         response_model: Type = str,
-        include_references: bool = True,
+        include_references: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,

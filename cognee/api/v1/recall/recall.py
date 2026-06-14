@@ -335,7 +335,7 @@ async def recall(
     retriever_specific_config: dict | None = None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
-    include_references: bool = True,
+    include_references: bool = False,
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,

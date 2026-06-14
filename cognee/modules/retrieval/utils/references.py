@@ -1,20 +1,25 @@
 """Deterministic, LLM-free helpers for building reference (Evidence) blocks.
 
-Two helpers are exposed:
+Evidence is grounded in the generated answer, not in whatever happened to be
+retrieved before the LLM was called:
 
 - ``format_chunk_references`` builds an Evidence block from retrieved vector
-  payloads (the ``RAG_COMPLETION`` / chunk path).
-- ``build_graph_reference_context`` builds an entity-fallback Evidence block by
-  walking the graph from entity node ids to their ``DocumentChunk`` -> ``Document``
-  via the :class:`GraphDBInterface` connection API (the graph completion path).
+  payloads, keeping only chunks that share significant terms with the answer
+  (the ``RAG_COMPLETION`` / chunk path, where candidates are the chunks the
+  LLM actually read).
+- ``build_answer_grounded_chunk_references`` runs the answer text as a vector
+  query against the chunk index and formats the results (the graph completion
+  path, where the LLM context is not chunk-shaped).
+- ``append_chunk_evidence`` / ``append_answer_grounded_evidence`` apply the
+  above to a list of completions, one Evidence block per string completion.
 
-Both are pure with respect to the LLM (no model calls) so they can be unit
-tested in isolation. Both return ``""`` when there is nothing usable, and
-``build_graph_reference_context`` never raises on a backend that cannot
-traverse (e.g. Postgres-graph).
+All helpers are pure with respect to the LLM (no model calls) so they can be
+unit tested in isolation. All return ``""`` (or the completions unchanged)
+when there is nothing usable, and never raise on backend failures.
 """
 
-from typing import Any, List, Optional
+import re
+from typing import Any, List, Optional, Set, Tuple
 
 from cognee.shared.logging_utils import get_logger
 
@@ -30,6 +35,26 @@ _SNIPPET_MAX_CHARS = 160
 # Hard upper bound on bullets regardless of the requested limit (3-5 range).
 _MAX_BULLETS = 5
 _MIN_LIMIT = 3
+
+# Vector collection holding document chunks (same one ChunksRetriever queries).
+_CHUNK_COLLECTION = "DocumentChunk_text"
+
+# How many vector candidates to fetch before answer-overlap filtering.
+_CANDIDATE_POOL = 10
+
+# Common English words excluded from answer/chunk term overlap scoring.
+_STOPWORDS = frozenset(
+    """
+    a about above after again all also an and any are as at be because been
+    before being below between both but by can did do does doing down during
+    each few for from further had has have having he her here hers him his how
+    i if in into is it its just me more most my no nor not of off on once only
+    or other our ours out over own same she should so some such than that the
+    their theirs them then there these they this those through to too under
+    until up very was we were what when where which while who whom why will
+    with you your yours
+    """.split()
+)
 
 
 def _clamp_limit(limit: int) -> int:
@@ -121,8 +146,16 @@ def _chunk_id(obj: Any, payload: dict) -> Optional[str]:
     return None
 
 
-def format_chunk_references(retrieved_objects: Any, limit: int = 5) -> str:
-    """Build an Evidence block from retrieved vector payloads.
+def _significant_terms(text: str) -> Set[str]:
+    """Lowercased alphanumeric terms of an answer, minus stopwords and stubs."""
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return {token for token in tokens if len(token) >= 3 and token not in _STOPWORDS}
+
+
+def format_chunk_references(
+    retrieved_objects: Any, answer: Optional[str] = None, limit: int = 5
+) -> str:
+    """Build an Evidence block from retrieved vector payloads, grounded in the answer.
 
     Reads ``payload["document_name"]``, ``payload["chunk_number"]`` (falling back
     to ``payload["chunk_index"] + 1``), and ``payload["text"]`` from each
@@ -130,11 +163,19 @@ def format_chunk_references(retrieved_objects: Any, limit: int = 5) -> str:
     metadata are skipped. Results are deduplicated by chunk id and capped at
     3-5 bullets.
 
+    When ``answer`` is provided, candidates that share no significant terms
+    with the answer are dropped and the remainder is ranked by term overlap,
+    so bullets reflect answer provenance rather than retrieval order. An
+    answer with no significant terms cannot be grounded and yields ``""``.
+
     Parameters
     ----------
     retrieved_objects:
         An iterable of retrieved vector results (``ScoredResult``-like objects
         exposing a ``.payload`` dict), or raw payload dicts.
+    answer:
+        The generated answer text used to filter and rank candidates. When
+        None, candidates keep their retrieval order unfiltered.
     limit:
         Desired maximum number of bullets, clamped into the 3-5 range.
 
@@ -152,14 +193,19 @@ def format_chunk_references(retrieved_objects: Any, limit: int = 5) -> str:
     except TypeError:
         return ""
 
-    max_bullets = _clamp_limit(limit)
-    bullets: List[str] = []
+    answer_terms: Optional[Set[str]] = None
+    if answer is not None:
+        answer_terms = _significant_terms(answer)
+        if not answer_terms:
+            # Nothing to ground the citation in (e.g. "Yes."): omit Evidence
+            # rather than presenting unverifiable retrieval order as provenance.
+            return ""
+
+    # (overlap_score, document_name, number, text) per usable candidate.
+    candidates: List[Tuple[int, str, int, str]] = []
     seen: set = set()
 
     for obj in iterator:
-        if len(bullets) >= max_bullets:
-            break
-
         payload = _get_payload(obj)
         if payload is None:
             continue
@@ -178,116 +224,51 @@ def format_chunk_references(retrieved_objects: Any, limit: int = 5) -> str:
             continue
         seen.add(dedup_key)
 
-        bullets.append(f'- chunk {number} of document {document_name}: "{_snippet(text)}"')
+        score = 0
+        if answer_terms is not None:
+            chunk_terms = set(re.findall(r"[a-z0-9]+", text.lower()))
+            score = len(answer_terms & chunk_terms)
+            if score == 0:
+                # No term from the answer appears in this chunk: it is almost
+                # certainly not a source of the answer.
+                continue
 
-    if not bullets:
+        candidates.append((score, document_name, number, text))
+
+    if not candidates:
         return ""
+
+    if answer_terms is not None:
+        # Stable sort: highest answer overlap first, retrieval order as tiebreak.
+        candidates.sort(key=lambda candidate: -candidate[0])
+
+    max_bullets = _clamp_limit(limit)
+    bullets = [
+        f'- chunk {number} of document {document_name}: "{_snippet(text)}"'
+        for _, document_name, number, text in candidates[:max_bullets]
+    ]
 
     return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
 
 
-# Relationship names used to walk chunk <-> document and chunk <-> entity edges.
-# These are stored as edge properties (``relationship_name``) on the single EDGE
-# table, so we filter on them directly rather than on edge labels.
-_DOCUMENT_REL = "is_part_of"
-_CONTAINS_REL = "contains"
+async def build_answer_grounded_chunk_references(
+    answer: str, vector_engine: Any, limit: int = 5
+) -> str:
+    """Build an Evidence block by running the answer as a vector query over chunks.
 
-# Node type labels (stored as the ``type`` property on the single Node table).
-_DOCUMENT_CHUNK_TYPE = "DocumentChunk"
-_DOCUMENT_TYPE = "Document"
+    This grounds Evidence in the answer text itself, independent of how the
+    original retrieval was done (graph traversal, triplets, ...): the answer is
+    embedded once and matched against the existing chunk index, then candidates
+    are additionally filtered by term overlap with the answer.
 
-
-def _node_type(node: Any) -> Optional[str]:
-    """Best-effort node type extraction from a connection node dict."""
-    if not isinstance(node, dict):
-        return None
-    return _clean_str(node.get("type"))
-
-
-def _node_name(node: Any) -> Optional[str]:
-    """Best-effort node display name extraction from a connection node dict."""
-    if not isinstance(node, dict):
-        return None
-    return _clean_str(node.get("name"))
-
-
-def _other_node(self_id: Any, source: dict, target: dict) -> Optional[dict]:
-    """Return the connection endpoint that is NOT ``self_id``."""
-    self_id_str = str(self_id)
-    if isinstance(source, dict) and str(source.get("id")) == self_id_str:
-        return target if isinstance(target, dict) else None
-    if isinstance(target, dict) and str(target.get("id")) == self_id_str:
-        return source if isinstance(source, dict) else None
-    # Undirected fallback: prefer target when neither matches exactly.
-    return target if isinstance(target, dict) else None
-
-
-def _relationship_name(relationship: Any) -> Optional[str]:
-    """Extract relationship_name from a connection relationship element."""
-    if isinstance(relationship, dict):
-        return _clean_str(relationship.get("relationship_name"))
-    return _clean_str(relationship)
-
-
-def _chunk_display_number(chunk_node: dict) -> Optional[int]:
-    """Resolve a 1-based chunk number from a graph node dict."""
-    return _chunk_number(chunk_node)
-
-
-async def _document_name_for_chunk(chunk_node: dict, graph_engine: Any) -> Optional[str]:
-    """Resolve the document name for a chunk node.
-
-    Prefers the flat ``document_name`` scalar on the chunk; otherwise walks the
-    chunk's ``is_part_of`` connection to the ``Document`` node and uses its name.
-    """
-    flat_name = _clean_str(chunk_node.get("document_name"))
-    if flat_name is not None:
-        return flat_name
-
-    chunk_id = chunk_node.get("id")
-    if chunk_id is None:
-        return None
-
-    try:
-        connections = await graph_engine.get_connections(chunk_id)
-    except (NotImplementedError, AttributeError):
-        return None
-    except Exception as error:  # pragma: no cover - defensive
-        logger.debug(f"get_connections failed for chunk {chunk_id}: {error}")
-        return None
-
-    for connection in connections or []:
-        if not isinstance(connection, (tuple, list)) or len(connection) != 3:
-            continue
-        source, relationship, target = connection
-        if _relationship_name(relationship) != _DOCUMENT_REL:
-            continue
-        other = _other_node(chunk_id, source, target)
-        if other is not None and _node_type(other) == _DOCUMENT_TYPE:
-            name = _node_name(other)
-            if name is not None:
-                return name
-    return None
-
-
-async def build_graph_reference_context(node_ids: Any, graph_engine: Any, limit: int = 5) -> str:
-    """Build an entity-fallback Evidence block by traversing the graph.
-
-    For each entity node id, walks its connections to find ``DocumentChunk``
-    nodes (via the ``contains`` relationship), then resolves the owning
-    ``Document`` for each chunk. Emits compact entity/chunk/document bullets.
-
-    Uses only :class:`GraphDBInterface` connection methods (``get_connections``),
-    never raw Cypher, so it works uniformly across backends. Never raises: on a
-    backend that cannot traverse (e.g. Postgres-graph, which raises
-    ``NotImplementedError``) it returns ``""``.
+    Never raises: a missing collection or backend failure degrades to ``""``.
 
     Parameters
     ----------
-    node_ids:
-        Iterable of entity node identifiers to start traversal from.
-    graph_engine:
-        A graph engine implementing the ``GraphDBInterface`` connection API.
+    answer:
+        The generated answer text to ground.
+    vector_engine:
+        A vector engine exposing ``search(collection, query, limit, include_payload)``.
     limit:
         Desired maximum number of bullets, clamped into the 3-5 range.
 
@@ -295,91 +276,72 @@ async def build_graph_reference_context(node_ids: Any, graph_engine: Any, limit:
     -------
     str
         A multi-line Evidence block prefixed by an ``Evidence:`` header, or an
-        empty string when nothing usable was found or traversal is unsupported.
+        empty string when nothing usable was found or the search failed.
     """
-    if not node_ids or graph_engine is None:
+    cleaned_answer = _clean_str(answer)
+    if cleaned_answer is None or vector_engine is None:
         return ""
 
     try:
-        ids = list(node_ids)
-    except TypeError:
+        found_chunks = await vector_engine.search(
+            _CHUNK_COLLECTION,
+            cleaned_answer,
+            limit=_CANDIDATE_POOL,
+            include_payload=True,
+        )
+    except Exception as error:
+        logger.debug(f"Answer-grounded chunk search failed: {error}")
         return ""
 
-    max_bullets = _clamp_limit(limit)
-    bullets: List[str] = []
-    seen: set = set()
+    return format_chunk_references(found_chunks, answer=cleaned_answer, limit=limit)
+
+
+def append_chunk_evidence(
+    completions: List[Any], retrieved_objects: Any, enabled: bool
+) -> List[Any]:
+    """Append an answer-grounded chunk Evidence block to string completions.
+
+    Each string completion gets its own Evidence block, filtered and ranked by
+    that completion's text against the retrieved candidates. Non-string
+    completions (structured response models) are never touched, and an empty
+    Evidence block leaves the completion unchanged.
+    """
+    if not enabled:
+        return completions
+
+    appended: List[Any] = []
+    for completion in completions:
+        if not isinstance(completion, str):
+            appended.append(completion)
+            continue
+        evidence = format_chunk_references(retrieved_objects, answer=completion)
+        appended.append(f"{completion}\n\n{evidence}" if evidence else completion)
+    return appended
+
+
+async def append_answer_grounded_evidence(completions: List[Any], enabled: bool) -> List[Any]:
+    """Append an answer-grounded Evidence block to string completions.
+
+    Each string completion is run as a vector query against the chunk index
+    (see :func:`build_answer_grounded_chunk_references`). Non-string completions
+    are never touched; any backend failure degrades to no Evidence.
+    """
+    if not enabled:
+        return completions
 
     try:
-        for node_id in ids:
-            if len(bullets) >= max_bullets:
-                break
-            if node_id is None:
-                continue
+        from cognee.infrastructure.databases.vector import get_vector_engine
 
-            try:
-                connections = await graph_engine.get_connections(node_id)
-            except NotImplementedError:
-                # Backend cannot traverse (e.g. Postgres-graph): omit Evidence.
-                return ""
-            except AttributeError:
-                return ""
-            except Exception as error:  # pragma: no cover - defensive
-                logger.debug(f"get_connections failed for node {node_id}: {error}")
-                continue
+        vector_engine = get_vector_engine()
+    except Exception as error:
+        logger.debug(f"Unable to obtain vector engine for references: {error}")
+        return completions
 
-            for connection in connections or []:
-                if len(bullets) >= max_bullets:
-                    break
-                if not isinstance(connection, (tuple, list)) or len(connection) != 3:
-                    continue
-
-                source, relationship, target = connection
-                if _relationship_name(relationship) != _CONTAINS_REL:
-                    continue
-
-                # The entity is connected to a chunk via `contains`; the chunk is
-                # the endpoint that is not this entity node.
-                chunk_node = _other_node(node_id, source, target)
-                if chunk_node is None or _node_type(chunk_node) != _DOCUMENT_CHUNK_TYPE:
-                    continue
-
-                entity_name = (
-                    _node_name(source)
-                    if str(source.get("id") if isinstance(source, dict) else None) == str(node_id)
-                    else _node_name(target)
-                )
-                if entity_name is None:
-                    # Fall back to whichever endpoint is the entity (not chunk).
-                    entity_node = (
-                        source
-                        if isinstance(source, dict) and _node_type(source) != _DOCUMENT_CHUNK_TYPE
-                        else target
-                    )
-                    entity_name = _node_name(entity_node)
-                if entity_name is None:
-                    continue
-
-                number = _chunk_display_number(chunk_node)
-                if number is None:
-                    continue
-
-                document_name = await _document_name_for_chunk(chunk_node, graph_engine)
-                if document_name is None:
-                    continue
-
-                dedup_key = (entity_name, number, document_name)
-                if dedup_key in seen:
-                    continue
-                seen.add(dedup_key)
-
-                bullets.append(
-                    f"- Entity {entity_name} appears in chunk {number} of document {document_name}"
-                )
-    except Exception as error:  # pragma: no cover - defensive catch-all
-        logger.debug(f"build_graph_reference_context failed: {error}")
-        return ""
-
-    if not bullets:
-        return ""
-
-    return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
+    appended: List[Any] = []
+    for completion in completions:
+        if not isinstance(completion, str):
+            appended.append(completion)
+            continue
+        evidence = await build_answer_grounded_chunk_references(completion, vector_engine)
+        appended.append(f"{completion}\n\n{evidence}" if evidence else completion)
+    return appended

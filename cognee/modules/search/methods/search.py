@@ -56,7 +56,7 @@ async def search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
-    include_references: bool = True,
+    include_references: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
@@ -168,7 +168,7 @@ async def authorized_search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
-    include_references: bool = True,
+    include_references: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResultPayload]:
@@ -228,7 +228,7 @@ async def search_in_datasets_context(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
-    include_references: bool = True,
+    include_references: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
@@ -255,7 +255,7 @@ async def search_in_datasets_context(
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = None,
-        include_references: bool = True,
+        include_references: bool = False,
     ) -> SearchResultPayload:
         with new_span("cognee.search.dataset") as span:
             span.set_attribute("cognee.search.dataset_name", dataset.name or "")

@@ -51,7 +51,7 @@ async def search(
     skills: Optional[List[Union[str, Skill]]] = None,
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
-    include_references: bool = True,
+    include_references: bool = False,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
