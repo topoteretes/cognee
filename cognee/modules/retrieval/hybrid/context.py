@@ -1,6 +1,7 @@
 from typing import Any, Optional
 
 from cognee.modules.retrieval.hybrid.entities import format_entities
+from cognee.modules.retrieval.hybrid.facts import format_facts
 from cognee.modules.retrieval.hybrid.results import display_value, payload, result_id
 
 
@@ -22,10 +23,15 @@ def format_hybrid_context(global_context: str, retrieved_objects: Any) -> str:
     if entities:
         sections.append(entities)
 
+    facts = format_facts(retrieved_objects.get("facts", []))
+    if facts:
+        sections.append(facts)
+
     return "\n\n".join(sections)
 
 
 def extract_context_object_ids(retrieved_objects: Any) -> Optional[dict[str, list[str]]]:
+    # Facts are intentionally excluded: their ids are EdgeType vector rows, not graph nodes.
     if not isinstance(retrieved_objects, dict):
         return None
 
