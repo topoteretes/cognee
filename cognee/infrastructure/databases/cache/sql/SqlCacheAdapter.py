@@ -29,6 +29,7 @@ from .tables import (
     cache_kv,
     cache_metadata,
     cache_qa_entries,
+    cache_session_context,
     cache_trace_entries,
     cache_usage_logs,
 )
@@ -256,6 +257,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 for table in (
                     cache_qa_entries,
                     cache_trace_entries,
+                    cache_session_context,
                     cache_usage_logs,
                     cache_kv,
                 ):
@@ -647,7 +649,7 @@ class SqlCacheAdapter(CacheDBInterface):
         try:
             async with self.sessionmaker() as session, session.begin():
                 deleted_rows = 0
-                for table in (cache_qa_entries, cache_trace_entries):
+                for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
                     # Expired rows are invisible — drop them first so they don't
                     # count toward "session existed".
                     await self._purge_session_expired(session, table, user_id, session_id)
@@ -758,6 +760,131 @@ class SqlCacheAdapter(CacheDBInterface):
                 return result.scalar_one()
         except Exception as error:
             error_msg = f"Unexpected error while counting agent trace steps in SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    # --------------------------------------------------------------------- #
+    # Session context (active guidance: goals, rules, preferences, lessons)
+    # --------------------------------------------------------------------- #
+
+    async def create_session_context_entry(
+        self, user_id: str, session_id: str, entry_dump: dict
+    ) -> None:
+        """Append one session-context entry (kind-discriminated dict) to the session.
+
+        The caller validates the payload; we only promote its ``id`` to the
+        ``entry_id`` column so updates can target a single row directly.
+        """
+        await self._ensure_initialized()
+        entry_id = entry_dump.get("id")
+        if not entry_id:
+            raise CacheConnectionError("session-context entry_dump must carry a non-empty 'id'")
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                await self._purge_session_expired(
+                    session, cache_session_context, user_id, session_id
+                )
+                await session.execute(
+                    insert(cache_session_context).values(
+                        user_id=user_id,
+                        session_id=session_id,
+                        entry_id=entry_id,
+                        payload=entry_dump,
+                        expires_at=self._session_expiry(),
+                    )
+                )
+                await self._refresh_session_ttl(session, cache_session_context, user_id, session_id)
+        except Exception as error:
+            error_msg = f"Unexpected error while adding session context to SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+        await self._maybe_purge_expired()
+
+    async def get_session_context_entries(self, user_id: str, session_id: str) -> list[dict]:
+        """Return all stored session-context entries for the session, oldest first."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                result = await session.execute(
+                    select(cache_session_context.c.payload)
+                    .where(
+                        self._session_filter(cache_session_context, user_id, session_id),
+                        self._not_expired(cache_session_context),
+                    )
+                    .order_by(cache_session_context.c.seq.asc())
+                )
+                return [dict(payload) for payload in result.scalars().all()]
+        except Exception as error:
+            error_msg = f"Unexpected error while reading session context from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    async def update_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str, merge: dict
+    ) -> bool:
+        """Shallow-merge ``merge`` into the entry whose id is ``entry_id``.
+
+        Returns True if a matching entry was updated, False otherwise.
+        """
+        await self._ensure_initialized()
+        attempt = 0
+        while True:
+            try:
+                async with self.sessionmaker() as session, session.begin():
+                    result = await session.execute(
+                        select(cache_session_context.c.payload)
+                        .where(
+                            self._session_filter(cache_session_context, user_id, session_id),
+                            cache_session_context.c.entry_id == entry_id,
+                            self._not_expired(cache_session_context),
+                        )
+                        .with_for_update()
+                    )
+                    payload = result.scalar_one_or_none()
+                    if payload is None:
+                        return False
+                    merged = {**dict(payload), **merge}
+                    await session.execute(
+                        update(cache_session_context)
+                        .where(
+                            self._session_filter(cache_session_context, user_id, session_id),
+                            cache_session_context.c.entry_id == entry_id,
+                        )
+                        .values(payload=merged)
+                    )
+                    await self._refresh_session_ttl(
+                        session, cache_session_context, user_id, session_id
+                    )
+                    return True
+            except DBAPIError as error:
+                attempt += 1
+                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                    await asyncio.sleep(0.05 * (2**attempt))
+                    continue
+                error_msg = f"Unexpected error while updating session context in SQL cache: {error}"
+                logger.error(error_msg)
+                raise CacheConnectionError(error_msg) from error
+            except Exception as error:
+                error_msg = f"Unexpected error while updating session context in SQL cache: {error}"
+                logger.error(error_msg)
+                raise CacheConnectionError(error_msg) from error
+
+    async def delete_session_context(self, user_id: str, session_id: str) -> bool:
+        """Delete all session-context entries for the session. True if any existed."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                await self._purge_session_expired(
+                    session, cache_session_context, user_id, session_id
+                )
+                result = await session.execute(
+                    delete(cache_session_context).where(
+                        self._session_filter(cache_session_context, user_id, session_id)
+                    )
+                )
+                return result.rowcount > 0
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting session context from SQL cache: {error}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
@@ -913,6 +1040,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 for table in (
                     cache_qa_entries,
                     cache_trace_entries,
+                    cache_session_context,
                     cache_usage_logs,
                     cache_kv,
                 ):

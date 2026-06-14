@@ -87,6 +87,34 @@ Index(
     sqlite_where=cache_trace_entries.c.expires_at.isnot(None),
 )
 
+# Session-context entries: append-only, kind-discriminated ("context"/"feedback").
+# entry_id is promoted from the payload's "id" to a column for direct UPDATE,
+# mirroring how cache_qa_entries promotes qa_id.
+cache_session_context = Table(
+    "cache_session_context",
+    cache_metadata,
+    Column("seq", _seq_type(), primary_key=True, autoincrement=True),
+    Column("user_id", Text, nullable=False),
+    Column("session_id", Text, nullable=False),
+    Column("entry_id", Text, nullable=False),
+    Column("payload", _payload_type(), nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=True),
+)
+
+Index(
+    "idx_cache_session_context_session",
+    cache_session_context.c.user_id,
+    cache_session_context.c.session_id,
+    cache_session_context.c.seq,
+)
+Index(
+    "idx_cache_session_context_expires",
+    cache_session_context.c.expires_at,
+    postgresql_where=cache_session_context.c.expires_at.isnot(None),
+    sqlite_where=cache_session_context.c.expires_at.isnot(None),
+)
+
 # Usage logs (Redis key {log_key}:{user_id} analogue).
 cache_usage_logs = Table(
     "cache_usage_logs",
