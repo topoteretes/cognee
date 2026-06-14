@@ -36,6 +36,18 @@ class TestRunRelationalMigrations(unittest.TestCase):
     subprocess interpreter to resolve anymore.)
     """
 
+    def test_alembic_chain_has_a_single_head(self):
+        """The Alembic relational chain must have exactly ONE head. With two
+        heads, both ``upgrade head`` and ``stamp head`` fail ('Multiple heads
+        are present'), breaking startup. A new migration whose ``down_revision``
+        branches off a non-head revision reintroduces this — fix the chain, not
+        this test."""
+        from alembic.script import ScriptDirectory
+
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+        heads = ScriptDirectory.from_config(startup._build_alembic_config()).get_heads()
+        self.assertEqual(len(heads), 1, f"expected one Alembic head, found {len(heads)}: {heads}")
+
     def test_runs_alembic_in_process_without_logger_clobbering(self):
         shim = importlib.import_module("cognee.run_migrations")
         startup = importlib.import_module("cognee.modules.migrations.startup")
