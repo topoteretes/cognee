@@ -40,21 +40,6 @@ from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_
 logger = get_logger("cognify")
 
 
-async def _ensure_migrations_run(datasets, user) -> None:
-    """Run startup migrations before cognifying, and block this cognify if a
-    dataset it targets failed to migrate (writing new-scheme data into an
-    un-migrated store is the corruption the migration prevents). The
-    once-per-process guard lives in ``run_startup_migrations``, so after the
-    first run this is just a flag check; failures are retried on the next call,
-    and a healthy dataset is never blocked by an unrelated one's failure.
-    """
-    from cognee.run_migrations import run_startup_migrations
-    from cognee.modules.migrations.startup import abort_write_if_migration_blocked
-
-    failed = await run_startup_migrations()
-    await abort_write_if_migration_blocked(failed, datasets, user)
-
-
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -231,7 +216,9 @@ async def cognify(
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
 
-        await _ensure_migrations_run(datasets, user)
+        from cognee.modules.migrations.startup import run_startup_migrations_and_block
+
+        await run_startup_migrations_and_block(datasets, user)
 
         if config is None:
             ontology_config = get_ontology_env_config()

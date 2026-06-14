@@ -463,42 +463,39 @@ async def _tenant_by_dataset(session, dataset_ids: set) -> dict:
     return {dataset_id: tenant_id for dataset_id, tenant_id in rows}
 
 
-async def _migrate_ledger_edges(session, remap: dict, dataset_id) -> None:
-    """Move remapped ``edges`` rows onto their new PK (which embeds the
-    endpoints — see ``_frozen_edge_pk``), so the next cognify dedupes instead of
-    inserting a duplicate logical edge.
+async def _recompute_ledger_pks(
+    session, dataset_id, *, model, affected_stmt, migrated_values, old_pk, new_pk, kind: str
+) -> None:
+    """Move remapped ledger rows onto a PK recomputed from their new identity.
 
-    - self-validating: only rewrite the PK when the stored id is exactly
+    Shared by the nodes and edges ledgers: both embed a remapped id in their PK
+    (``_frozen_node_pk`` / ``_frozen_edge_pk``), so leaving it stale lets the next
+    cognify insert a duplicate row. The per-model parts are passed in; the
+    algorithm is identical:
+
+    - self-validating: rewrite the PK only when the stored id is exactly
       reproducible from the row. If the tenant is unrecoverable, still update the
-      endpoints (delete-ledger correctness) but leave the PK — never guess.
-    - merge-safe: if the target id already exists (SDK wrote new-scheme first, or
-      two edges collapse into one), drop this stale row instead of colliding.
+      migrated columns (delete-ledger correctness) but leave the PK — never guess.
+    - merge-safe: if the target id already exists (an SDK wrote new-scheme first,
+      or two rows collapse into one), drop this stale row instead of colliding.
+
+    ``migrated_values(row)`` returns the non-id columns to update (always
+    applied); ``old_pk(row, tenant)`` / ``new_pk(row, tenant, migrated)`` derive
+    the stored and target PKs.
     """
-    from sqlalchemy import delete, or_, select, update
+    from sqlalchemy import delete, select, update
 
-    from cognee.modules.graph.models import Edge
-
-    old_uuids = {UUID(old) for old in remap}
-
-    affected_stmt = select(
-        Edge.id,
-        Edge.user_id,
-        Edge.dataset_id,
-        Edge.source_node_id,
-        Edge.destination_node_id,
-        Edge.relationship_name,
-    ).where(or_(Edge.source_node_id.in_(old_uuids), Edge.destination_node_id.in_(old_uuids)))
-    scope_stmt = select(Edge.id)
+    scope_stmt = select(model.id)
     if dataset_id is not None:
-        affected_stmt = affected_stmt.where(Edge.dataset_id == dataset_id)
-        scope_stmt = scope_stmt.where(Edge.dataset_id == dataset_id)
+        affected_stmt = affected_stmt.where(model.dataset_id == dataset_id)
+        scope_stmt = scope_stmt.where(model.dataset_id == dataset_id)
 
     affected = (await session.execute(affected_stmt)).all()
     if not affected:
         return
 
-    # Stable ids = every in-scope edge id EXCEPT the rows we are about to remap
-    # away (their old ids are being vacated, so they must not count as collision
+    # Stable ids = every in-scope id EXCEPT the rows we are about to remap away
+    # (their old ids are being vacated, so they must not count as collision
     # targets). New ids are added to this set as we assign them.
     affected_old_ids = {row.id for row in affected}
     existing_ids = {row_id for (row_id,) in (await session.execute(scope_stmt)).all()}
@@ -509,31 +506,13 @@ async def _migrate_ledger_edges(session, remap: dict, dataset_id) -> None:
     unrecoverable = 0
     merged = 0
     for row in affected:
-        new_source = remap.get(str(row.source_node_id))
-        new_source = UUID(new_source) if new_source else row.source_node_id
-        new_target = remap.get(str(row.destination_node_id))
-        new_target = UUID(new_target) if new_target else row.destination_node_id
+        migrated = migrated_values(row)
 
         new_id = row.id  # default: leave the PK if we cannot prove the new one
         if row.dataset_id in tenant_by_dataset:
             tenant_id = tenant_by_dataset[row.dataset_id]
-            recomputed_old = _frozen_edge_pk(
-                tenant_id,
-                row.user_id,
-                row.dataset_id,
-                row.source_node_id,
-                row.relationship_name,
-                row.destination_node_id,
-            )
-            if recomputed_old == row.id:
-                new_id = _frozen_edge_pk(
-                    tenant_id,
-                    row.user_id,
-                    row.dataset_id,
-                    new_source,
-                    row.relationship_name,
-                    new_target,
-                )
+            if old_pk(row, tenant_id) == row.id:
+                new_id = new_pk(row, tenant_id, migrated)
             else:
                 unrecoverable += 1
         else:
@@ -541,102 +520,103 @@ async def _migrate_ledger_edges(session, remap: dict, dataset_id) -> None:
 
         if new_id != row.id and new_id in existing_ids:
             # The new-scheme row already exists — drop this stale duplicate so
-            # the next cognify finds exactly one row for the logical edge.
-            await session.execute(delete(Edge).where(Edge.id == row.id))
+            # the next cognify finds exactly one row for the logical identity.
+            await session.execute(delete(model).where(model.id == row.id))
             merged += 1
             continue
 
-        await session.execute(
-            update(Edge)
-            .where(Edge.id == row.id)
-            .values(id=new_id, source_node_id=new_source, destination_node_id=new_target)
-        )
+        await session.execute(update(model).where(model.id == row.id).values(id=new_id, **migrated))
         existing_ids.add(new_id)
 
     if unrecoverable:
         logger.warning(
-            "Edge-ledger migration: kept the original id on %d edge row(s) whose tenant could "
-            "not be recovered (endpoints still migrated). A later cognify may insert a duplicate "
-            "logical-edge row for these; they remain delete-correct.",
+            "%s-ledger migration: kept the original id on %d row(s) whose tenant could not be "
+            "recovered (columns still migrated). A later cognify may insert a duplicate row for "
+            "these; they remain delete-correct.",
+            kind,
             unrecoverable,
         )
     if merged:
-        logger.info("Edge-ledger migration: merged %d already-migrated duplicate row(s).", merged)
+        logger.info(
+            "%s-ledger migration: merged %d already-migrated duplicate row(s).", kind, merged
+        )
+
+
+async def _migrate_ledger_edges(session, remap: dict, dataset_id) -> None:
+    """Recompute ``edges`` PKs onto their remapped endpoints (see ``_frozen_edge_pk``)."""
+    from sqlalchemy import or_, select
+
+    from cognee.modules.graph.models import Edge
+
+    old_uuids = {UUID(old) for old in remap}
+    affected_stmt = select(
+        Edge.id,
+        Edge.user_id,
+        Edge.dataset_id,
+        Edge.source_node_id,
+        Edge.destination_node_id,
+        Edge.relationship_name,
+    ).where(or_(Edge.source_node_id.in_(old_uuids), Edge.destination_node_id.in_(old_uuids)))
+
+    def migrated(row):
+        new_source = remap.get(str(row.source_node_id))
+        new_target = remap.get(str(row.destination_node_id))
+        return {
+            "source_node_id": UUID(new_source) if new_source else row.source_node_id,
+            "destination_node_id": UUID(new_target) if new_target else row.destination_node_id,
+        }
+
+    await _recompute_ledger_pks(
+        session,
+        dataset_id,
+        model=Edge,
+        affected_stmt=affected_stmt,
+        migrated_values=migrated,
+        old_pk=lambda row, tenant: _frozen_edge_pk(
+            tenant,
+            row.user_id,
+            row.dataset_id,
+            row.source_node_id,
+            row.relationship_name,
+            row.destination_node_id,
+        ),
+        new_pk=lambda row, tenant, m: _frozen_edge_pk(
+            tenant,
+            row.user_id,
+            row.dataset_id,
+            m["source_node_id"],
+            row.relationship_name,
+            m["destination_node_id"],
+        ),
+        kind="Edge",
+    )
 
 
 async def _migrate_ledger_nodes(session, remap: dict, dataset_id) -> None:
-    """Move remapped ``nodes`` rows onto their new PK.
-
-    The PK embeds the slug (see ``_frozen_node_pk``), so updating only the slug
-    leaves it stale and the next cognify of the same document inserts a duplicate
-    provenance row for ``(slug, data_id)``. Recompute it, with the same
-    self-validation and merge-safety as ``_migrate_ledger_edges``.
-    """
-    from sqlalchemy import delete, select, update
+    """Recompute ``nodes`` PKs onto their remapped slug (see ``_frozen_node_pk``)."""
+    from sqlalchemy import select
 
     from cognee.modules.graph.models import Node
 
     old_uuids = {UUID(old) for old in remap}
-
     affected_stmt = select(Node.id, Node.user_id, Node.dataset_id, Node.data_id, Node.slug).where(
         Node.slug.in_(old_uuids)
     )
-    scope_stmt = select(Node.id)
-    if dataset_id is not None:
-        affected_stmt = affected_stmt.where(Node.dataset_id == dataset_id)
-        scope_stmt = scope_stmt.where(Node.dataset_id == dataset_id)
 
-    affected = (await session.execute(affected_stmt)).all()
-    if not affected:
-        return
-
-    affected_old_ids = {row.id for row in affected}
-    existing_ids = {row_id for (row_id,) in (await session.execute(scope_stmt)).all()}
-    existing_ids -= affected_old_ids
-
-    tenant_by_dataset = await _tenant_by_dataset(session, {row.dataset_id for row in affected})
-
-    unrecoverable = 0
-    merged = 0
-    for row in affected:
-        new_slug = UUID(remap[str(row.slug)])
-
-        new_id = row.id  # default: leave the PK if we cannot prove the new one
-        if row.dataset_id in tenant_by_dataset:
-            tenant_id = tenant_by_dataset[row.dataset_id]
-            recomputed_old = _frozen_node_pk(
-                tenant_id, row.user_id, row.dataset_id, row.data_id, row.slug
-            )
-            if recomputed_old == row.id:
-                new_id = _frozen_node_pk(
-                    tenant_id, row.user_id, row.dataset_id, row.data_id, new_slug
-                )
-            else:
-                unrecoverable += 1
-        else:
-            unrecoverable += 1
-
-        if new_id != row.id and new_id in existing_ids:
-            # The new-scheme row already exists for this (slug, data_id) — drop
-            # this stale duplicate.
-            await session.execute(delete(Node).where(Node.id == row.id))
-            merged += 1
-            continue
-
-        await session.execute(
-            update(Node).where(Node.id == row.id).values(id=new_id, slug=new_slug)
-        )
-        existing_ids.add(new_id)
-
-    if unrecoverable:
-        logger.warning(
-            "Node-ledger migration: kept the original id on %d node row(s) whose tenant could "
-            "not be recovered (slug still migrated). A later cognify may insert a duplicate "
-            "provenance row for these; they remain delete-correct.",
-            unrecoverable,
-        )
-    if merged:
-        logger.info("Node-ledger migration: merged %d already-migrated duplicate row(s).", merged)
+    await _recompute_ledger_pks(
+        session,
+        dataset_id,
+        model=Node,
+        affected_stmt=affected_stmt,
+        migrated_values=lambda row: {"slug": UUID(remap[str(row.slug)])},
+        old_pk=lambda row, tenant: _frozen_node_pk(
+            tenant, row.user_id, row.dataset_id, row.data_id, row.slug
+        ),
+        new_pk=lambda row, tenant, m: _frozen_node_pk(
+            tenant, row.user_id, row.dataset_id, row.data_id, m["slug"]
+        ),
+        kind="Node",
+    )
 
 
 async def _migrate_ledger(id_map: dict, dataset_id) -> None:

@@ -274,3 +274,14 @@ async def run_startup_migrations() -> list[str]:
             _startup_migrations_done = True
 
         return failed
+
+
+async def run_startup_migrations_and_block(datasets, user) -> None:
+    """Run startup migrations, then block this write if a dataset it targets failed.
+
+    The shared entry point for write paths (cognify/remember). The once-per-process
+    guard lives in ``run_startup_migrations``, so after the first run this is just a
+    flag check plus the scoped block.
+    """
+    failed = await run_startup_migrations()
+    await abort_write_if_migration_blocked(failed, datasets, user)

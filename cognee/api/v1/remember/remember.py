@@ -36,20 +36,6 @@ from cognee.modules.observability import (
 logger = get_logger("remember")
 
 
-async def _ensure_migrations_run(datasets, user):
-    """Run startup migrations before this SDK write, and block it if a dataset it
-    targets failed to migrate (an SDK process can otherwise write new-scheme data
-    into an un-migrated store). The once-per-process guard lives in
-    ``run_startup_migrations``; failures are retried on the next call, and a
-    healthy dataset is never blocked by an unrelated one's failure.
-    """
-    from cognee.run_migrations import run_startup_migrations
-    from cognee.modules.migrations.startup import abort_write_if_migration_blocked
-
-    failed = await run_startup_migrations()
-    await abort_write_if_migration_blocked(failed, datasets, user)
-
-
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
@@ -792,7 +778,11 @@ async def _remember_inner(
     # This ensures stale LanceDB schemas are migrated before any
     # writes, even when the API server was never started. Scoped to the
     # dataset this call targets (dataset_id override, else dataset_name).
-    await _ensure_migrations_run(kwargs.get("dataset_id") or dataset_name, kwargs.get("user"))
+    from cognee.modules.migrations.startup import run_startup_migrations_and_block
+
+    await run_startup_migrations_and_block(
+        kwargs.get("dataset_id") or dataset_name, kwargs.get("user")
+    )
 
     # Normalize "" to None — HTML forms and Swagger UI submit untouched
     # optional fields as empty strings.
