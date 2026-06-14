@@ -132,7 +132,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -729,7 +732,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -824,7 +830,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -890,7 +899,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -945,7 +957,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -1036,7 +1051,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -1566,7 +1584,10 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -1692,7 +1713,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee

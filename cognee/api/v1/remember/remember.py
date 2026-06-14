@@ -601,6 +601,22 @@ class RememberResult:
             self.items_processed = len(self.items)
             if self.items and self.items[0].get("content_hash"):
                 self.content_hash = self.items[0]["content_hash"]
+        else:
+            # PipelineRunCompleted carries no `payload` — per-item results live
+            # in data_ingestion_info as {"run_info": ..., "data_id": ...} dicts.
+            ingestion_info = getattr(run_info, "data_ingestion_info", None)
+            if ingestion_info and isinstance(ingestion_info, list):
+                processed = 0
+                for entry in ingestion_info:
+                    if not isinstance(entry, dict):
+                        continue
+                    status = getattr(entry.get("run_info"), "status", "")
+                    if "Errored" in status:
+                        continue
+                    processed += 1
+                    if entry.get("data_id") is not None:
+                        self.items.append({"id": str(entry["data_id"])})
+                self.items_processed = processed
 
     def _fail(self, exc: BaseException):
         """Mark the result as failed with an error message and elapsed time."""
@@ -778,7 +794,9 @@ async def _remember_inner(
     # dataset this call targets (dataset_id override, else dataset_name).
     await _ensure_migrations_run(kwargs.get("dataset_id") or dataset_name, kwargs.get("user"))
 
-    content_type = kwargs.pop("content_type", None)
+    # Normalize "" to None — HTML forms and Swagger UI submit untouched
+    # optional fields as empty strings.
+    content_type = kwargs.pop("content_type", None) or None
     skill_improvement = kwargs.pop("skill_improvement", None)
 
     def _requested_node_set(default: str) -> str:

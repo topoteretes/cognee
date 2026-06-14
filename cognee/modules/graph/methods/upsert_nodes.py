@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from uuid import NAMESPACE_OID, UUID, uuid5
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ async def upsert_nodes(
     dataset_id: UUID,
     data_id: UUID,
     session: AsyncSession,
+    pipeline_run_id: Optional[UUID] = None,
 ):
     """
     Adds nodes to the nodes table.
@@ -44,6 +45,7 @@ async def upsert_nodes(
             "user_id": user_id,
             "data_id": data_id,
             "dataset_id": dataset_id,
+            "pipeline_run_id": pipeline_run_id,
             "type": sanitize_relational_payload(node.type),
             "indexed_fields": sanitize_relational_payload(
                 DataPoint.get_embeddable_property_names(node)
@@ -58,6 +60,16 @@ async def upsert_nodes(
 
     for start_index in range(0, len(node_rows), UPSERT_BATCH_SIZE):
         node_batch = node_rows[start_index : start_index + UPSERT_BATCH_SIZE]
+        # on_conflict_do_nothing intentionally preserves the FIRST run's
+        # pipeline_run_id on a re-cognify. The ledger id is keyed by logical
+        # identity (tenant/user/dataset/data_id/node) and NOT by run, so a single
+        # row tracks the run that originally created the node. Overwriting it with
+        # a later run's id would make that later run's rollback delete a node that
+        # an earlier (successful) run created — i.e. destroy pre-existing data.
+        # Keeping the original tag means rollback only removes artifacts the run
+        # actually introduced. (Re-writes of an existing node's attributes by a
+        # later run are not separately rolled back; restoring those would require
+        # per-run snapshots, which is out of scope.)
         upsert_statement = (
             insert(Node).values(node_batch).on_conflict_do_nothing(index_elements=["id"])
         )

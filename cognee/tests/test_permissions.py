@@ -146,7 +146,7 @@ async def test_permissions_example_flow(permissions_example_env):
     assert isinstance(recall_results, list) and len(recall_results) == 1
     assert recall_results[0].dataset_name == "AI"
     # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
-    # on (the default), so match the mocked completion as a prefix.
+    # enabled (off by default), so match the mocked completion as a prefix.
     assert recall_results[0].text.startswith("MOCK_ANSWER")
 
     # user_1 can't read dataset owned by user_2.
@@ -181,7 +181,7 @@ async def test_permissions_example_flow(permissions_example_env):
     assert isinstance(recall_results, list) and len(recall_results) == 1
     assert recall_results[0].dataset_name == "QUANTUM"
     # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
-    # on (the default), so match the mocked completion as a prefix.
+    # enabled (off by default), so match the mocked completion as a prefix.
     assert recall_results[0].text.startswith("MOCK_ANSWER")
 
     # Tenant + role scenario.
@@ -228,7 +228,7 @@ async def test_permissions_example_flow(permissions_example_env):
     assert isinstance(recall_results, list) and len(recall_results) == 1
     assert recall_results[0].dataset_name == "QUANTUM_COGNEE_LAB"
     # GRAPH_COMPLETION appends an "Evidence:" section when include_references is
-    # on (the default), so match the mocked completion as a prefix.
+    # enabled (off by default), so match the mocked completion as a prefix.
     assert recall_results[0].text.startswith("MOCK_ANSWER")
 
     # Remove user_3 from tenant (tenant owner user_2 removes user_3).

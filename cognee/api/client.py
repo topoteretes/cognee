@@ -93,6 +93,9 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
+    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+
+    await recover_stale_cognify_runs_on_startup()
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")

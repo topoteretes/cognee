@@ -279,9 +279,8 @@ class AgenticRetriever(GraphCompletionRetriever):
             triplets=retrieved_objects.get("triplets"),
         )
 
-        # Append code-assembled entity-fallback Evidence to the final answer using
-        # the memory triplets gathered for this turn (graph path, str answers only).
-        return await self._append_graph_evidence([final], retrieved_objects.get("triplets"))
+        # Append answer-grounded Evidence to the final answer (str answers only).
+        return await self._append_graph_evidence([final])
 
     @staticmethod
     async def _record_skill_runs(
