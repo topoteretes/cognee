@@ -73,7 +73,7 @@ class HybridRetriever(BaseRetriever):
 
         self._unified_engine = await get_unified_engine()
         query_embeddings = await self._unified_engine.vector.embedding_engine.embed_text([query])
-        self._query_vector = query_embeddings[0]
+        query_vector = query_embeddings[0]
 
         chunk_objects, (entities, facts) = await asyncio.gather(
             retrieve_hybrid_chunks(
@@ -84,13 +84,13 @@ class HybridRetriever(BaseRetriever):
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
                 use_importance_weight=self.use_importance_weight,
-                query_vector=self._query_vector,
+                query_vector=query_vector,
             ),
-            self._retrieve_entities_and_facts(query),
+            self._retrieve_entities_and_facts(query, query_vector),
         )
         return {**chunk_objects, "entities": entities, "facts": facts}
 
-    async def _retrieve_entities_and_facts(self, query: str) -> tuple:
+    async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
         edge bullets overlaps the chunk pipeline's ranking and summary loading."""
         max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
@@ -102,7 +102,7 @@ class HybridRetriever(BaseRetriever):
                 self.entities_top_k,
                 self.node_name,
                 self.node_name_filter_operator,
-                query_vector=self._query_vector,
+                query_vector=query_vector,
             ),
             search_collection(
                 self._unified_engine.vector,
@@ -112,7 +112,7 @@ class HybridRetriever(BaseRetriever):
                 self.node_name,
                 self.node_name_filter_operator,
                 apply_node_filter=False,
-                query_vector=self._query_vector,
+                query_vector=query_vector,
             ),
         )
         entities = await build_entities(
@@ -159,7 +159,6 @@ class HybridRetriever(BaseRetriever):
                 query,
                 self.global_context_index_top_k,
                 self._unified_engine.vector,
-                query_vector=getattr(self, "_query_vector", None),
             ),
         )
         prelude = format_global_context_prelude(root_text, top_summaries)

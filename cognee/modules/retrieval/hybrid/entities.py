@@ -7,6 +7,9 @@ from cognee.modules.retrieval.hybrid.results import (
     payload,
     result_id,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("HybridRetriever")
 
 
 async def build_entities(
@@ -23,7 +26,14 @@ async def build_entities(
     if not entity_ids:
         return entities
 
-    nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
+    try:
+        nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
+    except Exception as error:
+        logger.warning(
+            "Graph neighborhood retrieval failed; returning entities without edges: %s", error
+        )
+        return entities
+
     connections_by_entity_id = _partition_neighborhood(entity_ids, nodes, edges)
     for entity in entities:
         entity["edges"] = _edge_bullets_from_connections(

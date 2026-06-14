@@ -1042,7 +1042,43 @@ async def test_global_context_is_prepended_when_enabled():
     assert context.startswith("## Global context\nWorld summary:\nRoot summary")
     assert "\n\n## Relevant passages\nChunk" in context
     get_unified.assert_awaited_once()
-    search_summaries.assert_awaited_once_with("q", 3, vector, query_vector=None)
+    search_summaries.assert_awaited_once_with("q", 3, vector)
+
+
+@pytest.mark.asyncio
+async def test_global_context_does_not_reuse_previous_retrieval_vector():
+    vector = MagicMock()
+    vector.search = _vector_search()
+    retriever = HybridRetriever(include_global_context_index=True)
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(vector=vector, graph=_graph()),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
+            return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.load_root_text",
+            new_callable=AsyncMock,
+            return_value="Root summary",
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.search_top_global_context_summaries",
+            new_callable=AsyncMock,
+            return_value=["Area summary"],
+        ) as search_summaries,
+    ):
+        await retriever.get_retrieved_objects(query="first query")
+        await retriever.get_context_from_objects(
+            query="second query",
+            retrieved_objects={"chunks": [], "entities": []},
+        )
+
+    search_summaries.assert_awaited_once_with("second query", 3, vector)
 
 
 @pytest.mark.asyncio
@@ -1298,6 +1334,45 @@ async def test_missing_edge_collection_keeps_bullets_and_returns_no_facts():
 
     assert retrieved["facts"] == []
     assert retrieved["entities"][0]["edges"][0]["text"] == "Alice works at Acme."
+
+
+@pytest.mark.asyncio
+async def test_graph_neighborhood_error_keeps_chunks_entities_and_facts():
+    fact = "Acme acquired Initech."
+    vector = MagicMock()
+    vector.search = _vector_search(
+        chunks=[_result("chunk-1", {"id": "chunk-1", "text": "Chunk text"})],
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
+        edge_types=[_edge_hit(fact)],
+    )
+    graph = MagicMock()
+    graph.get_neighborhood = AsyncMock(side_effect=RuntimeError("graph unavailable"))
+    retriever = HybridRetriever(text_summaries_top_k=0, facts_top_k=1)
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_unified(vector=vector, graph=graph),
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
+            return_value=MagicMock(get_retrieved_objects=AsyncMock(return_value=[])),
+        ),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert [_payload_text(chunk) for chunk in retrieved["chunks"]] == ["Chunk text"]
+    assert retrieved["entities"] == [
+        {
+            "id": "entity-1",
+            "name": "Alice",
+            "description": None,
+            "type": None,
+            "edges": [],
+        }
+    ]
+    assert [item["text"] for item in retrieved["facts"]] == [fact]
 
 
 @pytest.mark.asyncio
