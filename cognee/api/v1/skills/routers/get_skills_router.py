@@ -1,7 +1,7 @@
-"""HTTP router for listing dataset-scoped skills.
+"""HTTP router for listing, fetching and toggling dataset-scoped skills.
 
-Exposes the ``list_skills`` SDK helper over HTTP with an explicit response
-schema and caller-scoped authorization, mirroring the schema-inventory router.
+Exposes the skills SDK helpers over HTTP with explicit response schemas and
+caller-scoped authorization, mirroring the schema-inventory router.
 """
 
 from uuid import UUID
@@ -45,6 +45,12 @@ class SkillListItem(BaseModel):
     source_dir: str = Field(default="", description="On-disk source directory.")
 
 
+class SkillDetail(SkillListItem):
+    """A single skill including its full procedure body."""
+
+    procedure: str = Field(default="", description="The full skill instruction body.")
+
+
 class ErrorResponse(BaseModel):
     """Generic API error response."""
 
@@ -54,13 +60,17 @@ class ErrorResponse(BaseModel):
 def get_skills_router() -> APIRouter:
     router = APIRouter()
 
+    async def _authorized_dataset(dataset_id: UUID, user: User, permission: str):
+        """Return the authorized dataset or raise PermissionDeniedError."""
+        datasets = await get_authorized_existing_datasets([dataset_id], permission, user)
+        if not datasets:
+            raise PermissionDeniedError(message="Not authorized for this dataset")
+        return datasets[0]
+
     @router.get(
         "/",
         response_model=list[SkillListItem],
-        responses={
-            403: {"model": ErrorResponse},
-            409: {"model": ErrorResponse},
-        },
+        responses={403: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
     )
     async def list_dataset_skills(
         dataset_id: UUID = Query(
@@ -72,17 +82,13 @@ def get_skills_router() -> APIRouter:
             examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
         ),
         include_inactive: bool = Query(
-            default=False,
-            description="Include skills whose is_active flag is false.",
+            default=False, description="Include skills whose is_active flag is false."
         ),
+        limit: int = Query(default=200, ge=1, le=1000, description="Max skills to return."),
+        offset: int = Query(default=0, ge=0, description="Number of skills to skip."),
         user: User = Depends(get_authenticated_user),
     ) -> list[dict]:
-        """Return the skills available in an authorized dataset.
-
-        Each item carries the skill's publisher metadata (maintainer, version,
-        tags, license) so the UI can show who maintains it. Wraps the
-        ``list_skills`` SDK helper.
-        """
+        """Return the skills available in an authorized dataset, with publisher metadata."""
         send_telemetry(
             "Skills List API Endpoint Invoked",
             user.id,
@@ -96,24 +102,50 @@ def get_skills_router() -> APIRouter:
         from cognee.api.v1.skills.list_skills import list_skills
 
         try:
-            datasets = await get_authorized_existing_datasets([dataset_id], "read", user)
-            if not datasets:
-                raise PermissionDeniedError(message="Not authorized to read this dataset")
-
+            dataset = await _authorized_dataset(dataset_id, user, "read")
             return await list_skills(
-                dataset=datasets[0].id,
+                dataset=dataset.id,
                 include_inactive=include_inactive,
+                limit=limit,
+                offset=offset,
             )
         except PermissionDeniedError:
             return JSONResponse(
-                status_code=403,
-                content={"error": "Not authorized to read this dataset"},
+                status_code=403, content={"error": "Not authorized for this dataset"}
             )
         except Exception as exc:
             logger.error("list skills failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=409, content={"error": "Failed to list skills"})
+
+    @router.get(
+        "/{skill_id}",
+        response_model=SkillDetail,
+        responses={
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+        },
+    )
+    async def get_dataset_skill(
+        skill_id: str,
+        dataset_id: UUID = Query(..., description="Dataset UUID the skill belongs to."),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Return one skill, including its full procedure body."""
+        from cognee.api.v1.skills.list_skills import get_skill
+
+        try:
+            dataset = await _authorized_dataset(dataset_id, user, "read")
+            skill = await get_skill(skill_id, dataset.id)
+            if skill is None:
+                return JSONResponse(status_code=404, content={"error": "Skill not found"})
+            return skill
+        except PermissionDeniedError:
             return JSONResponse(
-                status_code=409,
-                content={"error": "Failed to list skills"},
+                status_code=403, content={"error": "Not authorized for this dataset"}
             )
+        except Exception as exc:
+            logger.error("get skill failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=409, content={"error": "Failed to fetch skill"})
 
     return router
