@@ -16,9 +16,8 @@ from cognee.modules.retrieval.utils.global_context import (
 from cognee.modules.retrieval.utils.used_graph_elements import (
     is_edge_list,
     extract_from_edges,
-    extract_from_temporal_dict,
 )
-from cognee.modules.retrieval.utils.references import build_graph_reference_context
+from cognee.modules.retrieval.utils.references import append_answer_grounded_evidence
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
@@ -59,7 +58,7 @@ class GraphCompletionRetriever(BaseRetriever):
         neighborhood_seed_top_k: Optional[int] = 10,
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
-        include_references: bool = True,
+        include_references: bool = False,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
@@ -306,49 +305,20 @@ class GraphCompletionRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
-    def _node_ids_from_retrieved(self, retrieved_objects: Any) -> List[str]:
-        """Collect entity node ids from retrieved edges (or a temporal dict)."""
-        extracted: Optional[Dict[str, List[str]]] = None
-        if isinstance(retrieved_objects, dict):
-            extracted = extract_from_temporal_dict(retrieved_objects)
-        elif is_edge_list(retrieved_objects):
-            extracted = extract_from_edges(retrieved_objects)
-        if not extracted:
-            return []
-        return extracted.get("node_ids", [])
+    async def _append_graph_evidence(self, completions: List[Any]) -> List[Any]:
+        """Append an answer-grounded chunk Evidence block to string completions.
 
-    async def _append_graph_evidence(
-        self, completions: List[Any], retrieved_objects: Any
-    ) -> List[Any]:
-        """Append a code-assembled entity-fallback Evidence block to string completions.
-
-        Evidence is appended only when references are enabled, the completion is a
-        plain string (never corrupt a structured response_model), and the built
-        Evidence block is non-empty. Traversal failures degrade to no Evidence.
+        Each answer is run as a vector query against the chunk index, so the
+        Evidence bullets reflect where the answer text is grounded in the corpus
+        rather than which graph elements happened to be retrieved. Evidence is
+        appended only when references are enabled and the completion is a plain
+        string (never corrupt a structured response_model); search failures
+        degrade to no Evidence.
         """
-        if not self.include_references or self.response_model is not str:
-            return completions
-
-        node_ids = self._node_ids_from_retrieved(retrieved_objects)
-        if not node_ids:
-            return completions
-
-        from cognee.infrastructure.databases.graph import get_graph_engine
-
-        try:
-            graph_engine = await get_graph_engine()
-        except Exception as error:  # pragma: no cover - defensive
-            logger.debug(f"Unable to obtain graph engine for references: {error}")
-            return completions
-
-        evidence = await build_graph_reference_context(node_ids, graph_engine)
-        if not evidence:
-            return completions
-
-        return [
-            f"{completion}\n\n{evidence}" if isinstance(completion, str) else completion
-            for completion in completions
-        ]
+        return await append_answer_grounded_evidence(
+            completions,
+            enabled=self.include_references and self.response_model is str,
+        )
 
     async def get_completion_from_context(
         self,
@@ -398,8 +368,10 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         # Session and non-session branches rejoin here so every variant that calls
-        # this method (including via super()) appends graph references once.
-        return await self._append_graph_evidence(completions, retrieved_objects)
+        # this method (including via super()) appends references once. Evidence is
+        # grounded in each completion's own text, so a cache-hit answer never
+        # cites chunks that share nothing with it.
+        return await self._append_graph_evidence(completions)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
