@@ -279,6 +279,7 @@ class SqlCacheAdapter(CacheDBInterface):
         feedback_score: Optional[int] = None,
         used_graph_element_ids: Optional[dict] = None,
         memify_metadata: Optional[dict] = None,
+        used_session_context_ids: Optional[list] = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
@@ -291,6 +292,7 @@ class SqlCacheAdapter(CacheDBInterface):
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
+            used_session_context_ids=used_session_context_ids,
         )
         return entry.model_dump()
 
@@ -330,6 +332,7 @@ class SqlCacheAdapter(CacheDBInterface):
         feedback_score: Optional[int] = None,
         used_graph_element_ids: Optional[dict] = None,
         memify_metadata: Optional[dict] = None,
+        used_session_context_ids: Optional[list] = None,
     ) -> dict:
         """Merge partial QA updates into an existing payload; None preserves values."""
         merged = {**entry}
@@ -345,6 +348,8 @@ class SqlCacheAdapter(CacheDBInterface):
             merged["feedback_score"] = feedback_score
         if used_graph_element_ids is not None:
             merged["used_graph_element_ids"] = used_graph_element_ids
+        if used_session_context_ids is not None:
+            merged["used_session_context_ids"] = used_session_context_ids
         if memify_metadata is not None:
             existing_metadata = merged.get("memify_metadata")
             if isinstance(existing_metadata, dict):
@@ -449,6 +454,7 @@ class SqlCacheAdapter(CacheDBInterface):
         feedback_score: Optional[int] = None,
         used_graph_element_ids: Optional[dict] = None,
         memify_metadata: Optional[dict] = None,
+        used_session_context_ids: Optional[list] = None,
     ) -> None:
         """Append one QA entry to the session. Creates the session if it doesn't exist."""
         await self._ensure_initialized()
@@ -462,6 +468,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
+                used_session_context_ids=used_session_context_ids,
             )
             async with self.sessionmaker() as session, session.begin():
                 await self._purge_session_expired(session, cache_qa_entries, user_id, session_id)
@@ -572,6 +579,7 @@ class SqlCacheAdapter(CacheDBInterface):
         feedback_score: Optional[int] = None,
         used_graph_element_ids: Optional[dict] = None,
         memify_metadata: Optional[dict] = None,
+        used_session_context_ids: Optional[list] = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -593,6 +601,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     feedback_score,
                     used_graph_element_ids=used_graph_element_ids,
                     memify_metadata=memify_metadata,
+                    used_session_context_ids=used_session_context_ids,
                 ),
             )
         except SessionQAEntryValidationError:
@@ -776,9 +785,10 @@ class SqlCacheAdapter(CacheDBInterface):
         ``entry_id`` column so updates can target a single row directly.
         """
         await self._ensure_initialized()
-        entry_id = entry_dump.get("id")
-        if not entry_id:
-            raise CacheConnectionError("session-context entry_dump must carry a non-empty 'id'")
+        # Redis/FS append regardless of "id" (an id-less entry is simply never
+        # targetable by update). Mirror that: fall back to a synthetic entry_id
+        # only to satisfy the NOT NULL column; the stored payload is untouched.
+        entry_id = entry_dump.get("id") or str(uuid.uuid4())
         try:
             async with self.sessionmaker() as session, session.begin():
                 await self._purge_session_expired(

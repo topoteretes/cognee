@@ -121,6 +121,26 @@ async def test_create_qa_entry_with_used_graph_element_ids_round_trip(adapter):
 
 
 @pytest.mark.asyncio
+async def test_qa_entry_used_session_context_ids_round_trip(adapter):
+    """used_session_context_ids round-trips on create and can be set via update.
+
+    Guards the session-context guidance layer: SessionManager.add_qa always
+    forwards this kwarg, so the SQL adapter must accept and persist it.
+    """
+    await adapter.create_qa_entry(
+        "u1", "s1", "Q", "C", "A", qa_id="id1", used_session_context_ids=["ctx1", "ctx2"]
+    )
+    (entry,) = await adapter.get_all_qa_entries("u1", "s1")
+    assert entry.used_session_context_ids == ["ctx1", "ctx2"]
+
+    assert (
+        await adapter.update_qa_entry("u1", "s1", "id1", used_session_context_ids=["ctx3"]) is True
+    )
+    (entry,) = await adapter.get_all_qa_entries("u1", "s1")
+    assert entry.used_session_context_ids == ["ctx3"]
+
+
+@pytest.mark.asyncio
 async def test_create_qa_entry_invalid_used_graph_element_ids_raises(adapter):
     """create_qa_entry with invalid used_graph_element_ids (disallowed keys) raises."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
@@ -720,10 +740,13 @@ async def test_create_and_get_session_context_entries_preserve_order(adapter):
 
 
 @pytest.mark.asyncio
-async def test_create_session_context_entry_requires_id(adapter):
-    """A payload without a usable 'id' is rejected (it could never be updated)."""
-    with pytest.raises(CacheConnectionError):
-        await adapter.create_session_context_entry("u1", "s1", {"kind": "context"})
+async def test_create_session_context_entry_without_id_is_stored(adapter):
+    """An id-less payload is stored (parity with Redis/FS); it is just never updatable."""
+    await adapter.create_session_context_entry("u1", "s1", {"kind": "context", "content": "x"})
+    entries = await adapter.get_session_context_entries("u1", "s1")
+    assert len(entries) == 1
+    assert entries[0]["content"] == "x"
+    assert "id" not in entries[0]  # payload is stored verbatim, no synthetic id injected
 
 
 @pytest.mark.asyncio
