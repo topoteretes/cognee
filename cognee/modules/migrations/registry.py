@@ -24,13 +24,11 @@ from cognee.modules.migrations.versions.namespace_edge_type_point_ids import (
     migrate as namespace_edge_type_point_ids,
 )
 
-# NOTE: the vector adapter's own storage-schema sync (LanceDB adding columns to
-# existing collections) is NOT in this chain. A chain entry runs ONCE per
-# database (gated by the stored revision slug), but that sync must run on EVERY
-# Cognee version change — a later release can change the stored shape without
-# adding any data migration. The runner triggers it separately, gated on a
-# library-vs-recorded cognee_version mismatch, after this chain finishes
-# (``runner._sync_vector_adapter_storage`` / ``versions.adapter_storage_migration``).
+# The vector adapter's storage-schema sync (e.g. LanceDB adding columns) is NOT
+# in this chain: a chain entry runs once per database, but that sync must run on
+# every Cognee version change, even a release with no data migration. The runner
+# triggers it on a cognee_version mismatch, after the chain (see
+# runner._sync_vector_adapter_storage).
 
 MIGRATIONS: list[Migration] = [
     # PR #2515: Entity/EntityType node IDs gained "Entity:" / "EntityType:"

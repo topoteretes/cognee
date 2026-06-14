@@ -37,17 +37,11 @@ logger = get_logger("remember")
 
 
 async def _ensure_migrations_run(datasets, user):
-    """Run startup migrations on the first local SDK call.
-
-    The full set (relational schema + graph/vector revision chains), not just
-    vector schema — an SDK process is otherwise capable of writing new-scheme
-    data into an unmigrated store. The once-per-process guard (flag, lock,
-    retry-on-failure) lives inside ``run_startup_migrations`` itself.
-
-    A failed migration BLOCKS the call for the AFFECTED dataset(s) only: writing
-    new-scheme data into a store still on the old scheme is the mixed-state
-    corruption the migration exists to prevent. The failure is recorded and
-    retried on the next call; a different, healthy dataset is never blocked.
+    """Run startup migrations before this SDK write, and block it if a dataset it
+    targets failed to migrate (an SDK process can otherwise write new-scheme data
+    into an un-migrated store). The once-per-process guard lives in
+    ``run_startup_migrations``; failures are retried on the next call, and a
+    healthy dataset is never blocked by an unrelated one's failure.
     """
     from cognee.run_migrations import run_startup_migrations
     from cognee.modules.migrations.startup import abort_write_if_migration_blocked

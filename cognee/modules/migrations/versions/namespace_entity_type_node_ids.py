@@ -177,20 +177,12 @@ def _frozen_model_id(kind: str, name: str) -> str:
 def _frozen_edge_pk(
     tenant_id, user_id, dataset_id, source_id, relationship_name: str, target_id
 ) -> UUID:
-    """FROZEN copy of the relational ``edges`` primary-key derivation
-    (``upsert_edges`` as of cognee 1.2.0).
-
-    Must stay byte-for-byte identical to that write path::
-
-        uuid5(OID, str(tenant)+str(user)+str(dataset)+str(source)+text+str(target))
-
-    (no separators; ``text`` is the row's ``relationship_name``, which upsert
-    stored from the same ``sanitized_edge_text`` it hashed). The migration moves
-    a remapped edge row onto the id the NEXT ``cognify()`` will derive from the
-    new endpoints, so its ``on_conflict_do_nothing(id)`` upsert recognizes the
-    row instead of inserting a duplicate logical edge. f-strings render ``None``
-    and ``UUID`` exactly like ``str()``, matching the write path on both the
-    single-tenant (``tenant_id is None``) and multi-tenant cases.
+    """FROZEN copy of the ``edges`` PK derivation in ``upsert_edges`` (1.2.0):
+    ``uuid5(OID, tenant+user+dataset+source+relationship_name+target)``, all
+    str()-joined with no separators. We recompute it onto the new endpoints so
+    the next cognify's ``on_conflict_do_nothing(id)`` upsert recognizes the row
+    instead of inserting a duplicate edge. (f-strings render None/UUID like
+    str(), matching the write path for both single- and multi-tenant.)
     """
     return uuid5(
         NAMESPACE_OID,
@@ -199,18 +191,10 @@ def _frozen_edge_pk(
 
 
 def _frozen_node_pk(tenant_id, user_id, dataset_id, data_id, slug) -> UUID:
-    """FROZEN copy of the relational ``nodes`` primary-key derivation
-    (``upsert_nodes`` as of cognee 1.2.0).
-
-    Must stay byte-for-byte identical to that write path::
-
-        uuid5(OID, str(tenant)+str(user)+str(dataset)+str(data_id)+str(node.id))
-
-    where ``node.id`` is the row's ``slug``. As with edges, the PK embeds the
-    node id this migration moves, so it is recomputed onto the id the next
-    ``cognify()`` derives from the new slug — otherwise its
-    ``on_conflict_do_nothing(id)`` upsert misses and inserts a duplicate
-    provenance row for the same (slug, data_id).
+    """FROZEN copy of the ``nodes`` PK derivation in ``upsert_nodes`` (1.2.0):
+    ``uuid5(OID, tenant+user+dataset+data_id+node.id)``, where ``node.id`` is the
+    row's ``slug``. Recomputed onto the new slug so the next cognify dedupes on
+    the PK instead of inserting a duplicate provenance row for (slug, data_id).
     """
     return uuid5(
         NAMESPACE_OID,
@@ -456,18 +440,14 @@ async def _migrate_triplet_vector(vector_engine, triplet_map: dict) -> None:
 
 
 async def _tenant_by_dataset(session, dataset_ids: set) -> dict:
-    """``{dataset_id: tenant_id}`` for the given datasets, for ledger-PK recompute.
+    """``{dataset_id: tenant_id}`` for recomputing ledger PKs.
 
-    The ledger rows do not store ``tenant_id`` but their primary key is hashed
-    from it (see ``_frozen_node_pk`` / ``_frozen_edge_pk``). We recover it from
-    the OWNING DATASET, not the owning user: ``create_dataset`` stamps
-    ``Dataset.tenant_id = user.tenant_id`` at creation, so it equals the value
-    ``upsert_*`` hashed, but it stays bound to the data even if the user is later
-    moved to a different tenant — the user's current ``tenant_id`` could have
-    drifted from what was hashed. A dataset absent from the result (e.g. deleted)
-    is simply not in the dict; the caller then leaves that row's PK untouched
-    rather than guess. (Self-validation in the caller is the backstop either
-    way: a tenant that does not reproduce the stored id is never used.)
+    The ledger rows don't store the ``tenant_id`` their PK is hashed from, so we
+    recover it from the owning DATASET (``create_dataset`` stamps
+    ``Dataset.tenant_id = user.tenant_id``, so it matches what ``upsert_*``
+    hashed and stays bound to the data even if the user later changes tenant). A
+    missing dataset is left out of the dict, and the caller leaves that PK
+    untouched — self-validation never uses a tenant that can't reproduce the id.
     """
     if not dataset_ids:
         return {}
@@ -484,25 +464,15 @@ async def _tenant_by_dataset(session, dataset_ids: set) -> dict:
 
 
 async def _migrate_ledger_edges(session, remap: dict, dataset_id) -> None:
-    """Move ``edges`` rows whose endpoints were remapped onto their new id.
+    """Move remapped ``edges`` rows onto their new PK (which embeds the
+    endpoints — see ``_frozen_edge_pk``), so the next cognify dedupes instead of
+    inserting a duplicate logical edge.
 
-    The primary key is ``_frozen_edge_pk(tenant, user, dataset, source, rel,
-    target)``; when an endpoint moves, that key changes, so the next
-    ``cognify()`` would compute a DIFFERENT id from the new endpoints and its
-    ``on_conflict_do_nothing(id)`` upsert would insert a DUPLICATE logical edge.
-    We recompute the PK here so the row already carries the id the next cognify
-    derives.
-
-    Safety:
-      * self-validating — only rewrite a row's id when the OLD id is exactly
-        reproducible from the row (``_frozen_edge_pk`` of its current values ==
-        stored id). If the tenant is unrecoverable or the row predates this
-        formula, the endpoints are still updated (delete-ledger correctness) but
-        the PK is left as-is, never corrupted into a wrong value.
-      * merge-safe — if the target id already exists (an SDK process wrote
-        new-scheme data before migrating, or two edges collapse to one after the
-        remap), drop this stale row instead of colliding on the PK. This matches
-        the existing first-writer-wins semantics (``id`` excludes ``data_id``).
+    - self-validating: only rewrite the PK when the stored id is exactly
+      reproducible from the row. If the tenant is unrecoverable, still update the
+      endpoints (delete-ledger correctness) but leave the PK — never guess.
+    - merge-safe: if the target id already exists (SDK wrote new-scheme first, or
+      two edges collapse into one), drop this stale row instead of colliding.
     """
     from sqlalchemy import delete, or_, select, update
 
@@ -595,17 +565,12 @@ async def _migrate_ledger_edges(session, remap: dict, dataset_id) -> None:
 
 
 async def _migrate_ledger_nodes(session, remap: dict, dataset_id) -> None:
-    """Move ``nodes`` rows whose slug was remapped onto their new id.
+    """Move remapped ``nodes`` rows onto their new PK.
 
-    The primary key is ``_frozen_node_pk(tenant, user, dataset, data_id,
-    slug)`` — it embeds the slug this migration changes. Updating only the slug
-    (as earlier code did) leaves the PK derived from the OLD slug, so the next
-    ``cognify()`` of the SAME document recomputes a DIFFERENT PK from the new
-    slug and its ``on_conflict_do_nothing(id)`` upsert inserts a DUPLICATE
-    provenance row for the same ``(slug, data_id)``. We recompute the PK here so
-    the row already carries the id the next cognify derives. Same self-validation
-    and merge-safety as ``_migrate_ledger_edges`` (the node PK includes
-    ``data_id``, so a collision is a genuine same-document duplicate to drop).
+    The PK embeds the slug (see ``_frozen_node_pk``), so updating only the slug
+    leaves it stale and the next cognify of the same document inserts a duplicate
+    provenance row for ``(slug, data_id)``. Recompute it, with the same
+    self-validation and merge-safety as ``_migrate_ledger_edges``.
     """
     from sqlalchemy import delete, select, update
 
@@ -675,22 +640,15 @@ async def _migrate_ledger_nodes(session, remap: dict, dataset_id) -> None:
 
 
 async def _migrate_ledger(id_map: dict, dataset_id) -> None:
-    """Repoint the relational delete-ledger rows from old node ids to new ones.
+    """Repoint the relational delete-ledger from old node ids to new ones.
 
-    Updates the ``nodes`` rows (slug AND the slug-derived primary key — see
-    ``_migrate_ledger_nodes``) and the ``edges`` rows (endpoints AND the
-    endpoint-derived primary key — see ``_migrate_ledger_edges``) — scoped to
-    ``dataset_id`` when given (access control on: one database pair per
-    dataset), unscoped when ``None`` (global mode: one graph backs every
-    dataset's ledger rows, and old ids are deterministic, so the update is
-    correct across all of them) — plus the legacy ``graph_relationship_ledger``
-    (always unscoped — it has no dataset column; its PK is a random timestamp
-    uuid5, not endpoint-derived, so only its endpoints need updating).
-
-    Both the ``nodes`` and ``edges`` PKs embed the node id this migration moves
-    (``upsert_nodes`` / ``upsert_edges``), so leaving them stale makes the next
-    cognify of the same data insert duplicate ledger rows — they are recomputed,
-    not left as-is.
+    Rewrites ``nodes`` (slug + PK) and ``edges`` (endpoints + PK) — both PKs
+    embed a node id this migration moves, so leaving them stale would let the
+    next cognify insert duplicate rows. Scoped to ``dataset_id`` when given,
+    unscoped in global mode (one graph backs every dataset; old ids are
+    deterministic). The legacy ``graph_relationship_ledger`` is always unscoped
+    (no dataset column) and only its endpoints move — its PK is a random
+    timestamp, not endpoint-derived.
     """
     if not id_map:
         return

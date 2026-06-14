@@ -40,18 +40,12 @@ logger = get_logger("cognify")
 
 
 async def _ensure_migrations_run(datasets, user) -> None:
-    """Run startup migrations on the first local cognify in this process.
-
-    The full set (relational schema + graph/vector revision chains), The once-per-process guard
-    (flag, lock, bootstrap fallback, retry-on-failure) lives inside
-    ``run_startup_migrations``, so on the API server (already migrated in the
-    lifespan) and on every later call this is a flag check.
-
-    A failed migration BLOCKS the cognify for the AFFECTED dataset(s) only:
-    writing new-scheme nodes/edges into a store still on the old scheme is the
-    mixed-state corruption the migration exists to prevent. The failure is
-    recorded and retried on the next call, so cognify succeeds once the
-    migration does (cognifying a different, healthy dataset is never blocked).
+    """Run startup migrations before cognifying, and block this cognify if a
+    dataset it targets failed to migrate (writing new-scheme data into an
+    un-migrated store is the corruption the migration prevents). The
+    once-per-process guard lives in ``run_startup_migrations``, so after the
+    first run this is just a flag check; failures are retried on the next call,
+    and a healthy dataset is never blocked by an unrelated one's failure.
     """
     from cognee.run_migrations import run_startup_migrations
     from cognee.modules.migrations.startup import abort_write_if_migration_blocked

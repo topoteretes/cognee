@@ -62,23 +62,16 @@ class MigrationError(Exception):
 
 
 async def abort_write_if_migration_blocked(failed: list[str], datasets, user) -> None:
-    """Raise ``MigrationError`` if a database THIS write targets failed migration.
+    """Raise if a database this write targets failed migration — writing into a
+    store still on the old scheme is the corruption the migration prevents.
 
-    ``failed`` is the result of :func:`run_startup_migrations` (the ids of the
-    databases whose migration failed). Writing new-scheme data into a store still
-    on the old scheme is the mixed-scheme corruption the migration exists to
-    prevent — but the block is scoped, not global:
-
-    * access control OFF — one global graph/vector pair backs EVERY dataset, so
-      a failure is not dataset-scoped and any failure blocks all writes.
-    * access control ON — each dataset has its own database pair, so block only
-      when a dataset this call writes to is among the failed set. A brand-new
-      dataset has no databases yet (so it cannot be in ``failed``);
-      ``get_authorized_existing_datasets`` resolves existing datasets only and
-      never creates one, so the check has no side effects.
-
-    ``datasets`` is the caller's dataset selector (name(s)/UUID(s), or ``None``
-    for "all of the user's datasets"); ``user`` may be ``None`` (default user).
+    ``failed`` comes from :func:`run_startup_migrations`. The block is scoped:
+    access control OFF, one global pair backs every dataset, so any failure
+    blocks all writes; access control ON, block only when a dataset this call
+    targets is in ``failed`` (a brand-new dataset has no DB yet, and
+    ``get_authorized_existing_datasets`` resolves existing datasets only — no
+    side effects). ``datasets`` is the caller's selector (None = all of the
+    user's); ``user`` may be None (default user).
     """
     if not failed:
         return
@@ -120,51 +113,99 @@ def _auto_migrations_enabled() -> bool:
     return os.getenv("ENABLE_AUTO_MIGRATIONS", "true").lower() not in ("false", "0", "no")
 
 
-async def run_relational_migrations():
-    """Apply the Alembic relational-schema migrations, in-process.
+def _build_alembic_config():
+    """Alembic Config pointing at the package's alembic.ini and versions dir.
 
-    Runs ``alembic.command.upgrade`` in a worker thread (``env.py`` drives an
-    async engine via ``asyncio.run``, which needs a thread with no running
-    event loop). IN-PROCESS on purpose — not a subprocess: ``env.py`` resolves
-    the database from ``get_relational_engine()``, so programmatically
-    configured roots/credentials (``cognee.config.system_root_directory(...)``,
-    as every test/example uses) are honored. A subprocess inherits only
-    environment variables and silently migrates the DEFAULT-location database
-    instead — the bug behind the library-test/example CI failures. The thread
-    also keeps the caller's event loop unblocked for the duration.
+    ``configure_logger`` is off so env.py doesn't fileConfig()-reset the host
+    process's loggers.
     """
-    # Locate the Alembic configuration within the installed package.
+    from alembic.config import Config
+
     package_root = str(pkg_resources.files(MIGRATIONS_PACKAGE))
     alembic_ini_path = os.path.join(package_root, "alembic.ini")
     script_location_path = os.path.join(package_root, MIGRATIONS_DIR_NAME)
-
     if not os.path.exists(alembic_ini_path):
-        raise FileNotFoundError(
-            f"Error: alembic.ini not found at expected locations for package '{MIGRATIONS_PACKAGE}'."
-        )
+        raise FileNotFoundError(f"alembic.ini not found for package '{MIGRATIONS_PACKAGE}'.")
     if not os.path.exists(script_location_path):
         raise FileNotFoundError(
-            f"Error: Migrations directory not found at expected locations for package '{MIGRATIONS_PACKAGE}'."
+            f"Alembic versions dir not found for package '{MIGRATIONS_PACKAGE}'."
         )
 
-    def _upgrade_to_head():
-        from alembic import command
-        from alembic.config import Config
+    config = Config(alembic_ini_path)
+    config.set_main_option("script_location", script_location_path)
+    config.attributes["configure_logger"] = False
+    return config
 
-        alembic_config = Config(alembic_ini_path)
-        alembic_config.set_main_option("script_location", script_location_path)
-        # Tell env.py not to fileConfig() — that would reconfigure (and
-        # disable) the host process's loggers from alembic.ini.
-        alembic_config.attributes["configure_logger"] = False
-        command.upgrade(alembic_config, "head")
+
+async def run_relational_migrations():
+    """Apply the Alembic relational-schema migrations to head, in-process.
+
+    Run in a worker thread (env.py drives an async engine via asyncio.run, which
+    needs a thread with no running loop), NOT a subprocess: env.py resolves the
+    database from get_relational_engine(), so programmatic config
+    (cognee.config.system_root_directory(...)) is honored. A subprocess would
+    inherit only env vars and migrate the default-location database instead.
+    """
+
+    def _upgrade():
+        from alembic import command
+
+        command.upgrade(_build_alembic_config(), "head")
 
     try:
-        await asyncio.to_thread(_upgrade_to_head)
+        await asyncio.to_thread(_upgrade)
     except Exception as error:
-        logger.error("Migration failed with unexpected error: %s", error)
+        logger.error("Relational migration failed: %s", error)
         raise MigrationError("Relational DB Migrations failed.") from error
 
-    logger.info("Migration completed successfully.")
+    logger.info("Relational migrations applied.")
+
+
+async def run_relational_stamp(revision: str = "head"):
+    """Record an Alembic revision without running any migration.
+
+    Used after ``create_database`` builds a fresh schema with
+    ``Base.metadata.create_all``: that schema already IS head, so we stamp it
+    instead of replaying every historical migration.
+    """
+
+    def _stamp():
+        from alembic import command
+
+        command.stamp(_build_alembic_config(), revision)
+
+    await asyncio.to_thread(_stamp)
+    logger.info("Stamped fresh relational schema at %s.", revision)
+
+
+async def _relational_schema_exists() -> bool:
+    """True if the relational database already holds cognee's schema.
+
+    We look for EITHER the ``users`` table OR Alembic's ``alembic_version``,
+    because neither alone is reliable across cognee's history:
+      - ``users`` is a core table present in every initialized database,
+        including LEGACY ones created before Alembic was wired in — those have
+        no ``alembic_version`` at all, so checking only ``alembic_version``
+        would mistake a populated legacy DB for an empty one and wrongly stamp
+        it at head.
+      - ``alembic_version`` is Alembic's own marker, so it still identifies a
+        migration-managed DB even if the ``users`` table is renamed or
+        restructured in the future.
+    Only when NEITHER exists is the database genuinely empty — the one state
+    where create_all + stamp head is safe.
+    """
+    from sqlalchemy import inspect
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    try:
+        async with get_relational_engine().engine.connect() as connection:
+            tables = await connection.run_sync(
+                lambda sync_conn: inspect(sync_conn).get_table_names()
+            )
+    except Exception:
+        return False  # cannot inspect (e.g. brand-new SQLite file) -> treat as empty
+    return "users" in tables or "alembic_version" in tables
 
 
 async def run_startup_migrations() -> list[str]:
@@ -196,23 +237,19 @@ async def run_startup_migrations() -> list[str]:
 
         from cognee.modules.migrations.runner import run_database_migrations
 
-        try:
+        if await _relational_schema_exists():
+            # Existing database: apply any pending migrations from its recorded
+            # revision. (cognee's chain isn't self-sufficient on an empty DB, so
+            # we never run it on a fresh one — see the branch below.)
             await run_relational_migrations()
-        except MigrationError:
-            # cognee's Alembic chain is not self-sufficient on an EMPTY
-            # database — it patches a schema bootstrapped by
-            # Base.metadata.create_all (e.g. the acls migration assumes its
-            # table already exists). Bootstrap the schema and retry once: the
-            # same first-boot recovery the API lifespan has always used, now
-            # available to every caller (remember(), MCP, explicit SDK calls).
+        else:
+            # Fresh database: create_all builds the schema at HEAD, so stamp head
+            # rather than replaying every historical migration on top of it.
             from cognee.infrastructure.databases.relational import get_relational_engine
 
-            logger.info(
-                "Alembic failed on an unbootstrapped database; creating schema and retrying."
-            )
-            db_engine = get_relational_engine()
-            await db_engine.create_database()
-            await run_relational_migrations()
+            logger.info("Fresh database: creating schema and stamping at head.")
+            await get_relational_engine().create_database()
+            await run_relational_stamp("head")
 
         summaries = await run_database_migrations()
 

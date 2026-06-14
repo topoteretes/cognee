@@ -1,17 +1,14 @@
 """Vector adapter storage-schema sync.
 
-Adapters that evolve their stored row shape (e.g. LanceDB adding the
-``belongs_to_set`` column to existing collections) expose an idempotent
-``run_migrations()`` that brings the stored schema up to what the running code
-expects.
+Adapters that evolve their stored shape (e.g. LanceDB adding ``belongs_to_set``
+to existing collections) expose an idempotent ``run_migrations()`` that brings
+the stored schema up to what the running code expects.
 
-This is deliberately NOT a revision-chain entry. A chain entry runs ONCE per
-database (gated by the stored slug), but this sync must run on EVERY Cognee
-version change: a later release can change the stored shape without shipping any
-data migration, and a database already at chain head would then never re-sync.
-The runner triggers ``migrate`` directly, gated on a mismatch between the
-library's ``cognee_version`` and the value recorded for the deployment, after
-the revision chain finishes (see ``runner._sync_vector_adapter_storage``).
+Deliberately NOT a revision-chain entry: the chain runs once per database, but
+this must run on every Cognee version change (a release can change the stored
+shape with no data migration, and a DB already at chain head would never
+re-sync). The runner calls ``migrate`` on a ``cognee_version`` mismatch, after
+the chain (see ``runner._sync_vector_adapter_storage``).
 """
 
 import logging

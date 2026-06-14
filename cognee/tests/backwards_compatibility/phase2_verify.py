@@ -30,15 +30,12 @@ is inaccessible:
   the migration could have moved still resolves to a live graph node (a stale
   ledger id silently orphans nodes on delete);
 * vector — a CHUNKS search (raw vector retrieval) must return results.
-* delete — hard-delete the documents ONE BY ONE and, after each, diff the
-  graph against ledger-derived expectations: exactly the nodes/edges owned
-  solely by the deleted document disappear, shared ones survive until their
-  last owner goes, and after the last document the graph is completely empty.
-  Deletion resolves graph nodes through the relational ledger (``nodes.slug``),
-  so this is the end-to-end proof that the migration kept the ledger and the
-  remapped graph in lockstep: a stale ledger id makes delete silently miss
-  (orphan) the migrated node, which only this check — not the static
-  id-resolution check above — can catch for the full flow.
+* delete — hard-delete documents one by one; after each, only the nodes/edges
+  owned solely by that document disappear, shared ones survive until their last
+  owner goes, and the graph ends empty. Delete resolves nodes via the ledger
+  (``nodes.slug``), so this is the end-to-end proof of ledger/graph lockstep: a
+  stale ledger id makes delete silently orphan a migrated node, which the static
+  checks above can't catch.
 
 Completion searches are still exercised afterwards as a smoke check (must not
 raise), just not used as the accessibility gate.
@@ -325,24 +322,16 @@ async def _ledger_expectations(data_id, dataset_id, scope_to_dataset: bool):
 
 
 async def _verify_delete(stage: str) -> None:
-    """Hard-delete documents ONE BY ONE, verifying graph precision after each.
+    """Hard-delete documents one by one, checking the graph after each.
 
-    Deletion resolves graph nodes by the relational ledger's ``nodes.slug``
-    (see ``delete_from_graph_and_vector``), so deleting data that was seeded
-    on the legacy version and remapped by the migration proves the ledger and
-    the graph migrated in lockstep. If the migration had left ledger slugs
-    stale, the delete would not raise — it would silently miss the remapped
-    nodes — so the gate is the graph state afterwards, not the call.
-
-    After every document's delete, assert against a before/after graph diff:
-      * every node/edge owned ONLY by that document is gone (no orphans);
-      * nothing else disappeared (no collateral damage) — shared nodes/edges
-        survive until their last owning document is deleted. EdgeType nodes
-        are exempt: they are derived per-relationship-text bookkeeping with no
-        ledger provenance, garbage-collected when their last edge goes;
-      * nothing new appeared.
-    After the last document: the graph must be completely empty — no documents
-    left means no nodes and no edges left.
+    Delete resolves graph nodes by the ledger's ``nodes.slug``, so deleting
+    migrated data exercises ledger/graph lockstep — a stale slug makes delete
+    silently miss nodes rather than raise, so we gate on the resulting graph, not
+    the call. After each delete, diff before/after: nodes/edges owned only by
+    that document are gone (no orphans), shared ones survive until their last
+    owner goes (no collateral damage; EdgeType nodes are exempt — derived
+    bookkeeping GC'd with their last edge), and nothing new appears. After the
+    last document the graph must be empty.
     """
     print(f"\n[{stage}] Hard-deleting documents one by one, verifying the graph after each")
 

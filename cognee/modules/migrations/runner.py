@@ -72,13 +72,11 @@ def _advisory_key(dataset_id: UUID) -> int:
 
 
 def _file_lock_path(db_engine, key: int) -> Optional[str]:
-    """Sidecar lock-file path next to the SQLite database, keyed per migration.
+    """Lock-file path next to the SQLite database, one per ``key``.
 
-    Lives in the database file's own directory so every process pointing at the
-    same SQLite store resolves the same lock file; the ``key`` (per-dataset or
-    the global key) keeps unrelated datasets from serializing against each
-    other. Returns ``None`` for an in-memory / pathless database, where there is
-    nothing to coordinate across processes.
+    All processes on the same store resolve the same file; ``key`` (per-dataset
+    or global) keeps unrelated datasets from blocking each other. ``None`` for an
+    in-memory DB — nothing to coordinate.
     """
     db_path = db_engine.engine.url.database
     if not db_path or db_path == ":memory:":
@@ -91,17 +89,12 @@ def _file_lock_path(db_engine, key: int) -> Optional[str]:
 async def _migration_lock(db_engine, key: int):
     """Cross-process mutex around one database's migrate-then-stamp sequence.
 
-    Postgres: session-scoped ``pg_advisory_lock`` on a dedicated connection.
-    The transaction is committed immediately after acquiring (advisory session
-    locks survive commit), so nothing relational stays locked or open while
-    the migration runs — and it serializes across HOSTS too.
-
-    SQLite (and other file-based stores): an OS advisory file lock (``filelock``,
-    portable across Linux/macOS/Windows) on a sidecar file next to the database.
-    The OS releases it automatically if the holder dies, so a crashed migrator
-    never wedges the others. This serializes processes on ONE host sharing a
-    local filesystem (multi-worker servers, parallel SDK processes); it does NOT
-    work across hosts or over NFS — use Postgres metadata for multi-host.
+    Postgres: a session-scoped ``pg_advisory_lock`` (committed right away, since
+    it survives commit) — also serializes across hosts. SQLite: an OS advisory
+    file lock (``filelock``, portable across Linux/macOS/Windows), auto-released
+    if the holder crashes. The file lock serializes processes on one host
+    (multi-worker servers, parallel SDK runs) but not across hosts/NFS — use
+    Postgres metadata for multi-host.
     """
     engine = db_engine.engine
     if engine.dialect.name == "postgresql":
@@ -123,9 +116,8 @@ async def _migration_lock(db_engine, key: int):
 
     from filelock import FileLock
 
-    # Blocking acquire/release run off the event loop. The OS lock is bound to
-    # the file descriptor (process-wide, not thread-local), so acquiring and
-    # releasing from different worker threads is safe.
+    # Acquire/release off the event loop. The OS lock is fd/process-scoped, not
+    # thread-local, so acquiring and releasing on different threads is fine.
     lock = FileLock(lock_path)
     await asyncio.to_thread(lock.acquire)
     try:
@@ -231,13 +223,11 @@ async def _record_global_failure(db_engine, error: Exception) -> None:
 
 
 async def _read_deployment_version() -> Optional[str]:
-    """The Cognee version recorded for this deployment, or ``None`` if never
-    recorded (fresh database, or bookkeeping table not created yet).
+    """The deployment's recorded Cognee version, or ``None`` if never recorded.
 
-    Read-only, and read BEFORE ``_record_deployment_version`` overwrites it, so a
-    caller can detect a Cognee version change — the gate for the vector adapter
-    storage sync (which must run on every version change, unlike the once-per-
-    database revision chain).
+    Read BEFORE ``_record_deployment_version`` overwrites it, so a version change
+    is detectable — the gate for the vector adapter storage sync (which, unlike
+    the once-per-database chain, must run on every version change).
     """
     db_engine = get_relational_engine()
     try:
@@ -249,13 +239,11 @@ async def _read_deployment_version() -> Optional[str]:
 
 
 async def _sync_vector_adapter_storage(migration_context: MigrationContext) -> None:
-    """Run the vector adapter's storage-schema sync for this database.
+    """Sync the vector adapter's stored schema (e.g. LanceDB columns) to current.
 
-    Idempotent; invoked only on a Cognee version change, AFTER the revision
-    chain has finished, so the adapter's stored shape (e.g. LanceDB collection
-    columns) is brought up to what the running code expects. A failure here
-    propagates like any migration failure for this database (caught by the
-    caller, which records the failure and blocks writes).
+    Idempotent; run only on a version change, after the chain. A failure
+    propagates like any migration failure for this database (the caller records
+    it and blocks writes).
     """
     await _run_adapter_storage_migration(migration_context)
 
@@ -304,15 +292,11 @@ async def _run_global_migrations(
 ) -> list[dict]:
     """Migrate the single global graph/vector pair (access control disabled).
 
-    Same lock + re-check + migrate + per-step stamp sequence as the
-    per-dataset path, against the ``global_database_version`` row. The
-    migration context carries ``dataset_id=None``, so ledger updates apply
-    unscoped — correct here, since the one global graph backs every dataset's
-    ledger rows.
-
-    ``version_changed`` (library ``cognee_version`` differs from the recorded
-    one) additionally triggers the vector adapter storage sync after the chain,
-    even when no chain migration is pending.
+    Same lock + re-check + migrate + per-step stamp as the per-dataset path, but
+    against the ``global_database_version`` row, with ``dataset_id=None`` so
+    ledger updates apply unscoped (one global graph backs every dataset).
+    ``version_changed`` also runs the adapter storage sync after the chain, even
+    with no chain migration pending.
     """
     try:
         row = await _record_deployment_version(current_version)
@@ -381,15 +365,11 @@ async def _migrate_dataset(
 ) -> Optional[dict]:
     """Run pending migrations for one dataset's database pair, under its lock.
 
-    Relational transactions stay SHORT: one read after acquiring the lock, the
-    migration itself runs with nothing relational open, a per-step stamp write
-    after each applied migration. Returns a summary dict, or ``None`` when
-    there was nothing to do (or the row vanished — dataset deleted
-    concurrently).
-
-    ``version_changed`` (deployment ``cognee_version`` differs from the library)
-    also triggers the vector adapter storage sync for this dataset's vector
-    database after the chain, even with no chain migration pending.
+    Relational transactions stay short: read under the lock, migrate with nothing
+    relational open, stamp after each step. Returns a summary, or ``None`` when
+    there was nothing to do (or the dataset was deleted concurrently).
+    ``version_changed`` also runs the adapter storage sync for this dataset's
+    vector DB after the chain, even with no chain migration pending.
     """
     async with _migration_lock(db_engine, _advisory_key(row.dataset_id)):
         # Re-read under the lock: a concurrent worker may have finished.

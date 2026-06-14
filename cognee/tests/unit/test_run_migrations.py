@@ -125,23 +125,33 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
 
     def setUp(self):
         _reset_startup_flag()
+        # Default to the "existing database -> upgrade" path so tests that only
+        # care about the graph/vector flow don't hit a real DB inspection. The
+        # fresh-vs-existing branch itself is covered by the two tests below.
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+        self._schema_patch = patch.object(
+            startup, "_relational_schema_exists", new=AsyncMock(return_value=True)
+        )
+        self._schema_patch.start()
 
     def tearDown(self):
+        self._schema_patch.stop()
         _reset_startup_flag()
 
-    def test_bootstraps_schema_and_retries_when_alembic_fails_on_empty_db(self):
-        """cognee's Alembic chain is not self-sufficient on an empty database;
-        the first failure must trigger create_database() and ONE retry — the
-        recovery remember()/MCP/SDK callers rely on (the API lifespan has its
-        own copy)."""
+    def test_fresh_db_creates_schema_and_stamps_head(self):
+        """An empty database (no users/alembic_version table) is created with
+        create_all and STAMPED at head — never replaying historical migrations."""
         startup = importlib.import_module("cognee.modules.migrations.startup")
 
-        relational = AsyncMock(side_effect=[startup.MigrationError("empty db"), None])
+        relational = AsyncMock()
+        stamp = AsyncMock()
         db_engine = MagicMock()
         db_engine.create_database = AsyncMock()
 
         with (
+            patch.object(startup, "_relational_schema_exists", new=AsyncMock(return_value=False)),
             patch.object(startup, "run_relational_migrations", relational),
+            patch.object(startup, "run_relational_stamp", stamp),
             patch(
                 "cognee.infrastructure.databases.relational.get_relational_engine",
                 return_value=db_engine,
@@ -153,9 +163,40 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
         ):
             asyncio.run(startup.run_startup_migrations())
 
-        self.assertEqual(relational.await_count, 2)
         db_engine.create_database.assert_awaited_once()
+        stamp.assert_awaited_once_with("head")
+        relational.assert_not_awaited()  # never run migrations on a fresh DB
         self.assertTrue(startup._startup_migrations_done)
+
+    def test_existing_db_upgrades_and_does_not_stamp(self):
+        """An existing database (users/alembic_version present) takes the upgrade
+        path; a migration failure there is a real error that propagates — we do
+        not create/stamp over it."""
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+
+        stamp = AsyncMock()
+        db_engine = MagicMock()
+        db_engine.create_database = AsyncMock()
+
+        with (
+            patch.object(startup, "_relational_schema_exists", new=AsyncMock(return_value=True)),
+            patch.object(
+                startup,
+                "run_relational_migrations",
+                new=AsyncMock(side_effect=startup.MigrationError("boom")),
+            ),
+            patch.object(startup, "run_relational_stamp", stamp),
+            patch(
+                "cognee.infrastructure.databases.relational.get_relational_engine",
+                return_value=db_engine,
+            ),
+        ):
+            with self.assertRaises(startup.MigrationError):
+                asyncio.run(startup.run_startup_migrations())
+
+        stamp.assert_not_awaited()
+        db_engine.create_database.assert_not_awaited()
+        self.assertFalse(startup._startup_migrations_done)
 
     def test_flag_not_set_when_a_database_failed(self):
         """A failed dataset must be retried by the next call in this process —

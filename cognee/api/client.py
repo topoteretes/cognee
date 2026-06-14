@@ -338,14 +338,12 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        # Bind + listen BEFORE serving so the port is held for the whole startup,
-        # including the lifespan database migration. uvicorn runs the lifespan
-        # (migrations) before it starts accept()ing on this socket, so during the
-        # migration the port is taken — a second server on the same host:port
-        # fails fast with EADDRINUSE — while no endpoint is served yet (incoming
-        # requests queue in the kernel backlog until the lifespan yields).
-        # reuse_port stays False on purpose: SO_REUSEPORT would let a second
-        # process share the port and defeat the EADDRINUSE guard.
+        # Bind before serving so the port is held during startup (including the
+        # lifespan migration): uvicorn runs the lifespan before it accepts on this
+        # socket, so while migrating, a second server on the same host:port fails
+        # fast with EADDRINUSE and no endpoint is served yet (requests queue).
+        # reuse_port=False keeps that guard — SO_REUSEPORT would let a second
+        # process share the port.
         sock = socket.create_server((host, port), reuse_port=False)
 
         config = uvicorn.Config(app, host=host, port=port)
