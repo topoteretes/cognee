@@ -19,6 +19,24 @@ def _patch_graph(corpus: dict[str, str]):
 
 
 @pytest.mark.asyncio
+async def test_payloads_carry_id_when_graph_node_payload_omits_it():
+    # Some graph adapters (e.g. kuzu) omit "id" from node payloads; the loader must
+    # backfill it from the node id so chunks can be matched across retrieval channels.
+    nodes = [("chunk_a", {"type": "DocumentChunk", "text": "alpha project"})]
+    engine = AsyncMock()
+    engine.get_filtered_graph_data = AsyncMock(return_value=(nodes, {}))
+    retriever = BM25ChunksRetriever(top_k=1, with_scores=True)
+
+    with patch(
+        "cognee.modules.retrieval.lexical_retriever.get_graph_engine",
+        AsyncMock(return_value=engine),
+    ):
+        results = await retriever.get_retrieved_objects("project")
+
+    assert results[0][0]["id"] == "chunk_a"
+
+
+@pytest.mark.asyncio
 async def test_term_frequency_orders_results():
     corpus = {
         "chunk_a": "alpha alpha alpha project",

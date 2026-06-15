@@ -346,6 +346,34 @@ class FSCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def get_value(self, key: str) -> str | None:
+        """Retrieve a raw string value stored under the given key, or None if absent/expired."""
+        try:
+            self.cache.expire()
+            return self.cache.get(key)
+        except Exception as e:
+            error_msg = f"Unexpected error while getting value from diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def set_value(self, key: str, value: str, ttl: int | None = None) -> None:
+        """Store a raw string value under the given key, optionally expiring after ttl seconds."""
+        try:
+            self.cache.set(key, value, expire=ttl)
+        except Exception as e:
+            error_msg = f"Unexpected error while setting value in diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_value(self, key: str) -> None:
+        """Delete the value stored under the given key, if present."""
+        try:
+            self.cache.delete(key)
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting value from diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def append_agent_trace_step(
         self,
         user_id: str,

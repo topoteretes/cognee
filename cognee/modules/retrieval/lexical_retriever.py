@@ -71,8 +71,12 @@ class LexicalRetriever(BaseRetriever):
                         tokens = self.tokenizer(document["text"])
                         if not tokens:
                             continue
-                        self.chunks[str(document.get("id", chunk_id))] = tokens
-                        self.payloads[str(document.get("id", chunk_id))] = document
+                        # Some graph adapters (e.g. kuzu) omit "id" from node payloads;
+                        # downstream consumers match chunks across channels by payload id.
+                        document_id = str(document.get("id") or chunk_id)
+                        document.setdefault("id", document_id)
+                        self.chunks[document_id] = tokens
+                        self.payloads[document_id] = document
                         chunk_count += 1
                     except Exception as e:
                         logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
