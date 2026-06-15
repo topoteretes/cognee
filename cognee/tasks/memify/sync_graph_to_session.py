@@ -44,6 +44,18 @@ async def _load_checkpoint(cache_engine, key: str) -> Optional[datetime]:
     if cache_engine is None:
         return None
     try:
+        raw = await cache_engine.get_value(key)
+        if raw:
+            return datetime.fromisoformat(raw)
+        return None
+    except (NotImplementedError, AttributeError, TypeError):
+        # Adapter predates the KV interface (missing, non-async, or
+        # different-signature get_value), fall back to legacy duck-typing
+        pass
+    except Exception:
+        logger.debug("_load_checkpoint: cache read failed for key %s", key)
+        return None
+    try:
         raw = await cache_engine.async_redis.get(key)
         if raw:
             return datetime.fromisoformat(raw.decode() if isinstance(raw, bytes) else raw)
@@ -62,6 +74,13 @@ async def _load_checkpoint(cache_engine, key: str) -> Optional[datetime]:
 async def _save_checkpoint(cache_engine, key: str, ts: datetime) -> None:
     """Persist the high-water mark timestamp."""
     value = ts.isoformat()
+    try:
+        await cache_engine.set_value(key, value)
+        return
+    except (NotImplementedError, AttributeError, TypeError):
+        # Adapter predates the KV interface (missing, non-async, or
+        # different-signature set_value), fall back to legacy duck-typing
+        pass
     try:
         await cache_engine.async_redis.set(key, value)
     except AttributeError:
