@@ -674,8 +674,12 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
     await graph_engine.add_nodes(new_nodes)
 
     # 2) Re-create every edge touching a remapped node onto the new endpoints.
-    #    Edges between two unchanged nodes are left as-is.
+    #    Edges between two unchanged nodes are kept aside as survivors, and the
+    #    unchanged endpoint of a remapped edge is recorded as an "affected
+    #    neighbor" (its OTHER edges sit next to the detach-delete in step 3).
     remapped_edges = []
+    survivor_edges = []
+    affected_neighbors = set()
     for source_id, target_id, relationship_name, edge_properties in edges:
         # Ladybug's get_graph_data fabricates (id, id, "SELF") placeholder
         # edges for an edgeless graph; persisting them would write fake
@@ -694,12 +698,33 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
             if "target_node_id" in new_properties:
                 new_properties["target_node_id"] = new_target
             remapped_edges.append((new_source, new_target, relationship_name, new_properties))
+            if new_source == source_id:
+                affected_neighbors.add(source_id)
+            if new_target == target_id:
+                affected_neighbors.add(target_id)
+        else:
+            survivor_edges.append((source_id, target_id, relationship_name, edge_properties or {}))
     if remapped_edges:
         await graph_engine.add_edges(remapped_edges)
 
     # 3) Delete the old nodes. A detach-delete also drops their stale edges,
     #    which we already re-created against the new node IDs above.
     await graph_engine.delete_nodes(list(id_map.keys()))
+
+    # 4) Re-assert survivor edges incident to an affected neighbor. The add_edges +
+    #    detach-delete around such a node (e.g. a DocumentChunk whose Entity edges
+    #    were re-keyed) can drop its OTHER, non-remapped edges on some backends
+    #    (Ladybug), even though those edges touch no remapped node — e.g. an
+    #    incoming ``TextSummary -made_from-> DocumentChunk``. add_edges is an
+    #    idempotent upsert, so re-asserting is a no-op where the edge survived and
+    #    restores it where the backend dropped it.
+    at_risk = [
+        edge
+        for edge in survivor_edges
+        if edge[0] in affected_neighbors or edge[1] in affected_neighbors
+    ]
+    if at_risk:
+        await graph_engine.add_edges(at_risk)
 
     return len(remapped_edges)
 
