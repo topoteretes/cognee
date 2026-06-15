@@ -123,6 +123,27 @@ def _validate_session_params(
         raise SessionParameterValidationError(message="last_n must be a positive integer")
 
 
+def compose_session_prompt(
+    active_context_block: str,
+    graph_context: str,
+    conversation_history: str,
+) -> str:
+    """Assemble the session prompt from its three layers, top to bottom.
+
+    Order: the active session-context block first, then the graph-knowledge snapshot,
+    then the conversation history. Empty layers are skipped. ``graph_context`` is expected
+    to be already truncated by the caller (its char budget differs from the block's).
+    """
+    prompt = conversation_history
+    if graph_context:
+        prompt = (
+            "Background knowledge from the knowledge graph:\n" + graph_context + "\n\n" + prompt
+        )
+    if active_context_block:
+        prompt = active_context_block + "\n\n" + prompt
+    return prompt
+
+
 class SessionManager:
     """
     Manages session QA entries.
@@ -610,81 +631,81 @@ class SessionManager:
                 session_id=resolved_session_id,
                 user_id=str(user_id),
             )
-        if not turn_preparation.should_answer:
-            return turn_preparation.response_to_user or "Thanks for your feedback."
+        # Every turn — answered or feedback-only — falls through to a single add_qa, so the
+        # whole conversation stays in history and semantic recall.
+        if turn_preparation.should_answer:
+            answer_query = (
+                (turn_preparation.effective_query or "").strip()
+                or (effective_query or "").strip()
+                or query
+            )
+            # One embedding per turn, shared by hybrid history retrieval and context ranking.
+            query_embedding = await embed_text_safe(answer_query)
+            conversation_history = await self._get_formatted_history(
+                str(user_id), resolved_session_id, query_embedding=query_embedding
+            )
 
-        answer_query = (
-            (turn_preparation.effective_query or "").strip()
-            or (effective_query or "").strip()
-            or query
-        )
-        # One embedding per turn, shared by hybrid history retrieval and context ranking.
-        query_embedding = await embed_text_safe(answer_query)
-        conversation_history = await self._get_formatted_history(
-            str(user_id), resolved_session_id, query_embedding=query_embedding
-        )
+            cache_config = CacheConfig()
+            served_ids: list[str] = []
+            active_context_block = ""
+            if cache_config.caching and cache_config.auto_feedback:
+                active_context_block, served_ids = await self._build_active_context_block_safe(
+                    user_id=str(user_id),
+                    session_id=resolved_session_id,
+                    query=answer_query,
+                    query_embedding=query_embedding,
+                )
 
-        cache_config = CacheConfig()
-        session_context_on = cache_config.caching and cache_config.auto_feedback
+            # Graph-knowledge snapshot (from improve() sync). Its char budget is separate
+            # from the context block's: explicit param > config > unlimited.
+            graph_context = await self.get_graph_context(
+                user_id=str(user_id), session_id=resolved_session_id
+            )
+            if graph_context:
+                char_limit = max_context_chars
+                if char_limit is None:
+                    char_limit = cache_config.max_session_context_chars
+                if char_limit is not None:
+                    graph_context = graph_context[:char_limit]
 
-        served_ids: list[str] = []
-        active_context_block = ""
-        if session_context_on:
-            active_context_block, served_ids = await self._build_active_context_block_safe(
-                user_id=str(user_id),
-                session_id=resolved_session_id,
+            conversation_history = compose_session_prompt(
+                active_context_block, graph_context, conversation_history
+            )
+
+            (
+                answer,
+                context_to_store,
+                _feedback_result,
+            ) = await generate_session_completion_with_optional_summary(
                 query=answer_query,
-                query_embedding=query_embedding,
+                context=context,
+                conversation_history=conversation_history,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                response_model=response_model,
+                summarize_context=summarize_context,
             )
-
-        # Prepend graph knowledge snapshot (from improve() sync) if available
-        graph_context = await self.get_graph_context(
-            user_id=str(user_id), session_id=resolved_session_id
-        )
-        if graph_context:
-            # Apply context char limit: explicit param > config > unlimited
-            char_limit = max_context_chars
-            if char_limit is None:
-                char_limit = cache_config.max_session_context_chars
-            if char_limit is not None:
-                graph_context = graph_context[:char_limit]
-            conversation_history = (
-                "Background knowledge from the knowledge graph:\n"
-                + graph_context
-                + "\n\n"
-                + conversation_history
-            )
-
-        # Finally, prepend the active session-context block ABOVE the graph snapshot so it is the
-        # very first segment of the assembled prompt.
-        if active_context_block:
-            conversation_history = active_context_block + "\n\n" + conversation_history
-
-        (
-            completion,
-            context_to_store,
-            _feedback_result,
-        ) = await generate_session_completion_with_optional_summary(
-            query=answer_query,
-            context=context,
-            conversation_history=conversation_history,
-            user_prompt_path=user_prompt_path,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            response_model=response_model,
-            summarize_context=summarize_context,
-        )
+            used_session_context_ids = served_ids or None
+            graph_elements = used_graph_element_ids
+        else:
+            # Feedback-only turn: nothing to answer, but we still record the exchange
+            # (question + acknowledgement) so it stays in history and semantic recall.
+            answer = turn_preparation.response_to_user or "Thanks for your feedback."
+            context_to_store = ""
+            used_session_context_ids = None
+            graph_elements = None
 
         await self.add_qa(
             user_id=str(user_id),
             question=query,
             context=context_to_store,
-            answer=str(completion),
+            answer=str(answer),
             session_id=resolved_session_id,
-            used_graph_element_ids=used_graph_element_ids,
-            used_session_context_ids=served_ids or None,
+            used_graph_element_ids=graph_elements,
+            used_session_context_ids=used_session_context_ids,
         )
-        return completion
+        return answer
 
     async def _build_active_context_block_safe(
         self,

@@ -10,7 +10,40 @@ from cognee.infrastructure.session.feedback_models import (
 from cognee.infrastructure.session.session_manager import (
     SessionManager,
     _validate_session_params,
+    compose_session_prompt,
 )
+
+
+class TestComposeSessionPrompt:
+    """Characterization tests pinning the exact prompt assembly extracted from the
+    inner completion method. These must stay byte-identical to the pre-extraction
+    behavior, so changing them means deliberately changing every session prompt."""
+
+    GRAPH_PREFIX = "Background knowledge from the knowledge graph:\n"
+
+    def test_all_three_layers_order_and_joiners(self):
+        result = compose_session_prompt("BLOCK", "GRAPH", "HISTORY")
+        assert result == "BLOCK\n\n" + self.GRAPH_PREFIX + "GRAPH\n\nHISTORY"
+
+    def test_history_only(self):
+        assert compose_session_prompt("", "", "HISTORY") == "HISTORY"
+
+    def test_graph_and_history(self):
+        assert compose_session_prompt("", "GRAPH", "HISTORY") == (
+            self.GRAPH_PREFIX + "GRAPH\n\nHISTORY"
+        )
+
+    def test_block_and_history(self):
+        assert compose_session_prompt("BLOCK", "", "HISTORY") == "BLOCK\n\nHISTORY"
+
+    def test_empty_history_keeps_trailing_separators(self):
+        # Pre-extraction behavior prepended onto a possibly-empty history, leaving a
+        # trailing "\n\n" when history is empty. Preserved exactly.
+        assert compose_session_prompt("BLOCK", "", "") == "BLOCK\n\n"
+        assert compose_session_prompt("", "GRAPH", "") == self.GRAPH_PREFIX + "GRAPH\n\n"
+
+    def test_all_empty(self):
+        assert compose_session_prompt("", "", "") == ""
 
 
 class TestValidateSessionParams:
@@ -657,10 +690,9 @@ class TestSessionManager:
         mock_generate.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_generate_completion_with_session_feedback_only_returns_thanks_skips_add_qa(
-        self, sm, mock_cache
-    ):
-        """When no query_to_answer is present: return acknowledgement and skip add_qa."""
+    async def test_generate_completion_with_session_feedback_only_records_qa(self, sm, mock_cache):
+        """When no query_to_answer is present: return the acknowledgement and record it
+        as a QA entry (question + acknowledgement, no served context)."""
         with (
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
@@ -695,7 +727,11 @@ class TestSessionManager:
 
         assert result == "Thanks for your feedback!"
         mock_cache.update_qa_entry.assert_not_called()
-        mock_cache.create_qa_entry.assert_not_called()
+        mock_cache.create_qa_entry.assert_called_once()
+        qa_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert qa_kw["question"] == "thanks, that was helpful!"
+        assert qa_kw["answer"] == "Thanks for your feedback!"
+        assert qa_kw["used_session_context_ids"] is None
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_feedback_and_followup_persists_and_adds_qa(
@@ -872,10 +908,11 @@ class TestSessionManager:
         mock_cache.update_qa_entry.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_generate_completion_with_session_feedback_persistence_failure_returns_response(
+    async def test_generate_completion_with_session_feedback_records_despite_rating_failure(
         self, sm, mock_cache
     ):
-        """No-answer turns do not call feedback persistence, even if update_qa_entry would fail."""
+        """A no-answer turn still records its QA entry even if rating persistence
+        (update_qa_entry) fails — that failure is swallowed fail-open."""
         mock_cache.update_qa_entry = AsyncMock(side_effect=Exception("Cache write failed"))
         mock_cache.get_latest_qa_entries.return_value = [
             SessionQAEntry(qa_id="last-qa-789", question="Q", context="", answer="A", time="t")
@@ -910,7 +947,7 @@ class TestSessionManager:
             )
 
         assert result == "Thanks for your feedback!"
-        mock_cache.create_qa_entry.assert_not_called()
+        mock_cache.create_qa_entry.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_empty_analysis_answers_original_query(
@@ -967,7 +1004,7 @@ class TestSessionManager:
     async def test_generate_completion_with_session_does_not_auto_write_qa_feedback(
         self, sm, mock_cache
     ):
-        """Session turn analysis no longer auto-populates QA feedback text/score."""
+        """The recorded feedback turn does not auto-populate QA feedback text/score."""
         mock_cache.get_latest_qa_entries.return_value = [
             SessionQAEntry(qa_id="last-qa-norm", question="Q", context="", answer="A", time="t")
         ]
@@ -1002,4 +1039,7 @@ class TestSessionManager:
 
         assert result == "Thanks!"
         mock_cache.update_qa_entry.assert_not_called()
-        mock_cache.create_qa_entry.assert_not_called()
+        mock_cache.create_qa_entry.assert_called_once()
+        qa_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert qa_kw["feedback_text"] is None
+        assert qa_kw["feedback_score"] is None
