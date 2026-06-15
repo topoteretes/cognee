@@ -32,6 +32,7 @@ async def retrieve_hybrid_chunks(
     node_name: Optional[list[str]],
     node_name_filter_operator: str,
     use_importance_weight: bool,
+    query_vector: Optional[list[float]] = None,
 ) -> dict[str, Any]:
     candidate_limit = max(0, chunks_top_k * 2)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
@@ -45,6 +46,7 @@ async def retrieve_hybrid_chunks(
             node_name,
             node_name_filter_operator,
             required=True,
+            query_vector=query_vector,
         ),
         search_collection(
             vector_engine,
@@ -53,6 +55,7 @@ async def retrieve_hybrid_chunks(
             summary_limit,
             node_name,
             node_name_filter_operator,
+            query_vector=query_vector,
         ),
     )
 
@@ -135,6 +138,7 @@ async def search_collection(
     *,
     required: bool = False,
     apply_node_filter: bool = True,
+    query_vector: Optional[list[float]] = None,
 ) -> list[Any]:
     if limit <= 0:
         return []
@@ -144,7 +148,8 @@ async def search_collection(
     try:
         return await vector_engine.search(
             collection_name,
-            query,
+            None if query_vector is not None else query,
+            query_vector=query_vector,
             limit=limit,
             include_payload=True,
             node_name=search_node_name,
