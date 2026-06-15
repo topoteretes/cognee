@@ -1,4 +1,3 @@
-import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -10,18 +9,16 @@ from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInte
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
-from cognee.infrastructure.session.feedback_models import (
-    AgentTraceFeedbackSummary,
-    SessionTurnAnalysis,
+from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
+from cognee.infrastructure.session.session_agent_trace import (
+    fallback_agent_trace_feedback,
+    generate_agent_trace_feedback,
 )
 from cognee.infrastructure.session.session_embeddings import (
     embed_text_safe,
     select_hybrid_qa_entries,
 )
-from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.modules.observability import (
     COGNEE_DATA_SIZE_BYTES,
     COGNEE_SESSION_ENTRY_COUNT,
@@ -242,65 +239,6 @@ class SessionManager:
             await _record_session_activity(user_id, session_id)
             return qa_id
 
-    @staticmethod
-    def _fallback_agent_trace_feedback(
-        origin_function: str,
-        status: str,
-        error_message: str = "",
-    ) -> str:
-        """Generate deterministic fallback feedback for a trace step."""
-        normalized_origin = origin_function.strip()
-        normalized_status = status.strip().lower()
-        normalized_error = error_message.strip()
-
-        if normalized_status == "error":
-            if normalized_error:
-                return f"{normalized_origin} failed. Reason: {normalized_error}."
-            return f"{normalized_origin} failed."
-        return f"{normalized_origin} succeeded."
-
-    async def _generate_agent_trace_feedback(
-        self,
-        *,
-        origin_function: str,
-        status: str,
-        method_return_value: Any,
-        error_message: str = "",
-    ) -> str:
-        """Generate per-step feedback from method_return_value, or fall back deterministically."""
-        fallback_feedback = self._fallback_agent_trace_feedback(
-            origin_function=origin_function,
-            status=status,
-            error_message=error_message,
-        )
-
-        if method_return_value is None:
-            return fallback_feedback
-
-        try:
-            system_prompt = read_query_prompt("agent_trace_feedback_summary_system.txt")
-            if not system_prompt:
-                logger.warning("Agent trace feedback: system prompt not found, using fallback")
-                return fallback_feedback
-
-            sanitized_return_value = sanitize_value(method_return_value)
-            serialized_return_value = json.dumps(sanitized_return_value, ensure_ascii=False)
-
-            result = await LLMGateway.acreate_structured_output(
-                text_input=serialized_return_value,
-                system_prompt=system_prompt,
-                response_model=AgentTraceFeedbackSummary,
-            )
-            session_feedback = result.session_feedback.strip()
-            return session_feedback if session_feedback else fallback_feedback
-        except Exception as e:
-            logger.warning(
-                "Agent trace feedback generation failed, using fallback: %s",
-                e,
-                exc_info=False,
-            )
-            return fallback_feedback
-
     async def add_agent_trace_step(
         self,
         *,
@@ -328,14 +266,14 @@ class SessionManager:
 
         trace_id = str(uuid.uuid4())
         if generate_feedback_with_llm:
-            session_feedback = await self._generate_agent_trace_feedback(
+            session_feedback = await generate_agent_trace_feedback(
                 origin_function=origin_function,
                 status=status,
                 method_return_value=method_return_value,
                 error_message=error_message,
             )
         else:
-            session_feedback = self._fallback_agent_trace_feedback(
+            session_feedback = fallback_agent_trace_feedback(
                 origin_function=origin_function,
                 status=status,
                 error_message=error_message,

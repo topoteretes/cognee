@@ -205,11 +205,11 @@ class TestSessionManager:
         """add_agent_trace_step returns generated trace_id and persists generated feedback."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value="summarize this",
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
                 return_value=AgentTraceFeedbackSummary(
                     session_feedback="Trip plan created successfully."
@@ -243,11 +243,11 @@ class TestSessionManager:
         """Empty LLM summaries fall back to the deterministic feedback string."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value="summarize this",
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
                 return_value=AgentTraceFeedbackSummary(session_feedback="   "),
             ),
@@ -269,11 +269,11 @@ class TestSessionManager:
         """LLM failures do not block trace writes and use deterministic fallback feedback."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value="summarize this",
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("llm unavailable"),
             ),
@@ -295,11 +295,11 @@ class TestSessionManager:
         """Missing trace feedback prompt uses deterministic fallback feedback."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value=None,
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
             ) as mock_llm,
         ):
@@ -323,11 +323,11 @@ class TestSessionManager:
         """Unexpected LLM result types use deterministic fallback feedback."""
         with (
             patch(
-                "cognee.infrastructure.session.session_manager.read_query_prompt",
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
                 return_value="summarize this",
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
                 new_callable=AsyncMock,
                 return_value="not-a-model",
             ),
@@ -350,7 +350,7 @@ class TestSessionManager:
     ):
         """None return values skip LLM generation and use deterministic fallback feedback."""
         with patch(
-            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
         ) as mock_llm:
             trace_id = await sm.add_agent_trace_step(
@@ -370,7 +370,7 @@ class TestSessionManager:
     async def test_add_agent_trace_step_can_disable_llm_feedback_generation(self, sm, mock_cache):
         """When disabled explicitly, trace feedback uses fallback without touching the LLM."""
         with patch(
-            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
         ) as mock_llm:
             trace_id = await sm.add_agent_trace_step(
