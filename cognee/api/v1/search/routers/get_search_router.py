@@ -13,7 +13,10 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
+from cognee.modules.users.exceptions.exceptions import (
+    PermissionDeniedError,
+    UserNotFoundError,
+)
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.usage_logger import log_usage
@@ -61,6 +64,13 @@ class SearchPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
+    persist_trace: bool = Field(
+        default=False,
+        description=(
+            "When used with only_context, persist the retrieved graph element trace"
+            " in the session cache without generating an LLM answer."
+        ),
+    )
     verbose: bool = Field(
         default=False,
         description=(
@@ -135,7 +145,10 @@ def get_search_router() -> APIRouter:
         send_telemetry(
             "Search API Endpoint Invoked",
             user.id,
-            additional_properties={"endpoint": "GET /v1/search", "cognee_version": cognee_version},
+            additional_properties={
+                "endpoint": "GET /v1/search",
+                "cognee_version": cognee_version,
+            },
         )
 
         try:
@@ -161,7 +174,9 @@ def get_search_router() -> APIRouter:
         },
     )
     @log_usage(function_name="POST /v1/search", log_type="api_endpoint")
-    async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
+    async def search(
+        payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)
+    ):
         """
         Search for nodes in the graph database.
 
@@ -204,12 +219,15 @@ def get_search_router() -> APIRouter:
                 "endpoint": "POST /v1/search",
                 "search_type": str(payload.search_type),
                 "datasets": payload.datasets,
-                "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
+                "dataset_ids": [
+                    str(dataset_id) for dataset_id in payload.dataset_ids or []
+                ],
                 "query": payload.query,
                 "system_prompt": payload.system_prompt,
                 "node_name": payload.node_name,
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
+                "persist_trace": payload.persist_trace,
                 "verbose": payload.verbose,
                 "skills": payload.skills,
                 "tools": payload.tools,
@@ -226,15 +244,16 @@ def get_search_router() -> APIRouter:
                 query_text=payload.query,
                 query_type=payload.search_type,
                 user=user,
-                datasets=payload.datasets
-                if not payload.dataset_ids
-                else None,  # If dataset_ids are provided, ignore datasets by name to avoid confusion and potential mismatches.
+                datasets=(
+                    payload.datasets if not payload.dataset_ids else None
+                ),  # If dataset_ids are provided, ignore datasets by name to avoid confusion and potential mismatches.
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                persist_trace=payload.persist_trace,
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
@@ -251,7 +270,9 @@ def get_search_router() -> APIRouter:
                 ).model_dump(),
             )
         except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_CONTENT)
+            status_code = getattr(
+                e, "status_code", status.HTTP_422_UNPROCESSABLE_CONTENT
+            )
             return JSONResponse(
                 status_code=status_code,
                 content=ErrorResponse(

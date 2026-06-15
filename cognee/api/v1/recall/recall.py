@@ -56,6 +56,7 @@ class RecallKwargs(TypedDict, total=False):
     wide_search_top_k: int
     triplet_distance_penalty: float
     feedback_influence: float
+    persist_trace: bool
     verbose: bool
     retriever_specific_config: dict
     user: object
@@ -73,7 +74,9 @@ async def _resolve_user_id(user: str | None) -> str | None:
     return str(user.id) if hasattr(user, "id") else None
 
 
-async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | None) -> str | None:
+async def _resolve_session_cache_user_id(
+    session_id: str, caller_user_id: str | None
+) -> str | None:
     """Resolve the user_id to use when querying the session cache.
 
     Session-cache entries are keyed by the session's OWNER, not by the
@@ -114,7 +117,9 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 
         permitted_ids: list[UUID] = []
         try:
-            permitted = await get_specific_user_permission_datasets(caller_uuid, "read", None)
+            permitted = await get_specific_user_permission_datasets(
+                caller_uuid, "read", None
+            )
             permitted_ids = [ds.id for ds in permitted] if permitted else []
         except Exception:
             permitted_ids = []
@@ -239,7 +244,9 @@ async def _search_trace(
     if not sm.is_available:
         return []
 
-    entries = await sm.get_agent_trace_session(user_id=cache_user_id, session_id=session_id)
+    entries = await sm.get_agent_trace_session(
+        user_id=cache_user_id, session_id=session_id
+    )
 
     if not entries:
         return []
@@ -331,6 +338,7 @@ async def recall(
     wide_search_top_k: int | None = 100,
     triplet_distance_penalty: float | None = 6.5,
     feedback_influence: float = 0.0,
+    persist_trace: bool = False,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
     neighborhood_depth: int | None = None,
@@ -414,8 +422,11 @@ async def recall(
             "search_type": str(query_type.value) if query_type else "auto",
             "session_id": session_id or "",
             "datasets": ",".join(datasets) if datasets else "",
-            "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
+            "dataset_ids": ",".join(
+                str(dataset_id) for dataset_id in dataset_ids or []
+            ),
             "include_references": include_references,
+            "persist_trace": persist_trace,
             "cognee_version": cognee_version,
         },
     )
@@ -441,6 +452,7 @@ async def recall(
                 system_prompt=system_prompt,
                 node_name=node_name,
                 only_context=only_context,
+                persist_trace=persist_trace,
                 session_id=session_id,
                 verbose=verbose,
                 include_references=include_references,
@@ -506,7 +518,10 @@ async def recall(
             local_query_type = query_type
             if local_query_type is not None:
                 if auto_route:
-                    from cognee.api.v1.recall.query_router import record_override, route_query
+                    from cognee.api.v1.recall.query_router import (
+                        record_override,
+                        route_query,
+                    )
 
                     result = route_query(query_text)
                     routed_type = result.search_type
@@ -530,7 +545,9 @@ async def recall(
             if search_dataset_ids is None and datasets is not None:
                 search_dataset_ids = [
                     dataset.id
-                    for dataset in await get_authorized_existing_datasets(datasets, "read", user)
+                    for dataset in await get_authorized_existing_datasets(
+                        datasets, "read", user
+                    )
                 ]
                 if not search_dataset_ids:
                     raise DatasetNotFoundError(message="No datasets found.")
@@ -550,6 +567,7 @@ async def recall(
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,
                 feedback_influence=feedback_influence,
+                persist_trace=persist_trace,
                 retriever_specific_config=retriever_specific_config,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
@@ -562,7 +580,10 @@ async def recall(
             for r in graph_results:
                 items: list[SearchResultItem] = normalize_search_payload(r)
                 tagged.extend(
-                    [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
+                    [
+                        ResponseGraphEntry(**item.model_dump(), source="graph")
+                        for item in items
+                    ]
                 )
             return tagged
 

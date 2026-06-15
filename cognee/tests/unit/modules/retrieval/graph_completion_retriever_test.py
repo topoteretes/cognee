@@ -117,7 +117,9 @@ async def test_get_context_empty_results():
         ),
     ):
         mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
-        context = await retriever.get_context_from_objects(query="test query", retrieved_objects=[])
+        context = await retriever.get_context_from_objects(
+            query="test query", retrieved_objects=[]
+        )
 
     assert context == ""
 
@@ -135,7 +137,9 @@ async def test_get_context_empty_graph():
         new_callable=AsyncMock,
     ) as mock_get_unified:
         mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
-        context = await retriever.get_context_from_objects(query="test query", retrieved_objects=[])
+        context = await retriever.get_context_from_objects(
+            query="test query", retrieved_objects=[]
+        )
 
     assert context == ""
 
@@ -330,7 +334,9 @@ async def test_get_completion_with_session(mock_edge):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
         mock_sm = MagicMock()
-        mock_sm.generate_completion_with_session = AsyncMock(return_value="Generated answer")
+        mock_sm.generate_completion_with_session = AsyncMock(
+            return_value="Generated answer"
+        )
         mock_get_sm.return_value = mock_sm
 
         completion = await retriever.get_completion_from_context(
@@ -382,7 +388,9 @@ async def test_get_completion_with_session_passes_used_graph_element_ids(mock_ed
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
         mock_sm = MagicMock()
-        mock_sm.generate_completion_with_session = AsyncMock(return_value="Generated answer")
+        mock_sm.generate_completion_with_session = AsyncMock(
+            return_value="Generated answer"
+        )
         mock_get_sm.return_value = mock_sm
 
         await retriever.get_completion_from_context(
@@ -400,6 +408,60 @@ async def test_get_completion_with_session_passes_used_graph_element_ids(mock_ed
     assert "node-1" in ids.get("node_ids", [])
     assert "node-2" in ids.get("node_ids", [])
     assert "edge-1" in ids.get("edge_ids", [])
+
+
+@pytest.mark.asyncio
+async def test_persist_context_trace_adds_session_qa_without_completion(mock_edge):
+    """Context-only trace persistence stores used graph IDs without calling the LLM path."""
+    mock_node1 = MagicMock()
+    mock_node1.id = "node-1"
+    mock_node2 = MagicMock()
+    mock_node2.id = "node-2"
+    mock_edge.node1 = mock_node1
+    mock_edge.node2 = mock_node2
+    mock_edge.attributes = {"edge_object_id": "edge-1"}
+
+    retriever = GraphCompletionRetriever(session_id="test_session")
+    mock_user = MagicMock()
+    mock_user.id = "test-user-id"
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_session_manager",
+        ) as mock_get_sm,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.session_user"
+        ) as mock_session_user,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = True
+        mock_cache_config.return_value = mock_config
+        mock_session_user.get.return_value = mock_user
+        mock_sm = MagicMock()
+        mock_sm.add_qa = AsyncMock(return_value="qa-id")
+        mock_get_sm.return_value = mock_sm
+
+        qa_id = await retriever.persist_context_trace(
+            query="test query",
+            retrieved_objects=[mock_edge],
+            context="Resolved context",
+        )
+
+    assert qa_id == "qa-id"
+    mock_sm.add_qa.assert_awaited_once()
+    call_kw = mock_sm.add_qa.call_args.kwargs
+    assert call_kw["user_id"] == "test-user-id"
+    assert call_kw["session_id"] == "test_session"
+    assert call_kw["question"] == "test query"
+    assert call_kw["context"] == "Resolved context"
+    assert call_kw["answer"] == ""
+    assert call_kw["used_graph_element_ids"] == {
+        "node_ids": ["node-1", "node-2"],
+        "edge_ids": ["edge-1"],
+    }
 
 
 @pytest.mark.asyncio
