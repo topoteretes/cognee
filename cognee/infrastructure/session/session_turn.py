@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_context_builder import (
@@ -20,7 +21,13 @@ from cognee.infrastructure.session.session_context_builder import (
     build_active_context_block,
 )
 from cognee.infrastructure.session.session_context_models import SessionFeedbackEntry
-from cognee.infrastructure.session.session_embeddings import select_hybrid_qa_entries
+from cognee.infrastructure.session.session_embeddings import (
+    embed_text_safe,
+    select_hybrid_qa_entries,
+)
+from cognee.modules.retrieval.utils.completion import (
+    generate_session_completion_with_optional_summary,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_turn")
@@ -112,6 +119,80 @@ async def select_session_history(
         include_context=False,
     )
     return history if isinstance(history, str) else ""
+
+
+def _truncate_graph_context(graph_context: str, max_context_chars: int | None) -> str:
+    """Truncate the graph snapshot to its char budget: explicit arg > config > unlimited."""
+    if not graph_context:
+        return graph_context
+    char_limit = max_context_chars
+    if char_limit is None:
+        char_limit = CacheConfig().max_session_context_chars
+    if char_limit is not None:
+        return graph_context[:char_limit]
+    return graph_context
+
+
+async def generate_session_answer(
+    session_manager,
+    *,
+    user_id: str,
+    session_id: str,
+    answer_query: str,
+    context: str,
+    user_prompt_path: str,
+    system_prompt_path: str,
+    system_prompt: str | None,
+    response_model: type,
+    summarize_context: bool,
+    max_context_chars: int | None,
+) -> tuple[Any, str, list[str] | None]:
+    """Recall history and context, compose the prompt, and generate one answer.
+
+    Returns ``(answer, context_to_store, served_context_ids)``. The active context block
+    and the graph snapshot keep separate char budgets, applied before composing.
+    """
+    # One embedding per turn, shared by hybrid history retrieval and context ranking.
+    query_embedding = await embed_text_safe(answer_query)
+    conversation_history = await select_session_history(
+        session_manager, user_id, session_id, query_embedding=query_embedding
+    )
+
+    served_ids: list[str] = []
+    active_context_block = ""
+    if session_manager.is_auto_feedback_enabled():
+        active_context_block, served_ids = await build_active_context_block_safe(
+            session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            query=answer_query,
+            query_embedding=query_embedding,
+        )
+
+    # Graph-knowledge snapshot from improve() sync; its budget is separate from the block's.
+    graph_context = _truncate_graph_context(
+        await session_manager.get_graph_context(user_id=user_id, session_id=session_id),
+        max_context_chars,
+    )
+    conversation_history = compose_session_prompt(
+        active_context_block, graph_context, conversation_history
+    )
+
+    (
+        answer,
+        context_to_store,
+        _feedback_result,
+    ) = await generate_session_completion_with_optional_summary(
+        query=answer_query,
+        context=context,
+        conversation_history=conversation_history,
+        user_prompt_path=user_prompt_path,
+        system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
+        response_model=response_model,
+        summarize_context=summarize_context,
+    )
+    return answer, context_to_store, served_ids or None
 
 
 async def build_active_context_block_safe(

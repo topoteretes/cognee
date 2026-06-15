@@ -7,11 +7,8 @@ from cognee.infrastructure.session.feedback_models import (
     AgentTraceFeedbackSummary,
     FeedbackDetectionResult,
 )
-from cognee.infrastructure.session.session_manager import (
-    SessionManager,
-    _validate_session_params,
-    compose_session_prompt,
-)
+from cognee.infrastructure.session.session_manager import SessionManager
+from cognee.infrastructure.session.session_turn import compose_session_prompt
 
 
 class TestComposeSessionPrompt:
@@ -51,53 +48,53 @@ class TestValidateSessionParams:
 
     def test_valid_params(self):
         """Valid user_id and session_id do not raise."""
-        _validate_session_params(user_id="u1", session_id="s1")
-        _validate_session_params(user_id="u1", session_id="s1", qa_id="q1")
+        SessionManager._validate_session_params(user_id="u1", session_id="s1")
+        SessionManager._validate_session_params(user_id="u1", session_id="s1", qa_id="q1")
 
     def test_empty_user_id_raises(self):
         """Empty user_id raises SessionParameterValidationError."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="", session_id="s1")
+            SessionManager._validate_session_params(user_id="", session_id="s1")
         assert "user_id" in exc_info.value.message
 
     def test_empty_session_id_raises(self):
         """Empty session_id raises SessionParameterValidationError."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="")
+            SessionManager._validate_session_params(user_id="u1", session_id="")
         assert "session_id" in exc_info.value.message
 
     def test_whitespace_user_id_raises(self):
         """Whitespace-only user_id raises."""
         with pytest.raises(SessionParameterValidationError):
-            _validate_session_params(user_id="  ", session_id="s1")
+            SessionManager._validate_session_params(user_id="  ", session_id="s1")
 
     def test_empty_qa_id_raises(self):
         """Empty qa_id raises when provided."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="s1", qa_id="")
+            SessionManager._validate_session_params(user_id="u1", session_id="s1", qa_id="")
         assert "qa_id" in exc_info.value.message
 
     def test_valid_last_n(self):
         """Valid last_n (positive int or None) does not raise."""
-        _validate_session_params(user_id="u1", session_id="s1", last_n=5)
-        _validate_session_params(user_id="u1", session_id="s1", last_n=1)
+        SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=5)
+        SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=1)
 
     def test_invalid_last_n_zero_raises(self):
         """last_n=0 raises SessionParameterValidationError."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="s1", last_n=0)
+            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=0)
         assert "last_n" in exc_info.value.message
 
     def test_invalid_last_n_negative_raises(self):
         """last_n negative raises."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="s1", last_n=-1)
+            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n=-1)
         assert "last_n" in exc_info.value.message
 
     def test_invalid_last_n_not_int_raises(self):
         """last_n not an int raises."""
         with pytest.raises(SessionParameterValidationError) as exc_info:
-            _validate_session_params(user_id="u1", session_id="s1", last_n="5")
+            SessionManager._validate_session_params(user_id="u1", session_id="s1", last_n="5")
         assert "last_n" in exc_info.value.message
 
 
@@ -626,7 +623,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
                 return_value=("Generated answer", "", None),
             ) as mock_generate,
@@ -752,7 +749,7 @@ class TestSessionManager:
                 ),
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
                 return_value=("Paris is the capital of France.", "", None),
             ),
@@ -794,7 +791,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
                 return_value=("Generated answer", "", None),
             ),
@@ -838,7 +835,7 @@ class TestSessionManager:
                 ),
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
                 return_value=("Generated answer", "", None),
             ),
@@ -880,7 +877,7 @@ class TestSessionManager:
                 return_value=FeedbackDetectionResult(response_to_user="Got it."),
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
                 return_value=("Generated answer", "", None),
             ),
@@ -968,13 +965,13 @@ class TestSessionManager:
                 return_value=FeedbackDetectionResult(),
             ),
             patch(
-                "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
                 return_value=("Generated answer", "", None),
             ) as mock_generate,
             patch.object(sm, "add_qa", new_callable=AsyncMock) as mock_add_qa,
             patch(
-                "cognee.infrastructure.session.session_manager.build_active_context_block_safe",
+                "cognee.infrastructure.session.session_turn.build_active_context_block_safe",
                 new_callable=AsyncMock,
                 return_value=("", []),
             ),
