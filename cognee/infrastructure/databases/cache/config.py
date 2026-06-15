@@ -29,14 +29,15 @@ class CacheConfig(BaseSettings):
     - usage_logging: Enable/disable usage logging for API endpoints and MCP tools.
     - usage_logging_ttl: Time-to-live for usage logs in seconds (default: 7 days).
     - auto_feedback: When caching is True, run automatic feedback detection and session-context
-      guidance on each query (default False).
+      guidance on each query (default True). Adds one structured-output LLM call per answered
+      turn; set AUTO_FEEDBACK=false to disable.
     """
 
     cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
     cache_db_url: Optional[str] = None
     cache_purge_interval_seconds: int = 900
     caching: bool = True
-    auto_feedback: bool = False
+    auto_feedback: bool = True
     shared_ladybug_lock: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
