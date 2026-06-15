@@ -1,4 +1,4 @@
-"""Compatibility shim — startup-migration orchestration lives in
+"""Compatibility shim — migration orchestration lives in
 ``cognee.modules.migrations.startup``.
 
 This module is imported by ``cognee/__init__.py`` at package-import time, so
@@ -8,15 +8,16 @@ factories that cannot load during package import).
 """
 
 
-async def run_migrations():
-    """Relational (Alembic) schema migrations. See ``modules.migrations.startup``."""
+async def run_relational_migrations():
+    """Relational (Alembic) schema migrations only. See ``modules.migrations.startup``."""
     from cognee.modules.migrations.startup import run_relational_migrations
 
     return await run_relational_migrations()
 
 
-async def run_startup_migrations():
-    """All startup migrations (relational + graph/vector revision chains)."""
-    from cognee.modules.migrations.startup import run_startup_migrations as _run
+async def run_migrations():
+    """All migrations (relational + graph/vector revision chains). See
+    ``modules.migrations.startup``."""
+    from cognee.modules.migrations.startup import run_migrations as _run
 
     return await _run()

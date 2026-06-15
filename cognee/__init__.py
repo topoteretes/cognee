@@ -47,7 +47,7 @@ from .modules import pipelines
 from .pipelines import Drop
 
 # Migrations
-from cognee.run_migrations import run_startup_migrations
+from cognee.run_migrations import run_migrations
 
 # ---------------------------------------------------------------------------
 # V2 memory-oriented API

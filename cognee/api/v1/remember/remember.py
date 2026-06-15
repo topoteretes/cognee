@@ -778,11 +778,9 @@ async def _remember_inner(
     # This ensures stale LanceDB schemas are migrated before any
     # writes, even when the API server was never started. Scoped to the
     # dataset this call targets (dataset_id override, else dataset_name).
-    from cognee.modules.migrations.startup import run_startup_migrations_and_block
+    from cognee.modules.migrations.startup import run_migrations_and_block
 
-    await run_startup_migrations_and_block(
-        kwargs.get("dataset_id") or dataset_name, kwargs.get("user")
-    )
+    await run_migrations_and_block(kwargs.get("dataset_id") or dataset_name, kwargs.get("user"))
 
     # Normalize "" to None — HTML forms and Swagger UI submit untouched
     # optional fields as empty strings.

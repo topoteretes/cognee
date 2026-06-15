@@ -216,9 +216,9 @@ async def cognify(
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
 
-        from cognee.modules.migrations.startup import run_startup_migrations_and_block
+        from cognee.modules.migrations.startup import run_migrations_and_block
 
-        await run_startup_migrations_and_block(datasets, user)
+        await run_migrations_and_block(datasets, user)
 
         if config is None:
             ontology_config = get_ontology_env_config()

@@ -22,7 +22,7 @@ last started); nothing gates on them. Revisions are the only gates.
 - FastAPI lifespan (`api/client.py`) — every server start, once per worker
 - the first `remember()` or `cognify()` call in an SDK process (both write
   new-scheme ids, so both migrate first; once-per-process guarded)
-- explicitly: `await cognee.run_startup_migrations()`
+- explicitly: `await cognee.run_migrations()`
 
 Steady state is cheap: an in-memory revision comparison per database, nothing
 opened, nothing written.

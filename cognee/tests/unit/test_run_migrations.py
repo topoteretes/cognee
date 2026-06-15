@@ -65,7 +65,7 @@ class TestRunRelationalMigrations(unittest.TestCase):
             patch.object(startup.os.path, "exists", return_value=True),
             patch("alembic.command.upgrade") as mock_upgrade,
         ):
-            asyncio.run(shim.run_migrations())
+            asyncio.run(shim.run_relational_migrations())
 
         mock_upgrade.assert_called_once()
         alembic_config, target = mock_upgrade.call_args[0]
@@ -141,7 +141,7 @@ class TestMissingBookkeepingTables(unittest.TestCase):
 
 
 class TestStartupMigrationsBootstrap(unittest.TestCase):
-    """run_startup_migrations: empty-DB bootstrap fallback + once-per-process flag."""
+    """run_migrations: empty-DB bootstrap fallback + once-per-process flag."""
 
     def setUp(self):
         _reset_startup_flag()
@@ -188,7 +188,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 new=AsyncMock(return_value=[]),
             ),
         ):
-            asyncio.run(startup.run_startup_migrations())
+            asyncio.run(startup.run_migrations())
 
         db_engine.create_database.assert_awaited_once()
         stamp.assert_awaited_once_with("head")
@@ -219,7 +219,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
             ),
         ):
             with self.assertRaises(startup.MigrationError):
-                asyncio.run(startup.run_startup_migrations())
+                asyncio.run(startup.run_migrations())
 
         stamp.assert_not_awaited()
         db_engine.create_database.assert_not_awaited()
@@ -237,7 +237,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 new=AsyncMock(return_value=[{"dataset_id": "x", "result": "failed"}]),
             ),
         ):
-            asyncio.run(startup.run_startup_migrations())
+            asyncio.run(startup.run_migrations())
             self.assertFalse(startup._startup_migrations_done)
 
         # The very next call retries immediately and (now clean) sets the flag.
@@ -248,7 +248,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 new=AsyncMock(return_value=[{"dataset_id": "x", "migrations_applied": []}]),
             ),
         ):
-            asyncio.run(startup.run_startup_migrations())
+            asyncio.run(startup.run_migrations())
             relational.assert_awaited_once()
             self.assertTrue(startup._startup_migrations_done)
 
@@ -268,7 +268,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 new=AsyncMock(),
             ) as database,
         ):
-            asyncio.run(startup.run_startup_migrations())
+            asyncio.run(startup.run_migrations())
             relational.assert_not_awaited()
             database.assert_not_awaited()
             self.assertFalse(startup._startup_migrations_done)
@@ -281,7 +281,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 new=AsyncMock(return_value=[]),
             ),
         ):
-            asyncio.run(startup.run_startup_migrations())
+            asyncio.run(startup.run_migrations())
             relational.assert_awaited_once()
 
     def test_second_call_is_a_noop_after_success(self):
@@ -294,8 +294,8 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 new=AsyncMock(return_value=[]),
             ),
         ):
-            asyncio.run(startup.run_startup_migrations())
-            asyncio.run(startup.run_startup_migrations())
+            asyncio.run(startup.run_migrations())
+            asyncio.run(startup.run_migrations())
             relational.assert_awaited_once()
 
     def test_returns_failed_databases_so_write_paths_can_block(self):
@@ -316,7 +316,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 ),
             ),
         ):
-            failed = asyncio.run(startup.run_startup_migrations())
+            failed = asyncio.run(startup.run_migrations())
         self.assertEqual(failed, ["ds-1"])
 
     def test_returns_empty_list_when_all_succeed(self):
@@ -329,7 +329,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
                 new=AsyncMock(return_value=[{"dataset_id": "ds-1", "migrations_applied": []}]),
             ),
         ):
-            failed = asyncio.run(startup.run_startup_migrations())
+            failed = asyncio.run(startup.run_migrations())
         self.assertEqual(failed, [])
 
 

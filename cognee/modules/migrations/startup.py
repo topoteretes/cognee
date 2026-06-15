@@ -13,12 +13,12 @@ Two stages, in order:
 
 Triggered from the FastAPI lifespan on every server start, from the first
 ``remember()``/``cognify()`` call in an SDK process, and explicitly via
-``cognee.run_startup_migrations()``. Set ``ENABLE_AUTO_MIGRATIONS=false`` to
+``cognee.run_migrations()``. Set ``ENABLE_AUTO_MIGRATIONS=false`` to
 disable ALL of these automatic runs (e.g. operating on deliberately
 old-format data, or environments where migrations are operator-driven) —
 ``cognee-cli upgrade`` remains the explicit path and ignores the flag.
 
-``run_startup_migrations`` is once-per-process: a cognee instance never needs
+``run_migrations`` is once-per-process: a cognee instance never needs
 to run migrations twice (databases at head no-op anyway, but the relational
 Alembic subprocess and the per-database row scan are not free). The guard
 lives HERE, not in any caller — a concurrent second call waits on the lock,
@@ -66,7 +66,7 @@ async def abort_write_if_migration_blocked(failed: list[str], datasets, user) ->
     """Raise if a database this write targets failed migration — writing into a
     store still on the old scheme is the corruption the migration prevents.
 
-    ``failed`` comes from :func:`run_startup_migrations`. The block is scoped:
+    ``failed`` comes from :func:`run_migrations`. The block is scoped:
     access control OFF, one global pair backs every dataset, so any failure
     blocks all writes; access control ON, block only when a dataset this call
     targets is in ``failed`` (a brand-new dataset has no DB yet, and
@@ -270,7 +270,7 @@ async def apply_all_migrations(
     startup AND the CLI ``upgrade`` share identical behavior and one lock
     (run_database_migrations does not lock itself — see ``migration_lock``). Returns
     the runner's per-database summaries. Does NOT apply the ENABLE_AUTO_MIGRATIONS
-    gate or the once-per-process guard — those belong to ``run_startup_migrations``;
+    gate or the once-per-process guard — those belong to ``run_migrations``;
     the CLI must migrate even when automatic migrations are disabled.
     """
     from cognee.modules.migrations.runner import migration_lock, run_database_migrations
@@ -348,7 +348,7 @@ async def revert_all_migrations(
         return summaries
 
 
-async def run_startup_migrations() -> list[str]:
+async def run_migrations() -> list[str]:
     """Run all startup migrations: relational schema first, then the graph +
     vector revision chains. Once per process (see module docstring); a failed
     run is retried on the next call.
@@ -405,12 +405,12 @@ async def run_startup_migrations() -> list[str]:
         return failed
 
 
-async def run_startup_migrations_and_block(datasets, user) -> None:
+async def run_migrations_and_block(datasets, user) -> None:
     """Run startup migrations, then block this write if a dataset it targets failed.
 
     The shared entry point for write paths (cognify/remember). The once-per-process
-    guard lives in ``run_startup_migrations``, so after the first run this is just a
+    guard lives in ``run_migrations``, so after the first run this is just a
     flag check plus the scoped block.
     """
-    failed = await run_startup_migrations()
+    failed = await run_migrations()
     await abort_write_if_migration_blocked(failed, datasets, user)

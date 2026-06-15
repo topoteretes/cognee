@@ -97,7 +97,7 @@ async def _migration_lock(db_engine, key: int):
 
     Not re-entrant: a caller must never acquire the same key twice (re-locking it
     on a second connection self-deadlocks). The single global key is taken at one
-    level only — see run_startup_migrations / run_database_migrations.
+    level only — see run_migrations / run_database_migrations.
     """
     engine = db_engine.engine
     if engine.dialect.name == "postgresql":
@@ -123,7 +123,7 @@ async def _migration_lock(db_engine, key: int):
     # release on DIFFERENT pool threads; FileLock is thread-local by default (its
     # re-entrancy counter lives on the acquiring thread), so a release on another
     # thread would no-op and leak the OS lock — deadlocking the next acquisition
-    # (e.g. run_startup_migrations' failed-migration retry). thread_local=False
+    # (e.g. run_migrations' failed-migration retry). thread_local=False
     # shares the counter across threads; the OS lock itself is process/fd-scoped.
     lock = FileLock(lock_path, thread_local=False)
     await asyncio.to_thread(lock.acquire)
@@ -452,7 +452,7 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
     per-database summary.
 
     The CALLER must hold the single migration lock (see ``_migration_lock``):
-    ``run_startup_migrations`` wraps the relational bootstrap + this call in it,
+    ``run_migrations`` wraps the relational bootstrap + this call in it,
     and the CLI ``migrate`` command acquires it around this call. This function
     does not lock, so a host runs at most one migration — relational, global, and
     every dataset — under one mutex, never one lock per dataset.

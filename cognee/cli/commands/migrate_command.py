@@ -113,7 +113,7 @@ Examples:
             )
             # The SAME locked relational + graph/vector sequence startup runs — one
             # global migration lock, no duplicated bootstrap logic. Unlike
-            # run_startup_migrations it is not gated by ENABLE_AUTO_MIGRATIONS, so an
+            # run_migrations it is not gated by ENABLE_AUTO_MIGRATIONS, so an
             # explicit upgrade works even when automatic migrations are turned off.
             return await apply_all_migrations(
                 data_target=args.revision, relational_target=args.alembic

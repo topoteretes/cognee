@@ -453,7 +453,7 @@ async def main():
     print(f"Running Phase 2 with cognee version: {cognee.__version__}")
 
     # ── Step 0: Run database migrations (relational + graph + vector) ─────────
-    await cognee.run_startup_migrations()
+    await cognee.run_migrations()
 
     # ── Step 1: legacy data must be accessible & correctly migrated ───────────
     await _verify_access("Step 1 — legacy data after migration")
