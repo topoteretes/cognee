@@ -699,7 +699,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(
                     response_to_user="Thanks for your feedback!",
@@ -744,7 +744,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(
                     response_to_user="Thanks for your feedback!",
@@ -831,7 +831,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(
                     query_to_answer="What is X?",
@@ -875,7 +875,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(response_to_user="Got it."),
             ),
@@ -923,7 +923,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(
                     response_to_user="Thanks for your feedback!",
@@ -963,7 +963,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(),
             ),
@@ -973,9 +973,8 @@ class TestSessionManager:
                 return_value=("Generated answer", "", None),
             ) as mock_generate,
             patch.object(sm, "add_qa", new_callable=AsyncMock) as mock_add_qa,
-            patch.object(
-                sm,
-                "_build_active_context_block_safe",
+            patch(
+                "cognee.infrastructure.session.session_manager.build_active_context_block_safe",
                 new_callable=AsyncMock,
                 return_value=("", []),
             ),
@@ -1014,7 +1013,7 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(
                     response_to_user="Thanks!",

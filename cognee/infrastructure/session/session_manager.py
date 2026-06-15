@@ -1,6 +1,4 @@
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 from cognee.context_global_variables import session_user
@@ -9,15 +7,17 @@ from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInte
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
-from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
-from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_agent_trace import (
     fallback_agent_trace_feedback,
     generate_agent_trace_feedback,
 )
-from cognee.infrastructure.session.session_embeddings import (
-    embed_text_safe,
-    select_hybrid_qa_entries,
+from cognee.infrastructure.session.session_embeddings import embed_text_safe
+from cognee.infrastructure.session.session_turn import (
+    SessionTurnPreparation,
+    build_active_context_block_safe,
+    compose_session_prompt,
+    prepare_session_turn as _prepare_turn,
+    select_session_history,
 )
 from cognee.modules.observability import (
     COGNEE_DATA_SIZE_BYTES,
@@ -36,18 +36,6 @@ logger = get_logger("SessionManager")
 
 
 _session_record_write_failed = False
-
-
-@dataclass
-class SessionTurnPreparation:
-    """Pre-answer decision and updates for one session turn."""
-
-    should_answer: bool = True
-    response_to_user: str | None = None
-    effective_query: str = ""
-    analysis: SessionTurnAnalysis | None = None
-    accepted_context_ids: list[str] = field(default_factory=list)
-    previous_qa_id: str | None = None
 
 
 async def _record_session_activity(
@@ -118,27 +106,6 @@ def _validate_session_params(
             raise SessionParameterValidationError(message=f"{name} must be a non-empty string")
     if last_n is not None and (not isinstance(last_n, int) or last_n < 1):
         raise SessionParameterValidationError(message="last_n must be a positive integer")
-
-
-def compose_session_prompt(
-    active_context_block: str,
-    graph_context: str,
-    conversation_history: str,
-) -> str:
-    """Assemble the session prompt from its three layers, top to bottom.
-
-    Order: the active session-context block first, then the graph-knowledge snapshot,
-    then the conversation history. Empty layers are skipped. ``graph_context`` is expected
-    to be already truncated by the caller (its char budget differs from the block's).
-    """
-    prompt = conversation_history
-    if graph_context:
-        prompt = (
-            "Background knowledge from the knowledge graph:\n" + graph_context + "\n\n" + prompt
-        )
-    if active_context_block:
-        prompt = active_context_block + "\n\n" + prompt
-    return prompt
 
 
 class SessionManager:
@@ -301,58 +268,10 @@ class SessionManager:
         cache_config = CacheConfig()
         return bool(cache_config.caching)
 
-    async def _get_formatted_history(
-        self,
-        user_id: str,
-        session_id: str,
-        query_embedding: list[float] | None = None,
-    ) -> str:
-        """Load session history and return it as a formatted conversation string.
-
-        With a query embedding, history is the union of the last N turns and the most
-        semantically relevant older turns, in chronological order. Without one (or on
-        any failure), this is exactly the plain last-N recency window.
-        """
-        if query_embedding is not None:
-            try:
-                entries = await self.get_session(
-                    user_id=user_id,
-                    session_id=session_id,
-                    formatted=False,
-                )
-                if isinstance(entries, list):
-                    selected = select_hybrid_qa_entries(
-                        entries,
-                        query_embedding,
-                        last_n=self.session_history_last_n,
-                    )
-                    return self.format_entries(
-                        [self._coerce_last_qa_entry(entry) for entry in selected],
-                        include_context=False,
-                    )
-            except Exception as error:
-                logger.warning("SessionManager: hybrid history failed open: %s", error)
-
-        history: str | list = await self.get_session(
-            user_id=user_id,
-            session_id=session_id,
-            formatted=True,
-            last_n=self.session_history_last_n,
-            include_context=False,
-        )
-        return history if isinstance(history, str) else ""
-
-    @staticmethod
-    def _empty_turn_preparation(query: str) -> SessionTurnPreparation:
-        return SessionTurnPreparation(should_answer=True, effective_query=query)
-
-    @staticmethod
-    def _coerce_last_qa_entry(entry: Any) -> dict:
-        if hasattr(entry, "model_dump"):
-            return entry.model_dump()
-        if isinstance(entry, dict):
-            return entry
-        return {}
+    def is_auto_feedback_enabled(self) -> bool:
+        """Return True if caching and automatic turn-feedback analysis are both enabled."""
+        cache_config = CacheConfig()
+        return bool(cache_config.caching and cache_config.auto_feedback)
 
     async def prepare_session_turn(
         self,
@@ -363,94 +282,9 @@ class SessionManager:
     ) -> SessionTurnPreparation:
         """Analyze one user turn before retrieval/answer generation.
 
-        This runs only when caching and auto_feedback are enabled. It applies accepted candidate
-        guidance, rates previously served guidance, and returns the effective query that retrieval
-        and answer generation should use.
+        Thin delegate to ``session_turn.prepare_session_turn``; see that module for the logic.
         """
-        resolved_user_id = user_id
-        if resolved_user_id is None:
-            user = session_user.get()
-            resolved_user_id = getattr(user, "id", None)
-
-        if not self.is_session_available_for_completion(resolved_user_id):
-            return self._empty_turn_preparation(query)
-
-        cache_config = CacheConfig()
-        if not (cache_config.caching and cache_config.auto_feedback):
-            return self._empty_turn_preparation(query)
-
-        resolved_session_id = self._resolve_session_id(session_id)
-
-        try:
-            previous_entries = await self.get_session(
-                user_id=str(resolved_user_id),
-                session_id=resolved_session_id,
-                formatted=False,
-                last_n=1,
-            )
-            previous_entry = (
-                self._coerce_last_qa_entry(previous_entries[-1])
-                if isinstance(previous_entries, list) and previous_entries
-                else {}
-            )
-            previous_qa_id = previous_entry.get("qa_id")
-            previous_question = previous_entry.get("question")
-            previous_answer = previous_entry.get("answer")
-            previous_served_ids = previous_entry.get("used_session_context_ids") or []
-            if not isinstance(previous_served_ids, list):
-                previous_served_ids = []
-
-            served_context = await self._load_served_context_payload(
-                user_id=str(resolved_user_id),
-                session_id=resolved_session_id,
-                served_ids=[str(entry_id) for entry_id in previous_served_ids],
-            )
-
-            analysis = await analyze_turn_for_session_context(
-                query,
-                previous_question=previous_question,
-                previous_answer=previous_answer,
-                served_context=served_context,
-            )
-        except Exception as error:
-            logger.warning("SessionManager: turn preparation failed open: %s", error)
-            return self._empty_turn_preparation(query)
-
-        try:
-            accepted_context_ids = await self._apply_session_turn_analysis(
-                user_id=str(resolved_user_id),
-                session_id=resolved_session_id,
-                query=query,
-                analysis=analysis,
-                previous_qa_id=previous_qa_id,
-                served_ids=[str(entry_id) for entry_id in previous_served_ids],
-            )
-        except Exception as error:
-            logger.warning("SessionManager: turn analysis application failed open: %s", error)
-            accepted_context_ids = []
-
-        query_to_answer = (analysis.query_to_answer or "").strip()
-        response_to_user = (analysis.response_to_user or "").strip() or None
-        has_analysis_signal = bool(
-            query_to_answer
-            or response_to_user
-            or analysis.candidate_context_updates
-            or analysis.served_context_ratings
-        )
-        has_previous_answer = bool(previous_qa_id)
-        should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_answer)
-        effective_query = query_to_answer or query
-        if not should_answer and not response_to_user:
-            response_to_user = "Got it."
-
-        return SessionTurnPreparation(
-            should_answer=should_answer,
-            response_to_user=response_to_user,
-            effective_query=effective_query,
-            analysis=analysis,
-            accepted_context_ids=accepted_context_ids,
-            previous_qa_id=previous_qa_id,
-        )
+        return await _prepare_turn(self, query=query, session_id=session_id, user_id=user_id)
 
     async def generate_completion_with_session(
         self,
@@ -579,15 +413,16 @@ class SessionManager:
             )
             # One embedding per turn, shared by hybrid history retrieval and context ranking.
             query_embedding = await embed_text_safe(answer_query)
-            conversation_history = await self._get_formatted_history(
-                str(user_id), resolved_session_id, query_embedding=query_embedding
+            conversation_history = await select_session_history(
+                self, str(user_id), resolved_session_id, query_embedding=query_embedding
             )
 
             cache_config = CacheConfig()
             served_ids: list[str] = []
             active_context_block = ""
             if cache_config.caching and cache_config.auto_feedback:
-                active_context_block, served_ids = await self._build_active_context_block_safe(
+                active_context_block, served_ids = await build_active_context_block_safe(
+                    self,
                     user_id=str(user_id),
                     session_id=resolved_session_id,
                     query=answer_query,
@@ -644,163 +479,6 @@ class SessionManager:
             used_session_context_ids=used_session_context_ids,
         )
         return answer
-
-    async def _build_active_context_block_safe(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        query: str,
-        query_embedding: list[float] | None = None,
-    ) -> tuple[str, list[str]]:
-        """Render the active session-context guidance block. Fail-open -> ("", [])."""
-        try:
-            from cognee.infrastructure.session.session_context_builder import (
-                build_active_context_block,
-            )
-
-            return await build_active_context_block(
-                session_manager=self,
-                user_id=user_id,
-                session_id=session_id,
-                query=query,
-                query_embedding=query_embedding,
-            )
-        except Exception as e:
-            logger.warning("SessionManager: build_active_context_block failed: %s", e)
-            return "", []
-
-    async def _load_served_context_payload(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        served_ids: list[str],
-    ) -> list[dict]:
-        """Resolve the context entries served to the previous answer into {id, content} dicts.
-
-        These are fed to detect_feedback so the single feedback call can rate them. Fail-open -> [].
-        """
-        if not served_ids:
-            return []
-        try:
-            entries = await self.get_session_context_entries(user_id=user_id, session_id=session_id)
-            by_id = {}
-            for raw in entries or []:
-                row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
-                entry_id = row.get("id")
-                if entry_id is not None and row.get("kind", "context") == "context":
-                    by_id[str(entry_id)] = row.get("content", "")
-            return [{"id": cid, "content": by_id[cid]} for cid in served_ids if cid in by_id]
-        except Exception as e:
-            logger.warning("SessionManager: load served context failed: %s", e)
-            return []
-
-    async def _apply_session_turn_analysis(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        query: str,
-        analysis: SessionTurnAnalysis,
-        previous_qa_id: str | None,
-        served_ids: list[str],
-    ) -> list[str]:
-        """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
-        if not analysis.candidate_context_updates and not analysis.served_context_ratings:
-            return []
-        try:
-            from cognee.infrastructure.session.session_context_builder import (
-                apply_candidate_updates,
-            )
-            from cognee.infrastructure.session.session_context_models import (
-                SessionFeedbackEntry,
-            )
-
-            ratings = list(analysis.served_context_ratings or [])
-            candidates = list(analysis.candidate_context_updates or [])
-
-            feedback_entry = SessionFeedbackEntry(
-                id=str(uuid.uuid4()),
-                created_at=datetime.utcnow().isoformat(),
-                raw_text=query,
-                referenced_qa_ids=[previous_qa_id] if previous_qa_id else [],
-                influencing_context_ids=list(served_ids or []),
-                candidate_context_entries=[
-                    c.model_dump() if hasattr(c, "model_dump") else dict(c) for c in candidates
-                ],
-            )
-            await self.create_session_context_entry(
-                user_id=user_id,
-                entry_dump=feedback_entry.model_dump(),
-                session_id=session_id,
-            )
-
-            touched_ids = await apply_candidate_updates(
-                session_manager=self,
-                user_id=user_id,
-                session_id=session_id,
-                feedback_entry_id=feedback_entry.id,
-                candidates=candidates,
-            )
-
-            await self._apply_served_context_ratings(
-                user_id=user_id,
-                session_id=session_id,
-                ratings=ratings,
-            )
-            return touched_ids
-        except Exception as e:
-            logger.warning("SessionManager: session-context feedback application failed: %s", e)
-            return []
-
-    async def _apply_served_context_ratings(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        ratings: list,
-    ) -> None:
-        """Increment helpful_count / harmful_count for rated entries. Fail-open per rating."""
-        if not ratings:
-            return
-        try:
-            entries = await self.get_session_context_entries(user_id=user_id, session_id=session_id)
-            counts = {}
-            for raw in entries or []:
-                row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
-                if row.get("kind", "context") != "context":
-                    continue
-                entry_id = row.get("id")
-                if entry_id is not None:
-                    counts[str(entry_id)] = (
-                        int(row.get("helpful_count", 0) or 0),
-                        int(row.get("harmful_count", 0) or 0),
-                    )
-            for rating in ratings:
-                try:
-                    entry_id = str(getattr(rating, "entry_id", None) or "")
-                    verdict = str(getattr(rating, "rating", "") or "").strip().lower()
-                    if entry_id not in counts or verdict not in ("helpful", "harmful"):
-                        continue
-                    helpful, harmful = counts[entry_id]
-                    if verdict == "helpful":
-                        merge = {"helpful_count": helpful + 1}
-                        next_counts = (helpful + 1, harmful)
-                    else:
-                        merge = {"harmful_count": harmful + 1}
-                        next_counts = (helpful, harmful + 1)
-                    await self.update_session_context_entry(
-                        user_id=user_id,
-                        entry_id=entry_id,
-                        merge=merge,
-                        session_id=session_id,
-                    )
-                    counts[entry_id] = next_counts
-                except Exception:
-                    continue
-        except Exception as e:
-            logger.warning("SessionManager: served-context rating update failed: %s", e)
 
     @staticmethod
     def format_entries(entries: list[dict], include_context: bool = True) -> str:
