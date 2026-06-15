@@ -92,32 +92,32 @@ Examples:
             "revision",
             nargs="?",
             default="head",
-            help="Target revision: 'head' (default) or a migration slug",
+            help="Data-migration target: 'head' (default) or a migration slug",
+        )
+        parser.add_argument(
+            "--alembic",
+            default="head",
+            metavar="REV",
+            help="Relational (Alembic) schema target: 'head' (default) or an Alembic revision",
         )
 
     def execute(self, args: argparse.Namespace) -> None:
         _validate_revision(args.revision, ("head",))
 
         async def run():
-            from cognee.modules.migrations.runner import run_database_migrations
-            from cognee.modules.migrations.startup import (
-                MigrationError,
-                run_relational_migrations,
+            from cognee.modules.migrations.startup import apply_all_migrations
+
+            fmt.echo(
+                f"Migrating all databases — relational schema to '{args.alembic}', "
+                f"graph/vector to '{args.revision}'..."
             )
-
-            fmt.echo("Running relational (Alembic) migrations...")
-            try:
-                await run_relational_migrations()
-            except MigrationError:
-                # Fresh database: the Alembic chain is not self-sufficient on an
-                # empty schema — bootstrap and retry once, exactly like startup.
-                from cognee.infrastructure.databases.relational import get_relational_engine
-
-                fmt.note("Empty database detected — creating the schema and retrying.")
-                await get_relational_engine().create_database()
-                await run_relational_migrations()
-            fmt.echo(f"Upgrading the data-migration chain to '{args.revision}'...")
-            return await run_database_migrations(target=args.revision)
+            # The SAME locked relational + graph/vector sequence startup runs — one
+            # global migration lock, no duplicated bootstrap logic. Unlike
+            # run_startup_migrations it is not gated by ENABLE_AUTO_MIGRATIONS, so an
+            # explicit upgrade works even when automatic migrations are turned off.
+            return await apply_all_migrations(
+                data_target=args.revision, relational_target=args.alembic
+            )
 
         try:
             summaries = asyncio.run(run())
@@ -139,22 +139,33 @@ class DowngradeCommand(SupportsCliCommand):
     description = """
 Revert applied graph/vector migrations down to a revision.
 
-REVISION is required (alembic-style): 'base' reverts EVERY applied migration
-(revision back to NULL — the next upgrade re-applies everything), or a
+REVISION is required (alembic-style): 'base' reverts EVERY applied data
+migration (revision back to NULL — the next upgrade re-applies everything), or a
 migration slug, which downgrades down TO it (the slug itself stays applied).
 Only spans where every migration defines a down() can be reverted. This REWRITES DATA — use it when rolling back releases.
 
-The relational (Alembic) schema is NOT downgraded by this command.
+The relational (Alembic) schema is left untouched UNLESS you pass --alembic with
+a target; the data chain is reverted FIRST, then the schema. The schema cannot be
+taken below the revisions that hold the data-migration bookkeeping unless the data
+chain is going to 'base' in the same call.
 
 Examples:
   cognee downgrade base
   cognee downgrade namespace_entity_type_node_ids
+  cognee downgrade base --alembic base          # full rollback: data + schema
 """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "revision",
-            help="Target revision: 'base' (revert everything) or a migration slug",
+            help="Data-migration target: 'base' (revert everything) or a migration slug",
+        )
+        parser.add_argument(
+            "--alembic",
+            default=None,
+            metavar="REV",
+            help="Also downgrade the relational schema to this Alembic revision (or 'base'); "
+            "omit to leave the schema untouched",
         )
         parser.add_argument(
             "--dataset",
@@ -170,25 +181,29 @@ Examples:
         from uuid import UUID
 
         _validate_revision(args.revision, ("base",))
-        target = None if args.revision == "base" else args.revision
         dataset_ids = [UUID(d) for d in args.dataset] if args.dataset else None
 
         if not args.force:
             scope = f"{len(dataset_ids)} dataset(s)" if dataset_ids else "ALL databases"
+            schema_note = f" AND the relational schema to '{args.alembic}'" if args.alembic else ""
             if not fmt.confirm(
-                f"Downgrade {scope} to '{args.revision}'? This rewrites data, and entities "
-                "whose name collides across Entity/EntityType merge into one node on the "
-                "old scheme (lossy — that was the old scheme's #2515 bug).",
+                f"Downgrade {scope} to '{args.revision}'{schema_note}? This rewrites data, and "
+                "entities whose name collides across Entity/EntityType merge into one node on "
+                "the old scheme (lossy — that was the old scheme's #2515 bug).",
                 default=False,
             ):
                 fmt.note("Aborted.")
                 return
 
         async def run():
-            from cognee.modules.migrations.runner import downgrade_database_migrations
+            from cognee.modules.migrations.startup import revert_all_migrations
 
-            return await downgrade_database_migrations(
-                target_revision=target,
+            # One global lock, data chain first, then (opt-in) the relational schema.
+            # `revision` is required, so a data target is always given here; --alembic
+            # (None when omitted) leaves the schema untouched.
+            return await revert_all_migrations(
+                data_target=args.revision,
+                relational_target=args.alembic,
                 dataset_ids=dataset_ids,
             )
 

@@ -29,6 +29,7 @@ import asyncio
 import logging
 import os
 import importlib.resources as pkg_resources
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +138,9 @@ def _build_alembic_config():
     return config
 
 
-async def run_relational_migrations():
-    """Apply the Alembic relational-schema migrations to head, in-process.
+async def run_relational_migrations(target: str = "head"):
+    """Apply the Alembic relational-schema migrations up to ``target`` (default
+    head), in-process.
 
     Run in a worker thread (env.py drives an async engine via asyncio.run, which
     needs a thread with no running loop), NOT a subprocess: env.py resolves the
@@ -150,7 +152,7 @@ async def run_relational_migrations():
     def _upgrade():
         from alembic import command
 
-        command.upgrade(_build_alembic_config(), "head")
+        command.upgrade(_build_alembic_config(), target)
 
     try:
         await asyncio.to_thread(_upgrade)
@@ -158,7 +160,30 @@ async def run_relational_migrations():
         logger.error("Relational migration failed: %s", error)
         raise MigrationError("Relational DB Migrations failed.") from error
 
-    logger.info("Relational migrations applied.")
+    logger.info("Relational migrations applied (target %s).", target)
+
+
+async def run_relational_downgrade(target: str):
+    """Revert the Alembic relational-schema migrations DOWN to ``target``
+    (an Alembic revision, or ``"base"`` for the empty schema), in-process.
+
+    Same in-thread, in-process rationale as ``run_relational_migrations``.
+    EXPLICIT operator action only — the data chain must already be reverted past
+    anything that relies on the schema being dropped (see ``revert_all_migrations``).
+    """
+
+    def _downgrade():
+        from alembic import command
+
+        command.downgrade(_build_alembic_config(), target)
+
+    try:
+        await asyncio.to_thread(_downgrade)
+    except Exception as error:
+        logger.error("Relational downgrade failed: %s", error)
+        raise MigrationError("Relational DB downgrade failed.") from error
+
+    logger.info("Relational schema downgraded (target %s).", target)
 
 
 async def run_relational_stamp(revision: str = "head"):
@@ -208,6 +233,121 @@ async def _relational_schema_exists() -> bool:
     return "users" in tables or "alembic_version" in tables
 
 
+# Alembic revisions that CREATE the cognee data-migration bookkeeping (the
+# dataset_database tracking columns and the global_database_version table). The
+# data-migration system reads/writes these, so the relational schema must not be
+# downgraded below them while any data migration is still applied.
+_DATA_BOOKKEEPING_ALEMBIC_REVISIONS = ("c1a2b3d4e5f9", "d8f4a1b2c3e9")
+
+
+def _relational_downgrade_drops_bookkeeping(relational_target: str) -> bool:
+    """True if downgrading the relational schema to ``relational_target`` would
+    revert (drop) a migration that holds the data-migration bookkeeping.
+
+    A revision survives a downgrade-to-``target`` iff it is ``target`` or one of
+    its ancestors; anything above ``target`` is reverted. ``base`` reverts all.
+    """
+    if relational_target == "base":
+        return True
+
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(_build_alembic_config())
+    # ``target`` + all its ancestors down to base = the revisions that stay applied.
+    kept = {revision.revision for revision in script.iterate_revisions(relational_target, "base")}
+    return any(revision not in kept for revision in _DATA_BOOKKEEPING_ALEMBIC_REVISIONS)
+
+
+async def apply_all_migrations(
+    data_target: str = "head", relational_target: str = "head"
+) -> list[dict]:
+    """UPGRADE every database under the ONE global migration lock: the relational
+    schema FIRST (Alembic, to ``relational_target``), then the graph/vector data
+    chain (to ``data_target``). Both default to head.
+
+    Relational goes first because it owns the tables the data chain (and its own
+    bookkeeping) live in. The single place the full upgrade sequence lives, so
+    startup AND the CLI ``upgrade`` share identical behavior and one lock
+    (run_database_migrations does not lock itself — see ``migration_lock``). Returns
+    the runner's per-database summaries. Does NOT apply the ENABLE_AUTO_MIGRATIONS
+    gate or the once-per-process guard — those belong to ``run_startup_migrations``;
+    the CLI must migrate even when automatic migrations are disabled.
+    """
+    from cognee.modules.migrations.runner import migration_lock, run_database_migrations
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    async with migration_lock():
+        if await _relational_schema_exists():
+            # Existing database: apply pending migrations up to relational_target.
+            await run_relational_migrations(relational_target)
+        else:
+            # Fresh database: create_all builds the schema at HEAD, so stamp head
+            # rather than replaying history. A partial relational_target only makes
+            # sense for an existing DB — a fresh one is head by construction.
+            logger.info("Fresh database: creating schema and stamping at head.")
+            await get_relational_engine().create_database()
+            await run_relational_stamp("head")
+
+        return await run_database_migrations(data_target)
+
+
+async def revert_all_migrations(
+    data_target: Optional[str] = None,
+    relational_target: Optional[str] = None,
+    dataset_ids: Optional[list] = None,
+) -> list[dict]:
+    """DOWNGRADE under the ONE global migration lock, in REVERSE order: the data
+    chain FIRST, then the relational schema.
+
+    Each target is INDEPENDENT and explicit — ``None`` means "leave this store
+    alone", so you must name where to downgrade to:
+
+      - ``data_target``:        ``None`` = don't touch the data chain; ``"base"`` =
+                                revert EVERY data migration; a slug = revert down to it.
+      - ``relational_target``:  ``None`` = don't touch the schema; ``"base"`` or an
+                                Alembic revision = downgrade the schema to it.
+
+    A call with BOTH targets ``None`` is a no-op and almost certainly a mistake, so
+    it raises — a downgrade must say where to go. The relational schema cannot be
+    dropped below the revisions that hold the data-migration bookkeeping unless the
+    data chain is going to ``"base"`` in the same call.
+    """
+    from cognee.modules.migrations.runner import downgrade_database_migrations, migration_lock
+
+    if data_target is None and relational_target is None:
+        raise MigrationError(
+            "Nothing to downgrade: specify a data target ('base' or a migration slug) "
+            "and/or a relational target ('base' or an Alembic revision)."
+        )
+
+    # Coupling guard: dropping the relational tables that hold the data-migration
+    # bookkeeping is only safe once the data chain is fully reverted (to 'base').
+    if (
+        relational_target is not None
+        and data_target != "base"
+        and _relational_downgrade_drops_bookkeeping(relational_target)
+    ):
+        raise MigrationError(
+            f"Refusing to downgrade the relational schema to {relational_target!r}: it would "
+            "drop the data-migration bookkeeping tables while data migrations remain applied "
+            f"(data target {data_target!r}). Pass 'base' as the data target in the same call to "
+            "revert the data chain fully first."
+        )
+
+    async with migration_lock():
+        summaries: list[dict] = []
+        if data_target is not None:
+            # 'base' reverts everything -> the runner's None sentinel; else a slug.
+            summaries = await downgrade_database_migrations(
+                target_revision=None if data_target == "base" else data_target,
+                dataset_ids=dataset_ids,
+            )
+        if relational_target is not None:
+            await run_relational_downgrade(relational_target)
+            summaries.append({"database": "relational", "downgraded_to": relational_target})
+        return summaries
+
+
 async def run_startup_migrations() -> list[str]:
     """Run all startup migrations: relational schema first, then the graph +
     vector revision chains. Once per process (see module docstring); a failed
@@ -235,23 +375,12 @@ async def run_startup_migrations() -> list[str]:
         if _startup_migrations_done:
             return []
 
-        from cognee.modules.migrations.runner import run_database_migrations
-
-        if await _relational_schema_exists():
-            # Existing database: apply any pending migrations from its recorded
-            # revision. (cognee's chain isn't self-sufficient on an empty DB, so
-            # we never run it on a fresh one — see the branch below.)
-            await run_relational_migrations()
-        else:
-            # Fresh database: create_all builds the schema at HEAD, so stamp head
-            # rather than replaying every historical migration on top of it.
-            from cognee.infrastructure.databases.relational import get_relational_engine
-
-            logger.info("Fresh database: creating schema and stamping at head.")
-            await get_relational_engine().create_database()
-            await run_relational_stamp("head")
-
-        summaries = await run_database_migrations()
+        # The full sequence (relational + graph/vector) under the ONE global
+        # migration lock. _get_startup_lock above only serializes coroutines within
+        # THIS process; the cross-process race (two cognify subprocesses both running
+        # `alembic upgrade head`, the loser dying on the alembic_version create) is
+        # serialized by the global lock inside apply_all_migrations.
+        summaries = await apply_all_migrations("head")
 
         # Mark done only when every database succeeded: a failed dataset must
         # be retried by the next call in this process, exactly as the module

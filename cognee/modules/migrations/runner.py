@@ -62,21 +62,20 @@ from cognee.modules.migrations.versions.adapter_storage_migration import (
 
 logger = logging.getLogger(__name__)
 
-# Advisory-lock key for the global database pair (any stable bigint works).
+# The ONE migration mutex key. Every migration critical section — the relational
+# schema bootstrap (alembic upgrade / create+stamp), the global database-pair
+# migration, and each per-dataset migration — takes this same key, so a host runs
+# at most one migration step at a time across all processes. Each is a separate,
+# sequential acquisition; they never nest, so the shared key cannot self-deadlock.
 _GLOBAL_MIGRATION_LOCK_KEY = 0x636F676E6565_01  # "cognee" + 01
-
-
-def _advisory_key(dataset_id: UUID) -> int:
-    """Stable 64-bit advisory-lock key for one dataset's migration mutex."""
-    return int.from_bytes(dataset_id.bytes[:8], "big", signed=True)
 
 
 def _file_lock_path(db_engine, key: int) -> Optional[str]:
     """Lock-file path next to the SQLite database, one per ``key``.
 
-    All processes on the same store resolve the same file; ``key`` (per-dataset
-    or global) keeps unrelated datasets from blocking each other. ``None`` for an
-    in-memory DB — nothing to coordinate.
+    All processes on the same store resolve the same file for a given ``key``
+    (always the single global migration key here). ``None`` for an in-memory DB —
+    nothing to coordinate.
     """
     db_path = db_engine.engine.url.database
     if not db_path or db_path == ":memory:":
@@ -87,7 +86,7 @@ def _file_lock_path(db_engine, key: int) -> Optional[str]:
 
 @asynccontextmanager
 async def _migration_lock(db_engine, key: int):
-    """Cross-process mutex around one database's migrate-then-stamp sequence.
+    """Cross-process mutex around the migrate-then-stamp sequence.
 
     Postgres: a session-scoped ``pg_advisory_lock`` (committed right away, since
     it survives commit) — also serializes across hosts. SQLite: an OS advisory
@@ -95,6 +94,10 @@ async def _migration_lock(db_engine, key: int):
     if the holder crashes. The file lock serializes processes on one host
     (multi-worker servers, parallel SDK runs) but not across hosts/NFS — use
     Postgres metadata for multi-host.
+
+    Not re-entrant: a caller must never acquire the same key twice (re-locking it
+    on a second connection self-deadlocks). The single global key is taken at one
+    level only — see run_startup_migrations / run_database_migrations.
     """
     engine = db_engine.engine
     if engine.dialect.name == "postgresql":
@@ -116,14 +119,36 @@ async def _migration_lock(db_engine, key: int):
 
     from filelock import FileLock
 
-    # Acquire/release off the event loop. The OS lock is fd/process-scoped, not
-    # thread-local, so acquiring and releasing on different threads is fine.
-    lock = FileLock(lock_path)
+    # Acquire/release off the event loop. asyncio.to_thread may run acquire and
+    # release on DIFFERENT pool threads; FileLock is thread-local by default (its
+    # re-entrancy counter lives on the acquiring thread), so a release on another
+    # thread would no-op and leak the OS lock — deadlocking the next acquisition
+    # (e.g. run_startup_migrations' failed-migration retry). thread_local=False
+    # shares the counter across threads; the OS lock itself is process/fd-scoped.
+    lock = FileLock(lock_path, thread_local=False)
     await asyncio.to_thread(lock.acquire)
     try:
         yield
     finally:
         await asyncio.to_thread(lock.release)
+
+
+@asynccontextmanager
+async def migration_lock():
+    """THE one global migration lock — acquire around any migration flow.
+
+    Every entry point that migrates (startup bootstrap, the CLI ``migrate`` /
+    ``downgrade`` commands) wraps its whole sequence — relational schema bootstrap
+    AND the graph/vector data migrations — in this single mutex, keyed on
+    ``_GLOBAL_MIGRATION_LOCK_KEY`` against the relational engine. So a host runs at
+    most ONE migration of any kind at a time across all processes. The runner
+    functions (run_database_migrations / downgrade_database_migrations and their
+    per-dataset/global helpers) do NOT lock themselves — they assume this is held —
+    so there is exactly one acquisition per migration run, never one per dataset
+    and never nested.
+    """
+    async with _migration_lock(get_relational_engine(), _GLOBAL_MIGRATION_LOCK_KEY):
+        yield
 
 
 async def _apply(
@@ -292,8 +317,8 @@ async def _run_global_migrations(
 ) -> list[dict]:
     """Migrate the single global graph/vector pair (access control disabled).
 
-    Same lock + re-check + migrate + per-step stamp as the per-dataset path, but
-    against the ``global_database_version`` row, with ``dataset_id=None`` so
+    The caller holds the single migration lock. Re-check + migrate + per-step
+    stamp against the ``global_database_version`` row, with ``dataset_id=None`` so
     ledger updates apply unscoped (one global graph backs every dataset).
     ``version_changed`` also runs the adapter storage sync after the chain, even
     with no chain migration pending.
@@ -315,41 +340,38 @@ async def _run_global_migrations(
 
     db_engine = get_relational_engine()
     try:
-        async with _migration_lock(db_engine, _GLOBAL_MIGRATION_LOCK_KEY):
-            # Re-read under the lock: a concurrent worker may have finished.
+        # Re-read under the held lock: a concurrent worker may have finished.
+        async with db_engine.get_async_session() as session:
+            record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+        if record is None or (
+            not pending_migrations(MIGRATIONS, record.global_migration_revision, target)
+            and not version_changed
+        ):
+            return [{"database": "global", "migrations_applied": []}]
+        stored = record.global_migration_revision
+
+        async def stamp(revision):
+            await _stamp_global(db_engine, revision)
+
+        # No context override: without access control, get_graph_engine /
+        # get_vector_engine resolve the global databases directly.
+        graph_engine = await get_graph_engine()
+        vector_engine = get_vector_engine()
+        migration_context = MigrationContext(
+            graph_engine=graph_engine,
+            vector_engine=vector_engine,
+            dataset_id=None,
+        )
+        applied = await _apply(migration_context, stored, target, stamp)
+        # Version bumped -> sync the vector adapter's stored schema, last.
+        if version_changed:
+            await _sync_vector_adapter_storage(migration_context)
+        if applied or version_changed:
             async with db_engine.get_async_session() as session:
                 record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
-            if record is None or (
-                not pending_migrations(MIGRATIONS, record.global_migration_revision, target)
-                and not version_changed
-            ):
-                return [{"database": "global", "migrations_applied": []}]
-            stored = record.global_migration_revision
-
-            async def stamp(revision):
-                await _stamp_global(db_engine, revision)
-
-            # No context override: without access control, get_graph_engine /
-            # get_vector_engine resolve the global databases directly.
-            graph_engine = await get_graph_engine()
-            vector_engine = get_vector_engine()
-            migration_context = MigrationContext(
-                graph_engine=graph_engine,
-                vector_engine=vector_engine,
-                dataset_id=None,
-            )
-            applied = await _apply(migration_context, stored, target, stamp)
-            # Version bumped -> sync the vector adapter's stored schema, last.
-            if version_changed:
-                await _sync_vector_adapter_storage(migration_context)
-            if applied or version_changed:
-                async with db_engine.get_async_session() as session:
-                    record = await session.get(
-                        GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID
-                    )
-                    if record is not None and record.global_migration_last_error is not None:
-                        record.global_migration_last_error = None
-                        await session.commit()
+                if record is not None and record.global_migration_last_error is not None:
+                    record.global_migration_last_error = None
+                    await session.commit()
     except Exception as error:
         logger.exception("Database migrations failed for the global databases.")
         await _record_global_failure(db_engine, error)
@@ -363,59 +385,60 @@ async def _run_global_migrations(
 async def _migrate_dataset(
     db_engine, row, current_version: str, version_changed: bool, target: str
 ) -> Optional[dict]:
-    """Run pending migrations for one dataset's database pair, under its lock.
+    """Run pending migrations for one dataset's database pair.
 
-    Relational transactions stay short: read under the lock, migrate with nothing
-    relational open, stamp after each step. Returns a summary, or ``None`` when
-    there was nothing to do (or the dataset was deleted concurrently).
-    ``version_changed`` also runs the adapter storage sync for this dataset's
-    vector DB after the chain, even with no chain migration pending.
+    The caller (run_database_migrations) holds the single migration lock for the
+    whole dataset loop, so this does not lock itself. Relational transactions stay
+    short: read, migrate with nothing relational open, stamp after each step.
+    Returns a summary, or ``None`` when there was nothing to do (or the dataset was
+    deleted concurrently). ``version_changed`` also runs the adapter storage sync
+    for this dataset's vector DB after the chain, even with no chain migration
+    pending.
     """
-    async with _migration_lock(db_engine, _advisory_key(row.dataset_id)):
-        # Re-read under the lock: a concurrent worker may have finished.
-        async with db_engine.get_async_session() as session:
-            record = await session.get(DatasetDatabase, row.dataset_id)
-            if record is None:
-                return None
-            stored = record.migration_revision
-        if not pending_migrations(MIGRATIONS, stored, target) and not version_changed:
+    # Re-read under the held lock: a concurrent worker may have finished.
+    async with db_engine.get_async_session() as session:
+        record = await session.get(DatasetDatabase, row.dataset_id)
+        if record is None:
             return None
+        stored = record.migration_revision
+    if not pending_migrations(MIGRATIONS, stored, target) and not version_changed:
+        return None
 
-        async def stamp(revision):
-            await _stamp_dataset(db_engine, row.dataset_id, revision)
+    async def stamp(revision):
+        await _stamp_dataset(db_engine, row.dataset_id, revision)
 
-        # Resolve this dataset's graph/vector databases through the
-        # per-dataset context — the same way every other operation does.
-        async with set_database_global_context_variables(row.dataset_id, row.owner_id):
-            graph_engine = await get_graph_engine()
-            vector_engine = get_vector_engine()
-            migration_context = MigrationContext(
-                graph_engine=graph_engine,
-                vector_engine=vector_engine,
-                dataset_id=row.dataset_id,
+    # Resolve this dataset's graph/vector databases through the
+    # per-dataset context — the same way every other operation does.
+    async with set_database_global_context_variables(row.dataset_id, row.owner_id):
+        graph_engine = await get_graph_engine()
+        vector_engine = get_vector_engine()
+        migration_context = MigrationContext(
+            graph_engine=graph_engine,
+            vector_engine=vector_engine,
+            dataset_id=row.dataset_id,
+        )
+        applied = await _apply(migration_context, stored, target, stamp)
+        # Version bumped -> sync this dataset's vector adapter schema, last.
+        if version_changed:
+            await _sync_vector_adapter_storage(migration_context)
+
+    if applied or version_changed:
+        try:
+            # Audit/health bookkeeping: the release that last migrated this
+            # dataset, and clearing any recorded failure. Best-effort — the
+            # chain is already applied and stamped; a hiccup here must not
+            # report the migration itself as failed.
+            async with db_engine.get_async_session() as session:
+                record = await session.get(DatasetDatabase, row.dataset_id)
+                if record is not None:
+                    record.cognee_version = current_version
+                    record.migration_last_error = None
+                    await session.commit()
+        except Exception:  # noqa: BLE001 - audit only
+            logger.exception(
+                "Could not record audit fields for dataset '%s' (migrations applied fine).",
+                row.dataset_id,
             )
-            applied = await _apply(migration_context, stored, target, stamp)
-            # Version bumped -> sync this dataset's vector adapter schema, last.
-            if version_changed:
-                await _sync_vector_adapter_storage(migration_context)
-
-        if applied or version_changed:
-            try:
-                # Audit/health bookkeeping: the release that last migrated this
-                # dataset, and clearing any recorded failure. Best-effort — the
-                # chain is already applied and stamped; a hiccup here must not
-                # report the migration itself as failed.
-                async with db_engine.get_async_session() as session:
-                    record = await session.get(DatasetDatabase, row.dataset_id)
-                    if record is not None:
-                        record.cognee_version = current_version
-                        record.migration_last_error = None
-                        await session.commit()
-            except Exception:  # noqa: BLE001 - audit only
-                logger.exception(
-                    "Could not record audit fields for dataset '%s' (migrations applied fine).",
-                    row.dataset_id,
-                )
 
     return {"dataset_id": str(row.dataset_id), "migrations_applied": applied}
 
@@ -427,6 +450,12 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
     upgrade up to and including it). Failures for one database are logged and
     skipped so the remaining databases are still migrated. Returns a
     per-database summary.
+
+    The CALLER must hold the single migration lock (see ``_migration_lock``):
+    ``run_startup_migrations`` wraps the relational bootstrap + this call in it,
+    and the CLI ``migrate`` command acquires it around this call. This function
+    does not lock, so a host runs at most one migration — relational, global, and
+    every dataset — under one mutex, never one lock per dataset.
     """
     current_version = get_cognee_version()
 
@@ -466,7 +495,7 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
 
     for row in rows:
         # Fast path: nothing pending AND no version change for this row — skip
-        # without locking, opening the dataset's databases, or writing anything.
+        # without opening the dataset's databases or writing anything.
         if (
             not pending_migrations(MIGRATIONS, row.migration_revision, target)
             and not version_changed
@@ -480,7 +509,7 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
             )
         except Exception as error:
             logger.exception(
-                "Database migrations failed for dataset '%s'; continuing with remaining datasets.",
+                "Database migrations failed for dataset '%s'; continuing with the rest.",
                 row.dataset_id,
             )
             await _record_dataset_failure(db_engine, row.dataset_id, error)
@@ -497,39 +526,39 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
 
 
 async def _downgrade_dataset(db_engine, row, target: Optional[str]) -> Optional[dict]:
-    """Revert migrations for one dataset's database pair, under its lock.
+    """Revert migrations for one dataset's database pair.
 
-    Fast path first: the span is computed from the row snapshot, so datasets
-    with nothing to revert are skipped without locking or resolving engines.
+    The caller holds the single migration lock for the whole dataset loop. Fast
+    path first: the span is computed from the row snapshot, so datasets with
+    nothing to revert are skipped without resolving engines.
     """
     # Fast path (validates too: a bad stored revision fails loudly here).
     if not _downgrade_span(row.migration_revision, target):
         return None
 
-    async with _migration_lock(db_engine, _advisory_key(row.dataset_id)):
-        # Re-read under the lock: a concurrent operator may have finished.
-        async with db_engine.get_async_session() as session:
-            record = await session.get(DatasetDatabase, row.dataset_id)
-            if record is None:
-                return None
-            stored = record.migration_revision
-
-        span = _downgrade_span(stored, target)
-        if not span:
+    # Re-read under the held lock: a concurrent operator may have finished.
+    async with db_engine.get_async_session() as session:
+        record = await session.get(DatasetDatabase, row.dataset_id)
+        if record is None:
             return None
+        stored = record.migration_revision
 
-        async def stamp(revision):
-            await _stamp_dataset(db_engine, row.dataset_id, revision)
+    span = _downgrade_span(stored, target)
+    if not span:
+        return None
 
-        async with set_database_global_context_variables(row.dataset_id, row.owner_id):
-            graph_engine = await get_graph_engine()
-            vector_engine = get_vector_engine()
-            migration_context = MigrationContext(
-                graph_engine=graph_engine,
-                vector_engine=vector_engine,
-                dataset_id=row.dataset_id,
-            )
-            reverted = await _revert_span(migration_context, span, stamp)
+    async def stamp(revision):
+        await _stamp_dataset(db_engine, row.dataset_id, revision)
+
+    async with set_database_global_context_variables(row.dataset_id, row.owner_id):
+        graph_engine = await get_graph_engine()
+        vector_engine = get_vector_engine()
+        migration_context = MigrationContext(
+            graph_engine=graph_engine,
+            vector_engine=vector_engine,
+            dataset_id=row.dataset_id,
+        )
+        reverted = await _revert_span(migration_context, span, stamp)
 
     return {"dataset_id": str(row.dataset_id), "migrations_reverted": reverted}
 
@@ -565,28 +594,25 @@ async def downgrade_database_migrations(
             )
         db_engine = get_relational_engine()
         try:
-            async with _migration_lock(db_engine, _GLOBAL_MIGRATION_LOCK_KEY):
-                async with db_engine.get_async_session() as session:
-                    record = await session.get(
-                        GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID
-                    )
-                if record is None:
-                    return []
-                span = _downgrade_span(record.global_migration_revision, target_revision)
-                if not span:
-                    return [{"database": "global", "migrations_reverted": []}]
+            async with db_engine.get_async_session() as session:
+                record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
+            if record is None:
+                return []
+            span = _downgrade_span(record.global_migration_revision, target_revision)
+            if not span:
+                return [{"database": "global", "migrations_reverted": []}]
 
-                async def stamp(revision):
-                    await _stamp_global(db_engine, revision)
+            async def stamp(revision):
+                await _stamp_global(db_engine, revision)
 
-                graph_engine = await get_graph_engine()
-                vector_engine = get_vector_engine()
-                migration_context = MigrationContext(
-                    graph_engine=graph_engine,
-                    vector_engine=vector_engine,
-                    dataset_id=None,
-                )
-                reverted = await _revert_span(migration_context, span, stamp)
+            graph_engine = await get_graph_engine()
+            vector_engine = get_vector_engine()
+            migration_context = MigrationContext(
+                graph_engine=graph_engine,
+                vector_engine=vector_engine,
+                dataset_id=None,
+            )
+            reverted = await _revert_span(migration_context, span, stamp)
         except Exception:
             logger.exception("Database downgrade failed for the global databases.")
             return [{"database": "global", "result": "failed"}]
@@ -610,7 +636,7 @@ async def downgrade_database_migrations(
             summary = await _downgrade_dataset(db_engine, row, target_revision)
         except Exception:
             logger.exception(
-                "Database downgrade failed for dataset '%s'; continuing with remaining datasets.",
+                "Database downgrade failed for dataset '%s'; continuing with the rest.",
                 row.dataset_id,
             )
             summaries.append({"dataset_id": str(row.dataset_id), "result": "failed"})

@@ -15,7 +15,15 @@ import asyncio
 import importlib
 import os
 import unittest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
+
+
+@asynccontextmanager
+async def _null_async_cm(*args, **kwargs):
+    """Stand-in for the cross-process migration lock — unit tests exercise the
+    migration FLOW, not the real advisory/file lock (which would hit a live DB)."""
+    yield
 
 
 def _reset_startup_flag():
@@ -146,7 +154,14 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
         )
         self._schema_patch.start()
 
+        # The relational bootstrap now runs under the cross-process migration
+        # lock; stub it so these flow tests don't open a real advisory/file lock.
+        runner = importlib.import_module("cognee.modules.migrations.runner")
+        self._lock_patch = patch.object(runner, "_migration_lock", _null_async_cm)
+        self._lock_patch.start()
+
     def tearDown(self):
+        self._lock_patch.stop()
         self._schema_patch.stop()
         _reset_startup_flag()
 
