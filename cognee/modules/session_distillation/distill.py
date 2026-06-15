@@ -39,8 +39,6 @@ from cognee.shared.logging_utils import get_logger
 from .models import (
     GLOSSARY_ENTITIES_PER_LESSON,
     MAX_DIGEST_QUESTION_CHARS,
-    MAX_EVIDENCE_ANSWER_CHARS,
-    MAX_EVIDENCE_EXCERPTS,
     MAX_SOURCE_MESSAGE_CHARS,
     MIN_GATE_CONFIDENCE,
     NOVELTY_SNIPPETS_PER_ENTRY,
@@ -95,43 +93,6 @@ def build_session_digest(qa_rows: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def select_evidence_excerpts(
-    member_entries: List[SessionContextEntry],
-    context_rows: List[dict],
-    qa_rows: List[dict],
-) -> List[str]:
-    """Pick the QA excerpts grounding one lesson.
-
-    A turn qualifies when it created a member entry (via the feedback entries in
-    ``source_feedback_ids``) or when a member entry was served into it (via
-    ``used_session_context_ids``). Answers are truncated and the pack is capped.
-    """
-    member_ids = {entry.id for entry in member_entries}
-    feedback_ids = {
-        feedback_id for entry in member_entries for feedback_id in entry.source_feedback_ids
-    }
-
-    referenced_qa_ids = set()
-    for row in context_rows:
-        if not isinstance(row, dict) or row.get("kind") != "feedback":
-            continue
-        if row.get("id") not in feedback_ids:
-            continue
-        referenced_qa_ids.update(row.get("referenced_qa_ids") or [])
-
-    excerpts = []
-    for row in qa_rows:
-        used_ids = set(row.get("used_session_context_ids") or [])
-        if row.get("qa_id") not in referenced_qa_ids and not (used_ids & member_ids):
-            continue
-        question = (row.get("question") or "").strip()
-        answer = (row.get("answer") or "").strip()[:MAX_EVIDENCE_ANSWER_CHARS]
-        excerpts.append(f"Q: {question}\nA: {answer}")
-        if len(excerpts) >= MAX_EVIDENCE_EXCERPTS:
-            break
-    return excerpts
-
-
 def render_distilled_document(
     *,
     session_id: str,
@@ -170,12 +131,25 @@ def render_distilled_document(
 
 
 async def _search_snippets(
-    vector_engine, collection: str, query_text: str, limit: int
+    vector_engine,
+    collection: str,
+    limit: int,
+    *,
+    query_text: str | None = None,
+    query_vector: list | None = None,
 ) -> List[str]:
-    """Vector-search one collection and return payload texts; [] on any failure."""
+    """Vector-search one collection and return payload texts; [] on any failure.
+
+    Pass ``query_vector`` to reuse a stored embedding (no re-embedding); ``query_text`` is
+    the fallback the engine embeds itself when no vector is given.
+    """
     try:
         results = await vector_engine.search(
-            collection, query_text, limit=limit, include_payload=True
+            collection,
+            query_text=query_text,
+            query_vector=query_vector,
+            limit=limit,
+            include_payload=True,
         )
     except Exception as error:
         logger.debug("Distillation search on %s failed open: %s", collection, error)
@@ -190,6 +164,34 @@ async def _search_snippets(
         if text and str(text).strip():
             snippets.append(str(text).strip())
     return snippets
+
+
+async def existing_knowledge(vector_engine, entry: SessionContextEntry) -> List[str]:
+    """Graph chunks already similar to this entry — the curator's novelty signal.
+
+    Reuses the entry's stored embedding (computed when the entry was created); falls back
+    to embedding its content only when no stored vector is available.
+    """
+    return await _search_snippets(
+        vector_engine,
+        "DocumentChunk_text",
+        NOVELTY_SNIPPETS_PER_ENTRY,
+        query_vector=entry.embedding,
+        query_text=entry.content,
+    )
+
+
+async def anchor_entities(vector_engine, statement: str) -> List[str]:
+    """Existing entity names similar to a lesson statement, for verbatim anchoring.
+
+    The statement is freshly written by the curator, so there is no stored vector to reuse.
+    """
+    return await _search_snippets(
+        vector_engine,
+        "Entity_name",
+        GLOSSARY_ENTITIES_PER_LESSON,
+        query_text=statement,
+    )
 
 
 # -- LLM calls ----------------------------------------------------------------
@@ -264,10 +266,13 @@ async def _write_lesson(
     curated: CuratedLesson,
     member_entries: List[SessionContextEntry],
     source_messages: List[str],
-    evidence: List[str],
     glossary: List[str],
 ) -> Optional[DistilledLesson]:
-    """One narrow call per lesson: rewrite as standalone, entity-anchored prose."""
+    """One narrow call per lesson: rewrite as standalone, entity-anchored prose.
+
+    Grounding is the user's own words (member entries + source messages), never the
+    assistant's prior answers — those are exactly the unsupported claims the curator drops.
+    """
     system_prompt = read_query_prompt(WRITER_PROMPT_FILE)
     if not system_prompt:
         logger.warning("Distillation writer prompt not found: %s", WRITER_PROMPT_FILE)
@@ -282,8 +287,6 @@ async def _write_lesson(
         sections.append(
             "SOURCE USER MESSAGES:\n" + "\n".join(f"- {message}" for message in source_messages)
         )
-    if evidence:
-        sections.append("EVIDENCE:\n" + "\n\n".join(evidence))
     if glossary:
         sections.append("ENTITY GLOSSARY:\n" + "\n".join(f"- {name}" for name in glossary))
     if curated.overlap_note:
@@ -388,10 +391,7 @@ async def distill_session(
         vector_engine = get_vector_engine()
 
         known_by_entry_id = {
-            entry.id: await _search_snippets(
-                vector_engine, "DocumentChunk_text", entry.content, NOVELTY_SNIPPETS_PER_ENTRY
-            )
-            for entry in gated
+            entry.id: await existing_knowledge(vector_engine, entry) for entry in gated
         }
 
         source_messages_by_entry = build_source_messages_by_entry(gated, context_rows)
@@ -428,14 +428,8 @@ async def distill_session(
                 for message in source_messages_by_entry.get(member.id, []):
                     if message not in source_messages:
                         source_messages.append(message)
-            evidence = select_evidence_excerpts(members, context_rows, qa_rows)
-            glossary = await _search_snippets(
-                vector_engine,
-                "Entity_name",
-                curated.working_statement,
-                GLOSSARY_ENTITIES_PER_LESSON,
-            )
-            distilled = await _write_lesson(curated, members, source_messages, evidence, glossary)
+            glossary = await anchor_entities(vector_engine, curated.working_statement)
+            distilled = await _write_lesson(curated, members, source_messages, glossary)
             return (curated, distilled) if distilled is not None else None
 
         written = await asyncio.gather(

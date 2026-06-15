@@ -1,8 +1,8 @@
 """Unit tests for the deterministic parts of session distillation.
 
-The gate, the session digest, evidence-pack selection, and the document renderer are
-pure functions, so they are tested directly with fixtures — no LLM, cache, or vector
-engine involved.
+The gate, the session digest, the provenance source-message map, and the document
+renderer are pure functions, so they are tested directly with fixtures — no LLM, cache,
+or vector engine involved.
 """
 
 from uuid import uuid4
@@ -12,10 +12,8 @@ from cognee.modules.session_distillation.distill import (
     build_source_messages_by_entry,
     gate_context_entries,
     render_distilled_document,
-    select_evidence_excerpts,
 )
 from cognee.modules.session_distillation.models import (
-    MAX_EVIDENCE_EXCERPTS,
     CuratedLesson,
     DistilledLesson,
 )
@@ -102,50 +100,6 @@ class TestBuildSessionDigest:
     def test_truncates_long_questions(self):
         digest = build_session_digest([_qa_row("x" * 500)])
         assert len(digest) < 200
-
-
-class TestSelectEvidenceExcerpts:
-    def test_finds_origin_turn_via_feedback_entry(self):
-        entry = _context_row(source_feedback_ids=["fb-1"])
-        gated = gate_context_entries([entry])
-        origin_qa = _qa_row("Origin question?")
-        context_rows = [
-            entry,
-            {"kind": "feedback", "id": "fb-1", "referenced_qa_ids": [origin_qa["qa_id"]]},
-        ]
-
-        excerpts = select_evidence_excerpts(gated, context_rows, [origin_qa, _qa_row("Other?")])
-
-        assert len(excerpts) == 1
-        assert "Origin question?" in excerpts[0]
-
-    def test_finds_turns_where_entry_was_served(self):
-        entry = _context_row()
-        gated = gate_context_entries([entry])
-        served_qa = _qa_row("Served turn?", used_session_context_ids=[entry["id"]])
-
-        excerpts = select_evidence_excerpts(gated, [entry], [served_qa, _qa_row("Unrelated?")])
-
-        assert len(excerpts) == 1
-        assert "Served turn?" in excerpts[0]
-
-    def test_caps_excerpts_and_truncates_answers(self):
-        entry = _context_row()
-        gated = gate_context_entries([entry])
-        qa_rows = [
-            _qa_row(f"Q{i}?", answer="a" * 2000, used_session_context_ids=[entry["id"]])
-            for i in range(MAX_EVIDENCE_EXCERPTS + 3)
-        ]
-
-        excerpts = select_evidence_excerpts(gated, [entry], qa_rows)
-
-        assert len(excerpts) == MAX_EVIDENCE_EXCERPTS
-        assert all(len(excerpt) < 600 for excerpt in excerpts)
-
-    def test_no_matching_turns_returns_empty(self):
-        entry = _context_row()
-        gated = gate_context_entries([entry])
-        assert select_evidence_excerpts(gated, [entry], [_qa_row()]) == []
 
 
 class TestBuildSourceMessagesByEntry:

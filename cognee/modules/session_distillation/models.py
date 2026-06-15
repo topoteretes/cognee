@@ -18,9 +18,6 @@ MIN_GATE_CONFIDENCE = 0.75
 NOVELTY_SNIPPETS_PER_ENTRY = 3
 # How many existing entity names the anchoring search collects per surviving lesson.
 GLOSSARY_ENTITIES_PER_LESSON = 5
-# Evidence pack limits: QA excerpts per lesson and answer truncation length.
-MAX_EVIDENCE_EXCERPTS = 4
-MAX_EVIDENCE_ANSWER_CHARS = 500
 # Session digest: question truncation length for the one-line-per-turn overview.
 MAX_DIGEST_QUESTION_CHARS = 150
 # Truncation for the per-entry source user message shown to the curator (provenance).
