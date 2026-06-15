@@ -191,7 +191,7 @@ class TestStartupMigrationsBootstrap(unittest.TestCase):
             asyncio.run(startup.run_migrations())
 
         db_engine.create_database.assert_awaited_once()
-        stamp.assert_awaited_once_with("head")
+        stamp.assert_awaited_once_with("head", None)  # ("head", script_location=None)
         relational.assert_not_awaited()  # never run migrations on a fresh DB
         self.assertTrue(startup._startup_migrations_done)
 

@@ -114,33 +114,40 @@ def _auto_migrations_enabled() -> bool:
     return os.getenv("ENABLE_AUTO_MIGRATIONS", "true").lower() not in ("false", "0", "no")
 
 
-def _build_alembic_config():
-    """Alembic Config pointing at the package's alembic.ini and versions dir.
+def _build_alembic_config(script_location: Optional[str] = None):
+    """Alembic Config for the relational schema migrations.
 
-    ``configure_logger`` is off so env.py doesn't fileConfig()-reset the host
-    process's loggers.
+    ``script_location`` — the directory holding ``env.py`` + ``versions/`` —
+    defaults to cognee's packaged ``alembic`` dir, but can point elsewhere for
+    custom/vendored deployments whose migration scripts live outside the package.
+    Resolution order: explicit ``script_location`` arg → ``COGNEE_ALEMBIC_PATH``
+    env var → package default. (The alembic.ini is always cognee's packaged,
+    boilerplate one; only the script location moves.) ``configure_logger`` is off
+    so env.py doesn't fileConfig()-reset the host process's loggers.
     """
     from alembic.config import Config
 
     package_root = str(pkg_resources.files(MIGRATIONS_PACKAGE))
     alembic_ini_path = os.path.join(package_root, "alembic.ini")
-    script_location_path = os.path.join(package_root, MIGRATIONS_DIR_NAME)
+    if script_location is None:
+        script_location = os.environ.get("COGNEE_ALEMBIC_PATH") or os.path.join(
+            package_root, MIGRATIONS_DIR_NAME
+        )
     if not os.path.exists(alembic_ini_path):
         raise FileNotFoundError(f"alembic.ini not found for package '{MIGRATIONS_PACKAGE}'.")
-    if not os.path.exists(script_location_path):
-        raise FileNotFoundError(
-            f"Alembic versions dir not found for package '{MIGRATIONS_PACKAGE}'."
-        )
+    if not os.path.exists(script_location):
+        raise FileNotFoundError(f"Alembic script location not found: {script_location}")
 
     config = Config(alembic_ini_path)
-    config.set_main_option("script_location", script_location_path)
+    config.set_main_option("script_location", script_location)
     config.attributes["configure_logger"] = False
     return config
 
 
-async def run_relational_migrations(target: str = "head"):
+async def run_relational_migrations(target: str = "head", script_location: Optional[str] = None):
     """Apply the Alembic relational-schema migrations up to ``target`` (default
-    head), in-process.
+    head), in-process. ``script_location`` overrides the Alembic scripts dir (see
+    ``_build_alembic_config``).
 
     Run in a worker thread (env.py drives an async engine via asyncio.run, which
     needs a thread with no running loop), NOT a subprocess: env.py resolves the
@@ -152,7 +159,7 @@ async def run_relational_migrations(target: str = "head"):
     def _upgrade():
         from alembic import command
 
-        command.upgrade(_build_alembic_config(), target)
+        command.upgrade(_build_alembic_config(script_location), target)
 
     try:
         await asyncio.to_thread(_upgrade)
@@ -163,9 +170,10 @@ async def run_relational_migrations(target: str = "head"):
     logger.info("Relational migrations applied (target %s).", target)
 
 
-async def run_relational_downgrade(target: str):
+async def run_relational_downgrade(target: str, script_location: Optional[str] = None):
     """Revert the Alembic relational-schema migrations DOWN to ``target``
     (an Alembic revision, or ``"base"`` for the empty schema), in-process.
+    ``script_location`` overrides the Alembic scripts dir.
 
     Same in-thread, in-process rationale as ``run_relational_migrations``.
     EXPLICIT operator action only — the data chain must already be reverted past
@@ -175,7 +183,7 @@ async def run_relational_downgrade(target: str):
     def _downgrade():
         from alembic import command
 
-        command.downgrade(_build_alembic_config(), target)
+        command.downgrade(_build_alembic_config(script_location), target)
 
     try:
         await asyncio.to_thread(_downgrade)
@@ -186,8 +194,9 @@ async def run_relational_downgrade(target: str):
     logger.info("Relational schema downgraded (target %s).", target)
 
 
-async def run_relational_stamp(revision: str = "head"):
+async def run_relational_stamp(revision: str = "head", script_location: Optional[str] = None):
     """Record an Alembic revision without running any migration.
+    ``script_location`` overrides the Alembic scripts dir.
 
     Used after ``create_database`` builds a fresh schema with
     ``Base.metadata.create_all``: that schema already IS head, so we stamp it
@@ -197,7 +206,7 @@ async def run_relational_stamp(revision: str = "head"):
     def _stamp():
         from alembic import command
 
-        command.stamp(_build_alembic_config(), revision)
+        command.stamp(_build_alembic_config(script_location), revision)
 
     await asyncio.to_thread(_stamp)
     logger.info("Stamped fresh relational schema at %s.", revision)
@@ -240,7 +249,9 @@ async def _relational_schema_exists() -> bool:
 _DATA_BOOKKEEPING_ALEMBIC_REVISIONS = ("c1a2b3d4e5f9", "d8f4a1b2c3e9")
 
 
-def _relational_downgrade_drops_bookkeeping(relational_target: str) -> bool:
+def _relational_downgrade_drops_bookkeeping(
+    relational_target: str, script_location: Optional[str] = None
+) -> bool:
     """True if downgrading the relational schema to ``relational_target`` would
     revert (drop) a migration that holds the data-migration bookkeeping.
 
@@ -252,18 +263,21 @@ def _relational_downgrade_drops_bookkeeping(relational_target: str) -> bool:
 
     from alembic.script import ScriptDirectory
 
-    script = ScriptDirectory.from_config(_build_alembic_config())
+    script = ScriptDirectory.from_config(_build_alembic_config(script_location))
     # ``target`` + all its ancestors down to base = the revisions that stay applied.
     kept = {revision.revision for revision in script.iterate_revisions(relational_target, "base")}
     return any(revision not in kept for revision in _DATA_BOOKKEEPING_ALEMBIC_REVISIONS)
 
 
 async def apply_all_migrations(
-    data_target: str = "head", relational_target: str = "head"
+    data_target: str = "head",
+    relational_target: str = "head",
+    script_location: Optional[str] = None,
 ) -> list[dict]:
     """UPGRADE every database under the ONE global migration lock: the relational
     schema FIRST (Alembic, to ``relational_target``), then the graph/vector data
-    chain (to ``data_target``). Both default to head.
+    chain (to ``data_target``). Both default to head. ``script_location`` overrides
+    the Alembic scripts dir for custom deployments (see ``_build_alembic_config``).
 
     Relational goes first because it owns the tables the data chain (and its own
     bookkeeping) live in. The single place the full upgrade sequence lives, so
@@ -279,14 +293,14 @@ async def apply_all_migrations(
     async with migration_lock():
         if await _relational_schema_exists():
             # Existing database: apply pending migrations up to relational_target.
-            await run_relational_migrations(relational_target)
+            await run_relational_migrations(relational_target, script_location)
         else:
             # Fresh database: create_all builds the schema at HEAD, so stamp head
             # rather than replaying history. A partial relational_target only makes
             # sense for an existing DB — a fresh one is head by construction.
             logger.info("Fresh database: creating schema and stamping at head.")
             await get_relational_engine().create_database()
-            await run_relational_stamp("head")
+            await run_relational_stamp("head", script_location)
 
         return await run_database_migrations(data_target)
 
@@ -295,6 +309,7 @@ async def revert_all_migrations(
     data_target: Optional[str] = None,
     relational_target: Optional[str] = None,
     dataset_ids: Optional[list] = None,
+    script_location: Optional[str] = None,
 ) -> list[dict]:
     """DOWNGRADE under the ONE global migration lock, in REVERSE order: the data
     chain FIRST, then the relational schema.
@@ -307,6 +322,7 @@ async def revert_all_migrations(
       - ``relational_target``:  ``None`` = don't touch the schema; ``"base"`` or an
                                 Alembic revision = downgrade the schema to it.
 
+    ``script_location`` overrides the Alembic scripts dir for custom deployments.
     A call with BOTH targets ``None`` is a no-op and almost certainly a mistake, so
     it raises — a downgrade must say where to go. The relational schema cannot be
     dropped below the revisions that hold the data-migration bookkeeping unless the
@@ -325,7 +341,7 @@ async def revert_all_migrations(
     if (
         relational_target is not None
         and data_target != "base"
-        and _relational_downgrade_drops_bookkeeping(relational_target)
+        and _relational_downgrade_drops_bookkeeping(relational_target, script_location)
     ):
         raise MigrationError(
             f"Refusing to downgrade the relational schema to {relational_target!r}: it would "
@@ -343,7 +359,7 @@ async def revert_all_migrations(
                 dataset_ids=dataset_ids,
             )
         if relational_target is not None:
-            await run_relational_downgrade(relational_target)
+            await run_relational_downgrade(relational_target, script_location)
             summaries.append({"database": "relational", "downgraded_to": relational_target})
         return summaries
 

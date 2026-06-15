@@ -100,6 +100,13 @@ Examples:
             metavar="REV",
             help="Relational (Alembic) schema target: 'head' (default) or an Alembic revision",
         )
+        parser.add_argument(
+            "--alembic-path",
+            default=None,
+            metavar="DIR",
+            help="Override the Alembic scripts dir (env.py + versions/) for custom "
+            "deployments; defaults to cognee's packaged alembic dir or $COGNEE_ALEMBIC_PATH",
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         _validate_revision(args.revision, ("head",))
@@ -116,7 +123,9 @@ Examples:
             # run_migrations it is not gated by ENABLE_AUTO_MIGRATIONS, so an
             # explicit upgrade works even when automatic migrations are turned off.
             return await apply_all_migrations(
-                data_target=args.revision, relational_target=args.alembic
+                data_target=args.revision,
+                relational_target=args.alembic,
+                script_location=args.alembic_path,
             )
 
         try:
@@ -168,6 +177,13 @@ Examples:
             "omit to leave the schema untouched",
         )
         parser.add_argument(
+            "--alembic-path",
+            default=None,
+            metavar="DIR",
+            help="Override the Alembic scripts dir for custom deployments; defaults to "
+            "cognee's packaged alembic dir or $COGNEE_ALEMBIC_PATH",
+        )
+        parser.add_argument(
             "--dataset",
             action="append",
             default=None,
@@ -205,6 +221,7 @@ Examples:
                 data_target=args.revision,
                 relational_target=args.alembic,
                 dataset_ids=dataset_ids,
+                script_location=args.alembic_path,
             )
 
         try:

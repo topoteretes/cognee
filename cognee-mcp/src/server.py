@@ -1954,14 +1954,14 @@ async def main():
     is_remote = bool(args.api_url) or bool(serve_url)
     if not args.no_migration and not is_remote:
         from cognee.modules.engine.operations.setup import setup
-        from cognee.run_migrations import run_startup_migrations
+        from cognee.run_migrations import run_migrations
 
         logger.info("Running database migrations...")
 
         await setup()
         # Full startup migrations (relational schema + graph/vector revision
         # chains) — MCP writes new-scheme data, so it must migrate like the API.
-        await run_startup_migrations()
+        await run_migrations()
 
         logger.info("Database migrations done.")
     elif not is_remote:
