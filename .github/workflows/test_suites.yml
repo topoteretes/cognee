@@ -328,9 +328,7 @@ jobs:
   # logic. Runs only after the suite is green (needs: notify), core-team PRs only, advisory.
   claude-review:
     name: Claude Code Review
-    # TEMP(self-test only): 'needs: [ notify ]' removed so this runs immediately to
-    # validate the skill-load fix without waiting on the (flaky) full suite. The dev
-    # PR restores 'needs: [ notify ]'.
+    needs: [ notify ]
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     continue-on-error: true
