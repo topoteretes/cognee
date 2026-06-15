@@ -268,9 +268,13 @@ async def main():
         f"Distillation status={result.status} gated={result.gated_entry_count} "
         f"lessons={result.lesson_count} already_known={result.skipped_already_known}"
     )
-    if result.document:
-        print("\n----- Distilled document -----\n", file=sys.stderr)
-        print(result.document, file=sys.stderr)
+    if result.documents:
+        print(
+            f"\n----- {len(result.documents)} distilled lesson documents -----\n", file=sys.stderr
+        )
+        for doc in result.documents:
+            print(doc, file=sys.stderr)
+            print("---", file=sys.stderr)
 
     progress("Asking the graph (fresh session) what it now knows about the lesson.")
     answer = await cognee.recall(

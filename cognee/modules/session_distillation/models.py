@@ -100,7 +100,8 @@ class DistillationResult(BaseModel):
         "curator_failed",
         "no_lessons_written",
     ]
-    document: Optional[str] = None
+    documents: List[str] = Field(default_factory=list)
+    session_summary: Optional[str] = None
     gated_entry_count: int = 0
     lesson_count: int = 0
     skipped_already_known: int = 0

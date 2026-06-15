@@ -11,15 +11,16 @@ Pipeline (one curator LLM call, then one writer LLM call per surviving lesson):
 4. Anchoring search: for each surviving lesson, fetch existing entity names so the
    writer can use them verbatim and extraction connects to existing nodes.
 5. Writers: one LLM call per lesson rewrites it as standalone, entity-anchored prose.
-6. Render + cognify: the document is rendered from structured output by a template
-   (never written freehand by the LLM) and cognified into the session's dataset.
+6. Render + cognify: each lesson is rendered (by a template, never freehand) as its own
+   standalone document, and all of them are added + cognified into the session's dataset
+   in a single pass — one document per learning, so each is an independent graph unit.
 
 A curator failure aborts distillation; a writer failure drops only that lesson.
 """
 
 import asyncio
 from datetime import datetime
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables
@@ -56,11 +57,6 @@ WRITER_PROMPT_FILE = "session_distillation_writer_system.txt"
 # Node set tag marking distillate documents in the graph, for provenance/debugging.
 DISTILLATE_NODE_SET = ["session_learnings"]
 
-KIND_HEADINGS: List[Tuple[str, str]] = [
-    ("domain_fact", "What was learned about the domain"),
-    ("working_practice", "How to work on this"),
-]
-
 
 # -- Deterministic helpers (pure, unit-testable) -----------------------------
 
@@ -93,38 +89,22 @@ def build_session_digest(qa_rows: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def render_distilled_document(
+def render_lesson_document(
+    distilled: DistilledLesson,
     *,
     session_id: str,
     distilled_on: str,
-    session_summary: str,
-    lessons: List[Tuple[CuratedLesson, DistilledLesson]],
 ) -> str:
-    """Render the final markdown from structured output.
+    """Render ONE lesson as a standalone markdown document for the graph.
 
-    The template — not the LLM — controls the format, so "one lesson per paragraph,
-    entities named explicitly" is enforced by structure.
+    The template — not the LLM — controls the format. One document per lesson, so each
+    learning is an independently identifiable unit in the graph (its own data item, its
+    own provenance) rather than being bundled with the rest of the session.
     """
-    lines = [
-        f"# Session learnings — {distilled_on} (session {session_id})",
-        "",
-        session_summary.strip(),
-        "",
-    ]
-    for kind, heading in KIND_HEADINGS:
-        kind_lessons = [(c, d) for c, d in lessons if c.kind == kind]
-        if not kind_lessons:
-            continue
-        lines.append(f"## {heading}")
-        lines.append("")
-        for _curated, distilled in kind_lessons:
-            paragraph = distilled.statement.strip()
-            why = distilled.why_learned.strip().rstrip(".")
-            if why:
-                paragraph = f"{paragraph} ({why}.)"
-            lines.append(paragraph)
-            lines.append("")
-    return "\n".join(lines).strip() + "\n"
+    statement = distilled.statement.strip()
+    why = distilled.why_learned.strip().rstrip(".")
+    body = f"{statement} ({why}.)" if why else statement
+    return f"# Session learning — {distilled_on} (session {session_id})\n\n{body}\n"
 
 
 # -- Search helpers (fail-open per item) -------------------------------------
@@ -446,19 +426,19 @@ async def distill_session(
             skipped_already_known=skipped_already_known,
         )
 
-    document = render_distilled_document(
-        session_id=session_id,
-        distilled_on=datetime.utcnow().strftime("%Y-%m-%d"),
-        session_summary=plan.session_summary,
-        lessons=lessons,
-    )
+    distilled_on = datetime.utcnow().strftime("%Y-%m-%d")
+    documents = [
+        render_lesson_document(distilled, session_id=session_id, distilled_on=distilled_on)
+        for _curated, distilled in lessons
+    ]
 
     # Imported lazily to avoid a circular import through the cognee package root.
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
+    # One document per lesson (each its own data item), ingested in a single cognify pass.
     await add(
-        document,
+        documents,
         dataset_id=dataset_obj.id,
         user=resolved_user,
         node_set=DISTILLATE_NODE_SET,
@@ -469,7 +449,8 @@ async def distill_session(
         session_id=session_id,
         dataset_id=str(dataset_obj.id),
         status="completed",
-        document=document,
+        documents=documents,
+        session_summary=plan.session_summary,
         gated_entry_count=len(gated),
         lesson_count=len(lessons),
         skipped_already_known=skipped_already_known,

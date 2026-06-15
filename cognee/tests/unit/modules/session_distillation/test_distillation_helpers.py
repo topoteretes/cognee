@@ -11,12 +11,9 @@ from cognee.modules.session_distillation.distill import (
     build_session_digest,
     build_source_messages_by_entry,
     gate_context_entries,
-    render_distilled_document,
+    render_lesson_document,
 )
-from cognee.modules.session_distillation.models import (
-    CuratedLesson,
-    DistilledLesson,
-)
+from cognee.modules.session_distillation.models import DistilledLesson
 
 
 def _context_row(section="lessons_learned", content="A lesson.", **overrides):
@@ -48,15 +45,6 @@ def _qa_row(question="What?", answer="That.", **overrides):
     }
     row.update(overrides)
     return row
-
-
-def _curated(statement="A lesson.", kind="domain_fact", member_ids=None):
-    return CuratedLesson(
-        working_statement=statement,
-        member_entry_ids=member_ids or [],
-        kind=kind,
-        novelty="new",
-    )
 
 
 class TestGateContextEntries:
@@ -130,54 +118,37 @@ class TestBuildSourceMessagesByEntry:
         assert len(messages[entry["id"]][0]) <= 240
 
 
-class TestRenderDistilledDocument:
-    def test_renders_header_summary_and_kind_sections(self):
-        lessons = [
-            (
-                _curated(kind="domain_fact"),
-                DistilledLesson(
-                    statement="RoutePulse predicts delivery delays for European freight.",
-                    entities=["RoutePulse"],
-                    why_learned="Learned while planning the audit trip",
-                ),
+class TestRenderLessonDocument:
+    def test_renders_standalone_document_with_provenance_header(self):
+        document = render_lesson_document(
+            DistilledLesson(
+                statement="RoutePulse predicts delivery delays for European freight.",
+                entities=["RoutePulse"],
+                why_learned="Learned while planning the audit trip",
             ),
-            (
-                _curated(kind="working_practice"),
-                DistilledLesson(statement="Talk to Priya Tan before Mateo Reed."),
-            ),
-        ]
-
-        document = render_distilled_document(
             session_id="s-1",
             distilled_on="2026-06-11",
-            session_summary="A session about audit planning.",
-            lessons=lessons,
         )
 
-        assert document.startswith("# Session learnings — 2026-06-11 (session s-1)")
-        assert "A session about audit planning." in document
-        assert "## What was learned about the domain" in document
-        assert "## How to work on this" in document
+        assert document.startswith("# Session learning — 2026-06-11 (session s-1)")
+        assert "RoutePulse predicts delivery delays for European freight." in document
         assert "(Learned while planning the audit trip.)" in document
-        assert "Talk to Priya Tan before Mateo Reed." in document
 
-    def test_empty_kind_section_is_omitted(self):
-        lessons = [(_curated(kind="domain_fact"), DistilledLesson(statement="Fact."))]
-        document = render_distilled_document(
+    def test_one_document_holds_exactly_one_lesson(self):
+        document = render_lesson_document(
+            DistilledLesson(statement="Talk to Priya Tan before Mateo Reed."),
             session_id="s-1",
             distilled_on="2026-06-11",
-            session_summary="Summary.",
-            lessons=lessons,
         )
-        assert "## How to work on this" not in document
+        # No cross-lesson grouping headings; the doc is a single learning.
+        assert "## " not in document
+        assert document.count("# Session learning") == 1
 
     def test_why_learned_is_optional(self):
-        lessons = [(_curated(), DistilledLesson(statement="Plain statement."))]
-        document = render_distilled_document(
+        document = render_lesson_document(
+            DistilledLesson(statement="Plain statement."),
             session_id="s-1",
             distilled_on="2026-06-11",
-            session_summary="Summary.",
-            lessons=lessons,
         )
         assert "Plain statement.\n" in document
         assert "()" not in document
