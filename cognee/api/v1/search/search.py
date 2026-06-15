@@ -44,6 +44,7 @@ async def search(
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
+    persist_trace: bool = False,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -239,9 +240,14 @@ async def search(
             top_k=top_k,
             node_name=node_name,
             only_context=only_context,
+            persist_trace=persist_trace,
             verbose=verbose,
             include_references=include_references,
-            **{key: value for key, value in agentic_overrides.items() if value is not None},
+            **{
+                key: value
+                for key, value in agentic_overrides.items()
+                if value is not None
+            },
         )
 
     with new_span("cognee.api.search") as span:
@@ -262,7 +268,9 @@ async def search(
             )
 
         allowed_node_name_operators = {"AND", "OR"}
-        normalized_node_name_filter_operator = (node_name_filter_operator or "").strip().upper()
+        normalized_node_name_filter_operator = (
+            (node_name_filter_operator or "").strip().upper()
+        )
 
         if normalized_node_name_filter_operator not in allowed_node_name_operators:
             raise CogneeValidationError(
@@ -286,7 +294,9 @@ async def search(
         await set_session_user_context_variable(user)
 
         # Transform string based datasets to UUID - String based datasets can only be found for current user
-        if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
+        if datasets is not None and [
+            all(isinstance(dataset, str) for dataset in datasets)
+        ]:
             datasets = await get_authorized_existing_datasets(datasets, "read", user)
             datasets = [dataset.id for dataset in datasets]
             if not datasets:
@@ -324,6 +334,7 @@ async def search(
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
+            persist_trace=persist_trace,
             verbose=verbose,
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,

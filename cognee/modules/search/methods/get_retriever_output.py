@@ -35,7 +35,9 @@ async def get_retriever_output(
     with new_span("cognee.retrieval.get_objects") as span:
         span.set_attribute("cognee.retrieval.retriever", retriever_class)
         span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
-        retrieved_objects = await retriever_instance.get_retrieved_objects(query=query_text)
+        retrieved_objects = await retriever_instance.get_retrieved_objects(
+            query=query_text
+        )
         obj_count = _count_retrieved_objects(retrieved_objects)
         span.set_attribute(COGNEE_RESULT_COUNT, obj_count)
         span.set_attribute(
@@ -71,11 +73,28 @@ async def get_retriever_output(
                 context=context,
             )
             if isinstance(completion, str):
-                span.set_attribute("cognee.retrieval.completion_length", len(completion))
+                span.set_attribute(
+                    "cognee.retrieval.completion_length", len(completion)
+                )
             span.set_attribute(
                 COGNEE_RESULT_SUMMARY,
                 f"{retriever_class} generated completion",
             )
+    elif kwargs.get("persist_trace", False):
+        persist_context_trace = getattr(
+            retriever_instance, "persist_context_trace", None
+        )
+        if persist_context_trace is not None:
+            with new_span("cognee.retrieval.persist_context_trace") as span:
+                span.set_attribute("cognee.retrieval.retriever", retriever_class)
+                qa_id = await persist_context_trace(
+                    query=query_text,
+                    retrieved_objects=retrieved_objects,
+                    context=context,
+                )
+                span.set_attribute(
+                    "cognee.retrieval.trace_persisted", qa_id is not None
+                )
 
     search_result = SearchResultPayload(
         result_object=retrieved_objects,
@@ -85,7 +104,9 @@ async def get_retriever_output(
         only_context=kwargs.get("only_context", False),
         dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
         dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
-        dataset_tenant_id=kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None,
+        dataset_tenant_id=(
+            kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None
+        ),
     )
 
     return search_result
@@ -98,7 +119,9 @@ def _count_retrieved_objects(retrieved_objects) -> int:
         return len(retrieved_objects)
     if isinstance(retrieved_objects, dict):
         list_counts = [
-            len(value) for value in retrieved_objects.values() if isinstance(value, list)
+            len(value)
+            for value in retrieved_objects.values()
+            if isinstance(value, list)
         ]
         if list_counts:
             return sum(list_counts)

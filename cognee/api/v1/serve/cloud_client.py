@@ -46,7 +46,9 @@ class CloudClient:
 
     # ----- V2 Operations -----
 
-    async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
+    async def remember(
+        self, data: Any, dataset_name: str = "main_dataset", **kwargs
+    ) -> dict:
         """POST /api/v1/remember — ingest data and build knowledge graph."""
         session = await self._get_session()
 
@@ -90,7 +92,9 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
-        async with session.post(f"{self.service_url}/api/v1/remember", data=form) as resp:
+        async with session.post(
+            f"{self.service_url}/api/v1/remember", data=form
+        ) as resp:
             if resp.status >= 400:
                 body = await resp.text()
                 raise RuntimeError(f"Remote remember failed ({resp.status}): {body}")
@@ -125,18 +129,26 @@ class CloudClient:
         ) as resp:
             if resp.status >= 400:
                 body = await resp.text()
-                raise RuntimeError(f"Remote remember_entry failed ({resp.status}): {body}")
+                raise RuntimeError(
+                    f"Remote remember_entry failed ({resp.status}): {body}"
+                )
             return await resp.json()
 
-    async def recall(self, query_text: str, query_type: Optional[str] = None, **kwargs) -> list:
+    async def recall(
+        self, query_text: str, query_type: Optional[str] = None, **kwargs
+    ) -> list:
         """POST /api/v1/recall — query the knowledge graph and/or session cache."""
         session = await self._get_session()
 
         payload: dict = {"query": query_text}
         if query_type:
-            payload["search_type"] = query_type if isinstance(query_type, str) else query_type.value
+            payload["search_type"] = (
+                query_type if isinstance(query_type, str) else query_type.value
+            )
         if kwargs.get("dataset_ids"):
-            payload["dataset_ids"] = [str(dataset_id) for dataset_id in kwargs["dataset_ids"]]
+            payload["dataset_ids"] = [
+                str(dataset_id) for dataset_id in kwargs["dataset_ids"]
+            ]
         elif kwargs.get("datasets"):
             payload["datasets"] = kwargs["datasets"]
         if kwargs.get("top_k"):
@@ -147,6 +159,8 @@ class CloudClient:
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
             payload["only_context"] = kwargs["only_context"]
+        if kwargs.get("persist_trace") is not None:
+            payload["persist_trace"] = kwargs["persist_trace"]
         if kwargs.get("verbose"):
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
@@ -190,7 +204,9 @@ class CloudClient:
 
     # ----- V1 Operations (add / cognify / search) -----
 
-    async def add(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
+    async def add(
+        self, data: Any, dataset_name: str = "main_dataset", **kwargs
+    ) -> dict:
         """POST /api/v1/add — ingest data into a dataset."""
         session = await self._get_session()
 
@@ -233,7 +249,9 @@ class CloudClient:
         payload: dict = {}
         if datasets:
             payload["datasets"] = (
-                [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
+                [str(d) for d in datasets]
+                if isinstance(datasets, list)
+                else [str(datasets)]
             )
         if kwargs.get("run_in_background"):
             payload["run_in_background"] = True
@@ -276,11 +294,14 @@ class CloudClient:
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:
             payload["onlyContext"] = kwargs["only_context"]
+        if kwargs.get("persist_trace") is not None:
+            payload["persistTrace"] = kwargs["persist_trace"]
         if kwargs.get("verbose") is not None:
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("skills") is not None:
             payload["skills"] = [
-                skill.name if hasattr(skill, "name") else str(skill) for skill in kwargs["skills"]
+                skill.name if hasattr(skill, "name") else str(skill)
+                for skill in kwargs["skills"]
             ]
         if kwargs.get("tools") is not None:
             payload["tools"] = kwargs["tools"]

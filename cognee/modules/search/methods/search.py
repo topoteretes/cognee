@@ -52,6 +52,7 @@ async def search(
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
+    persist_trace: bool = False,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -81,8 +82,11 @@ async def search(
         user.id,
         additional_properties={
             "cognee_version": cognee_version,
-            "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+            "tenant_id": (
+                str(user.tenant_id) if user.tenant_id else "Single User Tenant"
+            ),
             "include_references": include_references,
+            "persist_trace": persist_trace,
         },
     )
 
@@ -111,6 +115,7 @@ async def search(
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
+            persist_trace=persist_trace,
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
@@ -126,7 +131,9 @@ async def search(
         user.id,
         additional_properties={
             "cognee_version": cognee_version,
-            "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+            "tenant_id": (
+                str(user.tenant_id) if user.tenant_id else "Single User Tenant"
+            ),
         },
     )
 
@@ -165,6 +172,7 @@ async def authorized_search(
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
+    persist_trace: bool = False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
@@ -198,6 +206,7 @@ async def authorized_search(
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
         feedback_influence=feedback_influence,
+        persist_trace=persist_trace,
         retriever_specific_config=retriever_specific_config,
         neighborhood_depth=neighborhood_depth,
         neighborhood_seed_top_k=neighborhood_seed_top_k,
@@ -225,6 +234,7 @@ async def search_in_datasets_context(
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
+    persist_trace: bool = False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
@@ -252,6 +262,7 @@ async def search_in_datasets_context(
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
         feedback_influence: float = 0.0,
+        persist_trace: bool = False,
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = None,
@@ -305,6 +316,7 @@ async def search_in_datasets_context(
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
                     feedback_influence=feedback_influence,
+                    persist_trace=persist_trace,
                     retriever_specific_config=retriever_specific_config,
                     neighborhood_depth=neighborhood_depth,
                     neighborhood_seed_top_k=neighborhood_seed_top_k,
@@ -331,6 +343,7 @@ async def search_in_datasets_context(
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
                     feedback_influence=feedback_influence,
+                    persist_trace=persist_trace,
                     retriever_specific_config=retriever_specific_config,
                     neighborhood_depth=neighborhood_depth,
                     neighborhood_seed_top_k=neighborhood_seed_top_k,
@@ -357,6 +370,7 @@ async def search_in_datasets_context(
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
             feedback_influence=feedback_influence,
+            persist_trace=persist_trace,
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,

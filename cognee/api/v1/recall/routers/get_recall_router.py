@@ -14,7 +14,10 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
+from cognee.modules.users.exceptions.exceptions import (
+    PermissionDeniedError,
+    UserNotFoundError,
+)
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -63,6 +66,7 @@ class RecallPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
+    persist_trace: bool = Field(default=False)
     verbose: bool = Field(default=False)
     include_references: bool = Field(
         default=False,
@@ -103,7 +107,10 @@ def get_recall_router() -> APIRouter:
         send_telemetry(
             "Recall API Endpoint Invoked",
             user.id,
-            additional_properties={"endpoint": "GET /v1/recall", "cognee_version": cognee_version},
+            additional_properties={
+                "endpoint": "GET /v1/recall",
+                "cognee_version": cognee_version,
+            },
         )
 
         try:
@@ -119,7 +126,9 @@ def get_recall_router() -> APIRouter:
 
     @router.post("", response_model=list[RecallResponse])
     @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
-    async def recall(payload: RecallPayloadDTO, user: User = Depends(get_authenticated_user)):
+    async def recall(
+        payload: RecallPayloadDTO, user: User = Depends(get_authenticated_user)
+    ):
         """
         Recall information from the knowledge graph.
 
@@ -179,6 +188,7 @@ def get_recall_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                persist_trace=payload.persist_trace,
                 session_id=payload.session_id,
                 scope=payload.scope,
                 include_references=payload.include_references,

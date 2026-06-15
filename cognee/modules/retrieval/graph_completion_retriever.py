@@ -7,7 +7,9 @@ from cognee.modules.retrieval.utils.validate_queries import validate_retriever_i
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    brute_force_triplet_search,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -128,7 +130,9 @@ class GraphCompletionRetriever(BaseRetriever):
         triplets = await self.get_triplets(query, query_batch)
 
         # Check if all triplets are empty, in case of batch queries
-        if query_batch and all(len(batched_triplets) == 0 for batched_triplets in triplets):
+        if query_batch and all(
+            len(batched_triplets) == 0 for batched_triplets in triplets
+        ):
             logger.warning("Empty context was provided to the completion")
             return []
 
@@ -237,12 +241,17 @@ class GraphCompletionRetriever(BaseRetriever):
 
         if query_batch:
             # Check if all triplets are empty, in case of batch queries
-            if not triplets or all(len(batched_triplets) == 0 for batched_triplets in triplets):
+            if not triplets or all(
+                len(batched_triplets) == 0 for batched_triplets in triplets
+            ):
                 logger.warning("Empty context was provided to the completion")
                 return ["" for _ in query_batch]
 
             return await asyncio.gather(
-                *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
+                *[
+                    self.resolve_edges_to_text(batched_triplets)
+                    for batched_triplets in triplets
+                ]
             )
 
         graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
@@ -274,7 +283,9 @@ class GraphCompletionRetriever(BaseRetriever):
         )
         return format_global_context_prelude(root_text, top_summaries)
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def _extract_context_object_ids(
+        self, retrieved_objects: Any
+    ) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""
         if not isinstance(retrieved_objects, list) or not retrieved_objects:
             return None
@@ -373,6 +384,38 @@ class GraphCompletionRetriever(BaseRetriever):
         # cites chunks that share nothing with it.
         return await self._append_graph_evidence(completions)
 
+    async def persist_context_trace(
+        self,
+        query: Optional[str] = None,
+        retrieved_objects: Optional[List[Edge]] = None,
+        context: str = None,
+    ) -> Optional[str]:
+        """Persist retrieval trace for context-only calls without generating an LLM answer."""
+        if not self._use_session_cache():
+            return None
+
+        used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+        if used_graph_element_ids is None:
+            return None
+
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        if user_id is None:
+            return None
+
+        if isinstance(context, list):
+            context = "\n".join(str(item) for item in context)
+
+        sm = get_session_manager()
+        return await sm.add_qa(
+            user_id=str(user_id),
+            session_id=self.session_id,
+            question=query or "",
+            context=context or "",
+            answer="",
+            used_graph_element_ids=used_graph_element_ids,
+        )
+
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
     ) -> List[Any]:
@@ -388,7 +431,9 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         validate_retriever_input(query, query_batch)
 
-        retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
+        retrieved_objects = await self.get_retrieved_objects(
+            query=query, query_batch=query_batch
+        )
         context = await self.get_context_from_objects(
             query=query, query_batch=query_batch, retrieved_objects=retrieved_objects
         )
