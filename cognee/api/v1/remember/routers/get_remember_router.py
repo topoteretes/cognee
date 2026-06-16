@@ -85,10 +85,12 @@ async def _import_cogx_archives(
     except HTTPException:
         raise
     except (ValueError, tarfile.TarError) as error:
+        # Log the detail server-side; the response stays generic so exception
+        # text / stack frames are not exposed to the caller (CodeQL py/stack-trace-exposure).
         logger.error("COGX archive import validation error: %s", error, exc_info=True)
         return JSONResponse(
             status_code=400,
-            content={"error": f"Invalid COGX archive: {error}"},
+            content={"error": "Invalid COGX archive."},
         )
     except Exception as error:
         logger.error("COGX archive import error: %s", error, exc_info=True)

@@ -16,9 +16,11 @@ from uuid import UUID, uuid4
 import pytest
 
 from cognee.modules.migration import loader
+from cognee.modules.migration.archive import pack_archive, unpack_archive
 from cognee.modules.migration.cogx import COGX_VERSION, read_archive, read_manifest
 from cognee.modules.migration.export import _write_cogx
 from cognee.modules.migration.loader import translate_records
+from cognee.modules.migration.sources.cogx_archive import COGXArchiveSource
 
 ALICE_ID = "11111111-1111-4111-8111-111111111111"
 BERLIN_ID = "22222222-2222-4222-8222-222222222222"
@@ -255,6 +257,98 @@ class TestTimestampFidelity:
         entity = next(record for record in read_archive(destination) if record.kind == "entity")
         assert entity.created_at == expected
         assert entity.updated_at == expected
+
+
+# A hand-written v0.1 archive: the on-disk wire format frozen exactly as it
+# ships today. If a future writer change alters the format, re-importing this
+# fixture must still rebuild the graph — that is the backwards-compatibility
+# contract for archives produced by older cognee versions / existing backups.
+FROZEN_MANIFEST = json.dumps(
+    {
+        "cogx_version": "0.1",
+        "source_system": "cognee",
+        "counts": {"entity": 2, "fact": 1, "raw_node": 1},
+    }
+)
+FROZEN_ENTITIES = (
+    '{"kind": "entity", "external_system": "cognee", "external_id": "ent-alice", "name": "Alice", "description": "A person"}\n'
+    '{"kind": "entity", "external_system": "cognee", "external_id": "ent-berlin", "name": "Berlin", "description": "A city"}\n'
+)
+FROZEN_FACTS = (
+    '{"kind": "fact", "external_system": "cognee", "external_id": "fact-1", '
+    '"subject_ref": "ent-alice", "predicate": "lives_in", "object_ref": "ent-berlin", '
+    '"fact_text": "Alice lives in Berlin"}\n'
+)
+FROZEN_NODES = (
+    '{"id": "' + PERSON_TYPE_ID + '", "type": "EntityType", "name": "Person", "description": "Person"}\n'
+)
+
+
+def _collect_records(source):
+    async def drain():
+        return [record async for record in source.records()]
+
+    return asyncio.run(drain())
+
+
+class TestArchiveTransportRoundTrip:
+    """End-to-end export -> pack -> unpack -> re-import through the public
+    ``COGXArchiveSource`` — the path ``cognee.push()`` and restore actually use.
+
+    Unlike the mapping tests above (which read the archive directory directly),
+    this drives the real tar transport and the public re-import entry point, so
+    it is the regression anchor the reviewer asked for: a format/transport
+    change that breaks restore fails here.
+    """
+
+    def test_export_pack_unpack_reimport_preserves_graph(self, tmp_path):
+        nodes, edges = sample_graph()
+        archive_dir = tmp_path / "export_cogx"
+        _write_cogx(nodes, edges, archive_dir, "main_dataset")
+
+        # Transport: tar the archive, then unpack it into a fresh location, as a
+        # restore on another instance (or after a backup) would.
+        tar_path = pack_archive(archive_dir, tmp_path / "export.cogx.tar.gz")
+        with open(tar_path, "rb") as handle:
+            restore_root = unpack_archive(handle, tmp_path / "restored")
+
+        # Re-import through the public source (defaults to preserve mode).
+        source = COGXArchiveSource(restore_root)
+        assert source.source_system == "cognee"
+        result = translate_records(_collect_records(source), source.mode)
+
+        # The full topology survives the round-trip with nothing skipped or
+        # fabricated as a UUID-named entity.
+        assert result.skipped_facts == 0
+        edges_out = _all_edges(result)
+        assert len(edges_out) == 5
+        assert {edge[2] for edge in edges_out} == {"contains", "is_a", "lives_in", "made_from"}
+        names = [getattr(node, "name", None) for node in _all_nodes(result)]
+        assert {"Alice", "Berlin"} <= set(names)
+        assert not any(name and _is_uuid_string(name) for name in names)
+        node_ids = {str(node.id) for node in _all_nodes(result)}
+        assert {PERSON_TYPE_ID, CHUNK_ID, SUMMARY_ID} <= node_ids
+
+    def test_frozen_archive_format_still_imports(self, tmp_path):
+        archive_dir = tmp_path / "frozen_cogx"
+        archive_dir.mkdir()
+        (archive_dir / "manifest.json").write_text(FROZEN_MANIFEST, encoding="utf-8")
+        (archive_dir / "entities.jsonl").write_text(FROZEN_ENTITIES, encoding="utf-8")
+        (archive_dir / "facts.jsonl").write_text(FROZEN_FACTS, encoding="utf-8")
+        (archive_dir / "nodes.jsonl").write_text(FROZEN_NODES, encoding="utf-8")
+
+        source = COGXArchiveSource(archive_dir)
+        records = _collect_records(source)
+        assert sorted(record.kind for record in records) == ["entity", "entity", "fact", "raw_node"]
+
+        result = translate_records(records, "preserve")
+        assert result.skipped_facts == 0
+        edges_out = _all_edges(result)
+        assert [edge[2] for edge in edges_out] == ["lives_in"]
+        lives_in = edges_out[0]
+        assert lives_in[3]["edge_text"] == "Alice lives in Berlin"
+        node_ids = {str(node.id) for node in _all_nodes(result)}
+        assert PERSON_TYPE_ID in node_ids  # raw node rehydrated
 
 
 class TestExportDatasetSelfLoops:

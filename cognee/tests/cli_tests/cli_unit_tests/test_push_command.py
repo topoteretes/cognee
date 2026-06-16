@@ -188,7 +188,9 @@ class TestPushCommand:
         command.execute(args)
 
         echoed = [call.args[0] for call in mock_fmt.echo.call_args_list]
-        assert any("https://resolved.example" in message for message in echoed)
+        # Exact-message membership, not a URL-substring check: the resolved host
+        # is echoed verbatim on its own line (CodeQL py/incomplete-url-substring-sanitization).
+        assert "Remote instance: https://resolved.example" in echoed
         # The throwaway client created for the echo is closed again.
         client.close.assert_awaited_once()
 

@@ -283,8 +283,12 @@ class TestCogxArchiveErrorMapping:
             files=[_upload(_packed_archive_bytes(tmp_path))],
         )
 
+        # A validation failure maps to 400 with a generic body — the exception
+        # text is logged server-side, never echoed to the caller (CodeQL
+        # py/stack-trace-exposure).
         assert resp.status_code == 400
-        assert "newer COGX version" in resp.json()["error"]
+        assert resp.json()["error"] == "Invalid COGX archive."
+        assert "newer COGX version" not in resp.json()["error"]
 
     def test_http_exception_not_swallowed_into_409(self, client, monkeypatch, tmp_path):
         import cognee.modules.migration as migration_pkg

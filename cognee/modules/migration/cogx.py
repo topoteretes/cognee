@@ -269,6 +269,24 @@ def read_manifest(directory: Union[str, Path]) -> Optional[COGXManifest]:
     return manifest
 
 
+def _archive_file(base: Path, file_name: str) -> Optional[Path]:
+    """Resolve ``base / file_name`` and confirm it stays inside ``base``.
+
+    Archive record file names are fixed constants, but the archive directory
+    itself is caller-supplied; resolving and containment-checking the joined
+    path keeps a crafted base from steering reads outside its own tree
+    (CodeQL py/path-injection). Returns ``None`` when the file is absent or
+    would resolve outside ``base``.
+    """
+    resolved_base = base.resolve()
+    candidate = (resolved_base / file_name).resolve()
+    if not candidate.is_relative_to(resolved_base):
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
 def read_archive(directory: Union[str, Path]) -> Iterator[COGXRecord]:
     """Stream typed records from a COGX archive directory.
 
@@ -280,16 +298,16 @@ def read_archive(directory: Union[str, Path]) -> Iterator[COGXRecord]:
     if not directory.is_dir():
         raise FileNotFoundError(f"COGX archive directory not found: {directory}")
     for file_name in RECORD_FILES.values():
-        file_path = directory / file_name
-        if not file_path.exists():
+        file_path = _archive_file(directory, file_name)
+        if file_path is None:
             continue
         with open(file_path, "r", encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
                 if line:
                     yield parse_record(json.loads(line))
-    raw_nodes_path = directory / RAW_NODES_FILE
-    if raw_nodes_path.exists():
+    raw_nodes_path = _archive_file(directory, RAW_NODES_FILE)
+    if raw_nodes_path is not None:
         with open(raw_nodes_path, "r", encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
