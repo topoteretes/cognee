@@ -1,6 +1,7 @@
 """Remote HTTP client that proxies V2 operations to a Cognee Cloud instance."""
 
 import io
+from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
@@ -72,13 +73,35 @@ class CloudClient:
             form.add_field("chunk_size", str(kwargs["chunk_size"]))
         if kwargs.get("chunks_per_batch") is not None:
             form.add_field("chunks_per_batch", str(kwargs["chunks_per_batch"]))
-        if kwargs.get("content_type") is not None:
-            form.add_field("content_type", str(kwargs["content_type"]))
+        content_type_kw = kwargs.get("content_type")
+        if content_type_kw is not None:
+            form.add_field("content_type", str(content_type_kw))
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
+        # Skills are local SKILL.md files. The server's add_skills() reads
+        # paths from its own filesystem — sending the path string verbatim
+        # would have the server look for that path on the POD, not the
+        # caller. For content_type="skills", read each SKILL.md and upload
+        # its bytes so the server can write them to a tempdir.
+        if content_type_kw == "skills" and isinstance(data, (str, Path)):
+            source = Path(data).expanduser()
+            if source.is_file():
+                skill_files = [source] if source.name == "SKILL.md" else []
+            elif source.is_dir():
+                skill_files = sorted(source.rglob("SKILL.md"))
+            else:
+                raise FileNotFoundError(f"Skills source not found: {data}")
+            if not skill_files:
+                raise ValueError(f"No SKILL.md files under {data}")
+            base = source if source.is_dir() else source.parent
+            for skill_path in skill_files:
+                # Preserve relative structure so the server can reconstruct
+                # the SKILL.md layout when writing to its tempdir.
+                rel = skill_path.relative_to(base).as_posix()
+                form.add_field("data", skill_path.open("rb"), filename=rel)
         # Handle data — string or file-like objects
-        if isinstance(data, str):
+        elif isinstance(data, str):
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),

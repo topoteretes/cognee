@@ -2,6 +2,10 @@
 
 import json
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("dlt_utils")
+
 
 def is_dlt_sourced(metadata) -> bool:
     """Check whether external_metadata indicates a DLT source.
@@ -34,5 +38,12 @@ def parse_external_metadata(obj) -> dict | None:
         try:
             return json.loads(raw)
         except (json.JSONDecodeError, TypeError):
+            # There WAS metadata but it could not be decoded — surface it so
+            # the lost FK edges are diagnosable rather than silently dropped.
+            logger.warning(
+                "Failed to parse external_metadata as JSON for object id=%s; "
+                "treating as absent. Any DLT FK edges for this row are skipped.",
+                getattr(obj, "id", "<unknown>"),
+            )
             return None
     return None

@@ -14,6 +14,12 @@ on:
         required: false
         type: string
         default: '["ubuntu-22.04", "macos-15", "windows-latest"]'
+      extra-dependencies:
+        # Space-separated package extras for the unit-test job (e.g. "postgres").
+        # Driver-dependent tests importorskip when their extra is absent.
+        required: false
+        type: string
+        default: ''
     secrets:
       LLM_PROVIDER:
         required: true
@@ -58,10 +64,11 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ matrix.python-version }}
+          extra-dependencies: ${{ inputs.extra-dependencies }}
 
       - name: Run unit tests
         shell: bash
-        run: uv run pytest cognee/tests/unit/
+        run: uv run pytest cognee/tests/unit/ --timeout=300 --timeout-method=thread
         env:
           PYTHONUTF8: 1
           LLM_PROVIDER: openai

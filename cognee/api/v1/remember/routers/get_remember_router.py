@@ -22,6 +22,11 @@ logger = get_logger()
 #       Once issue is resolved on Swagger side it can be removed.
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
+# Swagger UI prefills newly added array items from the ITEM-level example;
+# without one it inserts the literal "string". An empty item example keeps
+# "Add item" runnable (empty entries are filtered out server-side).
+EmptyExampleStr = Annotated[str, WithJsonSchema({"type": "string", "example": ""})]
+
 
 async def _import_cogx_archives(
     uploads,
@@ -100,25 +105,98 @@ def get_remember_router() -> APIRouter:
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: List[UploadFile] = File(default=None),
-        datasetName: Optional[str] = Form(default=None),
+        datasetName: Optional[str] = Form(
+            default=None,
+            examples=["default_dataset"],
+            description=(
+                "Name of the target dataset (created if it does not exist). "
+                "Required unless datasetId is provided."
+            ),
+        ),
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
-        session_id: Optional[str] = Form(default=None, examples=[""]),
-        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
-        run_in_background: Optional[bool] = Form(default=False),
-        custom_prompt: Optional[str] = Form(default=""),
-        chunk_size: Optional[int] = Form(default=4096),
-        chunks_per_batch: Optional[int] = Form(default=36),
-        ontology_key: Optional[List[str]] = Form(
+        # examples=[""] keeps Swagger try-it-out runnable: without an example,
+        # Swagger UI auto-generates the literal "string" and submits it.
+        session_id: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "Session to attribute this memory to (e.g. claude-code-1718000000). "
+                "When set, the data is stored in the session cache (and bridged into the "
+                "permanent graph in the background) and the session appears in the sessions "
+                "dashboard. Leave empty for a direct add+cognify."
+            ),
+        ),
+        node_set: Optional[List[EmptyExampleStr]] = Form(
+            default=[""],
+            description=(
+                "Tags the ingested data with named node sets (e.g. per-agent or per-project "
+                "groups). Extracted graph nodes are linked to these sets, and recall/search "
+                "can later be restricted to them via their node_name parameter. Leave empty "
+                "to skip tagging."
+            ),
+        ),
+        run_in_background: Optional[bool] = Form(
+            default=False,
+            description=(
+                "If true, the request returns immediately (status 'running' with a "
+                "pipeline_run_id) while ingestion and graph building continue server-side — "
+                "poll GET /v1/datasets/status to track completion. If false, the request "
+                "blocks until the knowledge graph is fully built, which can take minutes "
+                "for large files."
+            ),
+        ),
+        custom_prompt: Optional[str] = Form(
+            default="",
+            description=(
+                "Replaces the default entity-extraction prompt used during graph building. "
+                "Use it to steer which entities and relationships get extracted (e.g. focus "
+                "on technical concepts, people, or contracts). Leave empty for the default "
+                "prompt."
+            ),
+        ),
+        chunk_size: Optional[int] = Form(
+            default=4096,
+            description=(
+                "Maximum tokens per text chunk during ingestion (default: 4096). Each chunk "
+                "is processed by the LLM separately for entity extraction: larger chunks give "
+                "more context per extraction but fewer, coarser passes; smaller chunks give "
+                "finer-grained extraction at higher LLM cost."
+            ),
+        ),
+        chunks_per_batch: Optional[int] = Form(
+            default=36,
+            description=(
+                "Number of chunks processed per cognify task batch (default: 36). Controls "
+                "ingestion parallelism/throughput; rarely needs changing."
+            ),
+        ),
+        ontology_key: Optional[List[EmptyExampleStr]] = Form(
             default=None,
             examples=[[]],
-            description="Reference to one or more previously uploaded ontologies",
+            description=(
+                "Keys of previously uploaded ontologies (see /v1/ontologies) to ground "
+                "entity extraction. Leave empty to ingest without an ontology."
+            ),
         ),
         graph_model: Optional[str] = Form(
             default=None,
             examples=[""],
-            description="JSON-serialised graph model schema (same format as the cognify endpoint).",
+            description=(
+                "JSON-serialised graph model schema (same format as the cognify endpoint), "
+                'e.g. {"title": "CompanyGraph", "type": "object", "properties": {...}}. '
+                "Must include a top-level 'title' key. Leave empty to use the default "
+                "KnowledgeGraph model — a restrictive schema here can produce an empty graph. "
+                "Invalid JSON or an unconvertible schema is rejected with 400."
+            ),
         ),
-        content_type: Optional[str] = Form(default=None, examples=[""]),
+        content_type: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes. "
+                "Only supported value: 'skills'; leave empty for normal ingestion."
+            ),
+        ),
         import_mode: Optional[str] = Form(
             default=None,
             examples=[""],
@@ -138,19 +216,25 @@ def get_remember_router() -> APIRouter:
         - **data** (List[UploadFile]): Files to upload and process.
         - **datasetName** (Optional[str]): Name of the target dataset.
         - **datasetId** (Optional[UUID]): UUID of an existing dataset.
+        - **session_id** (Optional[str]): Session to attribute this memory to. When set,
+          data is stored in the session cache and bridged into the permanent graph in the
+          background; the session is tracked in the sessions dashboard. When omitted,
+          data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
-        - **chunk_size** (Optional[int]): Maximum tokens per chunk. Defaults to automatic
-          model-based sizing.
+        - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
         - **chunks_per_batch** (Optional[int]): Chunks per cognify batch.
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
         - **graph_model** (Optional[str]): JSON-serialised graph model schema (same dict format accepted by the cognify endpoint).
+        - **content_type** (Optional[str]): Set to "skills" to ingest SKILL.md files as
+          Skill nodes; omit for normal ingestion.
 
         Either datasetName or datasetId must be provided.
 
         ## Error Codes
-        - **400 Bad Request**: Neither datasetId nor datasetName provided
+        - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
+          content_type, or invalid graph_model JSON/schema
         - **409 Conflict**: Error during processing
         """
         send_telemetry(
@@ -184,15 +268,49 @@ def get_remember_router() -> APIRouter:
                 run_in_background=run_in_background or False,
             )
 
+        if content_type and content_type not in ("skills", "cogx-archive"):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported content_type '{content_type}'. "
+                    "Use 'skills', 'cogx-archive', or leave it empty for normal ingestion."
+                ),
+            )
+
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService
         from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
+        # Validate graph_model before the generic try/except so failures
+        # surface as a clear 400 instead of being swallowed into a 409.
+        graph_model_parsed = None
+        if graph_model:
+            try:
+                graph_model_schema = json.loads(graph_model)
+            except json.JSONDecodeError as parse_err:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"graph_model is not valid JSON: {parse_err}",
+                )
+            try:
+                graph_model_parsed = graph_schema_to_graph_model(graph_model_schema)
+            except Exception as parse_err:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"graph_model could not be converted to a graph model schema: {parse_err}. "
+                        "Expected the same dict format as the cognify endpoint, "
+                        "including a top-level 'title' key."
+                    ),
+                )
+
         try:
             config_to_use = None
-            if ontology_key and ontology_key != [""]:
+            # Drop empty entries — Swagger UI submits untouched array items as "".
+            ontology_keys = [key for key in (ontology_key or []) if key]
+            if ontology_keys:
                 ontology_service = OntologyService()
-                ontology_contents = ontology_service.get_ontology_contents(ontology_key, user)
+                ontology_contents = ontology_service.get_ontology_contents(ontology_keys, user)
 
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
@@ -207,42 +325,44 @@ def get_remember_router() -> APIRouter:
                     }
                 }
 
-            graph_model_parsed = None
-            if graph_model:
-                try:
-                    graph_model_schema = json.loads(graph_model)
-                    graph_model_parsed = graph_schema_to_graph_model(graph_model_schema)
-                except (json.JSONDecodeError, Exception) as parse_err:
-                    logger.warning("remember: invalid graph_model JSON, ignoring: %s", parse_err)
-
             result = await cognee_remember(
                 data,
                 dataset_name=datasetName,
-                session_id=session_id,
+                session_id=session_id or None,
                 user=user,
                 dataset_id=datasetId if datasetId else None,
-                node_set=node_set if node_set != [""] else None,
+                node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
-                content_type=content_type,
+                # Swagger UI submits every rendered form field, so an untouched
+                # content_type arrives as "" — treat it as omitted.
+                content_type=content_type or None,
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
             )
+
+            # A blocking run that ended errored must not look like a success
+            # to status-code-checking clients.
+            if result.status == "errored":
+                return JSONResponse(
+                    status_code=409,
+                    content=jsonable_encoder(result.to_dict()),
+                )
 
             return jsonable_encoder(result.to_dict())
         except ValueError as error:
             logger.error("Remember endpoint validation error: %s", error, exc_info=True)
             return JSONResponse(
                 status_code=409,
-                content={"error": "Invalid request data for remember operation."},
+                content={"error": f"Invalid request data for remember operation: {error}"},
             )
         except Exception as error:
             logger.error("Remember endpoint error: %s", error, exc_info=True)
             return JSONResponse(
                 status_code=409,
-                content={"error": "An error occurred during remember."},
+                content={"error": f"An error occurred during remember: {error}"},
             )
 
     class RememberEntryRequest(BaseModel):
@@ -258,7 +378,11 @@ def get_remember_router() -> APIRouter:
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
-        session_id: Optional[str] = None
+        session_id: Optional[str] = Field(
+            default=None,
+            examples=["claude-code-1718000000"],
+            description="Required for qa/trace/feedback entries; optional for skill_run entries.",
+        )
         skill_improvement: Optional[dict] = None
 
     @router.post("/entry", response_model=dict)

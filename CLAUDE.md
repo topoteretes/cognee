@@ -29,7 +29,7 @@ pre-commit install
 ```
 
 ### Available Installation Extras
-- **postgres** / **postgres-binary** - PostgreSQL + PGVector support
+- **postgres** / **postgres-binary** - PostgreSQL + PGVector support (also enables the Postgres session-cache backend, `CACHE_BACKEND=postgres`)
 - **neo4j** - Neo4j graph database support
 - **neptune** - AWS Neptune support
 - **chromadb** - ChromaDB vector database
@@ -284,6 +284,14 @@ GRAPH_DATABASE_PASSWORD=your_password
 # Does not support raw Cypher queries, natural language search, or Graphiti.
 GRAPH_DATABASE_PROVIDER=postgres
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+```
+
+#### Session Cache
+```bash
+# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
+CACHE_BACKEND=sqlite
+# Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
+CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
 ### LLM Provider Configuration
