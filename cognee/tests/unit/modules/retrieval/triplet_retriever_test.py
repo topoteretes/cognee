@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -244,7 +245,14 @@ async def test_get_completion_with_session(mock_vector_engine):
 
         objects = await retriever.get_retrieved_objects("test query")
         context = await retriever.get_context_from_objects("test query", retrieved_objects=objects)
-        completion = await retriever.get_completion_from_context("test query", objects, context)
+        turn_preparation = SessionTurnPreparation(effective_query="prepared query")
+        completion = await retriever.get_completion_from_context(
+            "test query",
+            objects,
+            context,
+            effective_query="prepared query",
+            turn_preparation=turn_preparation,
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -252,6 +260,8 @@ async def test_get_completion_with_session(mock_vector_engine):
     mock_sm.generate_completion_with_session.assert_awaited_once()
     call_kw = mock_sm.generate_completion_with_session.call_args.kwargs
     assert call_kw.get("used_graph_element_ids") is None
+    assert call_kw["effective_query"] == "prepared query"
+    assert call_kw["turn_preparation"] is turn_preparation
 
 
 @pytest.mark.asyncio

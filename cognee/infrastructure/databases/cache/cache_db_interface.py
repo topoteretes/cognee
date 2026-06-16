@@ -79,12 +79,14 @@ class CacheDBInterface(ABC):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> None:
         """
         Add a Q/A/context triplet to a cache session.
         Uses the same QA fields as update_qa_entry for consistent structure.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
         pass
 
@@ -127,6 +129,7 @@ class CacheDBInterface(ABC):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -234,6 +237,42 @@ class CacheDBInterface(ABC):
     async def get_agent_trace_count(self, user_id: str, session_id: str) -> int:
         """
         Retrieve the number of trace steps stored for the given trace session.
+        """
+        pass
+
+    @abstractmethod
+    async def create_session_context_entry(
+        self, user_id: str, session_id: str, entry_dump: dict
+    ) -> None:
+        """
+        Append one session-context entry (a plain dict carrying a "kind" field) to the
+        session-scoped context list. Entries are validated by the caller; the interface
+        stays dict-based to avoid importing session-layer models.
+        """
+        pass
+
+    @abstractmethod
+    async def get_session_context_entries(self, user_id: str, session_id: str) -> list[dict]:
+        """
+        Retrieve all stored session-context entries (both "context" and "feedback" kinds).
+        """
+        pass
+
+    @abstractmethod
+    async def update_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str, merge: dict
+    ) -> bool:
+        """
+        Shallow-merge updates into the session-context entry matching entry["id"].
+        Returns True if updated, False if entry_id not found.
+        """
+        pass
+
+    @abstractmethod
+    async def delete_session_context(self, user_id: str, session_id: str) -> bool:
+        """
+        Delete the entire session-context list for the given session.
+        Returns True if any context data existed, False otherwise.
         """
         pass
 
