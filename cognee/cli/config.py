@@ -23,6 +23,7 @@ COMMAND_DESCRIPTIONS = {
     "improve": "Enrich an existing knowledge graph with additional context and rules",
     "forget": "Remove data from the knowledge graph",
     "serve": "Connect to a Cognee instance (cloud or local)",
+    "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
 }
 
 # Search type choices
