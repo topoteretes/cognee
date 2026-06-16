@@ -1,19 +1,17 @@
 """Unit tests for the deterministic parts of session distillation.
 
-The gate, the session digest, the provenance source-message map, and the document
-renderer are pure functions, so they are tested directly with fixtures — no LLM, cache,
-or vector engine involved.
+The gate, the timeline batching, and the document renderer are pure functions, so they
+are tested directly with fixtures — no LLM, cache, or vector engine involved.
 """
 
 from uuid import uuid4
 
 from cognee.modules.session_distillation.distill import (
-    build_session_digest,
-    build_source_messages_by_entry,
+    build_batches,
     gate_context_entries,
     render_lesson_document,
 )
-from cognee.modules.session_distillation.models import DistilledLesson
+from cognee.modules.session_distillation.models import BATCH_CHAR_BUDGET, WrittenLesson
 
 
 def _context_row(section="lessons_learned", content="A lesson.", **overrides):
@@ -34,9 +32,9 @@ def _context_row(section="lessons_learned", content="A lesson.", **overrides):
     return row
 
 
-def _qa_row(question="What?", answer="That.", **overrides):
+def _qa_row(question="What?", answer="That.", time="2026-06-11T10:00:00", **overrides):
     row = {
-        "time": "2026-06-11T10:00:00",
+        "time": time,
         "qa_id": str(uuid4()),
         "question": question,
         "context": "",
@@ -76,52 +74,48 @@ class TestGateContextEntries:
         assert len(gate_context_entries(rows)) == 1
 
 
-class TestBuildSessionDigest:
-    def test_one_line_per_turn_questions_only(self):
-        digest = build_session_digest([_qa_row("First?"), _qa_row("Second?")])
-        assert digest == "- First?\n- Second?"
+class TestBuildBatches:
+    def test_small_session_is_one_batch_with_turns_and_candidates(self):
+        gated = gate_context_entries([_context_row(content="Flashing wipes calibration.")])
+        batches = build_batches([_qa_row("How do I update firmware?")], gated)
 
-    def test_skips_empty_questions_and_collapses_whitespace(self):
-        digest = build_session_digest([_qa_row(""), _qa_row("Multi\nline   question?")])
-        assert digest == "- Multi line question?"
+        assert len(batches) == 1
+        assert "User: How do I update firmware?" in batches[0]
+        assert f"Candidate {gated[0].id}" in batches[0]
+        assert "Flashing wipes calibration." in batches[0]
 
-    def test_truncates_long_questions(self):
-        digest = build_session_digest([_qa_row("x" * 500)])
-        assert len(digest) < 200
+    def test_interleaves_turns_and_candidates_chronologically(self):
+        gated = gate_context_entries(
+            [_context_row(content="Earlier candidate.", created_at="2026-06-11T10:00:00")]
+        )
+        qa = [_qa_row("Later question?", time="2026-06-11T10:00:05")]
 
+        batch = build_batches(qa, gated)[0]
 
-class TestBuildSourceMessagesByEntry:
-    def test_maps_entries_to_their_creating_user_messages(self):
-        entry = _context_row(source_feedback_ids=["fb-1", "fb-missing"])
-        gated = gate_context_entries([entry])
-        context_rows = [
-            entry,
-            {"kind": "feedback", "id": "fb-1", "raw_text": "Important:\nflashing  wipes data."},
-        ]
+        assert batch.index("Earlier candidate.") < batch.index("Later question?")
 
-        messages = build_source_messages_by_entry(gated, context_rows)
+    def test_splits_when_over_char_budget(self):
+        # Context-entry content is capped at 280 chars, so size the timeline with long
+        # questions (uncapped) instead. Three ~9k blocks pack into three batches.
+        big_question = "x" * 9000
+        qa = [_qa_row(question=big_question, time=f"2026-06-11T10:00:0{i}") for i in range(3)]
+        batches = build_batches(qa, [])
 
-        assert messages == {entry["id"]: ["Important: flashing wipes data."]}
+        assert len(batches) == 3
 
-    def test_entries_without_known_feedback_are_omitted(self):
-        entry = _context_row(source_feedback_ids=[])
-        gated = gate_context_entries([entry])
-        assert build_source_messages_by_entry(gated, [entry]) == {}
+    def test_oversized_single_block_gets_its_own_batch(self):
+        huge_question = "y" * (BATCH_CHAR_BUDGET * 2)
+        batches = build_batches([_qa_row(question=huge_question)], [])
 
-    def test_long_messages_are_truncated(self):
-        entry = _context_row(source_feedback_ids=["fb-1"])
-        gated = gate_context_entries([entry])
-        context_rows = [entry, {"kind": "feedback", "id": "fb-1", "raw_text": "x" * 1000}]
-
-        messages = build_source_messages_by_entry(gated, context_rows)
-
-        assert len(messages[entry["id"]][0]) <= 240
+        assert len(batches) == 1
+        assert huge_question in batches[0]
 
 
 class TestRenderLessonDocument:
     def test_renders_standalone_document_with_provenance_header(self):
         document = render_lesson_document(
-            DistilledLesson(
+            WrittenLesson(
+                accept=True,
                 statement="RoutePulse predicts delivery delays for European freight.",
                 entities=["RoutePulse"],
                 why_learned="Learned while planning the audit trip",
@@ -136,17 +130,16 @@ class TestRenderLessonDocument:
 
     def test_one_document_holds_exactly_one_lesson(self):
         document = render_lesson_document(
-            DistilledLesson(statement="Talk to Priya Tan before Mateo Reed."),
+            WrittenLesson(accept=True, statement="Talk to Priya Tan before Mateo Reed."),
             session_id="s-1",
             distilled_on="2026-06-11",
         )
-        # No cross-lesson grouping headings; the doc is a single learning.
         assert "## " not in document
         assert document.count("# Session learning") == 1
 
     def test_why_learned_is_optional(self):
         document = render_lesson_document(
-            DistilledLesson(statement="Plain statement."),
+            WrittenLesson(accept=True, statement="Plain statement."),
             session_id="s-1",
             distilled_on="2026-06-11",
         )

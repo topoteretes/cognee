@@ -266,7 +266,8 @@ async def main():
     result = await cognee.session.distill_session(SESSION_ID, dataset=DATASET_NAME, user=user)
     progress(
         f"Distillation status={result.status} gated={result.gated_entry_count} "
-        f"lessons={result.lesson_count} already_known={result.skipped_already_known}"
+        f"proposed={result.proposed_lesson_count} accepted={result.accepted_lesson_count} "
+        f"rejected={result.rejected_lesson_count}"
     )
     if result.documents:
         print(

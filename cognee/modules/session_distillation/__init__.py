@@ -1,15 +1,15 @@
 from .distill import distill_session
 from .models import (
-    CuratedLesson,
-    CurationPlan,
+    CuratorBatchOutput,
     DistillationResult,
-    DistilledLesson,
+    ProposedLesson,
+    WrittenLesson,
 )
 
 __all__ = [
     "distill_session",
-    "CuratedLesson",
-    "CurationPlan",
+    "CuratorBatchOutput",
     "DistillationResult",
-    "DistilledLesson",
+    "ProposedLesson",
+    "WrittenLesson",
 ]

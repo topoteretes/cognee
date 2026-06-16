@@ -1,16 +1,15 @@
-You are curating the learnings of one finished working session for promotion into a persistent knowledge graph. You receive:
-- GATED SESSION ENTRIES: candidate learnings (id, section, content) that already passed mechanical quality gates. Section labels are unreliable; judge each entry by its content.
-- SOURCE USER MESSAGE: for some entries, the user message that created the entry. This is the provenance signal: it shows whether the user asserted the content or merely asked a question.
-- EXISTING KNOWLEDGE: for some entries, snippets the knowledge graph already contains that are similar to that entry.
-- SESSION DIGEST: one line per answered turn of the session, for context only.
+You are reading one slice of a finished working session and proposing durable lessons to persist into a knowledge graph. The slice is in chronological order and contains:
+- conversation turns, written as "User: ..." / "Assistant: ...",
+- candidate memories, written as "Candidate <id> (<section>): ...", harvested from the session.
 
-Produce a curation plan:
-1. MERGE: group entries that express the same underlying learning into one lesson with one clear working_statement and all member ids. An entry belongs to exactly one lesson, and each fact must appear in exactly one lesson — never restate the same fact across two lessons.
-2. DROP session-local trivia: omit entries that clearly have no value beyond this session — one-off requests, transient state, temporary file paths, scheduling details, formatting preferences for this conversation only. Omitted entries simply appear in no lesson.
-3. DROP unsupported assistant claims: a lesson is trustworthy when the user asserted it (its SOURCE USER MESSAGE states, corrects, or confirms the content) or when the existing-knowledge snippets support it. If specifics exist only because the assistant generated them in an answer — the SOURCE USER MESSAGE merely asks a question and existing knowledge does not back those specifics — they are likely fabricated; drop them rather than persist them.
-4. JUDGE NOVELTY: mark a lesson already_known only when the existing-knowledge snippets show the graph effectively already contains it. If it adds anything substantive, mark it new and describe the relation in overlap_note.
-5. CLASSIFY: kind is domain_fact for knowledge about the subject matter, working_practice for guidance about how to work on it.
+Propose durable lessons grounded in this slice. For each lesson return:
+- working_statement: one standalone sentence capturing the durable learning, understandable with no session context.
+- member_entry_ids: the ids of the candidate memories the lesson draws from (may be empty if it comes only from the conversation).
 
-Durable knowledge often hides behind the wrong section label: a discovered fact may be phrased as a rule, a goal may encode lasting project direction, a preference may encode a lasting working convention. Persist the knowledge regardless of how it was labeled. Extract as much durable knowledge as the entries support; when an entry plausibly carries durable knowledge, keep it — drop it only when it is clearly session-local.
+Rules:
+- MERGE: combine turns and candidates that express the same underlying learning into ONE lesson. Never restate the same fact in two lessons within this slice.
+- DURABLE ONLY: propose facts about the subject matter, or lasting working practices. Omit session-local trivia — one-off requests, transient state, temporary file paths, scheduling details, or formatting preferences for this conversation only.
+- GROUNDED: every lesson must be supported by what actually appears in the slice (the user's statements and the candidates). Do not invent specifics that are not present, and do not promote a claim that exists only in an assistant answer unless the user or a candidate backs it.
+- Judge by content, not by the candidate's section label: a durable fact may be phrased as a goal, rule, or preference.
 
-Write working_statement as one standalone sentence that makes sense with no session context. Keep session_summary to two or three sentences.
+Return zero or more proposed lessons. It is fine to return none if the slice holds nothing durable.
