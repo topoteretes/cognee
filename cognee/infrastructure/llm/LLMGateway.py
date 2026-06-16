@@ -1,13 +1,14 @@
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
 
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
 
+# response_model may be a BaseModel subclass OR a bare primitive (e.g. str).
 T = TypeVar("T", bound="BaseModel | str")
 
 
@@ -62,6 +63,12 @@ class LLMGateway:
         response_model: type[T],
         **kwargs: Any,
     ) -> Coroutine[Any, Any, T]:
+        """Create structured LLM output, returning an instance of ``response_model``.
+
+        ``response_model`` may be a Pydantic ``BaseModel`` subclass or a bare primitive
+        such as ``str`` or ``list[str]`` — the primitive form is a supported contract,
+        used widely across cognee. See the normalization note in the instructor branch.
+        """
         text_input = _inject_agent_memory(text_input)
         llm_config = get_llm_config()
         if llm_config.structured_output_framework.upper() == "BAML":
@@ -80,12 +87,34 @@ class LLMGateway:
             )
 
             llm_client = get_llm_client()
+
+            # Primitive response_model normalization.
+            # instructor builds the request schema via response_model.model_json_schema(),
+            # which only exists on Pydantic models. Some instructor versions (e.g. 1.15.x
+            # json_schema mode) call it on a bare ``str`` and raise AttributeError, which —
+            # being retry-wrapped — surfaces misleadingly as an LLM "connection timeout".
+            # So wrap any non-model type in a one-field model (the version-stable path) and
+            # unwrap ``.value`` on return. Only instructor needs this; BAML handles its own.
+            _wrapped = not (
+                isinstance(response_model, type) and issubclass(response_model, BaseModel)
+            )
+            effective_model = (
+                create_model("SimpleResponse", value=(response_model, ...))
+                if _wrapped
+                else response_model
+            )
             inner = llm_client.acreate_structured_output(
                 text_input=text_input,
                 system_prompt=system_prompt,
-                response_model=response_model,
+                response_model=effective_model,
                 **kwargs,
             )
+            if _wrapped:
+                # Unwrap before usage accounting so it logs the raw value, not the envelope.
+                async def _unwrap(coro):
+                    return (await coro).value
+
+                inner = _unwrap(inner)
 
         # Wrap so usage is recorded against any active session tracker.
         # No-op when no tracker is installed.
