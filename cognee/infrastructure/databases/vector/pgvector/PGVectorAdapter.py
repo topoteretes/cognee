@@ -55,6 +55,8 @@ class IndexSchema(DataPoint):
     document_id: Optional[str] = None
     document_name: Optional[str] = None
     chunk_index: Optional[int] = None
+    source_chunk_id: Optional[str] = None
+    importance_weight: Optional[float] = 0.5
 
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: List[str] = []
@@ -100,6 +102,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 dict(relational_config.pool_args) if relational_config.pool_args else {}
             )
 
+        # A per-dataset PGVector engine may connect to managed
+        # Postgres (Neon) which requires SSL. Reuse the relational connect_args
+        # (e.g. {"ssl": "require"} from DATABASE_CONNECT_ARGS); {} for in-cluster.
+        effective_connect_args = (
+            dict(relational_config.database_connect_args)
+            if relational_config.database_connect_args
+            else None
+        )
+
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
         db_name2 = make_url(self.db_uri).database
@@ -107,6 +118,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # If backend access control create new instances of engine and sessionmaker
             super().__init__(
                 connection_string=self.db_uri,
+                connect_args=effective_connect_args,
                 pool_args=effective_pool_args,
             )
             self._owns_engine = True
@@ -118,6 +130,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # If not postgreSQL and not backend access control create new instances of engine and sessionmaker
             super().__init__(
                 connection_string=self.db_uri,
+                connect_args=effective_connect_args,
                 pool_args=effective_pool_args,
             )
             self._owns_engine = True
@@ -385,6 +398,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     document_id=getattr(data_point, "document_id", None),
                     document_name=getattr(data_point, "document_name", None),
                     chunk_index=getattr(data_point, "chunk_index", None),
+                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
+                    importance_weight=getattr(data_point, "importance_weight", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points

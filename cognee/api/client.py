@@ -47,6 +47,7 @@ from cognee.api.v1.users.routers import (
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.agents.routers import get_agents_router
 from cognee.api.v1.visualize.routers import get_schema_router
+from cognee.api.v1.skills.routers import get_skills_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
@@ -93,6 +94,9 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
+    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+
+    await recover_stale_cognify_runs_on_startup()
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
@@ -255,6 +259,8 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
 app.include_router(get_schema_router(), prefix="/api/v1/schema", tags=["schema"])
+
+app.include_router(get_skills_router(), prefix="/api/v1/skills", tags=["skills"])
 
 app.include_router(
     get_configuration_router(),

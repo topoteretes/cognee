@@ -601,6 +601,22 @@ class RememberResult:
             self.items_processed = len(self.items)
             if self.items and self.items[0].get("content_hash"):
                 self.content_hash = self.items[0]["content_hash"]
+        else:
+            # PipelineRunCompleted carries no `payload` — per-item results live
+            # in data_ingestion_info as {"run_info": ..., "data_id": ...} dicts.
+            ingestion_info = getattr(run_info, "data_ingestion_info", None)
+            if ingestion_info and isinstance(ingestion_info, list):
+                processed = 0
+                for entry in ingestion_info:
+                    if not isinstance(entry, dict):
+                        continue
+                    status = getattr(entry.get("run_info"), "status", "")
+                    if "Errored" in status:
+                        continue
+                    processed += 1
+                    if entry.get("data_id") is not None:
+                        self.items.append({"id": str(entry["data_id"])})
+                self.items_processed = processed
 
     def _fail(self, exc: BaseException):
         """Mark the result as failed with an error message and elapsed time."""
@@ -777,7 +793,9 @@ async def _remember_inner(
     # writes, even when the API server was never started.
     await _ensure_migrations_run()
 
-    content_type = kwargs.pop("content_type", None)
+    # Normalize "" to None — HTML forms and Swagger UI submit untouched
+    # optional fields as empty strings.
+    content_type = kwargs.pop("content_type", None) or None
     skill_improvement = kwargs.pop("skill_improvement", None)
 
     def _requested_node_set(default: str) -> str:
@@ -796,6 +814,9 @@ async def _remember_inner(
         )
 
     if content_type == "skills":
+        import tempfile
+        from pathlib import Path as _Path
+
         from cognee.context_global_variables import set_database_global_context_variables
         from cognee.modules.engine.operations.setup import setup
         from cognee.modules.tools import add_skills
@@ -813,13 +834,53 @@ async def _remember_inner(
         if owner_id is None:
             raise ValueError("Skill ingestion requires a dataset owner or user.")
 
-        async with set_database_global_context_variables(dataset.id, owner_id):
-            skills = await add_skills(
-                data,
-                node_set=skills_node_set,
-                user=user,
-                dataset=dataset,
-            )
+        # HTTP callers (CloudClient + Swagger) deliver SKILL.md content as
+        # UploadFile/file-like objects, not paths. add_skills reads paths from
+        # the local filesystem, so materialize the uploads into a tempdir
+        # under cwd (which is always allowed by _configured_skill_source_roots)
+        # before handing off. Local SDK callers continue to pass a path.
+        skill_source: Any = data
+        tmp_dir: Optional[tempfile.TemporaryDirectory] = None
+        normalized_uploads: list = []
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, (str, _Path)) and hasattr(item, "read"):
+                    normalized_uploads.append(item)
+        elif data is not None and not isinstance(data, (str, _Path)) and hasattr(data, "read"):
+            normalized_uploads.append(data)
+
+        if normalized_uploads:
+            tmp_dir = tempfile.TemporaryDirectory(prefix="cognee-skills-", dir=_Path.cwd())
+            tmp_root = _Path(tmp_dir.name)
+            for upload in normalized_uploads:
+                rel_name = (
+                    getattr(upload, "filename", None) or getattr(upload, "name", None) or "SKILL.md"
+                )
+                # Defensive: reject absolute paths / traversal in client-sent names.
+                safe_rel = _Path(rel_name).as_posix().lstrip("/")
+                if ".." in _Path(safe_rel).parts:
+                    raise ValueError(f"Invalid skill filename: {rel_name}")
+                dest = tmp_root / safe_rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                # UploadFile.read() is async; plain file-like .read() is sync.
+                read_result = upload.read()
+                payload = await read_result if hasattr(read_result, "__await__") else read_result
+                if isinstance(payload, str):
+                    payload = payload.encode("utf-8")
+                dest.write_bytes(payload or b"")
+            skill_source = tmp_root
+
+        try:
+            async with set_database_global_context_variables(dataset.id, owner_id):
+                skills = await add_skills(
+                    skill_source,
+                    node_set=skills_node_set,
+                    user=user,
+                    dataset=dataset,
+                )
+        finally:
+            if tmp_dir is not None:
+                tmp_dir.cleanup()
         result = RememberResult(
             status="completed",
             dataset_name=dataset.name,
