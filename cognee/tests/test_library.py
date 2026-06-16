@@ -12,6 +12,12 @@ logger = get_logger()
 
 
 async def main():
+    # Disable session-turn gating (auto_feedback). This script issues several searches against the
+    # same session; with gating on, the turn analysis can intercept a follow-up search with a
+    # clarifying acknowledgement instead of an answer. That layer has dedicated coverage
+    # (e.g. test_session_context_turn_flow.py); here we assert direct retrieval results.
+    os.environ["AUTO_FEEDBACK"] = "False"
+
     data_directory_path = str(
         pathlib.Path(
             os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_library")
