@@ -13,13 +13,14 @@ from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
 )
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
-from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
+from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -56,7 +57,7 @@ async def get_search_type_retriever_instance(
         retriever_specific_config = {}
 
     # Extract common defaults with fallback values from kwargs
-    top_k = kwargs.get("top_k", 10)
+    top_k = kwargs.get("top_k", 15)
     system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
     system_prompt = kwargs.get("system_prompt")
     node_type = kwargs.get("node_type", NodeSet)
@@ -68,13 +69,18 @@ async def get_search_type_retriever_instance(
     session_id = kwargs.get("session_id")
     neighborhood_depth = kwargs.get("neighborhood_depth")
     neighborhood_seed_top_k = kwargs.get("neighborhood_seed_top_k")
+    include_references = kwargs.get("include_references", False)
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
         SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
         SearchType.CHUNKS: (
             ChunksRetriever,
-            {"top_k": top_k},
+            {
+                "top_k": top_k,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+            },
         ),
         SearchType.RAG_COMPLETION: (
             CompletionRetriever,
@@ -84,6 +90,32 @@ async def get_search_type_retriever_instance(
                 "system_prompt": system_prompt,
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
+                "include_references": include_references,
+            },
+        ),
+        SearchType.HYBRID_COMPLETION: (
+            HybridRetriever,
+            {
+                "chunks_top_k": retriever_specific_config.get("chunks_top_k", top_k),
+                "entities_top_k": retriever_specific_config.get("entities_top_k", top_k),
+                "max_edges_per_entity": retriever_specific_config.get("max_edges_per_entity", 10),
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+                "system_prompt_path": system_prompt_path,
+                "system_prompt": system_prompt,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "include_global_context_index": retriever_specific_config.get(
+                    "include_global_context_index", False
+                ),
+                "global_context_index_top_k": retriever_specific_config.get(
+                    "global_context_index_top_k", 3
+                ),
+                "text_summaries_top_k": retriever_specific_config.get("text_summaries_top_k"),
+                "use_importance_weight": retriever_specific_config.get(
+                    "use_importance_weight", True
+                ),
+                "facts_top_k": retriever_specific_config.get("facts_top_k", top_k),
             },
         ),
         SearchType.TRIPLET_COMPLETION: (
@@ -94,6 +126,7 @@ async def get_search_type_retriever_instance(
                 "system_prompt": system_prompt,
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
+                "include_references": include_references,
             },
         ),
         SearchType.GRAPH_COMPLETION: (
@@ -118,6 +151,7 @@ async def get_search_type_retriever_instance(
                 "global_context_index_top_k": retriever_specific_config.get(
                     "global_context_index_top_k", 3
                 ),
+                "include_references": include_references,
             },
         ),
         SearchType.GRAPH_COMPLETION_DECOMPOSITION: (
@@ -139,6 +173,7 @@ async def get_search_type_retriever_instance(
                 "decomposition_mode": retriever_specific_config.get(
                     "decomposition_mode", "answer_per_subquery"
                 ),
+                "include_references": include_references,
             },
         ),
         SearchType.GRAPH_COMPLETION_COT: (
@@ -170,6 +205,7 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
+                "include_references": include_references,
             },
         ),
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: (
@@ -191,6 +227,7 @@ async def get_search_type_retriever_instance(
                 "response_model": retriever_specific_config.get("response_model", str),
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
+                "include_references": include_references,
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (
@@ -209,6 +246,7 @@ async def get_search_type_retriever_instance(
                 "summarize_prompt_path": retriever_specific_config.get(
                     "summarize_prompt_path", "summarize_search_results.txt"
                 ),
+                "include_references": include_references,
             },
         ),
         SearchType.CYPHER: (
@@ -254,9 +292,10 @@ async def get_search_type_retriever_instance(
                 "node_type": node_type,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                "include_references": include_references,
             },
         ),
-        SearchType.CHUNKS_LEXICAL: (JaccardChunksRetriever, {"top_k": top_k}),
+        SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),
         SearchType.CODING_RULES: (
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},
@@ -308,6 +347,7 @@ async def get_search_type_retriever_instance(
             response_model=retriever_specific_config.get("response_model", str),
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
         )
 
     # If the query type is FEELING_LUCKY, select the search type intelligently

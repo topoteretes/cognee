@@ -18,6 +18,9 @@ on:
         default: ''
         description: "Optional container image for CI"
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   run_temporal_graph_kuzu_lance_sqlite:
     name: Temporal Graph test Kuzu (lancedb + sqlite)
@@ -44,11 +47,10 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
@@ -84,11 +86,10 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'neo4j'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
@@ -104,7 +105,10 @@ jobs:
       container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
       services:
         postgres:
-          image: pgvector/pgvector:pg17
+          image: ghcr.io/topoteretes/pgvector:pg17
+          credentials:
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
           env:
             POSTGRES_USER: cognee
             POSTGRES_PASSWORD: cognee
@@ -138,11 +142,10 @@ jobs:
             LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
             LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
             LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+            LLM_ARGS: ${{ secrets.LLM_ARGS }}
             EMBEDDING_DIMENSIONS: 300
             EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-            EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
             EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-            EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
             GRAPH_DATABASE_PROVIDER: 'kuzu'
             VECTOR_DB_PROVIDER: 'pgvector'
             DB_PROVIDER: 'postgres'
@@ -172,7 +175,10 @@ jobs:
           --health-timeout=5s
           --health-retries=5
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -206,11 +212,10 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'neo4j'
           VECTOR_DB_PROVIDER: 'pgvector'
           DB_PROVIDER: 'postgres'

@@ -1,4 +1,5 @@
 from cognee.shared.logging_utils import get_logger
+from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.tasks.chunks import chunk_by_paragraph
@@ -18,6 +19,7 @@ class TextChunkerWithOverlap(Chunker):
         get_chunk_data: callable = None,
     ):
         super().__init__(document, get_text, max_chunk_size)
+        self.document_name = document.name or basename(document.raw_data_location)
         self._accumulated_chunk_data = []
         self._accumulated_size = 0
         self.chunk_overlap_ratio = chunk_overlap_ratio
@@ -76,6 +78,8 @@ class TextChunkerWithOverlap(Chunker):
                 chunk_index=self.chunk_index,
                 cut_type=cut_type,
                 contains=[],
+                document_id=str(self.document.id),
+                document_name=self.document_name,
                 metadata={"index_fields": ["text"]},
             )
         except Exception as e:

@@ -6,23 +6,21 @@ This demonstrates the new UI functionality that works similar to DuckDB's start_
 """
 
 import asyncio
-import cognee
 import time
+
+import cognee
 
 
 async def main():
     # First, let's add some data to cognee for the UI to display
     print("Adding sample data to cognee...")
-    await cognee.add(
-        "Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval."
+    await cognee.remember(
+        [
+            "Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.",
+            "Machine learning (ML) is a subset of artificial intelligence that focuses on algorithms and statistical models.",
+        ],
+        self_improvement=False,
     )
-    await cognee.add(
-        "Machine learning (ML) is a subset of artificial intelligence that focuses on algorithms and statistical models."
-    )
-
-    # Generate the knowledge graph
-    print("Generating knowledge graph...")
-    await cognee.cognify()
 
     print("\n" + "=" * 60)
     print("Starting cognee UI...")

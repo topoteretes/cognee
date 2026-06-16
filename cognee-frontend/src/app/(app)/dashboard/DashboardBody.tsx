@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import useDatasets from "@/modules/ingestion/useDatasets";
-import { useCogniInstance } from "@/modules/tenant/TenantProvider";
+import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { Stack, Flex, Text, Title, CloseButton, Button } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import DatasetSearchWidget from "@/ui/elements/Widgets/DatasetSearchWidget";
@@ -11,10 +11,12 @@ import DatasetAddWidget from "@/ui/elements/Widgets/DatasetAddWidget";
 import VisualizationWidget from "@/ui/elements/Widgets/VisualizationWidget";
 import { CogneeInstance } from "@/modules/instances/types";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
+import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import CognifyActivityPanel from "@/ui/elements/Widgets/CognifyActivityPanel";
 import FrostedLoadingOverlay from "./FrostedLoadingOverlay";
 import { LoadingProvider, useLoading } from "./LoadingContext";
 import DashboardControlPanel from "./DashboardControlPanel";
+import UpgradeBanner from "@/ui/elements/UpgradeBanner";
 import { tokens } from "@/ui/theme/tokens";
 import { loadPrompts } from "@/modules/prompts/storage";
 import type { Prompt } from "@/modules/prompts/storage";
@@ -32,74 +34,8 @@ function BusyScreen({ title, subtitle }: { title: string; subtitle: string }) {
         animation: "cognifyFadeIn 0.4s ease-out",
       }}
     >
-      <div style={{ textAlign: "center" }}>
-        <div style={{ position: "relative", width: 80, height: 80, margin: "0 auto 2rem" }}>
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              borderRadius: "50%",
-              border: "3px solid rgba(101, 16, 244, 0.1)",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              borderRadius: "50%",
-              border: "3px solid transparent",
-              borderTopColor: tokens.purple,
-              animation: "cognifySpin 1s cubic-bezier(0.4, 0, 0.2, 1) infinite",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              inset: 12,
-              borderRadius: "50%",
-              border: "3px solid transparent",
-              borderTopColor: tokens.green,
-              animation: "cognifySpin 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite reverse",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              inset: 24,
-              borderRadius: "50%",
-              border: "3px solid transparent",
-              borderTopColor: tokens.purple,
-              opacity: 0.5,
-              animation: "cognifySpin 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite",
-            }}
-          />
-        </div>
-        <p
-          style={{
-            margin: 0,
-            fontSize: "1.125rem",
-            fontWeight: 500,
-            color: tokens.textDark,
-            letterSpacing: "0.01em",
-            animation: "cognifyPulse 2.5s ease-in-out infinite",
-          }}
-        >
-          {title}
-        </p>
-        <p
-          style={{
-            margin: "0.5rem 0 0",
-            fontSize: "0.875rem",
-            fontWeight: 400,
-            color: tokens.textSecondary,
-            animation: "cognifyPulse 2.5s ease-in-out infinite 0.3s",
-          }}
-        >
-          {subtitle}
-        </p>
-      </div>
+      <video src="/videos/mascot-waiting.mp4" autoPlay loop muted playsInline style={{ width: 200, height: "auto" }} />
       <style>{`
-        @keyframes cognifySpin { to { transform: rotate(360deg); } }
         @keyframes cognifyPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
         @keyframes cognifyFadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
@@ -113,6 +49,7 @@ interface DashboardContentProps {
   instance: CogneeInstance;
   busyState: BusyState;
   dataVersion: number;
+  hasAccess: boolean;
   onCognifyStart: () => void;
   onCognifyComplete: () => void;
   onWidgetReady: () => void;
@@ -123,6 +60,7 @@ function DashboardContent({
   instance,
   busyState,
   dataVersion,
+  hasAccess,
   onCognifyStart,
   onCognifyComplete,
   onWidgetReady,
@@ -215,6 +153,7 @@ function DashboardContent({
   }, [datasets, setSelectedDatasetId]);
 
   const isBusy = busyState !== "idle";
+  const isGated = !hasAccess;
 
   const resolvedCustomPrompt = useMemo(() => {
     if (!activePromptId) return undefined;
@@ -230,6 +169,7 @@ function DashboardContent({
       customPrompt: resolvedCustomPrompt,
       llmModel,
     })
+      .then(() => pollDatasetStatus(selectedDatasetId, instance, { intervalMs: 5000 }))
       .then(() => onCognifyComplete())
       .catch((err) => {
         onCognifyComplete();
@@ -243,13 +183,14 @@ function DashboardContent({
 
   const busyTitle = busyState === "cognifying"
     ? "We are cognifying your data"
-    : "Loading dataset";
+    : "Loading brain";
   const busySubtitle = busyState === "cognifying"
     ? "Building knowledge graph and processing your documents..."
     : "Fetching visualization and example questions...";
 
   return (
     <Stack className="h-full overflow-auto" gap="0.625rem">
+      {isGated && <UpgradeBanner />}
       <DashboardControlPanel
         datasets={datasets}
         selectedDatasetId={selectedDatasetId}
@@ -276,7 +217,7 @@ function DashboardContent({
           <Flex gap="2rem" wrap="wrap">
             <div style={{ flex: 1, minWidth: 160 }}>
               <Text fw={600} size="sm" c={tokens.purple} mb="0.25rem">1. Upload documents</Text>
-              <Text size="sm" c={tokens.textSecondary}>Add files or paste text into a dataset</Text>
+              <Text size="sm" c={tokens.textSecondary}>Add files or paste text into a brain</Text>
             </div>
             <div style={{ flex: 1, minWidth: 160 }}>
               <Text fw={600} size="sm" c={tokens.purple} mb="0.25rem">2. Cognify</Text>
@@ -291,8 +232,8 @@ function DashboardContent({
       )}
       <div
         style={{
-          opacity: isBusy ? 0.4 : 1,
-          pointerEvents: isBusy ? "none" : "auto",
+          opacity: isBusy || isGated ? 0.4 : 1,
+          pointerEvents: isBusy || isGated ? "none" : "auto",
           transition: "opacity 0.3s ease",
         }}
       >
@@ -337,8 +278,8 @@ function DashboardContent({
       )}
       <div
         style={{
-          opacity: isBusy ? 0.4 : 1,
-          pointerEvents: isBusy ? "none" : "auto",
+          opacity: isBusy || isGated ? 0.4 : 1,
+          pointerEvents: isBusy || isGated ? "none" : "auto",
           transition: "opacity 0.3s ease",
         }}
       >
@@ -373,6 +314,7 @@ function DashboardContent({
 
 function DashboardInner() {
   const { cogniInstance, statusMessage } = useCogniInstance();
+  const { hasAccess } = useTenant();
   const { isLoading, stopLoading } = useLoading();
 
   // Safety net: force-dismiss the loading overlay after 15 s in case the
@@ -432,6 +374,7 @@ function DashboardInner() {
           instance={instance}
           busyState={busyState}
           dataVersion={dataVersion}
+          hasAccess={hasAccess}
           onCognifyStart={handleCognifyStart}
           onCognifyComplete={handleCognifyComplete}
           onWidgetReady={handleWidgetReady}

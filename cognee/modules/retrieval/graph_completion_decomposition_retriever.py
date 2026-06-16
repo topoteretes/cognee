@@ -46,6 +46,7 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
         decomposition_mode: DecompositionMode = DecompositionMode.ANSWER_PER_SUBQUERY,
+        include_references: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -62,6 +63,7 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             response_model=response_model,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
         )
         self.decomposition_mode = DecompositionMode(decomposition_mode)
         self._decomposition_state: Optional[DecompositionRunState] = None

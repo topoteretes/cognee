@@ -10,7 +10,7 @@ def extract_entities(graph: KnowledgeGraph, cache: dict | None = None):
     entity_types = []
 
     for node in graph.nodes:
-        node_id = generate_node_id(node.id)
+        node_id = generate_node_id(f"entity:{node.id}")
 
         if node_id not in cache:
             entity = Entity(
@@ -27,7 +27,7 @@ def extract_entities(graph: KnowledgeGraph, cache: dict | None = None):
         entities.append(entity)
 
         node_type = node.type
-        type_node_id = generate_node_id(node_type)
+        type_node_id = generate_node_id(f"type:{node_type}")
         if type_node_id not in cache:
             type_node_name = generate_node_name(node_type)
 

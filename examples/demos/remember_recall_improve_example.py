@@ -22,7 +22,7 @@ Requires:
 import asyncio
 import os
 
-# Enable filesystem-based session caching before importing Cognee.
+# Enable filesystem-based session caching (required for session_id and improve)
 os.environ["CACHING"] = "true"
 os.environ["CACHE_BACKEND"] = "fs"
 

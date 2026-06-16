@@ -1,24 +1,19 @@
 # ruff: noqa: E402
-import os
-import logging
 import asyncio
+import logging
+import os
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# If running without LLM_API_KEY set in the .env file, you can set it here
-# os.environ["LLM_API_KEY"] = ""
-
 # Notes: Nodesets cognee feature only works with Ladybug and Neo4j graph databases
 os.environ["GRAPH_DATABASE_PROVIDER"] = "ladybug"
 
-import cognee
-from cognee.context_global_variables import backend_access_control_enabled
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.api.v1.search import SearchType
-from cognee.modules.engine.models import NodeSet
-from cognee.shared.logging_utils import setup_logging
+import cognee  # noqa: E402
+from cognee import SearchType  # noqa: E402
+from cognee.infrastructure.llm.LLMGateway import LLMGateway  # noqa: E402
+from cognee.shared.logging_utils import setup_logging  # noqa: E402
 
 
 class ProcurementMemorySystem:
@@ -102,30 +97,34 @@ class ProcurementMemorySystem:
         """
 
         # Initializing and pruning databases
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
+        await cognee.forget(everything=True)
 
         # Store data in different memory categories
-        await cognee.add(
+        await cognee.remember(
             data=[vendor_conversation_text_techsupply, vendor_conversation_text_office_solutions],
             node_set=["vendor_conversations"],
+            self_improvement=False,
         )
 
-        await cognee.add(data=previous_purchases_text, node_set=["purchase_history"])
+        await cognee.remember(
+            data=previous_purchases_text,
+            node_set=["purchase_history"],
+            self_improvement=False,
+        )
 
-        await cognee.add(data=procurement_preferences_text, node_set=["procurement_policies"])
-
-        # Process all data through Cognee's knowledge graph
-        await cognee.cognify()
+        await cognee.remember(
+            data=procurement_preferences_text,
+            node_set=["procurement_policies"],
+            self_improvement=False,
+        )
 
     async def search_memory(self, query, search_categories=None):
         """Search across different memory layers"""
         results = {}
         for category in search_categories:
-            category_results = await cognee.search(
+            category_results = await cognee.recall(
                 query_type=SearchType.GRAPH_COMPLETION,
                 query_text=query,
-                node_type=NodeSet,
                 node_name=[category],
                 top_k=30,
             )
@@ -172,11 +171,7 @@ async def run_procurement_example():
         for q in questions:
             print(f"Question: \n{q}")
             results = await procurement_system.search_memory(q, search_categories=[category])
-            top_answer = (
-                results[category][0]["search_result"][0]
-                if backend_access_control_enabled()
-                else results[category][0]
-            )
+            top_answer = results[category][0]
             print(f"Answer: \n{top_answer}\n")
             research_notes[category].append({"question": q, "answer": top_answer})
 
@@ -184,7 +179,7 @@ async def run_procurement_example():
 
     print("Compiling structured research information for decision-making...\n")
     research_information = "\n\n".join(
-        f"Q: {note['question']}\nA: {note['answer'].strip()}"
+        f"Q: {note['question']}\nA: {note['answer']}"
         for section in research_notes.values()
         for note in section
     )

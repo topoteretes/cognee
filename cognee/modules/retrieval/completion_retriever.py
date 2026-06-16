@@ -10,6 +10,7 @@ from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.modules.retrieval.utils.references import append_chunk_evidence
 
 logger = get_logger("CompletionRetriever")
 
@@ -27,6 +28,7 @@ class CompletionRetriever(BaseRetriever):
         top_k: Optional[int] = 1,
         session_id: Optional[str] = None,
         response_model: Type = str,
+        include_references: bool = False,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -35,6 +37,7 @@ class CompletionRetriever(BaseRetriever):
         self.system_prompt = system_prompt
         self.session_id = session_id
         self.response_model = response_model
+        self.include_references = include_references
 
     async def get_retrieved_objects(self, query: str) -> Any:
         vector_engine = get_vector_engine()
@@ -144,5 +147,16 @@ class CompletionRetriever(BaseRetriever):
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
             )
-            return [completion]
-        return await self._generate_completion_without_session(query, context)
+            completions = [completion]
+        else:
+            completions = await self._generate_completion_without_session(query, context)
+
+        # Both the session/cache branch and the non-session branch rejoin here so
+        # logged-in/cached calls also receive references. Evidence is grounded in
+        # each completion's own text, so a cache-hit answer never cites chunks
+        # that share nothing with it.
+        return append_chunk_evidence(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
+        )

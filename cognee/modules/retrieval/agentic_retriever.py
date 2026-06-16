@@ -279,7 +279,8 @@ class AgenticRetriever(GraphCompletionRetriever):
             triplets=retrieved_objects.get("triplets"),
         )
 
-        return [final]
+        # Append answer-grounded Evidence to the final answer (str answers only).
+        return await self._append_graph_evidence([final])
 
     @staticmethod
     async def _record_skill_runs(

@@ -58,7 +58,7 @@ def test_forget_endpoint_passes_memory_only_flag(client, mock_default_user):
 
         response = client.post(
             "/api/v1/forget",
-            json={"dataset": dataset_id, "memory_only": True},
+            json={"dataset_id": dataset_id, "memory_only": True},
         )
 
         assert response.status_code == 200
@@ -67,7 +67,7 @@ def test_forget_endpoint_passes_memory_only_flag(client, mock_default_user):
         mock_forget.assert_awaited_once()
         call_kwargs = mock_forget.call_args.kwargs
         assert call_kwargs["memory_only"] is True
-        assert call_kwargs["dataset"] == dataset_id
+        assert call_kwargs["dataset_id"] == uuid.UUID(dataset_id)
 
 
 def test_forget_endpoint_memory_only_defaults_to_false(client):
@@ -99,11 +99,11 @@ def test_forget_endpoint_memory_only_with_data_id(client):
 
         response = client.post(
             "/api/v1/forget",
-            json={"dataset": dataset_id, "data_id": data_id, "memory_only": True},
+            json={"dataset_id": dataset_id, "data_id": data_id, "memory_only": True},
         )
 
         assert response.status_code == 200
         call_kwargs = mock_forget.call_args.kwargs
         assert call_kwargs["memory_only"] is True
         assert call_kwargs["data_id"] == uuid.UUID(data_id)
-        assert call_kwargs["dataset"] == dataset_id
+        assert call_kwargs["dataset_id"] == uuid.UUID(dataset_id)

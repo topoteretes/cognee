@@ -17,6 +17,10 @@ export function getAnonymousId() { return ""; }
 export function setAnonymousId(_id: string) {}
 
 // React components used in layouts
-export function TrackPageView(_props: { page?: string }) { return null; }
+export function TrackPageView(_props: {
+  page?: string;
+  searchProperties?: unknown;
+  additionalProperties?: Record<string, unknown>;
+}) { return null; }
 export function TrackPageEvent(_props: Record<string, unknown>) { return null; }
 export function IdentifyUser() { return null; }

@@ -1,9 +1,8 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from "react";
-import { useCogniInstance } from "@/modules/tenant/TenantProvider";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from "react";
+import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import getDatasets from "@/modules/datasets/getDatasets";
-import createDataset from "@/modules/datasets/createDataset";
 
 export interface Agent {
   id: string;
@@ -47,15 +46,15 @@ interface FilterContextValue {
 
   // Refresh
   refreshDatasets: () => void;
+
 }
 
 const DEFAULT_WORKSPACES: Workspace[] = [
-  { id: "personal", name: "Personal", initial: "P", color: "#6510F4", type: "personal" },
-  { id: "default", name: "Default", initial: "D", color: "#6510F4", type: "organization" },
+  { id: "personal", name: "Personal workspace", initial: "P", color: "#6510F4", type: "personal" },
 ];
 
 const FilterContext = createContext<FilterContextValue>({
-  workspace: DEFAULT_WORKSPACES[1],
+  workspace: DEFAULT_WORKSPACES[0],
   workspaces: DEFAULT_WORKSPACES,
   setWorkspace: () => {},
   selectedAgent: null,
@@ -68,14 +67,46 @@ const FilterContext = createContext<FilterContextValue>({
   refreshDatasets: () => {},
 });
 
+// Pick a deterministic color for a tenant based on its ID
+const TENANT_COLORS = ["#6510F4", "#2563EB", "#059669", "#D97706", "#DC2626", "#7C3AED", "#0891B2", "#BE185D"];
+function colorForTenant(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
+  return TENANT_COLORS[Math.abs(hash) % TENANT_COLORS.length];
+}
+
 export function FilterProvider({ children }: { children: ReactNode }) {
   const { cogniInstance, isInitializing } = useCogniInstance();
+  const { tenant, availableTenants, switchTenant } = useTenant();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
-  const [workspace, setWorkspaceState] = useState<Workspace>(DEFAULT_WORKSPACES[1]);
   const [loading, setLoading] = useState(true);
+
+  // Build workspaces from available tenants
+  const tenantWorkspaces = useMemo<Workspace[]>(() => {
+    if (availableTenants.length === 0) return DEFAULT_WORKSPACES;
+    return availableTenants.map((t) => ({
+      id: t.id,
+      name: t.name,
+      initial: t.name.charAt(0).toUpperCase(),
+      color: colorForTenant(t.id),
+      type: "organization" as const,
+    }));
+  }, [availableTenants]);
+
+  const currentWorkspace = useMemo(() => {
+    if (!tenant) return tenantWorkspaces[0];
+    return tenantWorkspaces.find((ws) => ws.id === tenant.tenant_id) ?? tenantWorkspaces[0];
+  }, [tenant, tenantWorkspaces]);
+
+  const [workspace, setWorkspaceState] = useState<Workspace>(DEFAULT_WORKSPACES[0]);
+
+  // Sync workspace state when tenant data loads
+  useEffect(() => {
+    if (currentWorkspace) setWorkspaceState(currentWorkspace);
+  }, [currentWorkspace]);
 
   const refreshDatasets = useCallback(() => {
     if (!cogniInstance) return;
@@ -84,41 +115,85 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   }, [cogniInstance]);
 
-  useEffect(() => {
-    if (!cogniInstance || isInitializing) return;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
+  // Refresh all data (datasets + agents)
+  const refreshAll = useCallback(() => {
+    if (!cogniInstance) return;
     Promise.all([
-      cogniInstance.fetch("/v1/activity/agents", { signal: controller.signal })
+      cogniInstance.fetch("/v1/activity/agents")
         .then((r) => r.ok ? r.json() : [])
         .catch(() => []),
       getDatasets(cogniInstance)
         .then((d: Dataset[]) => (Array.isArray(d) ? d : []))
         .catch(() => []),
-    ]).then(async ([agentData, datasetData]) => {
+    ]).then(([agentData, datasetData]) => {
       setAgents(Array.isArray(agentData) ? agentData : []);
-      // Auto-create a default dataset if none exist
-      if (datasetData.length === 0 && cogniInstance) {
-        try {
-          const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
-          datasetData = [ds];
-        } catch (e) {
-          console.warn("[FilterContext] Failed to auto-create default dataset:", e);
-        }
-      }
       setDatasets(datasetData);
-    }).catch(() => {}).finally(() => {
-      clearTimeout(timeout);
-      setLoading(false);
+    }).catch(() => {});
+  }, [cogniInstance]);
+
+  // Initial fetch
+  useEffect(() => {
+    if (!cogniInstance || isInitializing) return;
+
+    let cancelled = false;
+
+    function fetchAll() {
+      return Promise.all([
+        cogniInstance!.fetch("/v1/activity/agents")
+          .then((r) => r.ok ? r.json() : [])
+          .catch(() => []),
+        getDatasets(cogniInstance!)
+          .then((d: Dataset[]) => (Array.isArray(d) ? d : []))
+          .catch(() => []),
+      ]).then(async ([agentData, datasetData]) => {
+        if (cancelled) return;
+        setAgents(Array.isArray(agentData) ? agentData : []);
+        if (!cancelled) setDatasets(datasetData);
+      }).catch(() => {});
+    }
+
+    fetchAll().finally(() => {
+      if (!cancelled) setLoading(false);
     });
 
+    const interval = setInterval(fetchAll, 15000);
     return () => {
-      controller.abort();
-      clearTimeout(timeout);
+      cancelled = true;
+      clearInterval(interval);
     };
   }, [cogniInstance, isInitializing]);
+
+  // Refetch on window focus (debounced to prevent burst on rapid alt-tab)
+  useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+    const onFocus = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(refreshAll, 2000);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => { window.removeEventListener("focus", onFocus); clearTimeout(timeout); };
+  }, [refreshAll]);
+
+  // Retry with backoff if initial fetch returned empty (e.g. cold start 401s)
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (loading || !cogniInstance || datasets.length > 0) {
+      if (retryRef.current) clearTimeout(retryRef.current);
+      return;
+    }
+    let attempt = 0;
+    const maxAttempts = 3;
+    const retry = () => {
+      if (attempt >= maxAttempts) return;
+      attempt++;
+      retryRef.current = setTimeout(() => {
+        refreshAll();
+        retry();
+      }, attempt * 2000);
+    };
+    retry();
+    return () => { if (retryRef.current) clearTimeout(retryRef.current); };
+  }, [loading, cogniInstance, datasets.length, refreshAll]);
 
   const handleAgentChange = useCallback((agent: Agent | null) => {
     setSelectedAgent(agent);
@@ -126,14 +201,20 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const handleWorkspaceChange = useCallback((ws: Workspace) => {
+    // If selecting a different tenant, trigger a full tenant switch (sets cookie + reloads)
+    if (tenant && ws.id !== tenant.tenant_id) {
+      switchTenant(ws.id, ws.name);
+      return;
+    }
     setWorkspaceState(ws);
     setSelectedAgent(null);
     setSelectedDataset(null);
-  }, []);
+  }, [tenant, switchTenant]);
+
 
   const value = useMemo(() => ({
     workspace,
-    workspaces: DEFAULT_WORKSPACES,
+    workspaces: tenantWorkspaces,
     setWorkspace: handleWorkspaceChange,
     selectedAgent,
     selectedDataset,
@@ -143,7 +224,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     datasets,
     loading,
     refreshDatasets,
-  }), [workspace, selectedAgent, selectedDataset, agents, datasets, loading, handleAgentChange, handleWorkspaceChange, refreshDatasets]);
+  }), [workspace, tenantWorkspaces, selectedAgent, selectedDataset, agents, datasets, loading, handleAgentChange, handleWorkspaceChange, refreshDatasets]);
 
   return (
     <FilterContext.Provider value={value}>

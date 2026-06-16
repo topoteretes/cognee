@@ -5,6 +5,8 @@ from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
 
 from cognee.modules.users.models import User
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
@@ -110,6 +112,8 @@ async def add(
     data_per_batch: Optional[int] = 20,
     importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
     **kwargs,
 ):
     """
@@ -246,7 +250,7 @@ async def add(
         - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
-        - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
+        - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
@@ -291,8 +295,11 @@ async def add(
     )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
-    # standard DataItems before the pipeline sees them.
-    data = await resolve_dlt_sources(
+    # standard DataItems before the pipeline sees them. orphan_cleanup (when
+    # not None) deletes dlt rows no longer present in the source; it is
+    # deferred until after the fresh rows are committed to avoid a data-loss
+    # window on a mid-ingest failure.
+    data, orphan_cleanup = await resolve_dlt_sources(
         data,
         dataset_name=dataset_name,
         user=user,
@@ -302,6 +309,12 @@ async def add(
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.
     if run_in_background:
+        # Detached pipelines run one-at-a-time (to avoid DB write conflicts)
+        # and commit later, so we cannot safely defer cleanup past their commit
+        # from here without racing them. Run it up front instead.
+        if orphan_cleanup is not None:
+            await orphan_cleanup()
+            orphan_cleanup = None
         data = await _materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
@@ -322,6 +335,8 @@ async def add(
         use_pipeline_cache=True,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers

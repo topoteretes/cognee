@@ -93,6 +93,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.delete_command", "DeleteCommand"),
         ("cognee.cli.commands.config_command", "ConfigCommand"),
         ("cognee.cli.commands.datasets_command", "DatasetsCommand"),
+        ("cognee.cli.commands.agents_command", "AgentsCommand"),
         ("cognee.cli.commands.sessions_command", "SessionsCommand"),
         ("cognee.cli.commands.feedback_command", "FeedbackCommand"),
         ("cognee.cli.commands.memify_command", "MemifyCommand"),

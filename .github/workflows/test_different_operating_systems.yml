@@ -14,6 +14,12 @@ on:
         required: false
         type: string
         default: '["ubuntu-22.04", "macos-15", "windows-latest"]'
+      extra-dependencies:
+        # Space-separated package extras for the unit-test job (e.g. "postgres").
+        # Driver-dependent tests importorskip when their extra is absent.
+        required: false
+        type: string
+        default: ''
     secrets:
       LLM_PROVIDER:
         required: true
@@ -23,17 +29,15 @@ on:
         required: true
       LLM_API_KEY:
         required: true
+      LLM_ARGS:
+        required: false
       LLM_API_VERSION:
         required: true
       EMBEDDING_PROVIDER:
         required: true
       EMBEDDING_MODEL:
         required: true
-      EMBEDDING_ENDPOINT:
-        required: true
       EMBEDDING_API_KEY:
-        required: true
-      EMBEDDING_API_VERSION:
         required: true
 
 env:
@@ -60,24 +64,24 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ matrix.python-version }}
+          extra-dependencies: ${{ inputs.extra-dependencies }}
 
       - name: Run unit tests
         shell: bash
-        run: uv run pytest cognee/tests/unit/
+        run: uv run pytest cognee/tests/unit/ --timeout=300 --timeout-method=thread
         env:
           PYTHONUTF8: 1
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
 
   run-library-test:
     name: Library test ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -107,14 +111,13 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_library.py
 
   run-build-test:
@@ -178,12 +181,11 @@ jobs:
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_default_graph.py
 
   run-hard-deletion-test:
@@ -210,10 +212,9 @@ jobs:
         env:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_custom_graph.py

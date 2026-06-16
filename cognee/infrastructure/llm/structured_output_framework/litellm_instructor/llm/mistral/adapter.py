@@ -126,7 +126,11 @@ class MistralAdapter(GenericAPIAdapter):
                         response_model=response_model,
                         **merged_kwargs,
                     )
-                if response.choices and response.choices[0].message.content:
+                if (
+                    response.choices
+                    and response.choices[0].message is not None
+                    and response.choices[0].message.content
+                ):
                     content = response.choices[0].message.content
                     return response_model.model_validate_json(content)
                 else:

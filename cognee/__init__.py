@@ -26,9 +26,16 @@ from .modules.run_custom_pipeline import run_custom_pipeline
 from .api.v1.update import update
 from .api.v1.config.config import config
 from .api.v1.datasets.datasets import datasets
+from .api.v1.agents.agents import agents
 from .api.v1.prune import prune
 from .api.v1.search import SearchType, search
-from .api.v1.visualize import visualize_graph, start_visualization_server
+from .api.v1.visualize import (
+    visualize_graph,
+    start_visualization_server,
+    get_schema_inventory,
+    get_memory_provenance_graph,
+    visualize_memory_provenance,
+)
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )

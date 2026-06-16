@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import cognee
-from cognee.api.v1.search import SearchType
+from cognee import SearchType
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
@@ -222,7 +222,7 @@ async def _safe_search(question: str, session_id: str, top_k: int = 5) -> str:
     results = None
     for search_type in search_order:
         try:
-            results = await cognee.search(
+            results = await cognee.recall(
                 query_text=question,
                 query_type=search_type,
                 datasets=[DATASET_NAME],
@@ -521,16 +521,16 @@ async def init_demo():
         cognee.config.data_root_directory(str(DEMO_DATA_DIR))
         cognee.config.system_root_directory(str(DEMO_SYSTEM_DIR))
 
-        record_step("Reset", "Pruning demo-local data and metadata")
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
+        record_step("Reset", "Forgetting demo-local data and metadata")
+        await cognee.forget(everything=True)
 
         record_step("Ingest", "Loading deterministic demo documents")
         documents = _get_demo_documents()
-        await cognee.add(documents, dataset_name=DATASET_NAME)
-
-        record_step("Cognify", "Building knowledge graph")
-        await cognee.cognify(datasets=[DATASET_NAME])
+        await cognee.remember(
+            documents,
+            dataset_name=DATASET_NAME,
+            self_improvement=False,
+        )
 
         state.initialized = True
         state.session_id = DEFAULT_SESSION_ID

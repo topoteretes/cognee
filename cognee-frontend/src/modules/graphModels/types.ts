@@ -62,6 +62,7 @@ export type GraphModel = {
   createdAt: string;
   updatedAt: string;
   status: "draft" | "published";
+  assignedDatasets?: string[];
 };
 
 // ── Clean export types (no _id) ───────────────────────────────────────────────

@@ -70,6 +70,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
+        include_references: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -86,6 +87,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             response_model=response_model,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
         )
         self.validation_system_prompt_path = validation_system_prompt_path
         self.validation_user_prompt_path = validation_user_prompt_path

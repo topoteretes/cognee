@@ -15,6 +15,7 @@ on:
 env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
   test-gemini:
@@ -34,6 +35,7 @@ jobs:
         env:
           LLM_PROVIDER: "gemini"
           LLM_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_MODEL: "gemini/gemini-3-flash-preview"
           EMBEDDING_PROVIDER: "gemini"
           EMBEDDING_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -59,6 +61,7 @@ jobs:
         env:
           LLM_PROVIDER: "openai"
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
@@ -85,6 +88,7 @@ jobs:
         env:
           LLM_PROVIDER: "custom"
           LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_MODEL: "openrouter/x-ai/grok-4.3"
           LLM_ENDPOINT: "https://openrouter.ai/api/v1"
           EMBEDDING_PROVIDER: "openai"
@@ -112,6 +116,7 @@ jobs:
         env:
           LLM_PROVIDER: "bedrock"
           LLM_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
           LLM_MAX_TOKENS: "16384"
           AWS_REGION_NAME: "eu-west-1"
@@ -206,6 +211,7 @@ jobs:
           # Note: If model becomes outdated update docs with new model as well
           LLM_MODEL: "anthropic/claude-sonnet-4-5-20250929"
           LLM_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_MAX_TOKENS: "16384"
           EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: "openai/text-embedding-3-large"

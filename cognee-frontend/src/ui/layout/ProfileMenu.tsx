@@ -40,7 +40,6 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
 
   return (
     <div ref={containerRef} className="relative">
-      {/* Avatar trigger */}
       <button
         onClick={toggle}
         className="flex items-center justify-center rounded-full cursor-pointer"
@@ -49,7 +48,6 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
         <span style={{ fontSize: 13, fontWeight: 500, color: "#fff" }}>{initial}</span>
       </button>
 
-      {/* Dropdown */}
       {isOpen && (
         <div
           className="absolute z-50"
@@ -63,7 +61,6 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
             padding: 6,
           }}
         >
-          {/* User info */}
           <div className="flex items-center gap-[10px] px-3 py-[10px]">
             <div
               className="flex items-center justify-center rounded-full flex-shrink-0"
@@ -83,7 +80,6 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
 
           <div style={{ height: 1, background: "#EEEEEE", margin: "2px -6px" }} />
 
-          {/* Profile link */}
           <Link
             href={profileHref}
             onClick={close}
@@ -96,7 +92,6 @@ export default function ProfileMenu({ userName, userEmail, profileHref = "/setti
 
           <div style={{ height: 1, background: "#EEEEEE", margin: "2px -6px" }} />
 
-          {/* Log out — use <a> instead of <Link> to trigger a full page navigation to the API route */}
           <a
             href={logoutHref}
             onClick={close}

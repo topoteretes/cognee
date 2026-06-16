@@ -1,10 +1,12 @@
+from uuid import UUID
+
 from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models.PrincipalConfiguration import PrincipalConfiguration
 
 
 async def store_principal_configuration(
-    principal_id: str, name: str, configuration: dict
+    principal_id: UUID, name: str, configuration: dict
 ) -> PrincipalConfiguration:
     """
     Persists or updates a Cognee configuration for a specific principal (user or group).
@@ -15,7 +17,7 @@ async def store_principal_configuration(
     the existing record.
 
     Args:
-        principal_id (str): The unique identifier (UUID) of the owner (user/group).
+        principal_id (UUID): The unique identifier of the owner (user/group).
         name (str): A descriptive name for the configuration (e.g., "default_llm_settings").
         configuration (dict): A dictionary containing the JSON-serializable config data.
 

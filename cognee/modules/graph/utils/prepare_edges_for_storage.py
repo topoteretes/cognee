@@ -3,6 +3,9 @@
 from typing import Any, Dict, Iterable, List, Tuple
 
 from cognee.modules.engine.utils import generate_edge_object_id
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 def _get_value(item: Any, field_name: str) -> Any:
@@ -25,41 +28,47 @@ def get_edge_retrieval_text(edge_text: Any, relationship_name: Any) -> str:
     return _get_nonblank_text(edge_text) or _get_nonblank_text(relationship_name) or ""
 
 
-def _short_id(node_id: Any) -> str:
-    return str(node_id)[:8]
-
-
 def _trim_preview(text: str, max_length: int = 80) -> str:
     return " ".join(text.split())[:max_length]
 
 
 def _get_node_label(node: Any, node_id: Any) -> str:
-    short_id = _short_id(node_id)
+    """Return a human-readable label for a node, based on the author's
+    declared `metadata["index_fields"]`. Falls back to `name` if declared,
+    then to the class name as a last resort.
+
+    Structural DataPoints (e.g. `Timestamp`) intentionally declare empty
+    `index_fields` and have no `name`. For those we emit the class name
+    rather than raising, since they are part of the graph but were never
+    intended to carry an embeddable identifier.
+    """
     if node is None:
-        return short_id
+        logger.warning(
+            "Cannot resolve node %r to build a fallback edge_text label; "
+            "falling back to the node id. Pass the endpoint nodes alongside "
+            "the edges to ensure_default_edge_properties.",
+            node_id,
+        )
+        return str(node_id)
+
+    metadata = _get_value(node, "metadata") or {}
+    for field in metadata.get("index_fields") or []:
+        value = _get_nonblank_text(_get_value(node, field))
+        if value:
+            return _trim_preview(value)
 
     name = _get_nonblank_text(_get_value(node, "name"))
     if name:
         return name
 
     type_name = type(node).__name__
-    if type_name == "DocumentChunk":
-        chunk_index = _get_value(node, "chunk_index")
-        if chunk_index is not None:
-            return f"chunk {chunk_index}"
-
-        text = _get_nonblank_text(_get_value(node, "text"))
-        if text:
-            return _trim_preview(text)
-
-    title = _get_nonblank_text(_get_value(node, "title"))
-    if title:
-        return title
-
-    if type_name:
-        return f"{type_name} {short_id}"
-
-    return short_id
+    logger.warning(
+        "Falling back to class name %r as the edge_text label for node %r: "
+        "neither `metadata['index_fields']` nor `name` yields a value.",
+        type_name,
+        node_id,
+    )
+    return type_name
 
 
 def _make_node_lookup(nodes: Iterable[Any] | None) -> dict[str, Any]:

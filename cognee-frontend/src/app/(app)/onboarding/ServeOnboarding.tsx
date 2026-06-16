@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import searchDataset from "@/modules/datasets/searchDataset";
+import { trackEvent, TrackPageView } from "@/modules/analytics";
 
 function StepBadge({ step, total = 4 }: { step: number; total?: number }) {
   return (
@@ -31,7 +32,7 @@ function CodeBlock({ code }: { code: string }) {
         <code>{code}</code>
       </pre>
       <button
-        onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+        onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); trackEvent({ pageName: "Onboarding Serve", eventName: "serve_code_copied", additionalProperties: { snippet: code.slice(0, 30) } }); }}
         className="cursor-pointer"
         style={{ position: "absolute", top: 8, right: 8, background: "#27272A", border: "1px solid #3F3F46", borderRadius: 4, padding: "4px 8px", fontSize: 11, color: "#A1A1AA" }}
       >
@@ -62,7 +63,7 @@ function ServeStep1({ onNext }: { onNext: () => void }) {
         </div>
       </div>
 
-      <button onClick={onNext} className="cursor-pointer" style={{ background: "#059669", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
+      <button onClick={() => { trackEvent({ pageName: "Onboarding Serve", eventName: "serve_step_completed", additionalProperties: { step: "1" } }); onNext(); }} className="cursor-pointer" style={{ background: "#059669", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
         Continue
       </button>
       <StepDots current={1} />
@@ -99,7 +100,7 @@ function ServeStep2({ onNext }: { onNext: () => void }) {
         </div>
       </div>
 
-      <button onClick={onNext} className="cursor-pointer" style={{ background: "#059669", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
+      <button onClick={() => { trackEvent({ pageName: "Onboarding Serve", eventName: "serve_step_completed", additionalProperties: { step: "2" } }); onNext(); }} className="cursor-pointer" style={{ background: "#059669", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
         Continue
       </button>
       <StepDots current={2} />
@@ -121,6 +122,7 @@ function ServeStep3({ onNext, cogniInstance }: {
 
   const handleSearch = async (q: string) => {
     if (!q.trim()) return;
+    trackEvent({ pageName: "Onboarding Serve", eventName: "serve_search_executed", additionalProperties: { query_length: String(q.length) } });
     setQuery(q);
     setIsSearching(true);
     setResults([]);
@@ -169,7 +171,7 @@ function ServeStep3({ onNext, cogniInstance }: {
 
       <div className="flex gap-2 flex-wrap justify-center">
         {suggestions.map((s) => (
-          <button key={s} onClick={() => handleSearch(s)} className="cursor-pointer" style={{ background: "#F4F4F5", border: "1px solid #E4E4E7", borderRadius: 6, padding: "6px 12px", fontSize: 12, color: "#52525B" }}>
+          <button key={s} onClick={() => { trackEvent({ pageName: "Onboarding Serve", eventName: "serve_suggestion_clicked", additionalProperties: { suggestion: s } }); handleSearch(s); }} className="cursor-pointer" style={{ background: "#F4F4F5", border: "1px solid #E4E4E7", borderRadius: 6, padding: "6px 12px", fontSize: 12, color: "#52525B" }}>
             {s}
           </button>
         ))}
@@ -185,7 +187,7 @@ function ServeStep3({ onNext, cogniInstance }: {
 
       <StepDots current={3} />
 
-      <button onClick={onNext} className="cursor-pointer" style={{ background: "#059669", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
+      <button onClick={() => { trackEvent({ pageName: "Onboarding Serve", eventName: "serve_step_completed", additionalProperties: { step: "3" } }); onNext(); }} className="cursor-pointer" style={{ background: "#059669", border: "none", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#fff" }}>
         Continue
       </button>
     </div>
@@ -204,10 +206,10 @@ function ServeStep4() {
       </p>
 
       <div className="flex gap-3">
-        <button onClick={() => router.push("/dashboard")} className="cursor-pointer" style={{ background: "#059669", color: "#fff", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, border: "none" }}>
+        <button onClick={() => { trackEvent({ pageName: "Onboarding Serve", eventName: "serve_onboarding_completed", additionalProperties: { destination: "dashboard" } }); router.push("/dashboard"); }} className="cursor-pointer" style={{ background: "#059669", color: "#fff", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, border: "none" }}>
           Go to dashboard
         </button>
-        <button onClick={() => router.push("/datasets")} className="cursor-pointer bg-white" style={{ border: "1px solid #E4E4E7", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#000" }}>
+        <button onClick={() => { trackEvent({ pageName: "Onboarding Serve", eventName: "serve_onboarding_completed", additionalProperties: { destination: "datasets" } }); router.push("/datasets"); }} className="cursor-pointer bg-white" style={{ border: "1px solid #E4E4E7", borderRadius: 8, padding: "10px 24px", fontSize: 14, fontWeight: 500, color: "#000" }}>
           View datasets
         </button>
       </div>
@@ -223,9 +225,12 @@ export default function ServeOnboarding() {
 
   if (isInitializing || !cogniInstance) {
     return (
-      <div className="flex items-center justify-center h-screen" style={{ fontFamily: '"Inter", system-ui, sans-serif' }}>
-        <span style={{ fontSize: 14, color: "#71717A" }}>Connecting...</span>
-      </div>
+      <>
+        <TrackPageView page="Onboarding Serve" />
+        <div className="flex items-center justify-center h-screen" style={{ fontFamily: '"Inter", system-ui, sans-serif' }}>
+          <span style={{ fontSize: 14, color: "#71717A" }}>Connecting...</span>
+        </div>
+      </>
     );
   }
 

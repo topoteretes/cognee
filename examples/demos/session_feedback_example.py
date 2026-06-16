@@ -2,32 +2,33 @@
 import os
 import asyncio
 
+os.environ.setdefault("CACHING", "true")
+os.environ.setdefault("CACHE_BACKEND", "redis")
+
 # Enable session feedback caching before importing Cognee.
 os.environ.setdefault("CACHING", "true")
 os.environ.setdefault("CACHE_BACKEND", "redis")
 
 import cognee
-from cognee.api.v1.search import SearchType
+from cognee import SearchType
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import setup_logging, INFO
+from cognee.shared.logging_utils import INFO, setup_logging
 
 
 async def main():
     print("Resetting cognee data...")
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
     print("Done.\n")
 
     texts = [
         "Cognee builds knowledge graphs from text and provides session-based feedback APIs. "
         "You can attach feedback (rating and comment) to each Q&A and later retract it.",
-        "Sessions group Q&A by conversation. Use a session_id in search() to keep turns in one thread; "
+        "Sessions group Q&A by conversation. Use a session_id in recall() to keep turns in one thread; "
         "omit it to use the default_session.",
         "Feedback helps improve answers: add_feedback stores a score and optional text, "
         "delete_feedback clears it.",
     ]
-    await cognee.add(texts)
-    await cognee.cognify()
+    await cognee.remember(texts, self_improvement=False)
 
     user = await get_default_user()
 
@@ -41,7 +42,7 @@ async def main():
         "Can I attach feedback to answers?",
     ]:
         print(f"  Q: {q}")
-        results = await cognee.search(
+        results = await cognee.recall(
             query_text=q,
             query_type=SearchType.GRAPH_COMPLETION,
             user=user,
@@ -73,7 +74,7 @@ async def main():
 
     # ---- Default session: one question without a custom session_id ----
     print("--- Session: default_session (no session_id in search) ---")
-    results_default = await cognee.search(
+    results_default = await cognee.recall(
         query_text="How are sessions related to Cognee?",
         query_type=SearchType.GRAPH_COMPLETION,
         user=user,

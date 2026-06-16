@@ -8,6 +8,8 @@ import os
 
 import cognee
 
+import cognee
+
 
 async def cognee_demo():
     # Get file path to document to process
@@ -16,21 +18,19 @@ async def cognee_demo():
     current_directory = Path(__file__).resolve().parent
     file_path = os.path.join(current_directory, "data", "alice_in_wonderland.txt")
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     # Call Cognee to process document
-    await cognee.add(file_path)
-    await cognee.cognify()
+    await cognee.remember(file_path, self_improvement=False)
 
     # Query Cognee for information from provided document
-    answer = await cognee.search("List me all the important characters in Alice in Wonderland.")
+    answer = await cognee.recall("List me all the important characters in Alice in Wonderland.")
     print(answer)
 
-    answer = await cognee.search("How did Alice end up in Wonderland?")
+    answer = await cognee.recall("How did Alice end up in Wonderland?")
     print(answer)
 
-    answer = await cognee.search("Tell me about Alice's personality.")
+    answer = await cognee.recall("Tell me about Alice's personality.")
     print(answer)
 
 

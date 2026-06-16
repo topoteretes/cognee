@@ -45,7 +45,12 @@ async def test_get_context_success(mock_vector_engine):
     assert objects[0].payload["text"] == "Steve Rodger"
     assert objects[1].payload["text"] == "Mike Broski"
     mock_vector_engine.search.assert_awaited_once_with(
-        "DocumentChunk_text", "test query", limit=5, include_payload=True
+        "DocumentChunk_text",
+        "test query",
+        limit=5,
+        include_payload=True,
+        node_name=None,
+        node_name_filter_operator="OR",
     )
 
 
@@ -99,7 +104,39 @@ async def test_get_context_top_k_limit(mock_vector_engine):
 
     assert len(objects) == 3
     mock_vector_engine.search.assert_awaited_once_with(
-        "DocumentChunk_text", "test query", limit=3, include_payload=True
+        "DocumentChunk_text",
+        "test query",
+        limit=3,
+        include_payload=True,
+        node_name=None,
+        node_name_filter_operator="OR",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_context_forwards_nodeset_filter_to_vector_search(mock_vector_engine):
+    """Test that node_name filtering is passed through to the vector engine."""
+    mock_vector_engine.search.return_value = []
+
+    retriever = ChunksRetriever(
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        await retriever.get_retrieved_objects("land cover")
+
+    mock_vector_engine.search.assert_awaited_once_with(
+        "DocumentChunk_text",
+        "land cover",
+        limit=30,
+        include_payload=True,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
     )
 
 
@@ -126,6 +163,8 @@ async def test_init_defaults():
     retriever = ChunksRetriever()
 
     assert retriever.top_k == 5
+    assert retriever.node_name is None
+    assert retriever.node_name_filter_operator == "OR"
 
 
 @pytest.mark.asyncio

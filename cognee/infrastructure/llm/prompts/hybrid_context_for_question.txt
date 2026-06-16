@@ -1,0 +1,5 @@
+The question is: `{{ question }}`
+Answer using this sectioned context. Keep the answer brief and do not use information outside the context.
+
+Context:
+`{{ context }}`

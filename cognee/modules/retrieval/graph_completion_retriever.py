@@ -17,6 +17,7 @@ from cognee.modules.retrieval.utils.used_graph_elements import (
     is_edge_list,
     extract_from_edges,
 )
+from cognee.modules.retrieval.utils.references import append_answer_grounded_evidence
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
@@ -57,6 +58,7 @@ class GraphCompletionRetriever(BaseRetriever):
         neighborhood_seed_top_k: Optional[int] = 10,
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
+        include_references: bool = False,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.user_prompt_path = user_prompt_path
@@ -77,6 +79,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self.neighborhood_seed_top_k = neighborhood_seed_top_k
         self.include_global_context_index = include_global_context_index
         self.global_context_index_top_k = global_context_index_top_k
+        self.include_references = include_references
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -302,6 +305,21 @@ class GraphCompletionRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
+    async def _append_graph_evidence(self, completions: List[Any]) -> List[Any]:
+        """Append an answer-grounded chunk Evidence block to string completions.
+
+        Each answer is run as a vector query against the chunk index, so the
+        Evidence bullets reflect where the answer text is grounded in the corpus
+        rather than which graph elements happened to be retrieved. Evidence is
+        appended only when references are enabled and the completion is a plain
+        string (never corrupt a structured response_model); search failures
+        degrade to no Evidence.
+        """
+        return await append_answer_grounded_evidence(
+            completions,
+            enabled=self.include_references and self.response_model is str,
+        )
+
     async def get_completion_from_context(
         self,
         query: Optional[str] = None,
@@ -343,8 +361,17 @@ class GraphCompletionRetriever(BaseRetriever):
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
             )
-            return [completion]
-        return await self._generate_completion_without_session(query, query_batch, context)
+            completions = [completion]
+        else:
+            completions = await self._generate_completion_without_session(
+                query, query_batch, context
+            )
+
+        # Session and non-session branches rejoin here so every variant that calls
+        # this method (including via super()) appends references once. Evidence is
+        # grounded in each completion's own text, so a cache-hit answer never
+        # cites chunks that share nothing with it.
+        return await self._append_graph_evidence(completions)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None

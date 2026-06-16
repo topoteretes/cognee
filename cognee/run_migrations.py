@@ -64,7 +64,7 @@ async def run_vector_migrations():
     """
     Run adapter-specific vector storage migrations at startup.
     """
-    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.exc import OperationalError, ProgrammingError
     from cognee.infrastructure.databases.exceptions import EntityNotFoundError
     from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
     from cognee.infrastructure.databases.utils.resolve_dataset_database_connection_info import (
@@ -74,7 +74,11 @@ async def run_vector_migrations():
 
     try:
         dataset_databases = await get_dataset_databases()
-    except (OperationalError, EntityNotFoundError) as e:
+    except (OperationalError, ProgrammingError, EntityNotFoundError) as e:
+        # The dataset_database table may not exist yet on a fresh database. A
+        # missing table surfaces as OperationalError on SQLite ("no such
+        # table") and as ProgrammingError on PostgreSQL/asyncpg
+        # (UndefinedTableError); skip vector startup migrations in both cases.
         logger.warning(
             "Skipping vector startup migrations. Could not access dataset_database table: %s",
             e,

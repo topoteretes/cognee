@@ -1,38 +1,34 @@
 # ruff: noqa: E402
 import asyncio
 import os
-from pathlib import Path
+
 import sqlalchemy as sa
 
-from dotenv import load_dotenv
-
-load_dotenv(override=True)
-
-# Configure process-level Cognee settings before importing Cognee.
+# This example uses a local Postgres migration database and no backend ACL.
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
-
-MIGRATION_DB_PROVIDER = "postgres"
-MIGRATION_DB_HOST = os.environ.get("MIGRATION_DB_HOST", "127.0.0.1")
-MIGRATION_DB_PORT = os.environ.get("MIGRATION_DB_PORT", "5432")
-MIGRATION_DB_NAME = os.environ.get("MIGRATION_DB_NAME", "cognee_migration")
-MIGRATION_DB_USERNAME = os.environ.get("MIGRATION_DB_USERNAME", "cognee")
-MIGRATION_DB_PASSWORD = os.environ.get("MIGRATION_DB_PASSWORD", "cognee")
+os.environ["MIGRATION_DB_PROVIDER"] = "postgres"
+os.environ.setdefault("MIGRATION_DB_HOST", "127.0.0.1")
+os.environ.setdefault("MIGRATION_DB_PORT", "5432")
+os.environ.setdefault("MIGRATION_DB_NAME", "cognee_migration")
+os.environ.setdefault("MIGRATION_DB_USERNAME", "cognee")
+os.environ.setdefault("MIGRATION_DB_PASSWORD", "cognee")
 
 import cognee
+from cognee import SearchType
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
+)
+from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
 )
 from cognee.infrastructure.databases.relational.config import get_migration_config
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_vector_db_and_tables,
 )
-from cognee.modules.search.types import SearchType
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.tasks.ingestion import migrate_relational_database
-
 
 CAR_MANUFACTURERS = [
     (
@@ -270,16 +266,7 @@ async def main(ontology_path: str = None):
     # Create a small Postgres DB schema to migrate.
     create_example_postgres_db()
 
-    migration_config = get_migration_config()
-    migration_config.migration_db_provider = MIGRATION_DB_PROVIDER
-    migration_config.migration_db_host = MIGRATION_DB_HOST
-    migration_config.migration_db_port = MIGRATION_DB_PORT
-    migration_config.migration_db_name = MIGRATION_DB_NAME
-    migration_config.migration_db_username = MIGRATION_DB_USERNAME
-    migration_config.migration_db_password = MIGRATION_DB_PASSWORD
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     await create_relational_db_and_tables()
     await create_vector_db_and_tables()
@@ -290,10 +277,9 @@ async def main(ontology_path: str = None):
     graph = await get_graph_engine()
     await migrate_relational_database(graph, schema=schema)
 
-    # Second pass: ingest text content from the relational DB and run cognify (optional ontology).
+    # Second pass: remember text content from the relational DB (optional ontology).
     dataset_name = "migration_texts"
     db_texts = fetch_texts_from_postgres()
-    await cognee.add(db_texts, dataset_name)
 
     if ontology_path:
         graph_visualization_path = os.path.join(
@@ -304,14 +290,19 @@ async def main(ontology_path: str = None):
                 "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_path)
             }
         }
-        await cognee.cognify([dataset_name], config=config)
+        await cognee.remember(
+            db_texts,
+            dataset_name=dataset_name,
+            config=config,
+            self_improvement=False,
+        )
     else:
         graph_visualization_path = os.path.join(
             os.path.dirname(__file__), ".artifacts", "complex_relational_db_no_ont.html"
         )
-        await cognee.cognify([dataset_name])
+        await cognee.remember(db_texts, dataset_name=dataset_name, self_improvement=False)
 
-    results = await cognee.search(
+    results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Which companies are mentioned?",
         top_k=50,

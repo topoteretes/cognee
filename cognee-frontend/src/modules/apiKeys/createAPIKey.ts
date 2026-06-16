@@ -1,21 +1,19 @@
 import localFetch from "@/modules/instances/localFetch";
 
-export default async function createApiKey(
-  options?: { name?: string; noRedirectOnAuth?: boolean } | string,
-): Promise<string> {
-  const name = typeof options === "string" ? options : options?.name || null;
+export interface CreatedApiKey {
+  id: string;
+  key: string;
+  label?: string;
+  name?: string;
+}
 
+export default async function createApiKey(
+  options: { name?: string; noRedirectOnAuth?: boolean } = {},
+): Promise<CreatedApiKey> {
   const response = await localFetch("/v1/auth/api-keys", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name: options.name ?? null }),
   });
-
-  if (!response.ok) {
-    const err = await response.text().catch(() => "Failed to create API key");
-    throw new Error(err);
-  }
-
-  const data = await response.json();
-  return data.api_key ?? data.token ?? "";
+  return response.json();
 }
