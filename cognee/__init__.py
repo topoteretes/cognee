@@ -52,8 +52,25 @@ from cognee.run_migrations import run_startup_migrations
 # ---------------------------------------------------------------------------
 # V2 memory-oriented API
 # ---------------------------------------------------------------------------
-from .api.v1 import remember, RememberResult, recall, improve, forget, serve, disconnect, visualize
+from .api.v1 import (
+    remember,
+    RememberResult,
+    recall,
+    improve,
+    forget,
+    serve,
+    disconnect,
+    visualize,
+    push,
+    PushResult,
+    export,
+    ExportResult,
+)
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
+
+# Memory migration (cognee.migration has the provider sources:
+# Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
+from . import migration
 
 # Tracing / Observability
 from cognee.modules.observability.trace_context import (

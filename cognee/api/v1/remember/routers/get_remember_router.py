@@ -28,6 +28,78 @@ UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"}
 EmptyExampleStr = Annotated[str, WithJsonSchema({"type": "string", "example": ""})]
 
 
+async def _import_cogx_archives(
+    uploads,
+    dataset_name,
+    dataset_id,
+    import_mode,
+    user,
+    run_in_background: bool = False,
+):
+    """Import uploaded COGX archive tarballs (produced by ``cognee.push()``)."""
+    import tarfile
+    import tempfile
+
+    from cognee.modules.migration import COGXArchiveSource, import_memory_source
+    from cognee.modules.migration.archive import unpack_archive
+    from cognee.modules.migration.sources.base import IMPORT_MODES
+    from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+        resolve_authorized_user_datasets,
+    )
+
+    if import_mode and import_mode not in IMPORT_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown import_mode {import_mode!r}. Expected one of {IMPORT_MODES}.",
+        )
+
+    try:
+        if not dataset_name:
+            # The endpoint contract accepts datasetId in place of datasetName;
+            # resolve the name the same way the main remember path does.
+            _, authorized_datasets = await resolve_authorized_user_datasets(dataset_id, user)
+            dataset_name = authorized_datasets[0].name
+
+        results = []
+        for upload in uploads:
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                archive_root = unpack_archive(upload.file, temporary_directory)
+                source = COGXArchiveSource(archive_root, mode=import_mode or "preserve")
+                results.append(
+                    await import_memory_source(
+                        source,
+                        dataset_name=dataset_name,
+                        user=user,
+                        run_in_background=run_in_background,
+                    )
+                )
+        if not results:
+            raise HTTPException(status_code=400, detail="No archive files were processed.")
+
+        aggregate = results[-1].to_dict()
+        aggregate["items_processed"] = sum(result.items_processed for result in results)
+        items = [item for result in results for item in result.items]
+        if items:
+            aggregate["items"] = items
+        return jsonable_encoder(aggregate)
+    except HTTPException:
+        raise
+    except (ValueError, tarfile.TarError) as error:
+        # Log the detail server-side; the response stays generic so exception
+        # text / stack frames are not exposed to the caller (CodeQL py/stack-trace-exposure).
+        logger.error("COGX archive import validation error: %s", error, exc_info=True)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid COGX archive."},
+        )
+    except Exception as error:
+        logger.error("COGX archive import error: %s", error, exc_info=True)
+        return JSONResponse(
+            status_code=409,
+            content={"error": "An error occurred during COGX archive import."},
+        )
+
+
 def get_remember_router() -> APIRouter:
     router = APIRouter()
 
@@ -127,6 +199,13 @@ def get_remember_router() -> APIRouter:
                 "Only supported value: 'skills'; leave empty for normal ingestion."
             ),
         ),
+        import_mode: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "COGX archive imports only: 'preserve' (default), 'hybrid', or 're-derive'."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -176,12 +255,27 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        if content_type and content_type != "skills":
+        if content_type == "cogx-archive":
+            if not data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="content_type 'cogx-archive' requires an uploaded archive file.",
+                )
+            return await _import_cogx_archives(
+                data,
+                datasetName,
+                datasetId if datasetId else None,
+                import_mode,
+                user,
+                run_in_background=run_in_background or False,
+            )
+
+        if content_type and content_type not in ("skills", "cogx-archive"):
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Unsupported content_type '{content_type}'. "
-                    "Use 'skills' or leave it empty for normal ingestion."
+                    "Use 'skills', 'cogx-archive', or leave it empty for normal ingestion."
                 ),
             )
 
