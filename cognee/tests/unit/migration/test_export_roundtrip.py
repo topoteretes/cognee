@@ -280,7 +280,9 @@ FROZEN_FACTS = (
     '"fact_text": "Alice lives in Berlin"}\n'
 )
 FROZEN_NODES = (
-    '{"id": "' + PERSON_TYPE_ID + '", "type": "EntityType", "name": "Person", "description": "Person"}\n'
+    '{"id": "'
+    + PERSON_TYPE_ID
+    + '", "type": "EntityType", "name": "Person", "description": "Person"}\n'
 )
 
 
