@@ -1181,6 +1181,15 @@ class SessionManager:
         session_id = self._resolve_session_id(session_id)
         key = self._graph_context_key(user_id, session_id)
         try:
+            raw = await self._cache.get_value(key)
+            return raw if raw else ""
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature get_value), fall back to legacy duck-typing
+            pass
+        except Exception:
+            return ""
+        try:
             raw = await self._cache.async_redis.get(key)
             if raw:
                 return raw.decode() if isinstance(raw, bytes) else raw
@@ -1204,6 +1213,13 @@ class SessionManager:
             return
         session_id = self._resolve_session_id(session_id)
         key = self._graph_context_key(user_id, session_id)
+        try:
+            await self._cache.set_value(key, context, ttl=self._cache.session_ttl_seconds)
+            return
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature set_value), fall back to legacy duck-typing
+            pass
         try:
             await self._cache.async_redis.set(key, context)
             if self._cache.session_ttl_seconds:
@@ -1229,10 +1245,17 @@ class SessionManager:
         # Also clean up the graph knowledge context key
         graph_key = self._graph_context_key(user_id, session_id)
         try:
-            await self._cache.async_redis.delete(graph_key)
-        except AttributeError:
+            await self._cache.delete_value(graph_key)
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature delete_value), fall back to legacy duck-typing
             try:
-                del self._cache._cache[graph_key]
+                await self._cache.async_redis.delete(graph_key)
+            except AttributeError:
+                try:
+                    del self._cache._cache[graph_key]
+                except Exception:
+                    pass
             except Exception:
                 pass
         except Exception:

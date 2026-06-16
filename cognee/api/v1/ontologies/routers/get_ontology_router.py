@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, Form, UploadFile, Depends, Request
+from fastapi import APIRouter, File, Form, Path, UploadFile, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import Optional, List
 
@@ -16,18 +16,38 @@ def get_ontology_router() -> APIRouter:
     @router.post("", response_model=dict)
     async def upload_ontology(
         request: Request,
-        ontology_key: str = Form(...),
-        ontology_file: UploadFile = File(...),
-        description: Optional[str] = Form(None),
+        ontology_key: str = Form(
+            ...,
+            examples=["medical_ontology"],
+            description=(
+                "Unique, user-defined identifier for this ontology. Reference it later via the "
+                "ontology_key parameter of the cognify/remember endpoints."
+            ),
+        ),
+        ontology_file: UploadFile = File(
+            ...,
+            description=(
+                "Single ontology file in OWL (RDF/XML) format. The filename must end with .owl "
+                "— other extensions are rejected with 400. Exactly one file per request."
+            ),
+        ),
+        description: Optional[str] = Form(
+            None,
+            examples=["OWL ontology of medical conditions and treatments"],
+            description=(
+                "Optional human-readable description (plain string; values starting with "
+                "'[' or '{' are rejected)."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
         Upload a single ontology file for later use in cognify operations.
 
         ## Request Parameters
-        - **ontology_key** (str): User-defined identifier for the ontology.
-        - **ontology_file** (UploadFile): Single OWL format ontology file
-        - **description** (Optional[str]): Optional description for the ontology.
+        - **ontology_key** (str): Unique, user-defined identifier for the ontology (plain string — values starting with '[' or '{' are rejected; duplicate keys return 400). Use this key later as the `ontology_key` parameter in /api/v1/cognify or /api/v1/remember.
+        - **ontology_file** (UploadFile): Single ontology file in OWL (RDF/XML) format; the filename must end with .owl.
+        - **description** (Optional[str]): Optional description for the ontology (plain string; values starting with '[' or '{' are rejected).
 
         ## Response
         Returns metadata about the uploaded ontology including key, filename, size, and upload timestamp.
@@ -82,7 +102,14 @@ def get_ontology_router() -> APIRouter:
 
     @router.delete("/{ontology_key}", response_model=dict)
     async def delete_ontology(
-        ontology_key: str,
+        ontology_key: str = Path(
+            ...,
+            examples=["medical_ontology"],
+            description=(
+                "Key of the ontology to delete, exactly as provided at upload time "
+                "(see GET /api/v1/ontologies for available keys)."
+            ),
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """

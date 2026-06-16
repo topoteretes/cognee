@@ -340,6 +340,8 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                     document_id=getattr(dp, "document_id", None),
                     document_name=getattr(dp, "document_name", None),
                     chunk_index=getattr(dp, "chunk_index", None),
+                    source_chunk_id=getattr(dp, "source_chunk_id", None),
+                    importance_weight=getattr(dp, "importance_weight", None),
                     belongs_to_set=(dp.belongs_to_set or []),
                 )
                 payload = serialize_data(index_point.model_dump())
