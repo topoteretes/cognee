@@ -888,6 +888,10 @@ class LanceDBAdapter(VectorDBInterface):
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """Return rows from `collection_name` whose id is in `data_point_ids`."""
+        if not data_point_ids:
+            # No ids requested. Avoid building an "id IN ()" filter, which lance
+            # rejects as a parse error; pgvector/chromadb return [] here too.
+            return []
         try:
             collection = await self.get_collection(collection_name)
         except CollectionNotFoundError:
