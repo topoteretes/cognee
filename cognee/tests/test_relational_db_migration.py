@@ -226,6 +226,9 @@ async def test_schema_only_migration():
         query_type=cognee.SearchType.GRAPH_COMPLETION,
         top_k=30,
     )
+
+    print("Search results:", search_results)
+
     assert any("11" in r for r in search_results), (
         "Number of tables in the database reported in search_results is either None or not equal to 11"
     )
