@@ -22,12 +22,12 @@ from cognee.infrastructure.databases.relational import (
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
 )
-from cognee.infrastructure.databases.relational.config import get_migration_config
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_vector_db_and_tables,
 )
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.run_migrations import run_migrations
 from cognee.tasks.ingestion import migrate_relational_database
 
 CAR_MANUFACTURERS = [
@@ -121,11 +121,11 @@ def _get_postgres_engine() -> sa.Engine:
     # URL.create safely encodes credentials that contain URL-reserved characters.
     connection_url = sa.URL.create(
         "postgresql+psycopg2",
-        username=MIGRATION_DB_USERNAME,
-        password=MIGRATION_DB_PASSWORD,
-        host=MIGRATION_DB_HOST,
-        port=int(MIGRATION_DB_PORT),
-        database=MIGRATION_DB_NAME,
+        username=os.environ["MIGRATION_DB_USERNAME"],
+        password=os.environ["MIGRATION_DB_PASSWORD"],
+        host=os.environ["MIGRATION_DB_HOST"],
+        port=int(os.environ["MIGRATION_DB_PORT"]),
+        database=os.environ["MIGRATION_DB_NAME"],
     )
     return sa.create_engine(connection_url)
 
@@ -266,9 +266,11 @@ async def main(ontology_path: str = None):
     # Create a small Postgres DB schema to migrate.
     create_example_postgres_db()
 
+    # Ensure a reused local Cognee DB matches the current models before cleanup.
+    await create_relational_db_and_tables()
+    await run_migrations()
     await cognee.forget(everything=True)
 
-    await create_relational_db_and_tables()
     await create_vector_db_and_tables()
 
     engine = get_migration_relational_engine()

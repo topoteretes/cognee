@@ -27,6 +27,7 @@ async def main():
     cognee.config.set_vector_db_config(
         {
             "vector_db_provider": "pgvector",  # Specify PGVector as provider
+            "vector_dataset_database_handler": "pgvector",
             "vector_db_name": "cognee_db",
             "vector_db_host": os.environ.get("DB_HOST", "127.0.0.1"),
             "vector_db_port": "5432",
