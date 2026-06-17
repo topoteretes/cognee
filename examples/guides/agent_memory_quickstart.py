@@ -12,7 +12,7 @@ import asyncio
 import os
 import warnings
 
-# Set these before Cognee config is initialized so the example uses the intended values.
+# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
 os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 warnings.filterwarnings("ignore")

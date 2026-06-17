@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# Set these before Cognee config is initialized so the example uses the intended values.
+# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
 
 # In case environment variables are not set use the example database from the Cognee repo.

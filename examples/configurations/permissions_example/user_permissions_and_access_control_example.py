@@ -20,7 +20,7 @@ async def main():
     # Set the rest of your environment variables as needed. By default OpenAI is used as the LLM provider
     # Reference the .env.tempalte file for available option and how to change LLM provider: https://github.com/topoteretes/cognee/blob/main/.env.template
     # For example to set your OpenAI LLM API key use:
-    # Set this before Cognee config is initialized so the example uses the intended value.
+    # Set this before importing Cognee so Cognee reads the example value instead of defaults or .env settings.
     # os.environ["LLM_API_KEY"] = "your-api-key"
 
     # Create a clean slate for cognee -- reset data and system state

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-# Set these before Cognee config is initialized so the example uses the intended values.
+# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
 os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 os.environ["COGNEE_CLI_MODE"] = "true"

@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 # provide your OpenAI key here
-# Set these before Cognee config is initialized so the example uses the intended values.
+# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
 os.environ["LLM_API_KEY"] = "your_api_key"
 
 # create artifacts directory for storing visualization outputs
@@ -28,7 +28,7 @@ python_zen_principles = asset_paths["python_zen_principles"]
 ontology_path = asset_paths["ontology"]
 
 # configure ontology file path for structured data processing
-# Set these before Cognee config is initialized so the example uses the intended values.
+# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
 os.environ["ONTOLOGY_FILE_PATH"] = ontology_path
 
 import cognee  # noqa: E402

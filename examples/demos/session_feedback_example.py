@@ -2,7 +2,7 @@
 import os
 import asyncio
 
-# Set these before Cognee config is initialized so the example uses the intended values.
+# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
 os.environ.setdefault("CACHING", "true")
 os.environ.setdefault("CACHE_BACKEND", "redis")
 

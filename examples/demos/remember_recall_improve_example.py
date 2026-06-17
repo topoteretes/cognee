@@ -23,7 +23,7 @@ import asyncio
 import os
 
 # Enable filesystem-based session caching (required for session_id and improve)
-# Set these before Cognee config is initialized so the example uses the intended values.
+# Set these before importing Cognee so Cognee reads the example values instead of defaults or .env settings.
 os.environ["CACHING"] = "true"
 os.environ["CACHE_BACKEND"] = "fs"
 
