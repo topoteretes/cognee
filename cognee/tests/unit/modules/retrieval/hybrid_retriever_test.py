@@ -6,7 +6,7 @@ import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
-from cognee.modules.engine.utils import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
@@ -1186,7 +1186,7 @@ def _payload_text(chunk):
 
 
 def _edge_hit(text):
-    return _result(str(generate_edge_id(text)), {"text": text})
+    return _result(str(EdgeType.id_for(text)), {"text": text})
 
 
 def _graph(nodes=None, edges=None):

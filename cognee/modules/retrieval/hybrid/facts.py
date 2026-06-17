@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from cognee.modules.engine.utils import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.retrieval.hybrid.results import first_display_value, payload, result_id
 
@@ -22,7 +22,7 @@ def connection_edge_type_id(edge: dict) -> Optional[str]:
         first_display_value(edge.get("edge_text"), nested_edge_text),
         edge.get("relationship_name"),
     )
-    return str(generate_edge_id(retrieval_text)) if retrieval_text else None
+    return str(EdgeType.id_for(retrieval_text)) if retrieval_text else None
 
 
 def edge_rank_by_id(edge_hits: list[Any]) -> dict[str, int]:

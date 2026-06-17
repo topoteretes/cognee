@@ -47,7 +47,7 @@ from .modules import pipelines
 from .pipelines import Drop
 
 # Migrations
-from cognee.run_migrations import run_startup_migrations
+from cognee.run_migrations import run_migrations
 
 # ---------------------------------------------------------------------------
 # V2 memory-oriented API
@@ -86,3 +86,4 @@ from cognee.modules.agent_memory import agent_memory
 
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
+import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)

@@ -1959,6 +1959,8 @@ async def main():
         logger.info("Running database migrations...")
 
         await setup()
+        # Full startup migrations (relational schema + graph/vector revision
+        # chains) — MCP writes new-scheme data, so it must migrate like the API.
         await run_migrations()
 
         logger.info("Database migrations done.")
