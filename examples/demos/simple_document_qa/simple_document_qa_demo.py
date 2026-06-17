@@ -8,8 +8,6 @@ import os
 
 import cognee
 
-import cognee
-
 
 async def cognee_demo():
     # Get file path to document to process
