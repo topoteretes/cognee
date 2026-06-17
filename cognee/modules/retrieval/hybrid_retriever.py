@@ -172,6 +172,8 @@ class HybridRetriever(BaseRetriever):
         query_batch: Optional[List[str]] = None,
         retrieved_objects: Any = None,
         context: Optional[str] = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         _reject_query_batch(query_batch)
 
@@ -188,6 +190,8 @@ class HybridRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=extract_context_object_ids(retrieved_objects),
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
             return [completion]
 

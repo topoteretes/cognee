@@ -28,6 +28,7 @@ COMMAND_DESCRIPTIONS = {
     "stamp": "Set the stored migration revision WITHOUT running migrations (bookkeeping repair)",
     "history": "List the data-migration chain, newest first",
     "current": "Show each database's stamped migration revision (and last failure, if any)",
+    "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
 }
 
 # Search type choices

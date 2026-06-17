@@ -326,6 +326,8 @@ class GraphCompletionRetriever(BaseRetriever):
         query_batch: Optional[List[str]] = None,
         retrieved_objects: Optional[List[Edge]] = None,
         context: str = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         """
         Generates an LLM response based on the query, context, and conversation history.
@@ -360,6 +362,8 @@ class GraphCompletionRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
             completions = [completion]
         else:
@@ -388,15 +392,30 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         validate_retriever_input(query, query_batch)
 
-        retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
+        effective_query = query
+        turn_preparation = None
+        if query is not None and not query_batch:
+            turn_preparation = await self.prepare_session_turn_for_retrieval(query)
+            if not turn_preparation.should_answer:
+                return [turn_preparation.response_to_user or "Got it."]
+            effective_query = turn_preparation.effective_query or query
+
+        retrieved_objects = await self.get_retrieved_objects(
+            query=effective_query,
+            query_batch=query_batch,
+        )
         context = await self.get_context_from_objects(
-            query=query, query_batch=query_batch, retrieved_objects=retrieved_objects
+            query=effective_query,
+            query_batch=query_batch,
+            retrieved_objects=retrieved_objects,
         )
         completion = await self.get_completion_from_context(
             query=query,
             query_batch=query_batch,
             retrieved_objects=retrieved_objects,
             context=context,
+            effective_query=effective_query,
+            turn_preparation=turn_preparation,
         )
 
         return completion
