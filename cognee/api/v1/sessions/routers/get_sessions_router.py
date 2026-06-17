@@ -12,6 +12,7 @@ from uuid import UUID as UUIDType
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -34,6 +35,73 @@ logger = get_logger("sessions_api")
 
 
 _RangeLiteral = Literal["24h", "7d", "30d", "all"]
+
+
+# --------------------------------------------------------------------------- #
+# Response models
+#
+# These mirror the existing JSON contract exactly (snake_case keys). They use
+# a plain ``BaseModel`` (NOT ``OutDTO``) so field names serialize as-is rather
+# than being camelCased by ``OutDTO``'s alias generator.
+# --------------------------------------------------------------------------- #
+
+
+class SessionRowResponse(BaseModel):
+    """A session list/detail row — mirrors ``SessionRecord.to_dict()`` plus
+    the read-time computed ``effective_status``."""
+
+    session_id: str
+    user_id: str
+    dataset_id: Optional[str] = None
+    status: str
+    started_at: Optional[str] = None
+    last_activity_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    tokens_in: int
+    tokens_out: int
+    cost_usd: float
+    error_count: int
+    last_model: Optional[str] = None
+    effective_status: str
+
+
+class SessionListResponse(BaseModel):
+    """Paginated envelope returned by ``GET /api/v1/sessions``."""
+
+    sessions: list[SessionRowResponse] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+
+class SessionStatsResponse(BaseModel):
+    """Aggregate counters returned by ``GET /api/v1/sessions/stats``."""
+
+    range: _RangeLiteral
+    sessions: int
+    total_spend_usd: float
+    avg_spend_per_session_usd: float
+    tokens_in: int
+    tokens_out: int
+    tokens_total: int
+    agent_time_s: float
+    avg_session_s: float
+    success_rate: float
+    completed: int
+    failed: int
+    abandoned: int
+    running: int
+
+
+class CostByModelRow(BaseModel):
+    """One row of ``GET /api/v1/sessions/cost-by-model``."""
+
+    model: str
+    session_count: int
+    cost_usd: float
+    tokens_in: int
+    tokens_out: int
 
 
 def _range_since(range_key: _RangeLiteral) -> Optional[datetime]:
@@ -80,7 +148,7 @@ async def _visible_user_ids(user: User) -> list[UUIDType]:
 def get_sessions_router() -> APIRouter:
     router = APIRouter()
 
-    @router.get("")
+    @router.get("", response_model=SessionListResponse)
     async def list_sessions(
         range: _RangeLiteral = Query(
             "30d",
@@ -151,20 +219,18 @@ def get_sessions_router() -> APIRouter:
                 order_by=order_by,
                 descending=descending,
             )
-            return jsonable_encoder(
-                {
-                    "sessions": [r.to_dict() for r in page.sessions],
-                    "total": page.total,
-                    "limit": page.limit,
-                    "offset": page.offset,
-                    "has_more": page.has_more,
-                }
+            return SessionListResponse(
+                sessions=[SessionRowResponse(**r.to_dict()) for r in page.sessions],
+                total=page.total,
+                limit=page.limit,
+                offset=page.offset,
+                has_more=page.has_more,
             )
         except Exception as exc:
             logger.error("list_sessions failed: %s", exc, exc_info=True)
             return JSONResponse(status_code=500, content={"error": "list failed"})
 
-    @router.get("/stats")
+    @router.get("/stats", response_model=SessionStatsResponse)
     async def get_stats(
         range: _RangeLiteral = Query(
             "30d",
@@ -253,26 +319,24 @@ def get_sessions_router() -> APIRouter:
         sessions_count = totals.sessions or 0
         avg_spend = (totals.cost_usd / sessions_count) if sessions_count else 0.0
 
-        return jsonable_encoder(
-            {
-                "range": range,
-                "sessions": sessions_count,
-                "total_spend_usd": float(totals.cost_usd or 0.0),
-                "avg_spend_per_session_usd": float(avg_spend),
-                "tokens_in": int(totals.tokens_in or 0),
-                "tokens_out": int(totals.tokens_out or 0),
-                "tokens_total": int((totals.tokens_in or 0) + (totals.tokens_out or 0)),
-                "agent_time_s": float(total_seconds),
-                "avg_session_s": float(avg_seconds),
-                "success_rate": float(success_rate),
-                "completed": int(completed),
-                "failed": int(failed),
-                "abandoned": int(abandoned),
-                "running": int(running),
-            }
+        return SessionStatsResponse(
+            range=range,
+            sessions=sessions_count,
+            total_spend_usd=float(totals.cost_usd or 0.0),
+            avg_spend_per_session_usd=float(avg_spend),
+            tokens_in=int(totals.tokens_in or 0),
+            tokens_out=int(totals.tokens_out or 0),
+            tokens_total=int((totals.tokens_in or 0) + (totals.tokens_out or 0)),
+            agent_time_s=float(total_seconds),
+            avg_session_s=float(avg_seconds),
+            success_rate=float(success_rate),
+            completed=int(completed),
+            failed=int(failed),
+            abandoned=int(abandoned),
+            running=int(running),
         )
 
-    @router.get("/cost-by-model")
+    @router.get("/cost-by-model", response_model=list[CostByModelRow])
     async def cost_by_model(
         range: _RangeLiteral = Query(
             "30d",
@@ -325,18 +389,16 @@ def get_sessions_router() -> APIRouter:
 
             rows = (await session.execute(stmt)).all()
 
-        return jsonable_encoder(
-            [
-                {
-                    "model": row.model or "unknown",
-                    "session_count": int(row.session_count),
-                    "cost_usd": float(row.cost_usd or 0.0),
-                    "tokens_in": int(row.tokens_in or 0),
-                    "tokens_out": int(row.tokens_out or 0),
-                }
-                for row in rows
-            ]
-        )
+        return [
+            CostByModelRow(
+                model=row.model or "unknown",
+                session_count=int(row.session_count),
+                cost_usd=float(row.cost_usd or 0.0),
+                tokens_in=int(row.tokens_in or 0),
+                tokens_out=int(row.tokens_out or 0),
+            )
+            for row in rows
+        ]
 
     @router.get("/{session_id}")
     async def get_session_detail(

@@ -3,7 +3,13 @@ from uuid import UUID
 
 from cognee.api.DTO import OutDTO
 from cognee.modules.agents.agent_mode import register_agent, unregister_agent
-from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
+from cognee.modules.agents.models import (
+    AgentConnection,
+    AgentDetailResponse,
+    AgentsListResponse,
+    RegisterAgentRequest,
+    UnregisterAgentRequest,
+)
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.get_agent import get_agent
 from cognee.modules.agents.list_agents import list_agents
@@ -15,7 +21,6 @@ from cognee.modules.agents.operations import (
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.models.User import User
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.encoders import jsonable_encoder
 from fastapi_users.exceptions import UserAlreadyExists
 
 RangeLiteral = Literal["24h", "7d", "30d", "all"]
@@ -90,7 +95,7 @@ def get_agents_router() -> APIRouter:
     # Agent connections (fixed paths)
     # ------------------------------------------------------------------ #
 
-    @router.get("/connections", tags=[CONNECTIONS_TAG])
+    @router.get("/connections", tags=[CONNECTIONS_TAG], response_model=AgentsListResponse)
     async def list_agents_connections(
         agent_id: Optional[UUID] = Query(
             None,
@@ -118,9 +123,9 @@ def get_agents_router() -> APIRouter:
             limit=limit,
             offset=offset,
         )
-        return jsonable_encoder(response)
+        return response
 
-    @router.get("/connections/me", tags=[CONNECTIONS_TAG])
+    @router.get("/connections/me", tags=[CONNECTIONS_TAG], response_model=AgentDetailResponse)
     async def get_my_connection_detail(
         agent_session_name: Optional[str] = Query(
             None,
@@ -136,9 +141,11 @@ def get_agents_router() -> APIRouter:
         )
         if response is None:
             raise HTTPException(status_code=404, detail="connection not found")
-        return jsonable_encoder(response)
+        return response
 
-    @router.get("/connections/{agent_id}", tags=[CONNECTIONS_TAG])
+    @router.get(
+        "/connections/{agent_id}", tags=[CONNECTIONS_TAG], response_model=AgentDetailResponse
+    )
     async def get_connection_detail(
         agent_id: UUID,
         agent_session_name: Optional[str] = Query(
@@ -154,15 +161,20 @@ def get_agents_router() -> APIRouter:
         )
         if response is None:
             raise HTTPException(status_code=404, detail="connection not found")
-        return jsonable_encoder(response)
+        return response
 
-    @router.post("/register", status_code=status.HTTP_201_CREATED, tags=[CONNECTIONS_TAG])
+    @router.post(
+        "/register",
+        status_code=status.HTTP_201_CREATED,
+        tags=[CONNECTIONS_TAG],
+        response_model=AgentConnection,
+    )
     async def register_agent_endpoint(
         request: RegisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ):
         connection = await register_agent(user, request)
-        return jsonable_encoder(connection)
+        return connection
 
     @router.post("/unregister", tags=[CONNECTIONS_TAG])
     async def unregister_agent_endpoint(
