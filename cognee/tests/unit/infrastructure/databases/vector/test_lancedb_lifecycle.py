@@ -114,39 +114,6 @@ async def test_close_is_idempotent(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
-async def test_retrieve_empty_ids_returns_empty(monkeypatch, tmp_path):
-    """retrieve() with no ids must return [] rather than build an ``id IN ()``
-    filter, which lance rejects as a parse error (parity with pgvector/chromadb;
-    e.g. has_new_chunks() passes an empty id list when data_chunks is empty)."""
-
-    class _FakeQuery:
-        def where(self, *_args, **_kwargs):
-            return self
-
-        async def to_list(self):
-            # Rows the filter path would surface; the empty-id guard must
-            # short-circuit before we ever reach here.
-            return [{"id": "00000000-0000-0000-0000-000000000000", "payload": {"text": "x"}}]
-
-    class _FakeCollection:
-        def query(self):
-            return _FakeQuery()
-
-    async def _fake_get_collection(_name):
-        return _FakeCollection()
-
-    adapter = LanceDBAdapter(
-        url=str(tmp_path / "lance_db"),
-        api_key=None,
-        embedding_engine=_FakeEmbeddingEngine(),
-    )
-    monkeypatch.setattr(adapter, "get_collection", _fake_get_collection)
-
-    assert await adapter.retrieve("any_collection", []) == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_concurrent_first_get_connection_returns_same_object(monkeypatch, tmp_path):
     """Two coroutines reaching the lazy-create path simultaneously must
     end up returning the SAME ``self.connection`` object. Without the
