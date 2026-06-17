@@ -16,8 +16,8 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-# These two are not in the ambient .env, so setting them before import sticks.
 _DATA_DIR = tempfile.mkdtemp(prefix="cognee_references_example_")
+# Set these before Cognee config is initialized so the example uses the intended values.
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 os.environ["CACHING"] = "false"
 

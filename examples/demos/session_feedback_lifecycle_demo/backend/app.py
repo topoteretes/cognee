@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 # Configure cache/session behavior before importing cognee internals.
+# Set these before Cognee config is initialized so the example uses the intended values.
 os.environ.setdefault("CACHING", "true")
 os.environ.setdefault("CACHE_BACKEND", "fs")
 os.environ.setdefault("AUTO_FEEDBACK", "true")

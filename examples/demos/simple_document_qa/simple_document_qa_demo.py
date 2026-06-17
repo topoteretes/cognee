@@ -4,6 +4,7 @@ import os
 
 # By default cognee uses OpenAI's gpt-5-mini LLM model
 # Provide your OpenAI LLM API KEY, in case you did not set it in the .env file
+# Set this before Cognee config is initialized so the example uses the intended value.
 # os.environ["LLM_API_KEY"] = ""
 
 import cognee

@@ -21,8 +21,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from cognee.modules.recall.types.RecallResponse import ResponseGraphEntry
-
+# Set these before Cognee config is initialized so the example uses the intended values.
 os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 os.environ["COGNEE_CLI_MODE"] = "true"
@@ -32,6 +31,7 @@ import cognee
 from cognee import SearchType
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.memory import SkillRunEntry
+from cognee.modules.recall.types.RecallResponse import ResponseGraphEntry
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.memify.skill_improvement import improve_skill
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (

@@ -3,14 +3,11 @@ import asyncio
 import os
 from pathlib import Path
 
-# Disable backend access control to avoid dataset handler mismatch
-os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
-
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# Disable backend access control to avoid dataset handler mismatch.
+# Set these before Cognee config is initialized so the example uses the intended values.
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
 
 # In case environment variables are not set use the example database from the Cognee repo.

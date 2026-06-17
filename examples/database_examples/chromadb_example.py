@@ -4,6 +4,7 @@ import pathlib
 
 # ChromaDB is available as a vector adapter, but it does not have a dataset
 # database handler for backend access control yet.
+# Set these before Cognee config is initialized so the example uses the intended values.
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
 
 import cognee

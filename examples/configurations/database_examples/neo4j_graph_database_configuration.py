@@ -5,6 +5,7 @@ import pathlib
 # This example connects to one configured Neo4j instance. Cognee's backend
 # access-control mode expects the Neo4j Aura provisioning handler instead, so
 # keep it disabled here unless the caller explicitly exported another value.
+# Set these before Cognee config is initialized so the example uses the intended values.
 os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 
 import cognee

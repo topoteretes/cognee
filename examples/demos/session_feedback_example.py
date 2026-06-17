@@ -2,10 +2,7 @@
 import os
 import asyncio
 
-os.environ.setdefault("CACHING", "true")
-os.environ.setdefault("CACHE_BACKEND", "redis")
-
-# Enable session feedback caching before importing Cognee.
+# Set these before Cognee config is initialized so the example uses the intended values.
 os.environ.setdefault("CACHING", "true")
 os.environ.setdefault("CACHE_BACKEND", "redis")
 
