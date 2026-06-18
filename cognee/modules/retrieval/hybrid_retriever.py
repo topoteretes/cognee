@@ -13,6 +13,7 @@ from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context,
 )
 from cognee.modules.retrieval.hybrid.entities import build_entities
+from cognee.modules.retrieval.hybrid.facts import edge_rank_by_id, select_facts
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
@@ -41,6 +42,7 @@ class HybridRetriever(BaseRetriever):
         system_prompt: Optional[str] = None,
         text_summaries_top_k: Optional[int] = None,
         use_importance_weight: bool = True,
+        facts_top_k: Optional[int] = 5,
     ):
         self.chunks_top_k = chunks_top_k if chunks_top_k is not None else 5
         self.entities_top_k = entities_top_k if entities_top_k is not None else 5
@@ -56,6 +58,7 @@ class HybridRetriever(BaseRetriever):
         self.system_prompt = system_prompt
         self.text_summaries_top_k = text_summaries_top_k
         self.use_importance_weight = use_importance_weight
+        self.facts_top_k = facts_top_k if facts_top_k is not None else 5
 
     def _use_session_cache(self) -> bool:
         user = session_user.get()
@@ -69,7 +72,10 @@ class HybridRetriever(BaseRetriever):
         validate_retriever_input(query, None, self._use_session_cache())
 
         self._unified_engine = await get_unified_engine()
-        chunk_objects, entity_hits = await asyncio.gather(
+        query_embeddings = await self._unified_engine.vector.embedding_engine.embed_text([query])
+        query_vector = query_embeddings[0]
+
+        chunk_objects, (entities, facts) = await asyncio.gather(
             retrieve_hybrid_chunks(
                 vector_engine=self._unified_engine.vector,
                 query=query,
@@ -78,7 +84,17 @@ class HybridRetriever(BaseRetriever):
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
                 use_importance_weight=self.use_importance_weight,
+                query_vector=query_vector,
             ),
+            self._retrieve_entities_and_facts(query, query_vector),
+        )
+        return {**chunk_objects, "entities": entities, "facts": facts}
+
+    async def _retrieve_entities_and_facts(self, query: str, query_vector: list[float]) -> tuple:
+        """Entity lane, run concurrently with the chunk lane so the graph round trip for
+        edge bullets overlaps the chunk pipeline's ranking and summary loading."""
+        max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
+        entity_hits, edge_hits = await asyncio.gather(
             search_collection(
                 self._unified_engine.vector,
                 "Entity_name",
@@ -86,15 +102,39 @@ class HybridRetriever(BaseRetriever):
                 self.entities_top_k,
                 self.node_name,
                 self.node_name_filter_operator,
+                query_vector=query_vector,
+            ),
+            search_collection(
+                self._unified_engine.vector,
+                "EdgeType_relationship_name",
+                query,
+                max_ranked_bullets + self.facts_top_k,
+                self.node_name,
+                self.node_name_filter_operator,
+                apply_node_filter=False,
+                query_vector=query_vector,
             ),
         )
         entities = await build_entities(
             self._unified_engine.graph,
             entity_hits,
             self.max_edges_per_entity,
+            edge_rank_by_id(edge_hits),
         )
+        return entities, self._select_facts(edge_hits, entities)
 
-        return {**chunk_objects, "entities": entities}
+    def _select_facts(self, edge_hits: List[Any], entities: List[dict]) -> List[dict]:
+        """Facts are gated off for scoped searches: EdgeType rows carry no node-set fields."""
+        if self.facts_top_k <= 0 or self.node_name:
+            return []
+
+        bullet_ids = {
+            edge["edge_type_id"]
+            for entity in entities
+            for edge in entity.get("edges", [])
+            if edge.get("edge_type_id")
+        }
+        return select_facts(edge_hits, bullet_ids, self.facts_top_k)
 
     async def get_context_from_objects(
         self,
@@ -113,11 +153,13 @@ class HybridRetriever(BaseRetriever):
         if getattr(self, "_unified_engine", None) is None:
             self._unified_engine = await get_unified_engine()
 
-        root_text = await load_root_text()
-        top_summaries = await search_top_global_context_summaries(
-            query,
-            self.global_context_index_top_k,
-            self._unified_engine.vector,
+        root_text, top_summaries = await asyncio.gather(
+            load_root_text(),
+            search_top_global_context_summaries(
+                query,
+                self.global_context_index_top_k,
+                self._unified_engine.vector,
+            ),
         )
         prelude = format_global_context_prelude(root_text, top_summaries)
         if not prelude:
@@ -130,6 +172,8 @@ class HybridRetriever(BaseRetriever):
         query_batch: Optional[List[str]] = None,
         retrieved_objects: Any = None,
         context: Optional[str] = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         _reject_query_batch(query_batch)
 
@@ -146,6 +190,8 @@ class HybridRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=extract_context_object_ids(retrieved_objects),
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
             return [completion]
 

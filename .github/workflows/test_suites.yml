@@ -166,6 +166,9 @@ jobs:
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
       os: '["ubuntu-22.04"]'
+      # postgres so the SQL cache adapter tests run instead of skipping; omitted
+      # on macos/windows (extended) where psycopg2 has no prebuilt wheels.
+      extra-dependencies: 'postgres'
     secrets: inherit
 
   different-os-tests-extended:
@@ -373,11 +376,17 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           path: .ci-private
 
-      - name: Stage skill into the workspace
+      - name: Stage skill into the user skills dir
         if: ${{ steps.gate.outputs.run == 'true' }}
         run: |
-          mkdir -p .claude/skills
-          cp -r .ci-private/.claude/skills/pr-review .claude/skills/
+          # Stage into the USER skills dir ($HOME/.claude), NOT the repo's .claude/.
+          # claude-code-action sanitizes the repo .claude for untrusted PR heads
+          # (it moves the working-tree .claude to .claude-pr/ and restores a clean
+          # .claude from the base branch), which wipes the staged private skill and
+          # leaves /pr-review unresolved -> 0 turns, nothing posted. $HOME/.claude is
+          # untouched by that sanitization and is loaded via settingSources: [user,...].
+          mkdir -p "$HOME/.claude/skills"
+          cp -r .ci-private/.claude/skills/pr-review "$HOME/.claude/skills/"
 
       - name: Claude Code review
         if: ${{ steps.gate.outputs.run == 'true' }}

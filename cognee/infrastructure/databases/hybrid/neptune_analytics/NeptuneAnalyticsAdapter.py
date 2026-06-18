@@ -6,12 +6,12 @@ from collections import Counter
 from typing import List, Optional, Any, Dict, Tuple
 from uuid import UUID
 
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryParametersError
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
@@ -601,7 +601,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         await self.create_vector_index("EdgeType", "relationship_name")
         index_schemas = [
             IndexSchema(
-                id=str(generate_edge_id(edge_id=text)),
+                id=str(EdgeType.id_for(text)),
                 text=text,
                 belongs_to_set=[],
             )

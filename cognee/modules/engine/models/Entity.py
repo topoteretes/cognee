@@ -9,4 +9,7 @@ class Entity(DataPoint):
     is_a: Optional[EntityType] = None
     description: str
     relations: List[tuple] = []
-    metadata: dict = {"index_fields": ["name"]}
+    # identity_fields makes the id deterministic and namespaced by class
+    # (``Entity:<name>``) when constructed without an explicit id — the same
+    # value ``Entity.id_for(name)`` produces. Prevents the random-uuid4 footgun.
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}

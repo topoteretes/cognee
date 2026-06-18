@@ -1,7 +1,7 @@
 """add pipeline run id to nodes and edges
 
 Revision ID: aa753a730673
-Revises: 760ef4f08ef0
+Revises: d8f4a1b2c3e9
 Create Date: 2026-06-12 16:05:38.603946
 
 """
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "aa753a730673"
-down_revision: Union[str, None] = "760ef4f08ef0"
+down_revision: Union[str, None] = "d8f4a1b2c3e9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

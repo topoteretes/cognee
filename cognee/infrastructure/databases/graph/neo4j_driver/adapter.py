@@ -269,8 +269,19 @@ class Neo4jAdapter(GraphDBInterface):
         # the race and matches the batch-dedup already done in PGVector.
         deduped: Dict[str, Dict[str, Any]] = {}
         for node in nodes:
-            key = str(node.id)
-            props = self.serialize_properties(dict(node))
+            # Read the serializable form via model_dump() like the Ladybug/Postgres
+            # adapters (fall back to dict() for non-pydantic inputs). model_dump()
+            # recurses nested DataPoints into dicts (which serialize_properties can
+            # JSON-encode); a bare dict() would leave them as raw objects Neo4j
+            # rejects. Take the id and label from the node's own serialized
+            # properties / ``type`` field rather than the Python object: for a
+            # DataPoint these equal ``node.id`` / ``type(node).__name__`` (the base
+            # forces ``type`` to the class name), but this also accepts any
+            # DataPoint-shaped object such as migration node carriers.
+            raw = node.model_dump() if hasattr(node, "model_dump") else dict(node)
+            props = self.serialize_properties(raw)
+            key = str(props.get("id"))
+            label = props.get("type") or type(node).__name__
             existing_entry = deduped.get(key)
             if existing_entry:
                 existing_tags = existing_entry["properties"].get("belongs_to_set") or []
@@ -279,11 +290,11 @@ class Neo4jAdapter(GraphDBInterface):
                     merged = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
                     props["belongs_to_set"] = merged
                 existing_entry["properties"] = props
-                existing_entry["label"] = type(node).__name__
+                existing_entry["label"] = label
             else:
                 deduped[key] = {
                     "node_id": key,
-                    "label": type(node).__name__,
+                    "label": label,
                     "properties": props,
                 }
 
