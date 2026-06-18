@@ -1063,6 +1063,11 @@ async def _remember_inner(
             await improve(**improve_kwargs)
 
     if run_in_background:
+        # Background runs must not depend on caller/request-scoped stream lifetimes.
+        # Materialize stream-like inputs into owned in-memory buffers up front.
+        from cognee.api.v1.add.add import _materialize_stream_for_background
+
+        data = await _materialize_stream_for_background(data)
 
         async def _remember_background():
             try:
