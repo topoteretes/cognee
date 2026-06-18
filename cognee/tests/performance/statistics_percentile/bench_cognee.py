@@ -58,8 +58,14 @@ def _resolve_config(args: argparse.Namespace) -> dict:
     if not api_key and not mock_llm:
         sys.exit("Error: LLM_API_KEY is not set (CLI, .env, or environment)")
 
+    # Embeddings may use a different provider/key than the LLM (e.g. Baseten LLM
+    # + OpenAI embeddings). Resolve the embedding key independently, falling back
+    # to the LLM/OpenAI key when LLM and embeddings share a provider.
+    embedding_api_key = pick(None, "EMBEDDING_API_KEY", "") or api_key
+
     return {
         "api_key": api_key or "mock-key",
+        "embedding_api_key": embedding_api_key or "mock-key",
         "llm_provider": pick(args.llm_provider, "LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
         "llm_model": pick(args.llm_model, "LLM_MODEL", DEFAULT_LLM_MODEL),
         "embedding_provider": pick(
@@ -180,7 +186,7 @@ async def run_benchmark(
     cognee.config.set_embedding_provider(config["embedding_provider"])
     cognee.config.set_embedding_model(embedding_model)
     cognee.config.set_embedding_dimensions(embedding_dims)
-    cognee.config.set_embedding_api_key(config["api_key"])
+    cognee.config.set_embedding_api_key(config["embedding_api_key"])
 
     if config.get("mock_llm"):
         mock_data = _load_mock_data(config["mock_memories_file"])
