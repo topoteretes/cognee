@@ -58,7 +58,7 @@ def _resolve_config(args: argparse.Namespace) -> dict:
     if not api_key and not mock_llm:
         sys.exit("Error: LLM_API_KEY is not set (CLI, .env, or environment)")
 
-    # Embeddings may use a different provider/key than the LLM (e.g. Baseten LLM
+    # Embeddings may use a different provider/key than the LLM (e.g.
     # + OpenAI embeddings). Resolve the embedding key independently, falling back
     # to the LLM/OpenAI key when LLM and embeddings share a provider.
     embedding_api_key = pick(None, "EMBEDDING_API_KEY", "") or api_key
