@@ -159,6 +159,30 @@ async def improve_skill(
         return proposal
 
 
+async def get_proposal(
+    proposal_id: str,
+    *,
+    dataset,
+    user=None,
+) -> Optional[SkillImprovementProposal]:
+    """Fetch a stored SkillImprovementProposal for review (read-only).
+
+    Lets a caller inspect a proposal's ``old_procedure``/``proposed_procedure``/
+    ``rationale``/``confidence`` before deciding whether to apply it. Mirrors the
+    dataset-context handling of :func:`improve_skill`; never mutates the graph.
+    """
+    dataset_id = getattr(dataset, "id", None)
+    if dataset_id is None:
+        raise ValueError("Proposal lookup requires one explicit dataset.")
+
+    owner_id = getattr(dataset, "owner_id", None) or getattr(user, "id", None)
+    if owner_id is None:
+        raise ValueError("Proposal lookup requires a dataset owner or user.")
+
+    async with set_database_global_context_variables(dataset_id, owner_id):
+        return await _find_proposal(proposal_id=proposal_id, dataset_id=dataset_id)
+
+
 async def _apply_proposal(
     *,
     proposal_id: str,

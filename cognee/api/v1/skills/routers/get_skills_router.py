@@ -4,9 +4,11 @@ Exposes the skills SDK helpers over HTTP with explicit response schemas and
 caller-scoped authorization, mirroring the schema-inventory router.
 """
 
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -51,6 +53,21 @@ class SkillDetail(SkillListItem):
     procedure: str = Field(default="", description="The full skill instruction body.")
 
 
+class SkillIngestRequest(BaseModel):
+    """JSON body for ingesting a single skill from inline SKILL.md markdown."""
+
+    skills_text: str = Field(description="Inline SKILL.md markdown to ingest as a Skill node.")
+    skill_name: Optional[str] = Field(
+        default=None, description="Name/slug for the skill (defaults to 'skill')."
+    )
+    dataset_name: Optional[str] = Field(
+        default=None, description="Target dataset name (created if needed). Required unless dataset_id is given."
+    )
+    dataset_id: Optional[UUID] = Field(
+        default=None, description="Target dataset UUID (alternative to dataset_name)."
+    )
+
+
 class ErrorResponse(BaseModel):
     """Generic API error response."""
 
@@ -66,6 +83,52 @@ def get_skills_router() -> APIRouter:
         if not datasets:
             raise PermissionDeniedError(message="Not authorized for this dataset")
         return datasets[0]
+
+    @router.post(
+        "",
+        response_model=dict,
+        responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+    )
+    async def ingest_skill(
+        payload: SkillIngestRequest,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Ingest a skill from inline SKILL.md markdown (no file upload needed).
+
+        JSON-native companion to ``POST /api/v1/remember`` (content_type=skills),
+        for no-code clients. Reuses the same skills ingestion pipeline.
+        """
+        if not payload.dataset_name and payload.dataset_id is None:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Either dataset_name or dataset_id is required"},
+            )
+
+        send_telemetry(
+            "Skill Ingest API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/skills",
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.remember import remember as cognee_remember
+
+        try:
+            result = await cognee_remember(
+                "",
+                dataset_name=payload.dataset_name or "main_dataset",
+                content_type="skills",
+                skills_text=payload.skills_text,
+                skill_name=payload.skill_name,
+                user=user,
+                **({"dataset_id": payload.dataset_id} if payload.dataset_id else {}),
+            )
+            return jsonable_encoder(result.to_dict())
+        except Exception as exc:
+            logger.error("ingest skill failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=409, content={"error": "Failed to ingest skill"})
 
     @router.get(
         "/",
