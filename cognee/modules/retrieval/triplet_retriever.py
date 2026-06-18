@@ -111,7 +111,12 @@ class TripletRetriever(BaseRetriever):
         return [completion]
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Any
+        self,
+        query: str,
+        retrieved_objects: Any,
+        context: Any,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> Union[List[str], List[dict]]:
         """
         Generates an LLM completion using the context.
@@ -153,6 +158,8 @@ class TripletRetriever(BaseRetriever):
                 summarize_context=False,
                 used_graph_element_ids=used_graph_element_ids,
                 max_context_chars=getattr(self, "max_context_chars", None),
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
             completions = [completion]
         else:

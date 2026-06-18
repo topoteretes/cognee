@@ -19,6 +19,7 @@ from .lancedb_protocol import (
     OP_TABLE_ADD,
     OP_TABLE_COUNT_ROWS,
     OP_TABLE_DELETE,
+    OP_TABLE_OPTIMIZE,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
     OP_TABLE_QUERY_EXECUTE,
@@ -158,6 +159,12 @@ async def _op_table_delete(registry: HandleRegistry, req: Request):
     return None
 
 
+async def _op_table_optimize(registry: HandleRegistry, req: Request):
+    table = registry.get(req.handle_id)
+    await table.optimize()
+    return None
+
+
 def _apply_chain(builder, chain_steps):
     for method_name, args, kwargs in chain_steps:
         builder = getattr(builder, method_name)(*args, **kwargs)
@@ -226,6 +233,7 @@ DISPATCH = {
     OP_TABLE_TO_ARROW: _op_table_to_arrow,
     OP_TABLE_ADD: _op_table_add,
     OP_TABLE_DELETE: _op_table_delete,
+    OP_TABLE_OPTIMIZE: _op_table_optimize,
     OP_TABLE_QUERY_EXECUTE: _op_query_execute,
     OP_TABLE_VECTOR_SEARCH_EXECUTE: _op_vector_search_execute,
     OP_TABLE_MERGE_INSERT_EXECUTE: _op_merge_insert_execute,

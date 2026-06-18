@@ -203,6 +203,8 @@ class AgenticRetriever(GraphCompletionRetriever):
         query_batch: Optional[List[str]] = None,
         retrieved_objects=None,
         context: Any = None,
+        effective_query: Optional[str] = None,
+        turn_preparation=None,
     ) -> List[Any]:
         if not isinstance(retrieved_objects, dict):
             return await super().get_completion_from_context(
@@ -210,6 +212,8 @@ class AgenticRetriever(GraphCompletionRetriever):
                 query_batch=query_batch,
                 retrieved_objects=retrieved_objects,
                 context=context,
+                effective_query=effective_query,
+                turn_preparation=turn_preparation,
             )
 
         skills: List[Skill] = retrieved_objects.get("skills") or []
@@ -224,7 +228,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         try:
             try:
                 final = await self._run_tool_loop(
-                    query=query,
+                    query=effective_query or query,
                     initial_context=context if isinstance(context, str) else "",
                     tool_names=tool_names,
                     tool_trace=tool_trace,
@@ -383,6 +387,44 @@ class AgenticRetriever(GraphCompletionRetriever):
             logger.warning("Failed to load agentic session history: %s", exc)
             return ""
 
+    async def _maybe_active_context_block(self, query: Optional[str]) -> tuple[str, list]:
+        """Render the active session-context guidance block for the agentic loop.
+
+        Gated on caching + auto_feedback. Fully fail-open: returns ("", []) on any error
+        or when the layer is disabled, so it can never block agentic completion.
+        """
+        if not self._use_session_cache():
+            return "", []
+
+        user_id = getattr(self.user, "id", None)
+        if user_id is None:
+            return "", []
+
+        try:
+            from cognee.infrastructure.databases.cache.config import CacheConfig
+            from cognee.infrastructure.session.get_session_manager import get_session_manager
+            from cognee.infrastructure.session.session_context_builder import (
+                build_active_context_block,
+            )
+
+            cache_config = CacheConfig()
+            if not (cache_config.caching and cache_config.auto_feedback):
+                return "", []
+
+            session_manager = get_session_manager()
+            if not session_manager.is_available:
+                return "", []
+
+            return await build_active_context_block(
+                session_manager=session_manager,
+                user_id=str(user_id),
+                session_id=session_manager._resolve_session_id(self.session_id),
+                query=query or "",
+            )
+        except Exception as exc:
+            logger.warning("Agentic active session-context block failed: %s", exc)
+            return "", []
+
     async def _store_session_qa(
         self,
         query: str,
@@ -406,6 +448,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 return
 
             used_graph_element_ids = self._extract_context_object_ids(triplets)
+            served_ids = getattr(self, "_active_context_served_ids", None) or None
             await session_manager.add_qa(
                 user_id=str(user_id),
                 question=query,
@@ -413,6 +456,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 answer=answer,
                 session_id=self.session_id,
                 used_graph_element_ids=used_graph_element_ids,
+                used_session_context_ids=served_ids,
             )
         except Exception as exc:
             logger.warning("Failed to store agentic session QA: %s", exc)
@@ -426,6 +470,15 @@ class AgenticRetriever(GraphCompletionRetriever):
     ) -> str:
         loop_context = initial_context
         conversation_history = await self._get_session_history()
+
+        # Prepend the active session-context guidance block above history (gated + fail-open).
+        # served_ids are captured on the instance so _store_session_qa can record them on the QA.
+        block, served_ids = await self._maybe_active_context_block(query)
+        self._active_context_served_ids = served_ids
+        if block:
+            conversation_history = (
+                block + "\n\n" + conversation_history if conversation_history else block
+            )
 
         for iteration in range(self.max_iter):
             step: AgentStep = await generate_completion(

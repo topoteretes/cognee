@@ -48,6 +48,11 @@ class FSCacheAdapter(CacheDBInterface):
         return f"agent_traces:{user_id}:{session_id}"
 
     @staticmethod
+    def _session_context_key(user_id: str, session_id: str) -> str:
+        """Build the storage key for session-context entries."""
+        return f"session_context:{user_id}:{session_id}"
+
+    @staticmethod
     def _build_qa_entry_dump(
         question: str,
         context: str,
@@ -57,6 +62,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
@@ -69,6 +75,7 @@ class FSCacheAdapter(CacheDBInterface):
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
+            used_session_context_ids=used_session_context_ids,
         )
         return entry.model_dump()
 
@@ -129,6 +136,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> dict:
         """Merge partial QA updates into an existing entry payload."""
         merged = {**entry}
@@ -144,6 +152,8 @@ class FSCacheAdapter(CacheDBInterface):
             merged["feedback_score"] = feedback_score
         if used_graph_element_ids is not None:
             merged["used_graph_element_ids"] = used_graph_element_ids
+        if used_session_context_ids is not None:
+            merged["used_session_context_ids"] = used_session_context_ids
         if memify_metadata is not None:
             existing_metadata = merged.get("memify_metadata")
             if isinstance(existing_metadata, dict):
@@ -200,6 +210,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> None:
         """Append one QA entry to the filesystem-backed session history."""
         try:
@@ -213,6 +224,7 @@ class FSCacheAdapter(CacheDBInterface):
                 feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
+                used_session_context_ids=used_session_context_ids,
             )
             with self.cache.transact():
                 entries = self._load_entries(session_key)
@@ -250,6 +262,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -272,6 +285,7 @@ class FSCacheAdapter(CacheDBInterface):
                     feedback_score,
                     used_graph_element_ids=used_graph_element_ids,
                     memify_metadata=memify_metadata,
+                    used_session_context_ids=used_session_context_ids,
                 )
                 entries[idx] = self._validate_entry_dict(merged)
                 self._save_entries(session_key, entries)
@@ -333,16 +347,48 @@ class FSCacheAdapter(CacheDBInterface):
         try:
             session_key = self._session_key(user_id, session_id)
             trace_key = self._agent_trace_key(user_id, session_id)
+            context_key = self._session_context_key(user_id, session_id)
             qa_existed = self.cache.get(session_key) is not None
             trace_existed = self.cache.get(trace_key) is not None
+            context_existed = self.cache.get(context_key) is not None
             if qa_existed:
                 self.cache.delete(session_key)
             if trace_existed:
                 self.cache.delete(trace_key)
-            return qa_existed or trace_existed
+            if context_existed:
+                self.cache.delete(context_key)
+            return qa_existed or trace_existed or context_existed
 
         except Exception as e:
             error_msg = f"Unexpected error while deleting session from diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def get_value(self, key: str) -> str | None:
+        """Retrieve a raw string value stored under the given key, or None if absent/expired."""
+        try:
+            self.cache.expire()
+            return self.cache.get(key)
+        except Exception as e:
+            error_msg = f"Unexpected error while getting value from diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def set_value(self, key: str, value: str, ttl: int | None = None) -> None:
+        """Store a raw string value under the given key, optionally expiring after ttl seconds."""
+        try:
+            self.cache.set(key, value, expire=ttl)
+        except Exception as e:
+            error_msg = f"Unexpected error while setting value in diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_value(self, key: str) -> None:
+        """Delete the value stored under the given key, if present."""
+        try:
+            self.cache.delete(key)
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting value from diskcache: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -404,6 +450,58 @@ class FSCacheAdapter(CacheDBInterface):
         """Return the number of stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
         return len(self._load_entries(trace_key))
+
+    async def create_session_context_entry(
+        self, user_id: str, session_id: str, entry_dump: dict
+    ) -> None:
+        """Append one session-context entry to the filesystem-backed context list."""
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            with self.cache.transact():
+                entries = self._load_entries(context_key)
+                entries.append(entry_dump)
+                self._save_entries(context_key, entries)
+        except Exception as e:
+            error_msg = f"Unexpected error while adding session context to diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def get_session_context_entries(self, user_id: str, session_id: str) -> list[dict]:
+        """Retrieve all stored session-context entries for the given session."""
+        context_key = self._session_context_key(user_id, session_id)
+        return self._load_entries(context_key)
+
+    async def update_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str, merge: dict
+    ) -> bool:
+        """Shallow-merge updates into the session-context entry matching entry["id"]."""
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            with self.cache.transact():
+                entries = self._load_entries(context_key)
+                for i, entry in enumerate(entries):
+                    if entry.get("id") == entry_id:
+                        entries[i] = {**entry, **merge}
+                        self._save_entries(context_key, entries)
+                        return True
+                return False
+        except Exception as e:
+            error_msg = f"Unexpected error while updating session context in diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_session_context(self, user_id: str, session_id: str) -> bool:
+        """Delete the entire session-context list for the given session."""
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            existed = self.cache.get(context_key) is not None
+            if existed:
+                self.cache.delete(context_key)
+            return existed
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting session context from diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
 
     async def prune(self) -> None:
         """

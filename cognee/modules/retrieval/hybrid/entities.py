@@ -1,28 +1,75 @@
-import asyncio
 from typing import Any, Optional
 
+from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import (
     display_value,
     first_display_value,
     payload,
     result_id,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("HybridRetriever")
 
 
-async def build_entities(graph_engine: Any, entity_hits: list[Any], max_edges_per_entity: int):
+async def build_entities(
+    graph_engine: Any,
+    entity_hits: list[Any],
+    max_edges_per_entity: int,
+    edge_ranks: Optional[dict[str, int]] = None,
+):
     if not entity_hits:
         return []
 
     entities = [_entity_from_result(result) for result in entity_hits]
-    if await graph_engine.is_empty():
+    entity_ids = [entity["id"] for entity in entities if entity["id"]]
+    if not entity_ids:
         return entities
 
-    connections_by_entity = await asyncio.gather(
-        *[graph_engine.get_connections(entity["id"]) for entity in entities]
-    )
-    for entity, connections in zip(entities, connections_by_entity):
-        entity["edges"] = _edge_bullets_from_connections(connections, max_edges_per_entity)
+    try:
+        nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
+    except Exception as error:
+        logger.warning(
+            "Graph neighborhood retrieval failed; returning entities without edges: %s", error
+        )
+        return entities
+
+    connections_by_entity_id = _partition_neighborhood(entity_ids, nodes, edges)
+    for entity in entities:
+        entity["edges"] = _edge_bullets_from_connections(
+            connections_by_entity_id.get(entity["id"], []),
+            max_edges_per_entity,
+            edge_ranks or {},
+        )
     return entities
+
+
+def _partition_neighborhood(
+    entity_ids: list[str], nodes: list[Any], edges: list[Any]
+) -> dict[str, list[tuple[dict, dict, dict]]]:
+    """Rebuild per-entity (source, edge, target) connection triples from the flat one-hop
+    subgraph returned by get_neighborhood; drops neighbor-to-neighbor edges."""
+    nodes_by_id = {}
+    for node in nodes or []:
+        if isinstance(node, (list, tuple)) and len(node) == 2 and isinstance(node[1], dict):
+            nodes_by_id[str(node[0])] = {"id": str(node[0]), **node[1]}
+
+    connections = {entity_id: [] for entity_id in entity_ids}
+    for edge in edges or []:
+        if not isinstance(edge, (list, tuple)) or len(edge) < 3:
+            continue
+        source_id, target_id = str(edge[0]), str(edge[1])
+        properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+        triple = (
+            nodes_by_id.get(source_id, {"id": source_id}),
+            {"relationship_name": edge[2], "properties": properties},
+            nodes_by_id.get(target_id, {"id": target_id}),
+        )
+        if source_id in connections:
+            connections[source_id].append(triple)
+        if target_id in connections and target_id != source_id:
+            connections[target_id].append(triple)
+    return connections
 
 
 def format_entities(entities: list[dict]) -> str:
@@ -80,7 +127,9 @@ def _entity_type(result_payload: dict) -> Optional[str]:
     return None
 
 
-def _edge_bullets_from_connections(connections: list[Any], max_edges: int) -> list[dict]:
+def _edge_bullets_from_connections(
+    connections: list[Any], max_edges: int, edge_ranks: dict[str, int]
+) -> list[dict]:
     if max_edges <= 0:
         return []
 
@@ -108,8 +157,18 @@ def _edge_bullets_from_connections(connections: list[Any], max_edges: int) -> li
         else:
             seen_texts.add(bullet["text"])
         edges.append(bullet)
-    edges.sort(key=lambda edge: 0 if _is_type_edge(edge) else 1)
+    edges.sort(key=lambda edge: _edge_sort_key(edge, edge_ranks))
     return edges[:max_edges]
+
+
+def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
+    """Pinned type edges first, then query-ranked edges, then legacy graph order."""
+    if _is_type_edge(edge):
+        return (0, 0)
+    rank = edge_ranks.get(edge.get("edge_type_id"))
+    if rank is None:
+        return (2, 0)
+    return (1, rank)
 
 
 def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
@@ -138,6 +197,7 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
         "source_id": display_value(source.get("id")),
         "relationship": relationship,
         "target_id": display_value(target.get("id")),
+        "edge_type_id": connection_edge_type_id(edge),
     }
 
 

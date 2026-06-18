@@ -40,9 +40,6 @@ from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_
 logger = get_logger("cognify")
 
 
-update_status_lock = asyncio.Lock()
-
-
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -218,6 +215,10 @@ async def cognify(
         span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
+
+        from cognee.modules.migrations.startup import run_migrations_and_block
+
+        await run_migrations_and_block(datasets, user)
 
         if config is None:
             ontology_config = get_ontology_env_config()

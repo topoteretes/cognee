@@ -34,6 +34,10 @@ def chunk_summary_pairs(
                 pairs.append(pair)
             if pair["chunk"] is None:
                 set_pair_chunk(pair, chunk)
+            elif pair["chunk_id"] is None and chunk_id:
+                # Text-merged onto an idless chunk (e.g. BM25 payload without id):
+                # adopt the id so summary hits can pair by source_chunk_id.
+                pair["chunk_id"] = chunk_id
             if pair[rank_field] is None:
                 pair[rank_field] = rank
 
