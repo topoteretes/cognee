@@ -1063,6 +1063,35 @@ async def _remember_inner(
             await improve(**improve_kwargs)
 
     if run_in_background:
+        import os
+        import tempfile
+        from pathlib import Path as _Path
+
+        # The request closes UploadFile / file-like inputs as soon as it returns,
+        # but the background task reads them afterwards -> "I/O operation on closed
+        # file" and the upload silently ingests nothing. Materialize file-like
+        # uploads to on-disk temp copies NOW (still inside the request) so the
+        # background task ingests stable files; clean them up once it finishes.
+        _bg_tmp_dir: Optional[tempfile.TemporaryDirectory] = None
+        _items = data if isinstance(data, list) else [data]
+        if any(not isinstance(it, (str, _Path)) and hasattr(it, "read") for it in _items):
+            _bg_tmp_dir = tempfile.TemporaryDirectory(prefix="cognee-remember-")
+            _root = _Path(_bg_tmp_dir.name)
+            _materialized = []
+            for it in _items:
+                if not isinstance(it, (str, _Path)) and hasattr(it, "read"):
+                    _raw = it.read()
+                    _content = await _raw if hasattr(_raw, "__await__") else _raw
+                    if isinstance(_content, str):
+                        _content = _content.encode("utf-8")
+                    _name = getattr(it, "filename", None) or getattr(it, "name", None) or "upload"
+                    _safe = os.path.basename(_Path(str(_name)).as_posix()) or "upload"
+                    _dest = _root / _safe
+                    _dest.write_bytes(_content or b"")
+                    _materialized.append(str(_dest))
+                else:
+                    _materialized.append(it)
+            data = _materialized if isinstance(data, list) else _materialized[0]
 
         async def _remember_background():
             try:
@@ -1070,6 +1099,9 @@ async def _remember_inner(
             except Exception as exc:
                 result._fail(exc)
                 logger.exception("Background remember failed")
+            finally:
+                if _bg_tmp_dir is not None:
+                    _bg_tmp_dir.cleanup()
 
         result._task = asyncio.create_task(_remember_background())
         return result
