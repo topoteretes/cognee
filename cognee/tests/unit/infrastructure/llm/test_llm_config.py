@@ -44,3 +44,19 @@ def test_strip_quotes_from_strings():
 
     # Strings with internal quotes ("internal\"quotes" → internal"quotes")
     assert config.baml_llm_model == 'internal"quotes'
+
+
+def test_llm_call_timeout_defaults_to_120_seconds():
+    assert LLMConfig().llm_call_timeout_seconds == 120.0
+
+
+def test_llm_call_timeout_reads_environment(monkeypatch):
+    monkeypatch.setenv("LLM_CALL_TIMEOUT_SECONDS", "45.5")
+
+    assert LLMConfig(_env_file=None).llm_call_timeout_seconds == 45.5
+
+
+@pytest.mark.parametrize("timeout", [0, -1])
+def test_llm_call_timeout_must_be_positive(timeout):
+    with pytest.raises(ValueError):
+        LLMConfig(llm_call_timeout_seconds=timeout)

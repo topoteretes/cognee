@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 from typing import Any, ClassVar
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 try:
@@ -49,6 +49,7 @@ class LLMConfig(BaseSettings):
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
+    llm_call_timeout_seconds: float = Field(default=120.0, gt=0)
 
     baml_llm_provider: str = "openai"
     baml_llm_model: str = "gpt-5-mini"
@@ -241,6 +242,7 @@ class LLMConfig(BaseSettings):
             "temperature": self.llm_temperature,
             "streaming": self.llm_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
+            "call_timeout_seconds": self.llm_call_timeout_seconds,
             "transcription_model": self.transcription_model,
             "graph_prompt_path": self.graph_prompt_path,
             "rate_limit_enabled": self.llm_rate_limit_enabled,

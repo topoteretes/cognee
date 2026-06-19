@@ -3,7 +3,8 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm import get_llm_config
+from cognee.infrastructure.llm.call_timeout import run_with_timeout
+from cognee.infrastructure.llm.config import get_llm_config, get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
@@ -89,7 +90,12 @@ class LLMGateway:
 
         # Wrap so usage is recorded against any active session tracker.
         # No-op when no tracker is installed.
-        return _record_session_usage_after(inner, text_input=text_input)
+        bounded = run_with_timeout(
+            inner,
+            timeout_seconds=get_llm_context_config().llm_call_timeout_seconds,
+            operation="structured output generation",
+        )
+        return _record_session_usage_after(bounded, text_input=text_input)
 
     @staticmethod
     def create_transcript(input) -> Coroutine[Any, Any, TranscriptionReturnType | None]:
@@ -98,7 +104,12 @@ class LLMGateway:
         )
 
         llm_client = get_llm_client()
-        return llm_client.create_transcript(input=input)
+        llm_config = get_llm_context_config()
+        return run_with_timeout(
+            llm_client.create_transcript(input=input),
+            timeout_seconds=llm_config.llm_call_timeout_seconds,
+            operation="audio transcription",
+        )
 
     @staticmethod
     def transcribe_image(input: str) -> Coroutine[Any, Any, Any]:
@@ -107,4 +118,9 @@ class LLMGateway:
         )
 
         llm_client = get_llm_client()
-        return llm_client.transcribe_image(input=input)
+        llm_config = get_llm_context_config()
+        return run_with_timeout(
+            llm_client.transcribe_image(input=input),
+            timeout_seconds=llm_config.llm_call_timeout_seconds,
+            operation="image transcription",
+        )

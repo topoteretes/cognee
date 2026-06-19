@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 
@@ -16,6 +17,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
 )
@@ -111,7 +113,11 @@ class OpenAIAdapter(GenericAPIAdapter):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -209,7 +215,11 @@ class OpenAIAdapter(GenericAPIAdapter):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -233,8 +243,9 @@ class OpenAIAdapter(GenericAPIAdapter):
             The generated transcription of the audio file.
         """
 
+        kwargs.setdefault("timeout", get_llm_context_config().llm_call_timeout_seconds)
         async with open_data_file(input, mode="rb") as audio_file:
-            transcription = litellm.transcription(
+            transcription = await litellm.atranscription(
                 model=self.transcription_model,
                 file=audio_file,
                 api_key=self.api_key,

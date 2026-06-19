@@ -1,5 +1,6 @@
 """Adapter for Instructor-backed Structured Output Framework for Llama CPP"""
 
+import asyncio
 import logging
 import threading
 from typing import Any, cast
@@ -16,6 +17,7 @@ from tenacity import (
     stop_after_delay,
     wait_exponential_jitter,
 )
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
@@ -144,7 +146,11 @@ class LlamaCppAPIAdapter(LLMInterface):
 
         # Use instructor.from_openai() for server mode (OpenAI-compatible API)
         self.aclient = instructor.from_openai(
-            AsyncOpenAI(base_url=self.endpoint, api_key=self.api_key),
+            AsyncOpenAI(
+                base_url=self.endpoint,
+                api_key=self.api_key,
+                timeout=get_llm_context_config().llm_call_timeout_seconds,
+            ),
             mode=instructor.Mode(self.instructor_mode),
         )
 
@@ -153,7 +159,11 @@ class LlamaCppAPIAdapter(LLMInterface):
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+            (
+                litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                asyncio.CancelledError,
+            )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,

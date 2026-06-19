@@ -16,7 +16,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.config import get_llm_config, get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
 )
@@ -178,12 +178,13 @@ class MistralAdapter(GenericAPIAdapter):
             transcription_model = self.transcription_model.split("/")[-1]
         file_name = input.split("/")[-1]
         async with open_data_file(input, mode="rb") as f:
-            transcription_response = self.mistral_client.audio.transcriptions.complete(
+            transcription_response = await self.mistral_client.audio.transcriptions.complete_async(
                 model=transcription_model,
                 file={
                     "content": f,
                     "file_name": file_name,
                 },
+                timeout_ms=int(get_llm_context_config().llm_call_timeout_seconds * 1000),
             )
 
             return TranscriptionReturnType(transcription_response.text, transcription_response)

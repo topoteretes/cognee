@@ -24,6 +24,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
     OpenAIAdapter,
@@ -151,15 +152,18 @@ class AzureOpenAIAdapter(OpenAIAdapter):
 
         # Create native Azure OpenAI clients with managed identity token provider
         azure_endpoint = endpoint.rstrip("/")
+        timeout = get_llm_context_config().llm_call_timeout_seconds
         azure_client = AzureOpenAIClient(
             azure_endpoint=azure_endpoint,
             azure_ad_token_provider=token_provider,
             api_version=self.api_version,
+            timeout=timeout,
         )
         azure_aclient = AsyncAzureOpenAI(
             azure_endpoint=azure_endpoint,
             azure_ad_token_provider=token_provider,
             api_version=self.api_version,
+            timeout=timeout,
         )
 
         self.client = instructor.from_openai(

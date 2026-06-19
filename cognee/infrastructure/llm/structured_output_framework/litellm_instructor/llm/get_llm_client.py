@@ -54,6 +54,7 @@ class _LLMClientCacheKey:
     instructor_mode: str
     streaming: bool
     max_completion_tokens: int
+    call_timeout_seconds: float
     transcription_model: str
     fallback_api_key_cache_key: _SecretCacheKey
     fallback_endpoint: str
@@ -168,6 +169,7 @@ def _build_llm_client_cache_key(llm_config, max_completion_tokens: int) -> _LLMC
         instructor_mode=llm_config.llm_instructor_mode.lower(),
         streaming=llm_config.llm_streaming,
         max_completion_tokens=max_completion_tokens,
+        call_timeout_seconds=llm_config.llm_call_timeout_seconds,
         transcription_model=llm_config.transcription_model,
         fallback_api_key_cache_key=_secret_cache_key(llm_config.fallback_api_key),
         fallback_endpoint=llm_config.fallback_endpoint,

@@ -15,7 +15,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.config import get_llm_config, get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
 )
@@ -63,6 +63,7 @@ class AnthropicAdapter(GenericAPIAdapter):
             create=anthropic.AsyncAnthropic(
                 api_key=self.api_key,
                 http_client=anthropic.DefaultAsyncHttpxClient(http2=False),
+                timeout=get_llm_context_config().llm_call_timeout_seconds,
             ).messages.create,
             mode=instructor.Mode(self.instructor_mode),
         )

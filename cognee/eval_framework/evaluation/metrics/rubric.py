@@ -10,17 +10,11 @@ Unlike DeepEval's GEval, this metric:
   - Does not require deepeval's GEval infrastructure
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
-
-
-def _get_llm_client():
-    from cognee.infrastructure.llm.get_llm_client import get_llm_client
-
-    return get_llm_client()
 
 
 _JUDGE_SYSTEM_PROMPT = """You are an evaluation judge. You will be given:
@@ -81,7 +75,7 @@ class RubricMetric:
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                result = pool.submit(asyncio.run, self.a_measure(test_case)).result()
+                result = cast(float, pool.submit(asyncio.run, self.a_measure(test_case)).result())
         else:
             result = asyncio.run(self.a_measure(test_case))
 
@@ -102,9 +96,9 @@ class RubricMetric:
             self._verdicts = []
             return self.score
 
-        llm_client = _get_llm_client()
+        from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
-        verdicts = []
+        verdicts: List[Dict[str, Any]] = []
         satisfied = 0
 
         for criterion in rubric:
@@ -115,7 +109,7 @@ class RubricMetric:
             )
 
             try:
-                judge_response = await llm_client.acreate_structured_output(
+                judge_response = await LLMGateway.acreate_structured_output(
                     text_input=prompt,
                     system_prompt=_JUDGE_SYSTEM_PROMPT,
                     response_model=str,

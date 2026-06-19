@@ -5,6 +5,17 @@ class ContentPolicyFilterError(CogneeValidationError):
     pass
 
 
+class LLMCallTimeoutError(TimeoutError):
+    """Raised when an LLM operation exceeds its configured wall-clock budget."""
+
+    def __init__(self, operation: str, timeout_seconds: float) -> None:
+        self.operation = operation
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"LLM {operation} exceeded the {timeout_seconds:g} second wall-clock timeout."
+        )
+
+
 class LLMAPIKeyNotSetError(CogneeValidationError):
     """
     Raised when the LLM API key is not set in the configuration.

@@ -60,6 +60,7 @@ def test_llm_client_cache_key_covers_adapter_configuration_fields():
         _build_llm_client_cache_key(_llm_config(llm_api_key="other-secret"), 1024),
         _build_llm_client_cache_key(_llm_config(llm_api_version="2024-02-01"), 1024),
         _build_llm_client_cache_key(_llm_config(llm_streaming=True), 1024),
+        _build_llm_client_cache_key(_llm_config(llm_call_timeout_seconds=30), 1024),
         _build_llm_client_cache_key(_llm_config(fallback_api_key="other-fallback"), 1024),
         _build_llm_client_cache_key(_llm_config(fallback_endpoint="https://other.test"), 1024),
         _build_llm_client_cache_key(_llm_config(fallback_model="other-model"), 1024),

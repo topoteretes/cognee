@@ -16,6 +16,7 @@ from tenacity import (
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -73,7 +74,11 @@ class OllamaAPIAdapter(LLMInterface):
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.from_openai(
-            OpenAI(base_url=self.endpoint, api_key=self.api_key),
+            OpenAI(
+                base_url=self.endpoint,
+                api_key=self.api_key,
+                timeout=get_llm_context_config().llm_call_timeout_seconds,
+            ),
             mode=instructor.Mode(self.instructor_mode),
         )
 
@@ -114,8 +119,9 @@ class OllamaAPIAdapter(LLMInterface):
             - BaseModel: A structured output that conforms to the specified response model.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
-        async with llm_rate_limiter_context_manager():
-            response = self.aclient.chat.completions.create(
+
+        def _create_completion() -> BaseModel:
+            return self.aclient.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
@@ -131,6 +137,9 @@ class OllamaAPIAdapter(LLMInterface):
                 response_model=response_model,
                 **merged_kwargs,
             )
+
+        async with llm_rate_limiter_context_manager():
+            response = await asyncio.to_thread(_create_completion)
 
         return response
 
@@ -168,11 +177,15 @@ class OllamaAPIAdapter(LLMInterface):
         """
 
         async with open_data_file(input, mode="rb") as audio_file:
-            transcription = self.aclient.audio.transcriptions.create(
-                model="whisper-1",  # Ensure the correct model for transcription
-                file=audio_file,
-                language="en",
-            )
+
+            def _create_transcription() -> Any:
+                return self.aclient.audio.transcriptions.create(
+                    model="whisper-1",  # Ensure the correct model for transcription
+                    file=audio_file,
+                    language="en",
+                )
+
+            transcription = await asyncio.to_thread(_create_transcription)
 
         # Ensure the response contains a valid transcript
         if not hasattr(transcription, "text"):
@@ -216,22 +229,25 @@ class OllamaAPIAdapter(LLMInterface):
         async with open_data_file(input, mode="rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
-        response = self.aclient.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "What's in this image?"},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
-                        },
-                    ],
-                }
-            ],
-            max_completion_tokens=300,
-        )  # ty:ignore[no-matching-overload]
+        def _create_image_completion() -> Any:
+            return self.aclient.chat.completions.create(  # ty:ignore[no-matching-overload]
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "What's in this image?"},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
+                            },
+                        ],
+                    }
+                ],
+                max_completion_tokens=300,
+            )
+
+        response = await asyncio.to_thread(_create_image_completion)
 
         # Ensure response is valid before accessing .choices[0].message.content
         if (
