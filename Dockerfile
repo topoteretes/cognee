@@ -4,8 +4,10 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
 # Install the project into `/app`
 WORKDIR /app
 
-# Enable bytecode compilation
-# ENV UV_COMPILE_BYTECODE=1
+# Enable bytecode compilation: without it the venv ships no .pyc files, so
+# every container cold start recompiles the entire dependency tree from
+# source (measured on cognee-saas-pod: ~8s of a ~13s import, halving startup).
+ENV UV_COMPILE_BYTECODE=1
 
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
@@ -32,7 +34,7 @@ COPY README.md pyproject.toml uv.lock entrypoint.sh ./
 
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --extra chromadb --frozen --no-install-project --no-dev --no-editable
+    uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
@@ -44,7 +46,7 @@ COPY ./cognee_db_workers /app/cognee_db_workers
 # imported at module load by alembic/versions/b9274c27a25a_kuzu_11_migration.py.
 COPY ./kuzu /app/kuzu
 RUN --mount=type=cache,target=/root/.cache/uv \
-uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --extra chromadb --frozen --no-dev --no-editable
+uv sync --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm
 

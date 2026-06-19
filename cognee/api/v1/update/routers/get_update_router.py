@@ -1,5 +1,5 @@
 from fastapi.responses import JSONResponse
-from fastapi import File, UploadFile as UF, Depends, Form, status
+from fastapi import File, UploadFile as UF, Depends, Form, Query, status
 from typing import Optional, Annotated
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
@@ -36,10 +36,32 @@ def get_update_router() -> APIRouter:
         },
     )
     async def update(
-        data_id: UUID,
-        dataset_id: UUID,
-        data: List[UploadFile] = File(default=None),
-        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
+        data_id: UUID = Query(
+            ...,
+            description=(
+                "UUID of the existing document to update "
+                "(returned by GET /api/v1/datasets/{dataset_id}/data)."
+            ),
+            examples=["9c4e4a4b-2b1a-4f6e-9d3a-1c2b3d4e5f6a"],
+        ),
+        dataset_id: UUID = Query(
+            ...,
+            description="UUID of the dataset containing the document to update.",
+            examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+        ),
+        data: List[UploadFile] = File(
+            default=None,
+            description=(
+                "New version of the document that replaces the existing one. The existing "
+                "document is deleted before the replacement is ingested, so always provide "
+                "a file."
+            ),
+        ),
+        node_set: Optional[List[str]] = Form(
+            default=[""],
+            examples=[["user_memories"]],
+            description="Node identifiers for graph organization and access control.",
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -50,26 +72,22 @@ def get_update_router() -> APIRouter:
         The document is updated, analyzed, and the changes are integrated into the knowledge graph.
 
         ## Request Parameters
-        - **data_id** (UUID): UUID of the document to update in Cognee memory
-        - **data** (List[UploadFile]): List of files to upload.
-        - **datasetId** (Optional[UUID]): UUID of an already existing dataset
-        - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
+        - **data_id** (UUID, required, query): UUID of the existing document to update (returned by GET /api/v1/datasets/{dataset_id}/data)
+        - **dataset_id** (UUID, required, query): UUID of the dataset containing the document to update
+        - **data** (List[UploadFile]): New version of the document that replaces the existing one.
+        - **node_set** (Optional[List[str]]): List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
 
         ## Response
-        Returns information about the add operation containing:
-        - Status of the operation
-        - Details about the processed data
-        - Any relevant metadata from the ingestion process
+        Returns pipeline run information for the update (delete + re-add + cognify) operation.
 
         ## Error Codes
-        - **400 Bad Request**: Neither datasetId nor datasetName provided
-        - **409 Conflict**: Error during add operation
-        - **403 Forbidden**: User doesn't have permission to add to dataset
+        - **422 Unprocessable Entity**: data_id or dataset_id missing or not a valid UUID
+        - **403 Forbidden**: User lacks write permission on the dataset
+        - **500 Internal Server Error**: Pipeline run errored or an unexpected error occurred during the update
 
         ## Notes
-        - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
-        - datasetId value can only be the UUID of an already existing dataset
+        - The existing document is deleted and replaced by the uploaded file, then the dataset is re-cognified.
         """
         send_telemetry(
             "Update API Endpoint Invoked",

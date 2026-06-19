@@ -392,8 +392,8 @@ nodes.forEach(function(n){
   }
   n._rgb=typeRgbCache[n.type];
   if(n.ontology_valid===true){
-    n.color="#D8D8D8";
-    n._rgb=[216,216,216];
+    n.color="#FF5CA8";
+    n._rgb=[255,92,168];
   }
 });
 
@@ -508,6 +508,7 @@ function updateLegend(){
   var ontologySection=
     '<div class="legend-section">'+
       '<span class="legend-title">Ontology</span>'+
+      '<span class="legend-item"><span class="legend-dot" style="background:#FF5CA8"></span>grounded node</span>'+
       '<span class="legend-item"><span class="legend-ring"></span>matched in OWL</span>'+
     '</div>';
   var importanceSection=
@@ -845,6 +846,32 @@ searchInput.addEventListener("input",function(){
   draw();
 });
 
+// ── Schema → graph highlight bridge (PR3) ──
+// Resolve a semantic schema type name to its instance node ids, then reuse
+// the search-highlight path (searchMatches + draw) so type instances light up.
+// An Entity's semantic type is its is_a target's name; all other nodes match
+// on their raw `type`. Mirrors the type resolution in describeNode/preprocessor.
+function nodeMatchesSchemaType(n, typeName){
+  if(n.type===typeName)return true;
+  if(n.type!=="Entity")return false;
+  for(var i=0;i<links.length;i++){
+    var l=links[i];
+    var sid=l.source.id||l.source;
+    var isIsA=l.relation==="is_a"||(l.edge_info&&l.edge_info.relationship_name==="is_a");
+    if(sid===n.id&&isIsA){
+      var t=nodesById[l.target.id||l.target];
+      if(t&&(t.name||t.id)===typeName)return true;
+    }
+  }
+  return false;
+}
+window._highlightSchemaType=function(typeName){
+  searchQuery="__schema_type__";
+  searchMatches.clear();
+  nodes.forEach(function(n){if(nodeMatchesSchemaType(n,typeName))searchMatches.add(n.id)});
+  draw();
+};
+
 // ── Info panel (Phase 1e: sectioned inspector reading preprocessor enrichment) ──
 var infoPanel=document.getElementById("info-panel");
 var nodesById={};
@@ -1173,16 +1200,40 @@ function isInViewport(wx,wy,margin,vp){
 
 // ── Mouse ──
 var isDragging=false,dragNode=null,isPanning=false;
-var lastMx=0,lastMy=0;
+// A press only becomes a drag after the cursor moves DRAG_THRESHOLD px.
+// Plain clicks must never touch node pins or reheat the simulation —
+// doing so unpinned the clicked node and let repulsion push it off into
+// space (the layout anchors are much weaker than the charge force).
+var dragStarted=false;
+// 6px: trackpad clicks routinely jitter 3-5px, and treating that as a
+// drag reheated the simulation — a plain click sent the dot (and, in
+// Force mode, the whole layout) flying.
+var DRAG_THRESHOLD=6;
+var lastMx=0,lastMy=0,downMx=0,downMy=0;
+
+function releaseDragNode(){
+  if(!dragNode)return;
+  if(layoutMode==="story"){
+    // Story pins every node into its lane; snap the dragged node back so
+    // interaction can never degrade the deterministic grid. The sim is
+    // not running in story drags, so restore x/y directly too.
+    if(typeof dragNode._targetX==="number"){dragNode.fx=dragNode._targetX;dragNode.x=dragNode._targetX}
+    else{dragNode.fx=null}
+    if(typeof dragNode._targetY==="number"){dragNode.fy=dragNode._targetY;dragNode.y=dragNode._targetY}
+    else{dragNode.fy=null}
+    if(dragStarted){rebuildQuadtree();draw()}
+  }else{
+    dragNode.fx=null;dragNode.fy=null;
+    if(dragStarted)simulation.alphaTarget(0);
+  }
+}
 
 canvas.addEventListener("mousedown",function(ev){
   var mx=ev.offsetX,my=ev.offsetY;
-  lastMx=mx;lastMy=my;
+  lastMx=mx;lastMy=my;downMx=mx;downMy=my;
   var hit=findNodeAt(mx,my);
   if(hit){
-    dragNode=hit;isDragging=true;
-    dragNode.fx=dragNode.x;dragNode.fy=dragNode.y;
-    simulation.alphaTarget(0.3).restart();
+    dragNode=hit;isDragging=true;dragStarted=false;
     canvas.style.cursor="grabbing";
   }else{
     isPanning=true;
@@ -1193,8 +1244,22 @@ canvas.addEventListener("mousedown",function(ev){
 canvas.addEventListener("mousemove",function(ev){
   var mx=ev.offsetX,my=ev.offsetY;
   if(isDragging&&dragNode){
+    if(!dragStarted){
+      var dx=mx-downMx,dy=my-downMy;
+      if(dx*dx+dy*dy<DRAG_THRESHOLD*DRAG_THRESHOLD){lastMx=mx;lastMy=my;return}
+      dragStarted=true;
+      // Story is a fully pinned grid — reheating the simulation only
+      // agitates it (and a hot sim is what made clicked dots shoot off).
+      // Drive the node directly instead; other layouts use the standard
+      // d3 drag reheat so neighbors respond to the drag.
+      if(layoutMode!=="story")simulation.alphaTarget(0.3).restart();
+    }
     var w=screenToWorld(mx,my);
     dragNode.fx=w.x;dragNode.fy=w.y;
+    if(layoutMode==="story"){
+      dragNode.x=w.x;dragNode.y=w.y;
+      draw();
+    }
   }else if(isPanning){
     tx+=mx-lastMx;ty+=my-lastMy;
     draw();
@@ -1217,17 +1282,14 @@ canvas.addEventListener("mousemove",function(ev){
 });
 
 canvas.addEventListener("mouseup",function(){
-  if(isDragging&&dragNode){
-    dragNode.fx=null;dragNode.fy=null;
-    simulation.alphaTarget(0);
-  }
-  isDragging=false;dragNode=null;isPanning=false;
+  if(isDragging)releaseDragNode();
+  isDragging=false;dragNode=null;isPanning=false;dragStarted=false;
   canvas.style.cursor="grab";
 });
 
 canvas.addEventListener("mouseleave",function(){
-  if(isDragging&&dragNode){dragNode.fx=null;dragNode.fy=null;simulation.alphaTarget(0)}
-  isDragging=false;dragNode=null;isPanning=false;
+  if(isDragging)releaseDragNode();
+  isDragging=false;dragNode=null;isPanning=false;dragStarted=false;
   hoveredNode=null;draw();
 });
 
@@ -1415,10 +1477,11 @@ function updateFps(){
 }
 
 // Top-chrome reserved zone in screen-pixels. Tabs (32px), header (~40px),
-// theme toggle, search box all live in the first ~64px of the viewport.
-// Column gridlines and column labels must start below this so they don't
-// bleed into the chrome.
-var TOP_CHROME_PAD=72;
+// theme toggle, and the fixed search box (top:56px, ~34px tall — see
+// #search-box in template.html) live in the first ~90px of the viewport.
+// Column gridlines and column labels must start below ALL of it, or the
+// first column's "Documents" pill collides with the "Search nodes" input.
+var TOP_CHROME_PAD=104;
 // Bottom-chrome zone for the floating controls bar.
 var BOT_CHROME_PAD=64;
 function drawRankColumns(vp,_light){
@@ -1443,6 +1506,20 @@ function drawRankColumns(vp,_light){
       ctx.lineWidth=1/scale;
       ctx.stroke();
     }
+  });
+  ctx.restore();
+}
+
+// Stage label pills are drawn in a SEPARATE pass at the END of draw() —
+// after edges, nodes and node labels — so a dense graph panned toward
+// the top of the viewport can never paint over them.
+function drawRankColumnLabels(vp,_light){
+  if((layoutMode!=="ranked"&&layoutMode!=="story")||rankColumns.length<2)return;
+  ctx.save();
+  var topY=vp.y1+TOP_CHROME_PAD/scale;
+  rankColumns.forEach(function(column){
+    var half=rankColumnGap/2;
+    if(column.x+half<vp.x1||column.x-half>vp.x2)return;
 
     if(scale>0.12){
       // Pill-style stage header drawn below the tab bar
@@ -1789,33 +1866,39 @@ function draw(){
       else if(N>500){labelEvery=scale<0.3?Math.ceil(N/20):scale<0.8?Math.ceil(N/80):1}
       else{labelEvery=1}
 
+      // Two-pass labeling: collect candidates first, then place them in
+      // priority order with rectangle-collision rejection. Drawing labels
+      // node-by-node let neighbors overprint each other, which made
+      // entity names unreadable even on small graphs.
+      var labelCandidates=[];
       nodes.forEach(function(n,i){
         if(typeof n.x!=="number")return;
         // Viewport culling for labels
         if(!isInViewport(n.x,n.y,n._r+fontSize*2+vpMargin,vp))return;
 
-        var shouldLabel=false;
+        // Priority: hovered focus (3) > search match (2) > key node (1).
+        var prio=-1;
 
         // Always label hovered + neighbors (budget-independent)
-        if(hoveredNode&&neighborSet&&neighborSet.has(n.id))shouldLabel=true;
+        if(hoveredNode&&neighborSet&&neighborSet.has(n.id))prio=3;
         // Always label search matches
-        if(hasSearch&&searchMatches.has(n.id))shouldLabel=true;
+        if(hasSearch&&searchMatches.has(n.id))prio=Math.max(prio,2);
 
         if(labelBudget==="key"){
           // Default: label only nodes the preprocessor marked as
           // label_priority (documents, entity-types, top-quartile
           // importance). Hovered/searched already opted-in above.
-          if(n.label_priority===true)shouldLabel=true;
+          if(n.label_priority===true)prio=Math.max(prio,1);
         }else if(N>5000){
           // "all" mode on a huge graph still has to cap somewhere
-          if(topDegreeSet.has(n.id))shouldLabel=true;
+          if(topDegreeSet.has(n.id))prio=Math.max(prio,1);
         }else{
           // "all" mode — original legacy adaptive behavior
-          if(n._degree>=maxDeg*0.3)shouldLabel=true;
-          if(labelEvery<Infinity&&i%labelEvery===0)shouldLabel=true;
+          if(n._degree>=maxDeg*0.3)prio=Math.max(prio,1);
+          if(labelEvery<Infinity&&i%labelEvery===0)prio=Math.max(prio,0);
         }
 
-        if(!shouldLabel)return;
+        if(prio<0)return;
 
         var alpha2=0.85;
         if(hoveredNode){
@@ -1825,14 +1908,44 @@ function draw(){
           alpha2=searchMatches.has(n.id)?1:0.08;
         }
 
+        labelCandidates.push({n:n,prio:prio,alpha:alpha2});
+      });
+
+      // Important labels claim space first; ties broken by degree so hubs
+      // keep their names when space runs out.
+      labelCandidates.sort(function(a,b){
+        if(a.prio!==b.prio)return b.prio-a.prio;
+        return (b.n._degree||0)-(a.n._degree||0);
+      });
+
+      var placedLabelRects=[];
+      var MAX_PLACED_LABELS=250;
+      labelCandidates.forEach(function(c){
+        if(placedLabelRects.length>=MAX_PLACED_LABELS)return;
+        var n=c.n;
         var label=truncate(n.name||"",30);
+        if(!label)return;
         var yOff=n._r+fontSize*0.8;
+        var halfW=ctx.measureText(label).width/2+2;
+        var rect={
+          x1:n.x-halfW,x2:n.x+halfW,
+          y1:n.y+yOff-fontSize*0.7,y2:n.y+yOff+fontSize*0.7,
+        };
+        // The hovered node's neighborhood is the user's focus — always
+        // drawn. Everything else must not overlap an already-placed label.
+        if(c.prio<3){
+          for(var p=0;p<placedLabelRects.length;p++){
+            var r=placedLabelRects[p];
+            if(rect.x1<r.x2&&rect.x2>r.x1&&rect.y1<r.y2&&rect.y2>r.y1)return;
+          }
+        }
+        placedLabelRects.push(rect);
 
         // Text shadow
-        ctx.fillStyle=_light ? "rgba(255,255,255,"+alpha2*0.8+")" : "rgba(0,0,0,"+alpha2*0.8+")";
+        ctx.fillStyle=_light ? "rgba(255,255,255,"+c.alpha*0.8+")" : "rgba(0,0,0,"+c.alpha*0.8+")";
         ctx.fillText(label,n.x+0.5,n.y+yOff+0.5);
 
-        ctx.fillStyle=_light ? "rgba(30,30,30,"+alpha2+")" : "rgba(244,244,244,"+alpha2+")";
+        ctx.fillStyle=_light ? "rgba(30,30,30,"+c.alpha+")" : "rgba(244,244,244,"+c.alpha+")";
         ctx.fillText(label,n.x,n.y+yOff);
       });
     }else if(hoveredNode){
@@ -1846,6 +1959,9 @@ function draw(){
       ctx.fillText(label2,hn.x,hn.y+yOff2);
     }
   }
+
+  // Stage label pills last — always readable above the node mass.
+  drawRankColumnLabels(vp,_light);
 
   ctx.restore();
 

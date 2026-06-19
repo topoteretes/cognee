@@ -17,6 +17,8 @@ from raw graph adapter output. These tests pin the contract:
 import pytest
 
 from cognee.modules.visualization.preprocessor import (
+    OTHER_ENTITY_TYPES_LABEL,
+    SCHEMA_MAX_ENTITY_TYPES,
     STAGE_ORDER,
     PreprocessedGraph,
     preprocess,
@@ -280,23 +282,32 @@ def test_node_color_preserved_from_type_map():
 
 
 def test_ontology_valid_overrides_color():
-    nodes_data = [("e", {"type": "Entity", "name": "X", "ontology_valid": True})]
+    """Ontology-grounded nodes get a distinct fill — it must differ from the
+    unknown-type fallback gray so ontology matches stand apart visually."""
+    nodes_data = [
+        ("e", {"type": "Entity", "name": "X", "ontology_valid": True}),
+        ("u", {"type": "MysteryType", "name": "Y"}),
+    ]
     edges_data = []
     result = preprocess((nodes_data, edges_data))
-    assert result.nodes[0]["color"] == "#D8D8D8"
+    assert result.nodes[0]["color"] == "#FF5CA8"
+    assert result.nodes[0]["color"] != result.nodes[1]["color"]
 
 
 def test_schema_graph_falls_back_to_type_graph_when_no_schema_nodes():
     result = preprocess(_alice_like_graph())
     assert "nodes" in result.schema_graph
     assert "links" in result.schema_graph
-    # Type-graph fallback emits one GraphNodeType per distinct type
+    # Type-graph fallback emits one GraphNodeType per distinct semantic type.
+    # Entity instances resolve to their EntityType via is_a, so "type:Entity"
+    # is replaced by the resolved "type:Person" / "type:Field".
     type_node_ids = {
         n["id"] for n in result.schema_graph["nodes"] if n.get("type") == "GraphNodeType"
     }
     assert "type:TextDocument" in type_node_ids
     assert "type:DocumentChunk" in type_node_ids
-    assert "type:Entity" in type_node_ids
+    assert "type:Entity" not in type_node_ids
+    assert "type:Person" in type_node_ids
 
 
 def test_schema_graph_uses_schema_nodes_when_present():
@@ -326,6 +337,132 @@ def test_schema_graph_uses_schema_nodes_when_present():
     assert "SchemaTable" in schema_node_types
 
 
+def test_schema_type_nodes_resolve_semantic_types_via_is_a():
+    """Entity instances collapse into their EntityType semantic types
+    (Person/Field) via the is_a edge, so the literal "Entity" never appears."""
+    result = preprocess(_alice_like_graph())
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    assert "Entity" not in type_nodes
+    assert "Person" in type_nodes
+    assert "Field" in type_nodes
+    assert type_nodes["Person"]["instance_count"] == 2
+    assert type_nodes["Field"]["instance_count"] == 1
+
+
+def test_schema_type_nodes_carry_bounded_deterministic_samples():
+    result = preprocess(_alice_like_graph())
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    person = type_nodes["Person"]
+    # Alice has degree 3 (contains, is_a, knows), Bob has degree 3
+    # (contains, is_a, knows). Tie on degree breaks to name order: Alice, Bob.
+    assert person["samples"] == ["Alice", "Bob"]
+    assert person["sample_size"] == 2
+    assert type_nodes["Field"]["samples"] == ["NLP"]
+
+    # Samples never exceed the per-type cap regardless of instance count.
+    for node in type_nodes.values():
+        assert node["sample_size"] <= 5
+        assert len(node["samples"]) == node["sample_size"]
+
+
+def test_schema_type_nodes_carry_full_relationship_distribution():
+    result = preprocess(_alice_like_graph())
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    person_rels = {
+        (r["relation"], r["to_type"]): r["count"] for r in type_nodes["Person"]["relationships"]
+    }
+    # Alice + Bob both is_a the EntityType node; alice knows bob (Person -> Person).
+    assert person_rels[("is_a", "EntityType")] == 2
+    assert person_rels[("knows", "Person")] == 1
+
+    # DocumentChunk contains Person twice (alice, bob), Field once (nlp).
+    chunk_rels = {
+        (r["relation"], r["to_type"]): r["count"]
+        for r in type_nodes["DocumentChunk"]["relationships"]
+    }
+    assert chunk_rels[("contains", "Person")] == 2
+    assert chunk_rels[("contains", "Field")] == 1
+
+
+def _many_entity_types_graph(num_types):
+    """num_types semantic entity types with strictly descending instance counts:
+    Type00 has num_types instances, Type01 has num_types-1, ... down to 1."""
+    nodes_data = []
+    edges_data = []
+    for i in range(num_types):
+        type_name = f"Type{i:02d}"
+        type_id = f"etype{i}"
+        nodes_data.append((type_id, {"type": "EntityType", "name": type_name}))
+        for j in range(num_types - i):
+            entity_id = f"e{i}_{j}"
+            nodes_data.append((entity_id, {"type": "Entity", "name": f"{type_name}_inst{j}"}))
+            edges_data.append((entity_id, type_id, "is_a", {}))
+    return (nodes_data, edges_data)
+
+
+def test_entity_type_long_tail_rolls_up_into_other_entities():
+    """Beyond SCHEMA_MAX_ENTITY_TYPES, the tail of semantic entity types
+    collapses into one rollup card so the Entity column stays bounded."""
+    num_types = SCHEMA_MAX_ENTITY_TYPES + 3
+    result = preprocess(_many_entity_types_graph(num_types))
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    semantic_cards = [name for name in type_nodes if name.startswith("Type")] + (
+        [OTHER_ENTITY_TYPES_LABEL] if OTHER_ENTITY_TYPES_LABEL in type_nodes else []
+    )
+    assert len(semantic_cards) == SCHEMA_MAX_ENTITY_TYPES
+
+    # Top types keep their own cards; the smallest types are rolled up.
+    assert "Type00" in type_nodes
+    assert f"Type{num_types - 1:02d}" not in type_nodes
+
+    rollup = type_nodes[OTHER_ENTITY_TYPES_LABEL]
+    assert rollup["rollup"] is True
+    tail_size = num_types - (SCHEMA_MAX_ENTITY_TYPES - 1)
+    assert len(rollup["rolled_up_types"]) == tail_size
+    # Tail of descending counts ends at 1: tail_size + (tail_size-1) + ... + 1.
+    assert rollup["instance_count"] == tail_size * (tail_size + 1) // 2
+    # Rollup keeps the same rank as the kept entity-type cards (one column).
+    assert rollup["rank"] == type_nodes["Type00"]["rank"]
+    # The lead field announces the rollup.
+    assert any(f["name"] == "entity types" for f in rollup["fields"])
+
+    # Pair-relationship nodes never reference a rolled-up type name.
+    rolled_names = {t["name"] for t in rollup["rolled_up_types"]}
+    for node in result.schema_graph["nodes"]:
+        if node["type"] == "GraphRelationshipType":
+            assert node["source_type"] not in rolled_names
+            assert node["target_type"] not in rolled_names
+
+    # Instance drill-down still reaches the rolled-up instances.
+    instances = result.schema_graph["instances_by_type"][OTHER_ENTITY_TYPES_LABEL]
+    assert len(instances) == rollup["instance_count"]
+
+
+def test_entity_types_under_cap_are_not_rolled_up():
+    result = preprocess(_alice_like_graph())
+    names = {n["name"] for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"}
+    assert OTHER_ENTITY_TYPES_LABEL not in names
+
+    result_at_cap = preprocess(_many_entity_types_graph(SCHEMA_MAX_ENTITY_TYPES))
+    names_at_cap = {
+        n["name"] for n in result_at_cap.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+    assert OTHER_ENTITY_TYPES_LABEL not in names_at_cap
+    assert sum(1 for name in names_at_cap if name.startswith("Type")) == SCHEMA_MAX_ENTITY_TYPES
+
+
 def test_empty_graph_does_not_crash():
     result = preprocess(([], []))
     assert result.nodes == []
@@ -339,6 +476,42 @@ def test_provenance_index_indexes_only_nodes_with_provenance():
     # c1 has provenance; doc1 doesn't
     assert "c1" in result.provenance_index
     assert "doc1" not in result.provenance_index
+
+
+def test_operation_layer_maps_operations_to_present_types():
+    """The transformation impact-layer emits operation nodes + typed links only
+    for catalog operations that touch a type present in the graph, expanding
+    'Entity' to the semantic entity types."""
+    nodes = [
+        ("d1", {"type": "TextDocument", "name": "a.txt"}),
+        ("p1", {"type": "Entity", "name": "Carlos"}),
+        ("t_person", {"type": "EntityType", "name": "Person"}),
+    ]
+    edges = [("p1", "t_person", "is_a", {})]
+    schema = preprocess((nodes, edges)).schema_graph
+
+    op_ids = {o["id"] for o in schema["operations"]}
+    assert "op:cognify" in op_ids
+
+    cognify_targets = {
+        (link["target"], link["effect"])
+        for link in schema["operation_links"]
+        if link["source"] == "op:cognify"
+    }
+    assert ("type:TextDocument", "produces") in cognify_targets
+    assert ("type:Person", "produces") in cognify_targets  # Entity → semantic type
+    assert ("type:EntityType", "produces") in cognify_targets
+
+    # An operation whose only targets are absent (Rule) is filtered out entirely.
+    assert "op:coding_rule_associations" not in op_ids
+
+    # Modify effects are surfaced (feedback weighting touches entity types).
+    feedback_targets = {
+        (link["target"], link["effect"])
+        for link in schema["operation_links"]
+        if link["source"] == "op:apply_feedback_weights"
+    }
+    assert ("type:Person", "modifies") in feedback_targets
 
 
 if __name__ == "__main__":

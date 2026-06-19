@@ -1,6 +1,6 @@
 import time
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable, Any
 
 from cognee.modules.graph.exceptions import (
@@ -52,7 +52,7 @@ class CogneeGraph(CogneeAbstractGraph):
 
         edge_text = edge.attributes.get("edge_text") or edge.attributes.get("relationship_type")
         edge.attributes["edge_type_id"] = (
-            generate_edge_id(edge_id=edge_text) if edge_text else None
+            EdgeType.id_for(edge_text) if edge_text else None
         )  # Update edge with generated edge_type_id
 
         edge.node1.add_skeleton_edge(edge)

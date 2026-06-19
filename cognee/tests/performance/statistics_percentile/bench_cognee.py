@@ -58,8 +58,14 @@ def _resolve_config(args: argparse.Namespace) -> dict:
     if not api_key and not mock_llm:
         sys.exit("Error: LLM_API_KEY is not set (CLI, .env, or environment)")
 
+    # Embeddings may use a different provider/key than the LLM (e.g.
+    # + OpenAI embeddings). Resolve the embedding key independently, falling back
+    # to the LLM/OpenAI key when LLM and embeddings share a provider.
+    embedding_api_key = pick(None, "EMBEDDING_API_KEY", "") or api_key
+
     return {
         "api_key": api_key or "mock-key",
+        "embedding_api_key": embedding_api_key or "mock-key",
         "llm_provider": pick(args.llm_provider, "LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
         "llm_model": pick(args.llm_model, "LLM_MODEL", DEFAULT_LLM_MODEL),
         "embedding_provider": pick(
@@ -83,11 +89,9 @@ def _load_mock_data(path: Path) -> dict:
     return by_title
 
 
-def _install_mocks(mock_data: dict[str, dict], embedding_dims: int) -> None:
-    """Monkey-patch LLMGateway and the embedding engine with mock implementations."""
-    import hashlib
+def _install_mocks(mock_data: dict[str, dict]) -> None:
+    """Mock the LLM (structured-output replay) and embeddings (cognee MOCK_EMBEDDING)."""
     import importlib
-    import struct
 
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
     from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
@@ -125,40 +129,17 @@ def _install_mocks(mock_data: dict[str, dict], embedding_dims: int) -> None:
 
     LLMGateway.acreate_structured_output = _mock_acreate
 
-    class _MockEmbeddingEngine:
-        def __init__(self, dims: int):
-            self._dims = dims
-            self.max_completion_tokens = 8192
-            self.dimensions = dims
-            self.tokenizer = None
-
-        async def embed_text(self, text: list[str]) -> list[list[float]]:
-            results = []
-            for t in text:
-                h = hashlib.sha256(t.encode()).digest()
-                vec = []
-                for i in range(self._dims):
-                    offset = (i * 4) % len(h)
-                    chunk = h[offset : offset + 4].ljust(4, b"\x00")
-                    val = struct.unpack("<f", chunk)[0]
-                    vec.append(max(-1.0, min(1.0, val / 1e38)))
-                results.append(vec)
-            return results
-
-        def get_vector_size(self) -> int:
-            return self._dims
-
-        def get_batch_size(self) -> int:
-            return 64
-
-    mock_engine = _MockEmbeddingEngine(embedding_dims)
-
+    # Mock embeddings via cognee's built-in MOCK_EMBEDDING switch instead of
+    # monkey-patching the engine. The real embedding engine is still constructed,
+    # so it keeps its real tokenizer — chunk boundaries are decided by
+    # embedding_engine.tokenizer.count_tokens() in chunk_by_sentence, and a stub
+    # without a tokenizer would silently re-chunk the text (one-token-per-word),
+    # shifting boundaries and breaking title-substring matching for multi-chunk
+    # documents. With the flag set, embed_text skips the API and returns zero
+    # vectors. Clear cached engines so the flag takes effect.
+    os.environ["MOCK_EMBEDDING"] = "true"
     emb_mod.create_embedding_engine.cache_clear()
-    emb_mod.get_embedding_engine = lambda: mock_engine
-    emb_mod.create_embedding_engine = lambda *a, **kw: mock_engine
-
     vec_mod._create_vector_engine.cache_clear()
-    vec_mod.get_embedding_engine = lambda: mock_engine
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -205,11 +186,11 @@ async def run_benchmark(
     cognee.config.set_embedding_provider(config["embedding_provider"])
     cognee.config.set_embedding_model(embedding_model)
     cognee.config.set_embedding_dimensions(embedding_dims)
-    cognee.config.set_embedding_api_key(config["api_key"])
+    cognee.config.set_embedding_api_key(config["embedding_api_key"])
 
     if config.get("mock_llm"):
         mock_data = _load_mock_data(config["mock_memories_file"])
-        _install_mocks(mock_data, embedding_dims)
+        _install_mocks(mock_data)
         print("Mock LLM/embedding mode enabled")
 
     n = len(memories)
@@ -268,7 +249,7 @@ async def run_benchmark(
     print("\nPhase 2: Running cognee.cognify() (knowledge graph build)...")
     try:
         t_cognify_start = time.time()
-        await cognee.cognify(data_per_batch=n)
+        await cognee.cognify(data_per_batch=n, chunks_per_batch=10000)
         t_cognify = time.time() - t_cognify_start
     except Exception as e:
         t_cognify = time.time() - t_cognify_start

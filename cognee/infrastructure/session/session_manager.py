@@ -1,5 +1,7 @@
 import json
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from cognee.context_global_variables import session_user
@@ -10,7 +12,11 @@ from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapte
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.infrastructure.session.feedback_models import AgentTraceFeedbackSummary
+from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
+from cognee.infrastructure.session.feedback_models import (
+    AgentTraceFeedbackSummary,
+    SessionTurnAnalysis,
+)
 from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.modules.observability import (
     COGNEE_DATA_SIZE_BYTES,
@@ -29,6 +35,18 @@ logger = get_logger("SessionManager")
 
 
 _session_record_write_failed = False
+
+
+@dataclass
+class SessionTurnPreparation:
+    """Pre-answer decision and updates for one session turn."""
+
+    should_answer: bool = True
+    response_to_user: str | None = None
+    effective_query: str = ""
+    analysis: SessionTurnAnalysis | None = None
+    accepted_context_ids: list[str] = field(default_factory=list)
+    previous_qa_id: str | None = None
 
 
 async def _record_session_activity(
@@ -149,10 +167,12 @@ class SessionManager:
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> str | None:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id)
@@ -190,6 +210,7 @@ class SessionManager:
                 feedback_text=feedback_text,
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
+                used_session_context_ids=used_session_context_ids,
             )
             await _record_session_activity(user_id, session_id)
             return qa_id
@@ -326,6 +347,116 @@ class SessionManager:
         )
         return history if isinstance(history, str) else ""
 
+    @staticmethod
+    def _empty_turn_preparation(query: str) -> SessionTurnPreparation:
+        return SessionTurnPreparation(should_answer=True, effective_query=query)
+
+    @staticmethod
+    def _coerce_last_qa_entry(entry: Any) -> dict:
+        if hasattr(entry, "model_dump"):
+            return entry.model_dump()
+        if isinstance(entry, dict):
+            return entry
+        return {}
+
+    async def prepare_session_turn(
+        self,
+        *,
+        query: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> SessionTurnPreparation:
+        """Analyze one user turn before retrieval/answer generation.
+
+        This runs only when caching and auto_feedback are enabled. It applies accepted candidate
+        guidance, rates previously served guidance, and returns the effective query that retrieval
+        and answer generation should use.
+        """
+        resolved_user_id = user_id
+        if resolved_user_id is None:
+            user = session_user.get()
+            resolved_user_id = getattr(user, "id", None)
+
+        if not self.is_session_available_for_completion(resolved_user_id):
+            return self._empty_turn_preparation(query)
+
+        cache_config = CacheConfig()
+        if not (cache_config.caching and cache_config.auto_feedback):
+            return self._empty_turn_preparation(query)
+
+        resolved_session_id = self._resolve_session_id(session_id)
+
+        try:
+            previous_entries = await self.get_session(
+                user_id=str(resolved_user_id),
+                session_id=resolved_session_id,
+                formatted=False,
+                last_n=1,
+            )
+            previous_entry = (
+                self._coerce_last_qa_entry(previous_entries[-1])
+                if isinstance(previous_entries, list) and previous_entries
+                else {}
+            )
+            previous_qa_id = previous_entry.get("qa_id")
+            previous_question = previous_entry.get("question")
+            previous_answer = previous_entry.get("answer")
+            previous_served_ids = previous_entry.get("used_session_context_ids") or []
+            if not isinstance(previous_served_ids, list):
+                previous_served_ids = []
+
+            served_context = await self._load_served_context_payload(
+                user_id=str(resolved_user_id),
+                session_id=resolved_session_id,
+                served_ids=[str(entry_id) for entry_id in previous_served_ids],
+            )
+
+            analysis = await analyze_turn_for_session_context(
+                query,
+                previous_question=previous_question,
+                previous_answer=previous_answer,
+                served_context=served_context,
+            )
+        except Exception as error:
+            logger.warning("SessionManager: turn preparation failed open: %s", error)
+            return self._empty_turn_preparation(query)
+
+        try:
+            accepted_context_ids = await self._apply_session_turn_analysis(
+                user_id=str(resolved_user_id),
+                session_id=resolved_session_id,
+                query=query,
+                analysis=analysis,
+                previous_qa_id=previous_qa_id,
+                served_ids=[str(entry_id) for entry_id in previous_served_ids],
+            )
+        except Exception as error:
+            logger.warning("SessionManager: turn analysis application failed open: %s", error)
+            accepted_context_ids = []
+
+        query_to_answer = (analysis.query_to_answer or "").strip()
+        response_to_user = (analysis.response_to_user or "").strip() or None
+        has_analysis_signal = bool(
+            query_to_answer
+            or response_to_user
+            or analysis.candidate_context_updates
+            or analysis.served_context_ratings
+        )
+        has_previous_answer = bool(previous_qa_id)
+        should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_answer)
+        effective_query = query_to_answer or query
+        if not should_answer and not response_to_user:
+            response_to_user = "Got it."
+
+        return SessionTurnPreparation(
+            should_answer=should_answer,
+            response_to_user=response_to_user,
+            effective_query=effective_query,
+            analysis=analysis,
+            accepted_context_ids=accepted_context_ids,
+            previous_qa_id=previous_qa_id,
+        )
+
     async def generate_completion_with_session(
         self,
         *,
@@ -339,6 +470,8 @@ class SessionManager:
         summarize_context: bool = False,
         used_graph_element_ids: dict | None = None,
         max_context_chars: int | None = None,
+        effective_query: str | None = None,
+        turn_preparation: SessionTurnPreparation | None = None,
     ) -> Any:
         from uuid import UUID as _UUID
 
@@ -365,6 +498,8 @@ class SessionManager:
                     summarize_context=summarize_context,
                     used_graph_element_ids=used_graph_element_ids,
                     max_context_chars=max_context_chars,
+                    effective_query=effective_query,
+                    turn_preparation=turn_preparation,
                 )
         return await self._generate_completion_with_session_inner(
             session_id=session_id,
@@ -377,6 +512,8 @@ class SessionManager:
             summarize_context=summarize_context,
             used_graph_element_ids=used_graph_element_ids,
             max_context_chars=max_context_chars,
+            effective_query=effective_query,
+            turn_preparation=turn_preparation,
         )
 
     async def _generate_completion_with_session_inner(
@@ -392,6 +529,8 @@ class SessionManager:
         summarize_context: bool = False,
         used_graph_element_ids: dict | None = None,
         max_context_chars: int | None = None,
+        effective_query: str | None = None,
+        turn_preparation: SessionTurnPreparation | None = None,
     ) -> Any:
         """
         Run single-query completion with session: read history, generate, save QA.
@@ -429,7 +568,33 @@ class SessionManager:
             )
 
         resolved_session_id = self._resolve_session_id(session_id)
+        if turn_preparation is None:
+            turn_preparation = await self.prepare_session_turn(
+                query=query,
+                session_id=resolved_session_id,
+                user_id=str(user_id),
+            )
+        if not turn_preparation.should_answer:
+            return turn_preparation.response_to_user or "Thanks for your feedback."
+
+        answer_query = (
+            (turn_preparation.effective_query or "").strip()
+            or (effective_query or "").strip()
+            or query
+        )
         conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
+
+        cache_config = CacheConfig()
+        session_context_on = cache_config.caching and cache_config.auto_feedback
+
+        served_ids: list[str] = []
+        active_context_block = ""
+        if session_context_on:
+            active_context_block, served_ids = await self._build_active_context_block_safe(
+                user_id=str(user_id),
+                session_id=resolved_session_id,
+                query=answer_query,
+            )
 
         # Prepend graph knowledge snapshot (from improve() sync) if available
         graph_context = await self.get_graph_context(
@@ -439,7 +604,7 @@ class SessionManager:
             # Apply context char limit: explicit param > config > unlimited
             char_limit = max_context_chars
             if char_limit is None:
-                char_limit = CacheConfig().max_session_context_chars
+                char_limit = cache_config.max_session_context_chars
             if char_limit is not None:
                 graph_context = graph_context[:char_limit]
             conversation_history = (
@@ -449,29 +614,17 @@ class SessionManager:
                 + conversation_history
             )
 
-        cache_config = CacheConfig()
-        run_auto_feedback = cache_config.caching and cache_config.auto_feedback
-
-        last_qa_id: str | None = None
-        if run_auto_feedback:
-            entries = await self.get_session(
-                user_id=str(user_id),
-                session_id=resolved_session_id,
-                formatted=False,
-                last_n=1,
-            )
-            if isinstance(entries, list) and entries:
-                last_entry = entries[-1]
-                last_qa_id = getattr(last_entry, "qa_id", None) or (
-                    last_entry.get("qa_id") if isinstance(last_entry, dict) else None
-                )
+        # Finally, prepend the active session-context block ABOVE the graph snapshot so it is the
+        # very first segment of the assembled prompt.
+        if active_context_block:
+            conversation_history = active_context_block + "\n\n" + conversation_history
 
         (
             completion,
             context_to_store,
-            feedback_result,
+            _feedback_result,
         ) = await generate_session_completion_with_optional_summary(
-            query=query,
+            query=answer_query,
             context=context,
             conversation_history=conversation_history,
             user_prompt_path=user_prompt_path,
@@ -479,41 +632,7 @@ class SessionManager:
             system_prompt=system_prompt,
             response_model=response_model,
             summarize_context=summarize_context,
-            run_feedback_detection=run_auto_feedback,
         )
-
-        feedback_detected = (
-            run_auto_feedback
-            and feedback_result is not None
-            and feedback_result.feedback_detected
-            and last_qa_id is not None
-        )
-
-        if feedback_detected:
-            try:
-                score: int | None = None
-                if feedback_result.feedback_score is not None:
-                    s = float(feedback_result.feedback_score)
-                    score = int(round(min(5, max(1, s))))
-                feedback_text = (feedback_result.feedback_text or "").strip()
-                if not feedback_text:
-                    feedback_text = f"User message: {query.strip()}"
-                await self.add_feedback(
-                    user_id=str(user_id),
-                    session_id=resolved_session_id,
-                    qa_id=last_qa_id,
-                    feedback_text=feedback_text,
-                    feedback_score=score,
-                )
-            except Exception as e:
-                logger.warning(
-                    "Auto-feedback persistence failed, proceeding without storing feedback: %s",
-                    e,
-                    exc_info=False,
-                )
-            if not feedback_result.contains_followup_question:
-                response = (feedback_result.response_to_user or "").strip()
-                return response if response else "Thanks for your feedback."
 
         await self.add_qa(
             user_id=str(user_id),
@@ -522,11 +641,164 @@ class SessionManager:
             answer=str(completion),
             session_id=resolved_session_id,
             used_graph_element_ids=used_graph_element_ids,
+            used_session_context_ids=served_ids or None,
         )
-        if feedback_detected and feedback_result.contains_followup_question:
-            thanks = (feedback_result.response_to_user or "").strip()
-            return f"{thanks}\n\n{completion}" if thanks else completion
         return completion
+
+    async def _build_active_context_block_safe(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        query: str,
+    ) -> tuple[str, list[str]]:
+        """Render the active session-context guidance block. Fail-open -> ("", [])."""
+        try:
+            from cognee.infrastructure.session.session_context_builder import (
+                build_active_context_block,
+            )
+
+            return await build_active_context_block(
+                session_manager=self,
+                user_id=user_id,
+                session_id=session_id,
+                query=query,
+            )
+        except Exception as e:
+            logger.warning("SessionManager: build_active_context_block failed: %s", e)
+            return "", []
+
+    async def _load_served_context_payload(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        served_ids: list[str],
+    ) -> list[dict]:
+        """Resolve the context entries served to the previous answer into {id, content} dicts.
+
+        These are fed to detect_feedback so the single feedback call can rate them. Fail-open -> [].
+        """
+        if not served_ids:
+            return []
+        try:
+            entries = await self.get_session_context_entries(user_id=user_id, session_id=session_id)
+            by_id = {}
+            for raw in entries or []:
+                row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
+                entry_id = row.get("id")
+                if entry_id is not None and row.get("kind", "context") == "context":
+                    by_id[str(entry_id)] = row.get("content", "")
+            return [{"id": cid, "content": by_id[cid]} for cid in served_ids if cid in by_id]
+        except Exception as e:
+            logger.warning("SessionManager: load served context failed: %s", e)
+            return []
+
+    async def _apply_session_turn_analysis(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        query: str,
+        analysis: SessionTurnAnalysis,
+        previous_qa_id: str | None,
+        served_ids: list[str],
+    ) -> list[str]:
+        """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
+        if not analysis.candidate_context_updates and not analysis.served_context_ratings:
+            return []
+        try:
+            from cognee.infrastructure.session.session_context_builder import (
+                apply_candidate_updates,
+            )
+            from cognee.infrastructure.session.session_context_models import (
+                SessionFeedbackEntry,
+            )
+
+            ratings = list(analysis.served_context_ratings or [])
+            candidates = list(analysis.candidate_context_updates or [])
+
+            feedback_entry = SessionFeedbackEntry(
+                id=str(uuid.uuid4()),
+                created_at=datetime.utcnow().isoformat(),
+                raw_text=query,
+                referenced_qa_ids=[previous_qa_id] if previous_qa_id else [],
+                influencing_context_ids=list(served_ids or []),
+                candidate_context_entries=[
+                    c.model_dump() if hasattr(c, "model_dump") else dict(c) for c in candidates
+                ],
+            )
+            await self.create_session_context_entry(
+                user_id=user_id,
+                entry_dump=feedback_entry.model_dump(),
+                session_id=session_id,
+            )
+
+            touched_ids = await apply_candidate_updates(
+                session_manager=self,
+                user_id=user_id,
+                session_id=session_id,
+                feedback_entry_id=feedback_entry.id,
+                candidates=candidates,
+            )
+
+            await self._apply_served_context_ratings(
+                user_id=user_id,
+                session_id=session_id,
+                ratings=ratings,
+            )
+            return touched_ids
+        except Exception as e:
+            logger.warning("SessionManager: session-context feedback application failed: %s", e)
+            return []
+
+    async def _apply_served_context_ratings(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        ratings: list,
+    ) -> None:
+        """Increment helpful_count / harmful_count for rated entries. Fail-open per rating."""
+        if not ratings:
+            return
+        try:
+            entries = await self.get_session_context_entries(user_id=user_id, session_id=session_id)
+            counts = {}
+            for raw in entries or []:
+                row = raw if isinstance(raw, dict) else getattr(raw, "__dict__", {})
+                if row.get("kind", "context") != "context":
+                    continue
+                entry_id = row.get("id")
+                if entry_id is not None:
+                    counts[str(entry_id)] = (
+                        int(row.get("helpful_count", 0) or 0),
+                        int(row.get("harmful_count", 0) or 0),
+                    )
+            for rating in ratings:
+                try:
+                    entry_id = str(getattr(rating, "entry_id", None) or "")
+                    verdict = str(getattr(rating, "rating", "") or "").strip().lower()
+                    if entry_id not in counts or verdict not in ("helpful", "harmful"):
+                        continue
+                    helpful, harmful = counts[entry_id]
+                    if verdict == "helpful":
+                        merge = {"helpful_count": helpful + 1}
+                        next_counts = (helpful + 1, harmful)
+                    else:
+                        merge = {"harmful_count": harmful + 1}
+                        next_counts = (helpful, harmful + 1)
+                    await self.update_session_context_entry(
+                        user_id=user_id,
+                        entry_id=entry_id,
+                        merge=merge,
+                        session_id=session_id,
+                    )
+                    counts[entry_id] = next_counts
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning("SessionManager: served-context rating update failed: %s", e)
 
     @staticmethod
     def format_entries(entries: list[dict], include_context: bool = True) -> str:
@@ -672,6 +944,7 @@ class SessionManager:
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
         session_id: str | None = None,
     ) -> bool:
         """
@@ -681,6 +954,7 @@ class SessionManager:
         Returns True if updated, False if not found or cache unavailable.
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         used_graph_element_ids: Optional dict with "node_ids" and "edge_ids" lists for frequency weights.
+        used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """
         from cognee.infrastructure.locks import session_lock
 
@@ -702,6 +976,7 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
+                used_session_context_ids=used_session_context_ids,
             )
 
     async def add_feedback(
@@ -784,6 +1059,114 @@ class SessionManager:
                 qa_id=qa_id,
             )
 
+    # -- Session context entries (active guidance layer) --------------------
+
+    async def create_session_context_entry(
+        self,
+        *,
+        user_id: str,
+        entry_dump: dict,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Append one session-context entry (a plain dict carrying a "kind" field).
+
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            _validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return False
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping create_session_context_entry")
+            return False
+        try:
+            await self._cache.create_session_context_entry(user_id, session_id, entry_dump)
+            return True
+        except Exception as e:
+            logger.warning("SessionManager: create_session_context_entry failed: %s", e)
+            return False
+
+    async def get_session_context_entries(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+    ) -> list[dict]:
+        """
+        Return all stored session-context entries (both "context" and "feedback" kinds).
+
+        Fail-open: returns [] when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            _validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return []
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty session context")
+            return []
+        try:
+            return await self._cache.get_session_context_entries(user_id, session_id)
+        except Exception as e:
+            logger.warning("SessionManager: get_session_context_entries failed: %s", e)
+            return []
+
+    async def update_session_context_entry(
+        self,
+        *,
+        user_id: str,
+        entry_id: str,
+        merge: dict,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Shallow-merge updates into the session-context entry matching entry["id"].
+
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            _validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return False
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping update_session_context_entry")
+            return False
+        try:
+            return await self._cache.update_session_context_entry(
+                user_id, session_id, entry_id, merge
+            )
+        except Exception as e:
+            logger.warning("SessionManager: update_session_context_entry failed: %s", e)
+            return False
+
+    async def delete_session_context(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Delete the entire session-context list for the given session.
+
+        Fail-open: returns False when cache unavailable or on any error, never raises.
+        """
+        session_id = self._resolve_session_id(session_id)
+        try:
+            _validate_session_params(user_id=user_id, session_id=session_id)
+        except Exception:
+            return False
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_session_context")
+            return False
+        try:
+            return await self._cache.delete_session_context(user_id, session_id)
+        except Exception as e:
+            logger.warning("SessionManager: delete_session_context failed: %s", e)
+            return False
+
     # -- Graph knowledge context (separate from QA history) -----------------
 
     @staticmethod
@@ -797,6 +1180,15 @@ class SessionManager:
             return ""
         session_id = self._resolve_session_id(session_id)
         key = self._graph_context_key(user_id, session_id)
+        try:
+            raw = await self._cache.get_value(key)
+            return raw if raw else ""
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature get_value), fall back to legacy duck-typing
+            pass
+        except Exception:
+            return ""
         try:
             raw = await self._cache.async_redis.get(key)
             if raw:
@@ -822,6 +1214,13 @@ class SessionManager:
         session_id = self._resolve_session_id(session_id)
         key = self._graph_context_key(user_id, session_id)
         try:
+            await self._cache.set_value(key, context, ttl=self._cache.session_ttl_seconds)
+            return
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature set_value), fall back to legacy duck-typing
+            pass
+        try:
             await self._cache.async_redis.set(key, context)
             if self._cache.session_ttl_seconds:
                 await self._cache.async_redis.expire(key, self._cache.session_ttl_seconds)
@@ -846,12 +1245,26 @@ class SessionManager:
         # Also clean up the graph knowledge context key
         graph_key = self._graph_context_key(user_id, session_id)
         try:
-            await self._cache.async_redis.delete(graph_key)
-        except AttributeError:
+            await self._cache.delete_value(graph_key)
+        except (NotImplementedError, AttributeError, TypeError):
+            # Adapter predates the KV interface (missing, non-async, or
+            # different-signature delete_value), fall back to legacy duck-typing
             try:
-                del self._cache._cache[graph_key]
+                await self._cache.async_redis.delete(graph_key)
+            except AttributeError:
+                try:
+                    del self._cache._cache[graph_key]
+                except Exception:
+                    pass
             except Exception:
                 pass
+        except Exception:
+            pass
+
+        # Also clear the active session-context list (fail-open; adapter.delete_session may also
+        # clear it, but this guarantees no leak if the adapter does not).
+        try:
+            await self._cache.delete_session_context(user_id, session_id)
         except Exception:
             pass
 

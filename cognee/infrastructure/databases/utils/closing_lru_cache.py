@@ -191,9 +191,9 @@ class _LeasedValueProxy:
         return call_with_lease
 
     def __setattr__(self, name, value):
-        if name.startswith("_"):
-            object.__setattr__(self, name, value)
-            return
+        # The proxy's own slots (_entry, _finalizer) are only set via
+        # object.__setattr__ in __init__, so every write reaching here targets
+        # the wrapped value and must forward to it.
         setattr(self._entry.value, name, value)
 
 

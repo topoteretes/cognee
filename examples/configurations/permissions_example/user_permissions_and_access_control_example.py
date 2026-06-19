@@ -67,13 +67,13 @@ async def main():
     )
 
     def get_dataset_id(remember_result):
-    """Extract dataset_id from remember output."""
-    if not remember_result or not remember_result.dataset_id:
-        raise ValueError("Dataset ID is missing from remember result.")
-    from uuid import UUID
-    if isinstance(remember_result.dataset_id, UUID):
-        return remember_result.dataset_id
-    return UUID(remember_result.dataset_id)
+        """Extract dataset_id from remember output."""
+        if not remember_result or not remember_result.dataset_id:
+            raise ValueError("Dataset ID is missing from remember result.")
+        from uuid import UUID
+        if isinstance(remember_result.dataset_id, UUID):
+            return remember_result.dataset_id
+        return UUID(remember_result.dataset_id)
 
     # Get dataset IDs from remember results
     # Note: When we want to work with datasets from other users (recall, remember, and etc.) we must supply dataset

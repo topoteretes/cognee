@@ -193,6 +193,24 @@ async def test_migration_uses_pydantic_defaults(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_migration_backfills_source_chunk_id_default(tmp_path):
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    col = "Test_text"
+
+    old_point = _make_point(str(uuid4()), "old schema")
+    await _seed(adapter, col, [old_point])
+    await _strip_payload_named_field(adapter, col, "source_chunk_id")
+
+    await adapter.create_data_points(col, [_make_point(str(uuid4()), "new schema")])
+
+    result = (await adapter.retrieve(col, [old_point.id]))[0]
+    assert result.payload["source_chunk_id"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_non_schema_errors_propagate(tmp_path):
     adapter = LanceDBAdapter(
         url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
