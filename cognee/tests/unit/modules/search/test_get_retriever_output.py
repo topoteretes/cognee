@@ -1,3 +1,4 @@
+import importlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,6 +9,15 @@ from cognee.modules.search.methods.get_retriever_output import (
     get_retriever_output,
 )
 from cognee.modules.search.types import SearchType
+
+# Resolve the module object explicitly. The package __init__ re-exports the
+# `get_retriever_output` function under the same name as this submodule, so a
+# dotted-string patch target ("...methods.get_retriever_output.<attr>") resolves
+# to the function rather than the module and fails. Patching the module object
+# directly via patch.object is order-independent and reliable.
+get_retriever_output_module = importlib.import_module(
+    "cognee.modules.search.methods.get_retriever_output"
+)
 
 
 class _FakeGraphEngine:
@@ -71,13 +81,15 @@ class _NoAnswerRetriever:
 async def test_get_retriever_output_uses_effective_query_before_retrieval():
     retriever = _EffectiveQueryRetriever()
     with (
-        patch(
-            "cognee.modules.search.methods.get_retriever_output.get_graph_engine",
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
             new_callable=AsyncMock,
             return_value=_FakeGraphEngine(),
         ),
-        patch(
-            "cognee.modules.search.methods.get_retriever_output.get_search_type_retriever_instance",
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
             new_callable=AsyncMock,
             return_value=retriever,
         ),
@@ -101,13 +113,15 @@ async def test_get_retriever_output_uses_effective_query_before_retrieval():
 @pytest.mark.asyncio
 async def test_get_retriever_output_skips_retrieval_for_no_answer_turn():
     with (
-        patch(
-            "cognee.modules.search.methods.get_retriever_output.get_graph_engine",
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
             new_callable=AsyncMock,
             return_value=_FakeGraphEngine(),
         ),
-        patch(
-            "cognee.modules.search.methods.get_retriever_output.get_search_type_retriever_instance",
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
             new_callable=AsyncMock,
             return_value=_NoAnswerRetriever(),
         ),

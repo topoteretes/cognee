@@ -465,6 +465,50 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def get_value(self, key: str) -> str | None:
+        """Retrieve a raw string value stored under the given key, or None if absent."""
+        try:
+            value = await self.async_redis.get(key)
+            if isinstance(value, bytes):
+                return value.decode("utf-8")
+            return value
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while getting value: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while getting value from Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def set_value(self, key: str, value: str, ttl: int | None = None) -> None:
+        """Store a raw string value under the given key, optionally expiring after ttl seconds."""
+        try:
+            await self.async_redis.set(key, value)
+            if ttl:
+                await self.async_redis.expire(key, ttl)
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while setting value: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while setting value in Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_value(self, key: str) -> None:
+        """Delete the value stored under the given key, if present."""
+        try:
+            await self.async_redis.delete(key)
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting value: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting value from Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def append_agent_trace_step(
         self,
         user_id: str,

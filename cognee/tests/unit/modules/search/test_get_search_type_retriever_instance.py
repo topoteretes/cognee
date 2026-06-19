@@ -156,6 +156,9 @@ async def test_hybrid_completion_retriever_receives_config():
             "max_edges_per_entity": 3,
             "include_global_context_index": True,
             "global_context_index_top_k": 2,
+            "text_summaries_top_k": 0,
+            "use_importance_weight": False,
+            "facts_top_k": 4,
         },
     )
 
@@ -168,6 +171,9 @@ async def test_hybrid_completion_retriever_receives_config():
     assert retriever_instance.session_id == "session-1"
     assert retriever_instance.include_global_context_index is True
     assert retriever_instance.global_context_index_top_k == 2
+    assert retriever_instance.text_summaries_top_k == 0
+    assert retriever_instance.use_importance_weight is False
+    assert retriever_instance.facts_top_k == 4
 
 
 @pytest.mark.asyncio
@@ -183,6 +189,9 @@ async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
     assert isinstance(retriever_instance, HybridRetriever)
     assert retriever_instance.chunks_top_k == 11
     assert retriever_instance.entities_top_k == 11
+    assert retriever_instance.text_summaries_top_k is None
+    assert retriever_instance.use_importance_weight is True
+    assert retriever_instance.facts_top_k == 11
 
 
 @pytest.mark.asyncio
@@ -208,9 +217,10 @@ async def test_hybrid_completion_get_retriever_output_smoke():
         return []
 
     vector.search = AsyncMock(side_effect=search)
+    vector.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2]])
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
-    graph.get_connections = AsyncMock(return_value=[])
+    graph.get_neighborhood = AsyncMock(return_value=([], []))
     unified = MagicMock()
     unified.vector = vector
     unified.graph = graph
@@ -235,7 +245,7 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             return_value=unified,
         ),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.BM25ChunksRetriever",
+            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
             return_value=bm25_retriever,
         ),
         patch(

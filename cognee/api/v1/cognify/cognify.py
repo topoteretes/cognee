@@ -4,6 +4,7 @@ from typing import Union, Optional
 from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
@@ -37,9 +38,6 @@ from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_
 
 
 logger = get_logger("cognify")
-
-
-update_status_lock = asyncio.Lock()
 
 
 async def cognify(
@@ -218,6 +216,10 @@ async def cognify(
         if datasets is not None:
             span.set_attribute("cognee.cognify.datasets", str(datasets))
 
+        from cognee.modules.migrations.startup import run_migrations_and_block
+
+        await run_migrations_and_block(datasets, user)
+
         if config is None:
             ontology_config = get_ontology_env_config()
             if (
@@ -271,6 +273,7 @@ async def cognify(
             use_pipeline_cache=True,
             pipeline_name="cognify_pipeline",
             data_per_batch=data_per_batch,
+            rollback_handler=cognify_rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
         )

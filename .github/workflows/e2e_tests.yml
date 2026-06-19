@@ -132,7 +132,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -551,6 +554,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+          ENABLE_AUTO_MIGRATIONS: 'false'
         run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
 
   test-deletion-on-default-graph_with_legacy_data_2:
@@ -578,6 +582,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          ENABLE_AUTO_MIGRATIONS: 'false'
         run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_2.py
 
   test-delete-two-users-with-legacy-data:
@@ -603,6 +608,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          ENABLE_AUTO_MIGRATIONS: 'false'
         run: uv run python ./cognee/tests/test_delete_two_users_with_legacy_data.py
 
   test-delete-two-users-on-same-dataset:
@@ -726,7 +732,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -821,7 +830,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -887,7 +899,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -933,6 +948,94 @@ jobs:
           DB_PASSWORD: cognee
         run: uv run python ./cognee/tests/test_conversation_history.py
 
+  run_conversation_sessions_test_postgres:
+    name: Conversation sessions test (Postgres)
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "postgres"
+
+      - name: Run Conversation session tests (Postgres)
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          GRAPH_DATABASE_PROVIDER: 'kuzu'
+          CACHING: true
+          AUTO_FEEDBACK: true
+          CACHE_BACKEND: 'postgres'
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+        run: uv run python ./cognee/tests/test_conversation_history.py
+
+  run_conversation_sessions_test_sqlite:
+    name: Conversation sessions test (SQLite)
+    runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Conversation session tests (SQLite)
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          GRAPH_DATABASE_PROVIDER: 'kuzu'
+          CACHING: true
+          AUTO_FEEDBACK: true
+          CACHE_BACKEND: 'sqlite'
+        run: uv run python ./cognee/tests/test_conversation_history.py
+
   run-feedback-weights-pipeline-smoke-kuzu:
     name: Feedback Weights Pipeline Smoke Test (Kuzu)
     runs-on: ubuntu-latest
@@ -942,7 +1045,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -1033,7 +1139,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -1563,7 +1672,10 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee
@@ -1689,7 +1801,10 @@ jobs:
         shell: bash
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
           POSTGRES_PASSWORD: cognee

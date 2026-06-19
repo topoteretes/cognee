@@ -2,7 +2,7 @@ import os
 
 import asyncio
 from functools import wraps
-from typing import Any, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -64,6 +64,7 @@ async def run_tasks(
     incremental_loading: bool = False,
     data_per_batch: int = 20,
     extras: Optional[dict] = None,
+    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ):
@@ -118,6 +119,7 @@ async def run_tasks(
                             user=user,
                             data_item=data_item,
                             dataset=dataset,
+                            pipeline_run_id=pipeline_run_id,
                             pipeline_name=pipeline_name,
                             extras=extras if isinstance(extras, dict) else {},
                         ),
@@ -127,7 +129,6 @@ async def run_tasks(
 
             gathered = await asyncio.gather(
                 *[asyncio.create_task(_run_item(item)) for item in data],
-                return_exceptions=True,
             )
 
             # Separate successes from unhandled exceptions
@@ -157,6 +158,19 @@ async def run_tasks(
                     message="Pipeline run failed. Data item could not be processed."
                 )
 
+            # Flush durable storage BEFORE marking the run complete. If a push
+            # fails it must be treated as a failure of this run (rollback +
+            # PipelineRunErrored), not raised after the run has already been
+            # reported as completed — which would both roll back already-completed
+            # data and emit two contradictory terminal events for one run.
+            graph_engine = await get_graph_engine()
+            if hasattr(graph_engine, "push_to_s3"):
+                await graph_engine.push_to_s3()
+
+            relational_engine = get_relational_engine()
+            if hasattr(relational_engine, "push_to_s3"):
+                await relational_engine.push_to_s3()
+
             await log_pipeline_run_complete(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
             )
@@ -168,15 +182,22 @@ async def run_tasks(
                 data_ingestion_info=results,
             )
 
-            graph_engine = await get_graph_engine()
-            if hasattr(graph_engine, "push_to_s3"):
-                await graph_engine.push_to_s3()
-
-            relational_engine = get_relational_engine()
-            if hasattr(relational_engine, "push_to_s3"):
-                await relational_engine.push_to_s3()
-
         except Exception as error:
+            if callable(rollback_handler):
+                try:
+                    await rollback_handler(
+                        pipeline_run_id=pipeline_run_id,
+                        pipeline_id=pipeline_id,
+                        pipeline_name=pipeline_name,
+                        dataset=dataset,
+                        user=user,
+                        data=data,
+                        data_ingestion_info=locals().get("results"),
+                        error=error,
+                    )
+                except Exception as rollback_error:
+                    logger.error("Rollback errored: %s", rollback_error, exc_info=True)
+
             await log_pipeline_run_error(
                 pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
             )

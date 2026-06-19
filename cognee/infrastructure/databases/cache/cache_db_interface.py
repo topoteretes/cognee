@@ -164,6 +164,39 @@ class CacheDBInterface(ABC):
         """
         pass
 
+    async def get_value(self, key: str) -> str | None:
+        """
+        Retrieve a raw string value stored under the given key, or None if absent/expired.
+
+        Used for session-scoped key/value payloads such as graph context snapshots
+        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
+        (``graph_sync_checkpoint:...``). Adapters that do not support generic
+        key/value storage may leave this unimplemented.
+        """
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
+
+    async def set_value(self, key: str, value: str, ttl: int | None = None) -> None:
+        """
+        Store a raw string value under the given key, optionally expiring after ttl seconds.
+
+        Used for session-scoped key/value payloads such as graph context snapshots
+        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
+        (``graph_sync_checkpoint:...``). Adapters that do not support generic
+        key/value storage may leave this unimplemented.
+        """
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
+
+    async def delete_value(self, key: str) -> None:
+        """
+        Delete the value stored under the given key, if present.
+
+        Used for session-scoped key/value payloads such as graph context snapshots
+        (``graph_knowledge:{user_id}:{session_id}``) and graph sync checkpoints
+        (``graph_sync_checkpoint:...``). Adapters that do not support generic
+        key/value storage may leave this unimplemented.
+        """
+        raise NotImplementedError("This cache adapter does not support key/value storage.")
+
     @abstractmethod
     async def append_agent_trace_step(
         self,

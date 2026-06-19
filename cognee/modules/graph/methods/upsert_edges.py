@@ -1,5 +1,5 @@
 from uuid import UUID, uuid5, NAMESPACE_OID
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
@@ -23,6 +23,7 @@ async def upsert_edges(
     data_id: UUID,
     dataset_id: UUID,
     session: AsyncSession,
+    pipeline_run_id: Optional[UUID] = None,
 ):
     """
     Adds edges to the edges table.
@@ -57,6 +58,7 @@ async def upsert_edges(
                 "user_id": user_id,
                 "data_id": data_id,
                 "dataset_id": dataset_id,
+                "pipeline_run_id": pipeline_run_id,
                 "source_node_id": edge[0],
                 "destination_node_id": edge[1],
                 "relationship_name": sanitized_edge_text,
@@ -70,6 +72,11 @@ async def upsert_edges(
 
     for start_index in range(0, len(edges_to_add), UPSERT_BATCH_SIZE):
         edge_batch = edges_to_add[start_index : start_index + UPSERT_BATCH_SIZE]
+        # on_conflict_do_nothing intentionally preserves the FIRST run's
+        # pipeline_run_id on a re-cognify (see upsert_nodes for the full rationale):
+        # the ledger id is keyed by logical identity, not by run, so overwriting
+        # the tag would let a later run's rollback delete an edge an earlier
+        # successful run created.
         upsert_statement = (
             insert(Edge).values(edge_batch).on_conflict_do_nothing(index_elements=["id"])
         )
