@@ -35,9 +35,10 @@ class TestConditionalAuthentication:
         mock_get_default.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch.object(gau_mod, "get_user", new_callable=AsyncMock)
     @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     async def test_require_authentication_false_with_valid_user_returns_user(
-        self, mock_get_default
+        self, mock_get_default, mock_get_user
     ):
         """Test that when REQUIRE_AUTHENTICATION=false and valid user, returns that user."""
         mock_authenticated_user = User(
@@ -47,8 +48,7 @@ class TestConditionalAuthentication:
             is_active=True,
             is_verified=True,
         )
-
-        # Use gau_mod.get_authenticated_user instead
+        mock_get_user.return_value = mock_authenticated_user
 
         # Test with authenticated user
         result = await gau_mod.get_authenticated_user(user=mock_authenticated_user)
@@ -57,8 +57,11 @@ class TestConditionalAuthentication:
         mock_get_default.assert_not_called()
 
     @pytest.mark.asyncio
+    @patch.object(gau_mod, "get_user", new_callable=AsyncMock)
     @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-    async def test_require_authentication_true_with_user_returns_user(self, mock_get_default):
+    async def test_require_authentication_true_with_user_returns_user(
+        self, mock_get_default, mock_get_user
+    ):
         """Test that when REQUIRE_AUTHENTICATION=true and user present, returns user."""
         mock_authenticated_user = User(
             id=uuid4(),
@@ -67,8 +70,7 @@ class TestConditionalAuthentication:
             is_active=True,
             is_verified=True,
         )
-
-        # Use gau_mod.get_authenticated_user instead
+        mock_get_user.return_value = mock_authenticated_user
 
         result = await gau_mod.get_authenticated_user(user=mock_authenticated_user)
 
@@ -213,8 +215,9 @@ class TestConditionalAuthenticationEdgeCases:
             await gau_mod.get_authenticated_user(user=None)
 
     @pytest.mark.asyncio
+    @patch.object(gau_mod, "get_user", new_callable=AsyncMock)
     @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-    async def test_user_type_consistency(self, mock_get_default):
+    async def test_user_type_consistency(self, mock_get_default, mock_get_user):
         """Test that the function always returns the same type."""
         mock_user = User(
             id=uuid4(),
@@ -223,6 +226,7 @@ class TestConditionalAuthenticationEdgeCases:
             is_active=True,
             is_verified=True,
         )
+        mock_get_user.return_value = mock_user
 
         mock_default_user = SimpleNamespace(id=uuid4(), email="default@example.com", is_active=True)
         mock_get_default.return_value = mock_default_user
@@ -270,7 +274,8 @@ class TestAuthenticationScenarios:
         assert result == mock_default_user
         mock_get_default.assert_called_once()
 
-    async def test_scenario_valid_active_user(self):
+    @patch.object(gau_mod, "get_user", new_callable=AsyncMock)
+    async def test_scenario_valid_active_user(self, mock_get_user):
         """Scenario: Valid JWT and user exists and is active → returns the user."""
         mock_user = User(
             id=uuid4(),
@@ -279,8 +284,7 @@ class TestAuthenticationScenarios:
             is_active=True,
             is_verified=True,
         )
-
-        # Use gau_mod.get_authenticated_user instead
+        mock_get_user.return_value = mock_user
 
         result = await gau_mod.get_authenticated_user(user=mock_user)
         assert result == mock_user
