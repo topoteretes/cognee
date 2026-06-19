@@ -195,11 +195,17 @@ async def _remember_entry(
         result = RememberResult(
             status=payload.get("status", "session_stored"),
             dataset_name=payload.get("dataset_name", dataset_name),
+            dataset_id=payload.get("dataset_id"),
             session_ids=payload.get("session_ids"),
+            pipeline_run_id=payload.get("pipeline_run_id"),
         )
         result.entry_type = payload.get("entry_type")
         result.entry_id = payload.get("entry_id")
         result.elapsed_seconds = payload.get("elapsed_seconds")
+        result.items_processed = payload.get("items_processed", 0)
+        result.items = payload.get("items", []) or []
+        result.content_hash = payload.get("content_hash")
+        result.raw_result = payload
         if payload.get("error"):
             result.error = payload["error"]
         return result
@@ -853,6 +859,7 @@ async def _remember_inner(
         )
 
     if content_type == "skills":
+        import shutil
         import tempfile
         from pathlib import Path as _Path
 
@@ -907,7 +914,20 @@ async def _remember_inner(
                 if isinstance(payload, str):
                     payload = payload.encode("utf-8")
                 dest.write_bytes(payload or b"")
-            skill_source = tmp_root
+            skill_files = list(tmp_root.rglob("SKILL.md"))
+            if skill_files:
+                skill_source = tmp_root
+            else:
+                raw_files = [path for path in tmp_root.rglob("*") if path.is_file()]
+                if raw_files:
+                    canonical_root = tmp_root / "__canonical_skills__"
+                    for index, raw_file in enumerate(raw_files):
+                        target_dir = canonical_root / f"skill-{index:04d}"
+                        target_dir.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(raw_file, target_dir / "SKILL.md")
+                    skill_source = canonical_root
+                else:
+                    skill_source = tmp_root
 
         try:
             async with set_database_global_context_variables(dataset.id, owner_id):
