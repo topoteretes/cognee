@@ -18,11 +18,13 @@ from pydantic import BaseModel, Field
 # confidence clears this threshold. Deterministic, no search/LLM.
 MIN_GATE_CONFIDENCE = 0.75
 
-# Batching: pack the session timeline (turns + candidates) into batches no larger than
-# this many characters, so each curator call stays reliable. One assistant answer is
-# truncated to keep a single long turn from dominating a batch.
+# Batching: pack capped timeline blocks into coarse batches. Six worst-case QA
+# blocks plus separators stays below the budget, so the batching logic can stay simple.
 BATCH_CHAR_BUDGET = 16_000
+CURATOR_BLOCKS_PER_BATCH = 6
+MAX_QA_QUESTION_CHARS = 1_200
 MAX_QA_ANSWER_CHARS = 1_200
+MAX_CANDIDATE_CHARS = 280
 
 # Bounded concurrency for the two parallel fan-outs.
 CURATOR_CONCURRENCY = 5

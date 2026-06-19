@@ -14,7 +14,7 @@ work, never the whole run.
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Awaitable, Callable, List, Optional, Union
+from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables
@@ -29,13 +29,16 @@ from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
+from cognee.shared.async_utils import gather_with_concurrency_limit
 from cognee.shared.logging_utils import get_logger
 
 from .models import (
-    BATCH_CHAR_BUDGET,
+    CURATOR_BLOCKS_PER_BATCH,
     CURATOR_CONCURRENCY,
     GLOSSARY_ENTITIES_PER_LESSON,
+    MAX_CANDIDATE_CHARS,
     MAX_QA_ANSWER_CHARS,
+    MAX_QA_QUESTION_CHARS,
     MIN_GATE_CONFIDENCE,
     NOVELTY_LESSONS_PER_LESSON,
     WRITER_CONCURRENCY,
@@ -141,57 +144,48 @@ async def _load_distillable_session_inputs(
 # -- Curate proposed lessons --------------------------------------------------
 
 
-def build_batches(qa_rows: List[dict], context_entries: List[SessionContextEntry]) -> List[str]:
-    """Pack the session timeline into size-bounded batches of turns + candidates.
-
-    Turns and candidates are interleaved in chronological order, then greedily packed so
-    each batch stays under the char budget. A single oversized block gets its own batch
-    rather than being dropped. Each candidate carries its id so the curator can cite it.
-    """
-    timeline: List[tuple[str, str]] = []
-    for row in qa_rows:
-        question = " ".join((row.get("question") or "").split())
-        answer = " ".join((row.get("answer") or "").split())[:MAX_QA_ANSWER_CHARS]
-        if not question and not answer:
-            continue
-        timeline.append((row.get("time") or "", f"User: {question}\nAssistant: {answer}"))
-    for entry in context_entries:
-        block = f"Candidate {entry.id} ({entry.section}): {entry.content}"
-        timeline.append((entry.created_at or "", block))
-
-    timeline.sort(key=lambda item: item[0])
-
-    batches: List[str] = []
-    current: List[str] = []
-    current_chars = 0
-    for _timestamp, block in timeline:
-        if current and current_chars + len(block) > BATCH_CHAR_BUDGET:
-            batches.append("\n\n".join(current))
-            current, current_chars = [], 0
-        current.append(block)
-        current_chars += len(block)
-    if current:
-        batches.append("\n\n".join(current))
-    return batches
-
-
-async def curate_batches(batches: List[str]) -> List[ProposedLesson]:
-    """Run one curator call per batch in parallel; flatten the proposed lessons.
-
-    Cross-batch duplicates are accepted here; the per-lesson writer/rejecter handles
-    already-known lessons against the persisted graph.
-    """
-    per_batch = await _gather_bounded(
-        [lambda b=batch: _curate_batch(b) for batch in batches], CURATOR_CONCURRENCY
-    )
-    return [lesson for batch_lessons in per_batch for lesson in batch_lessons]
-
-
 async def _propose_lessons(
     qa_rows: List[dict],
     context_entries: List[SessionContextEntry],
 ) -> List[ProposedLesson]:
-    return await curate_batches(build_batches(qa_rows, context_entries))
+    """Pack session inputs into curator batches, then flatten proposed lessons."""
+    batches = _build_curator_batches(qa_rows, context_entries)
+    if not batches:
+        return []
+
+    curator_calls = [lambda batch=batch: _curate_batch(batch) for batch in batches]
+    per_batch = await gather_with_concurrency_limit(curator_calls, CURATOR_CONCURRENCY)
+
+    proposed = [lesson for batch_lessons in per_batch for lesson in batch_lessons]
+    return proposed
+
+
+def _build_curator_batches(
+    qa_rows: List[dict],
+    context_entries: List[SessionContextEntry],
+) -> List[str]:
+    """Pack the session timeline into coarse, size-safe chronological batches."""
+    timeline: List[tuple[str, str]] = []
+    for row in qa_rows:
+        question = " ".join((row.get("question") or "").split())[:MAX_QA_QUESTION_CHARS]
+        answer = " ".join((row.get("answer") or "").split())[:MAX_QA_ANSWER_CHARS]
+        if not question and not answer:
+            continue
+        block = f"User: {question}\nAssistant: {answer}"
+        timeline.append((row.get("time") or "", block))
+
+    for entry in context_entries:
+        content = " ".join(entry.content.split())[:MAX_CANDIDATE_CHARS]
+        block = f"Candidate {entry.id} ({entry.section}): {content}"
+        timeline.append((entry.created_at or "", block))
+
+    timeline.sort(key=lambda item: item[0])
+    blocks = [block for _timestamp, block in timeline]
+
+    return [
+        "\n\n".join(blocks[index : index + CURATOR_BLOCKS_PER_BATCH])
+        for index in range(0, len(blocks), CURATOR_BLOCKS_PER_BATCH)
+    ]
 
 
 async def _curate_batch(batch_text: str) -> List[ProposedLesson]:
@@ -215,43 +209,6 @@ async def _curate_batch(batch_text: str) -> List[ProposedLesson]:
 # -- Accept proposed lessons --------------------------------------------------
 
 
-async def _judge_and_write(
-    vector_engine,
-    proposed: List[ProposedLesson],
-    entries_by_id: dict,
-) -> List[WrittenLesson]:
-    """For each proposed lesson in parallel: gather evidence, then write-or-reject."""
-
-    async def judge_one(lesson: ProposedLesson) -> Optional[WrittenLesson]:
-        members = [
-            entries_by_id[entry_id]
-            for entry_id in lesson.member_entry_ids
-            if entry_id in entries_by_id
-        ]
-        # The two searches are independent; run them concurrently, then write once both land.
-        prior_lessons, glossary = await asyncio.gather(
-            _search_payload_texts(
-                vector_engine,
-                "DocumentChunk_text",
-                NOVELTY_LESSONS_PER_LESSON,
-                query_text=lesson.working_statement,
-                node_name=DISTILLATE_NODE_SET,
-            ),
-            _search_payload_texts(
-                vector_engine,
-                "Entity_name",
-                GLOSSARY_ENTITIES_PER_LESSON,
-                query_text=lesson.working_statement,
-            ),
-        )
-        return await _write_or_reject(lesson, members, prior_lessons, glossary)
-
-    decisions = await _gather_bounded(
-        [lambda lesson=lesson: judge_one(lesson) for lesson in proposed], WRITER_CONCURRENCY
-    )
-    return [decision for decision in decisions if decision is not None]
-
-
 async def _accept_proposed_lessons(
     scope: SessionDistillationScope,
     proposed: List[ProposedLesson],
@@ -260,8 +217,49 @@ async def _accept_proposed_lessons(
     entries_by_id = {entry.id: entry for entry in context_entries}
     async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
         vector_engine = get_vector_engine()
-        decisions = await _judge_and_write(vector_engine, proposed, entries_by_id)
-    return [lesson for lesson in decisions if lesson.accept and lesson.statement.strip()]
+
+        def write_lesson(lesson: ProposedLesson):
+            return lambda: _evaluate_proposed_lesson(
+                vector_engine,
+                lesson,
+                entries_by_id,
+            )
+
+        writer_calls = [write_lesson(lesson) for lesson in proposed]
+        decisions = await gather_with_concurrency_limit(writer_calls, WRITER_CONCURRENCY)
+
+    accepted = [
+        lesson
+        for lesson in decisions
+        if lesson is not None and lesson.accept and lesson.statement.strip()
+    ]
+    return accepted
+
+
+async def _evaluate_proposed_lesson(
+    vector_engine,
+    lesson: ProposedLesson,
+    entries_by_id: dict,
+) -> Optional[WrittenLesson]:
+    members = [
+        entries_by_id[entry_id] for entry_id in lesson.member_entry_ids if entry_id in entries_by_id
+    ]
+    prior_lessons, glossary = await asyncio.gather(
+        _search_payload_texts(
+            vector_engine,
+            "DocumentChunk_text",
+            NOVELTY_LESSONS_PER_LESSON,
+            query_text=lesson.working_statement,
+            node_name=DISTILLATE_NODE_SET,
+        ),
+        _search_payload_texts(
+            vector_engine,
+            "Entity_name",
+            GLOSSARY_ENTITIES_PER_LESSON,
+            query_text=lesson.working_statement,
+        ),
+    )
+    return await _write_or_reject(lesson, members, prior_lessons, glossary)
 
 
 async def _write_or_reject(
@@ -276,6 +274,24 @@ async def _write_or_reject(
         logger.warning("Distillation writer prompt not found: %s", WRITER_PROMPT_FILE)
         return None
 
+    text_input = _build_writer_input(lesson, members, prior_lessons, glossary)
+    try:
+        return await LLMGateway.acreate_structured_output(
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=WrittenLesson,
+        )
+    except Exception as error:
+        logger.warning("Distillation writer call failed open: %s", error)
+        return None
+
+
+def _build_writer_input(
+    lesson: ProposedLesson,
+    members: List[SessionContextEntry],
+    prior_lessons: List[str],
+    glossary: List[str],
+) -> str:
     sections = [f"PROPOSED LESSON:\n{lesson.working_statement}"]
     if members:
         sections.append(
@@ -287,16 +303,7 @@ async def _write_or_reject(
         )
     if glossary:
         sections.append("ENTITY GLOSSARY:\n" + "\n".join(f"- {name}" for name in glossary))
-
-    try:
-        return await LLMGateway.acreate_structured_output(
-            text_input="\n\n".join(sections),
-            system_prompt=system_prompt,
-            response_model=WrittenLesson,
-        )
-    except Exception as error:
-        logger.warning("Distillation writer call failed open: %s", error)
-        return None
+    return "\n\n".join(sections)
 
 
 # -- Publish accepted lessons -------------------------------------------------
@@ -339,17 +346,6 @@ async def _publish_distilled_lessons(
 
 
 # -- Shared helpers -----------------------------------------------------------
-
-
-async def _gather_bounded(factories: List[Callable[[], Awaitable]], limit: int) -> list:
-    """Run async factories concurrently, capped at ``limit`` in flight at once."""
-    semaphore = asyncio.Semaphore(limit)
-
-    async def run(factory: Callable[[], Awaitable]):
-        async with semaphore:
-            return await factory()
-
-    return list(await asyncio.gather(*(run(factory) for factory in factories)))
 
 
 async def _search_payload_texts(

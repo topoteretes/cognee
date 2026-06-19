@@ -12,11 +12,15 @@ import pytest
 
 from cognee.exceptions import CogneeValidationError
 import cognee.modules.session_distillation.distill as distill_module
-from cognee.modules.session_distillation.distill import (
-    build_batches,
-    render_lesson_document,
+from cognee.modules.session_distillation.distill import render_lesson_document
+from cognee.modules.session_distillation.models import (
+    BATCH_CHAR_BUDGET,
+    CURATOR_BLOCKS_PER_BATCH,
+    MAX_CANDIDATE_CHARS,
+    MAX_QA_QUESTION_CHARS,
+    ProposedLesson,
+    WrittenLesson,
 )
-from cognee.modules.session_distillation.models import BATCH_CHAR_BUDGET, WrittenLesson
 
 
 def _context_row(section="lessons_learned", content="A lesson.", **overrides):
@@ -113,10 +117,12 @@ class TestLoadDistillableSessionInputs:
         assert context_entries[0].harmful_count == 0
 
 
-class TestBuildBatches:
+class TestBuildCuratorBatches:
     def test_small_session_is_one_batch_with_turns_and_candidates(self):
         context_entries = [_context_entry(content="Flashing wipes calibration.")]
-        batches = build_batches([_qa_row("How do I update firmware?")], context_entries)
+        batches = distill_module._build_curator_batches(
+            [_qa_row("How do I update firmware?")], context_entries
+        )
 
         assert len(batches) == 1
         assert "User: How do I update firmware?" in batches[0]
@@ -129,25 +135,38 @@ class TestBuildBatches:
         ]
         qa = [_qa_row("Later question?", time="2026-06-11T10:00:05")]
 
-        batch = build_batches(qa, context_entries)[0]
+        batch = distill_module._build_curator_batches(qa, context_entries)[0]
 
         assert batch.index("Earlier candidate.") < batch.index("Later question?")
 
-    def test_splits_when_over_char_budget(self):
-        # Context-entry content is capped at 280 chars, so size the timeline with long
-        # questions (uncapped) instead. Three ~9k blocks pack into three batches.
-        big_question = "x" * 9000
-        qa = [_qa_row(question=big_question, time=f"2026-06-11T10:00:0{i}") for i in range(3)]
-        batches = build_batches(qa, [])
+    def test_splits_by_fixed_block_count(self):
+        long_text = "x" * 9000
+        qa = [
+            _qa_row(question=long_text, answer=long_text, time=f"2026-06-11T10:00:0{i}")
+            for i in range(CURATOR_BLOCKS_PER_BATCH + 1)
+        ]
+        batches = distill_module._build_curator_batches(qa, [])
 
-        assert len(batches) == 3
+        assert len(batches) == 2
+        assert all(len(batch) <= BATCH_CHAR_BUDGET for batch in batches)
 
-    def test_oversized_single_block_gets_its_own_batch(self):
+    def test_oversized_question_is_truncated_before_batching(self):
         huge_question = "y" * (BATCH_CHAR_BUDGET * 2)
-        batches = build_batches([_qa_row(question=huge_question)], [])
+        batch = distill_module._build_curator_batches([_qa_row(question=huge_question)], [])[0]
 
-        assert len(batches) == 1
-        assert huge_question in batches[0]
+        assert len(batch) <= BATCH_CHAR_BUDGET
+        assert huge_question not in batch
+        assert "y" * MAX_QA_QUESTION_CHARS in batch
+
+    def test_oversized_candidate_content_is_truncated_before_batching(self):
+        huge_content = "z" * (BATCH_CHAR_BUDGET * 2)
+        context_entries = [_context_entry(content=huge_content)]
+
+        batch = distill_module._build_curator_batches([], context_entries)[0]
+
+        assert len(batch) <= BATCH_CHAR_BUDGET
+        assert huge_content not in batch
+        assert "z" * MAX_CANDIDATE_CHARS in batch
 
 
 class TestRenderLessonDocument:
@@ -184,6 +203,35 @@ class TestRenderLessonDocument:
         )
         assert "Plain statement.\n" in document
         assert "()" not in document
+
+
+class TestBuildWriterInput:
+    def test_includes_proposed_lesson_evidence_and_context(self):
+        member = _context_entry(content="Flashing firmware clears calibration.")
+        text_input = distill_module._build_writer_input(
+            ProposedLesson(
+                working_statement="Firmware updates can wipe calibration.",
+                member_entry_ids=[member.id],
+            ),
+            members=[member],
+            prior_lessons=["Existing firmware lesson."],
+            glossary=["RoutePulse"],
+        )
+
+        assert "PROPOSED LESSON:\nFirmware updates can wipe calibration." in text_input
+        assert "MEMBER ENTRIES:\n- Flashing firmware clears calibration." in text_input
+        assert "SIMILAR EXISTING LESSONS:\n- Existing firmware lesson." in text_input
+        assert "ENTITY GLOSSARY:\n- RoutePulse" in text_input
+
+    def test_omits_empty_optional_sections(self):
+        text_input = distill_module._build_writer_input(
+            ProposedLesson(working_statement="A standalone lesson."),
+            members=[],
+            prior_lessons=[],
+            glossary=[],
+        )
+
+        assert text_input == "PROPOSED LESSON:\nA standalone lesson."
 
 
 class TestDistillSessionBoundary:
