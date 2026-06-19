@@ -49,7 +49,16 @@ class S3FileStorage(Storage):
                 client_kwargs={"region_name": s3_config.aws_region},
             )
         else:
-            raise ValueError("S3 credentials are not set in the configuration.")
+            # No static credentials configured: fall back to boto3's default
+            # credential chain (ECS task role, EC2 instance metadata, environment
+            # variables, ~/.aws/credentials) by omitting key/secret. This lets
+            # S3 storage work on AWS-managed compute (ECS Fargate/EC2/Lambda)
+            # where credentials come from IAM roles. s3fs resolves them lazily.
+            self.s3 = s3fs.S3FileSystem(
+                anon=False,
+                endpoint_url=s3_config.aws_endpoint_url,
+                client_kwargs={"region_name": s3_config.aws_region},
+            )
 
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
