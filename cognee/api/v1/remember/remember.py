@@ -36,20 +36,6 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
-_migrations_done = False
-
-
-async def _ensure_migrations_run():
-    """Run vector migrations once on the first local SDK call."""
-    global _migrations_done
-    if _migrations_done:
-        return
-    _migrations_done = True
-
-    from cognee.run_migrations import run_vector_migrations
-
-    await run_vector_migrations()
-
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
@@ -840,8 +826,11 @@ async def _remember_inner(
 
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
-    # writes, even when the API server was never started.
-    await _ensure_migrations_run()
+    # writes, even when the API server was never started. Scoped to the
+    # dataset this call targets (dataset_id override, else dataset_name).
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(kwargs.get("dataset_id") or dataset_name, kwargs.get("user"))
 
     # Normalize "" to None — HTML forms and Swagger UI submit untouched
     # optional fields as empty strings.
@@ -1074,6 +1063,11 @@ async def _remember_inner(
             await improve(**improve_kwargs)
 
     if run_in_background:
+        # Background runs must not depend on caller/request-scoped stream lifetimes.
+        # Materialize stream-like inputs into owned in-memory buffers up front.
+        from cognee.tasks.ingestion.utils import materialize_stream_for_background
+
+        data = await materialize_stream_for_background(data)
 
         async def _remember_background():
             try:

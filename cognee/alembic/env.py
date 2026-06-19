@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from alembic import context
 from logging.config import fileConfig
 from sqlalchemy import pool
@@ -7,14 +8,17 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from cognee.infrastructure.databases.relational import get_relational_engine, Base
 import cognee.modules.session_lifecycle.models  # noqa: F401
+import cognee.modules.migrations.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
 # Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
+# This line sets up loggers basically. Programmatic invocations (cognee's
+# startup migrations run alembic in-process) set configure_logger=False so
+# this does not clobber the host process's logging configuration.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
@@ -86,13 +90,13 @@ def run_migrations_online() -> None:
 
 db_engine = get_relational_engine()
 
-print("Using database:", db_engine.db_uri)
-# In case db_uri is a SQLAlchemy URL object, convert it to string
-db_uri = (
-    db_engine.db_uri
-    if isinstance(db_engine.db_uri, str)
-    else db_engine.db_uri.render_as_string(hide_password=False)
-)
+# Use the LIVE engine's URL, not db_uri: for S3-backed SQLite the adapter
+# pulls the database to a local temp file and connects to THAT (db_uri still
+# names the s3:// path, which aiosqlite cannot open). The live engine's URL
+# always points at the real connection target on every backend.
+db_uri = db_engine.engine.url.render_as_string(hide_password=False)
+
+logging.getLogger("alembic.env").info("Using database: %s", db_uri)
 
 config.set_section_option(
     config.config_ini_section,
