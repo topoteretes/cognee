@@ -5,6 +5,14 @@ from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.llm import get_llm_config
 
 
+MASKED_SECRET = "********"
+
+
+def mask_secret(secret: Optional[str]) -> str:
+    """Return a fixed placeholder without revealing secret content or length."""
+    return MASKED_SECRET if secret else ""
+
+
 class ConfigChoice(BaseModel):
     value: str
     label: str
@@ -91,9 +99,7 @@ def get_settings() -> SettingsDict:
                 "model": llm_config.llm_model,
                 "endpoint": llm_config.llm_endpoint,
                 "api_version": llm_config.llm_api_version,
-                "api_key": (llm_config.llm_api_key[0:10] + "*" * (len(llm_config.llm_api_key) - 10))
-                if llm_config.llm_api_key
-                else None,
+                "api_key": mask_secret(llm_config.llm_api_key),
                 "providers": llm_providers,
                 "models": {
                     "openai": [
@@ -181,10 +187,7 @@ def get_settings() -> SettingsDict:
             vector_db={
                 "provider": vector_config.vector_db_provider,
                 "url": vector_config.vector_db_url,
-                "api_key": (
-                    vector_config.vector_db_key[0:10]
-                    + "*" * (len(vector_config.vector_db_key) - 10)
-                ),
+                "api_key": mask_secret(vector_config.vector_db_key),
                 "providers": vector_dbs,
             },
         )

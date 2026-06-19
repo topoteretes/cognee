@@ -18,7 +18,11 @@ with patch("dotenv.load_dotenv"):
     def mock_default_user():
         """Mock default user for testing."""
         return SimpleNamespace(
-            id=uuid4(), email="default@example.com", is_active=True, tenant_id=uuid4()
+            id=uuid4(),
+            email="default@example.com",
+            is_active=True,
+            is_superuser=True,
+            tenant_id=uuid4(),
         )
 
     @pytest.fixture
@@ -80,7 +84,7 @@ with patch("dotenv.load_dotenv"):
             # But should still have security schemes defined
             security_schemes = schema.get("components", {}).get("securitySchemes", {})
             assert "BearerAuth" in security_schemes
-            assert "CookieAuth" in security_schemes
+            assert "ApiKeyAuth" in security_schemes
 
         @patch("cognee.api.v1.add.add")
         @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
@@ -121,7 +125,11 @@ with patch("dotenv.load_dotenv"):
             # This tests the actual integration behavior
 
             mock_get_default_user.return_value = SimpleNamespace(
-                id=uuid4(), email="default@example.com", is_active=True, tenant_id=uuid4()
+                id=uuid4(),
+                email="default@example.com",
+                is_active=True,
+                is_superuser=True,
+                tenant_id=uuid4(),
             )
 
             files = {"data": ("test.txt", b"test content", "text/plain")}
@@ -182,12 +190,12 @@ with patch("dotenv.load_dotenv"):
 
         @patch.object(gsm_mod, "get_vectordb_config")
         @patch.object(gsm_mod, "get_llm_config")
-        @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
         def test_settings_endpoint_integration(
-            self, mock_get_default, mock_llm_config, mock_vector_config, client, mock_default_user
+            self, mock_llm_config, mock_vector_config, client, mock_default_user
         ):
             """Test that settings endpoint integration works with conditional authentication."""
-            mock_get_default.return_value = mock_default_user
+            from cognee.api.client import app
+            from cognee.modules.users.methods import get_authenticated_superuser
 
             # Mock configurations to avoid validation errors
             mock_llm_config.return_value = SimpleNamespace(
@@ -204,12 +212,14 @@ with patch("dotenv.load_dotenv"):
                 vector_db_key="test_vector_key",
             )
 
-            response = client.get("/api/v1/settings")
-
-            assert mock_get_default.call_count == 1
+            app.dependency_overrides[get_authenticated_superuser] = lambda: mock_default_user
+            try:
+                response = client.get("/api/v1/settings")
+            finally:
+                app.dependency_overrides.pop(get_authenticated_superuser, None)
 
             # Core test: authentication is not required (should not get 401)
-            assert response.status_code != 401
+            assert response.status_code == 200
             # Note: This test verifies conditional authentication works for settings endpoint
 
     class TestConditionalAuthenticationErrorHandling:
