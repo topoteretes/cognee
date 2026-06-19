@@ -1,9 +1,9 @@
 """Data models and tunables for session distillation.
 
-Distillation turns a finished session's gated context entries into standalone lesson
+Distillation turns a finished session's distillable context entries into standalone lesson
 documents in the knowledge graph. The flow:
 
-    gate -> batch (qa + candidates) -> curate per batch -> judge + write per lesson -> persist
+    select -> batch (qa + candidates) -> curate per batch -> judge + write per lesson -> persist
 
 Curator calls run in parallel by batch; judge/write calls run in parallel by lesson.
 """
@@ -94,8 +94,3 @@ class DistillationResult(BaseModel):
         "no_accepted_lessons",
     ]
     documents: List[str] = Field(default_factory=list)
-    gated_entry_count: int = 0
-    batch_count: int = 0
-    proposed_lesson_count: int = 0
-    accepted_lesson_count: int = 0
-    rejected_lesson_count: int = 0

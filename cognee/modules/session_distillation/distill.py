@@ -1,21 +1,18 @@
 """Distill a finished session's learnings into the persistent knowledge graph.
 
-Flow (curator calls parallel by batch; judge/write calls parallel by lesson):
+Flow (curator calls parallel by batch; accept/write calls parallel by lesson):
 
-1. LOAD    gated session-context entries + the session's QA turns.
-2. BATCH   interleave turns and candidates chronologically, packed into size-bounded
-           batches (each batch is a contiguous session slice: its turns + its candidates).
-3. CURATE  one curator LLM call per batch, in parallel -> proposed lessons.
-4. JUDGE   per proposed lesson, in parallel: search prior lessons + entities, then one
-           writer/rejecter LLM call that either writes a standalone lesson or rejects it
-           (already_known | not_durable | unsupported).
-5. PERSIST render each accepted lesson as its own document; add + cognify them in one pass.
+1. LOAD    session QA turns + distillable session-context entries.
+2. CURATE  pack the session timeline into batches; one curator LLM call per batch.
+3. ACCEPT  per proposed lesson: search prior lessons/entities, then writer/rejecter LLM.
+4. PERSIST render accepted lessons as documents; add + cognify them in one pass.
 
 Everything is fail-open per unit: a failed curator batch or writer call drops only its own
 work, never the whole run.
 """
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Awaitable, Callable, List, Optional, Union
 from uuid import UUID
@@ -28,8 +25,8 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_context_builder import coerce_active_context_entries
 from cognee.infrastructure.session.session_context_models import SessionContextEntry
-from cognee.modules.data.methods import get_dataset, get_datasets_by_name
-from cognee.modules.session_lifecycle.metrics import get_session_row
+from cognee.modules.data.models import Dataset
+from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -58,120 +55,93 @@ WRITER_PROMPT_FILE = "session_distillation_writer_system.txt"
 DISTILLATE_NODE_SET = ["session_learnings"]
 
 
-# -- Entry point --------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class SessionDistillationScope:
+    """Resolved identity for one session distillation run."""
+
+    session_id: str
+    user: User
+    dataset: Dataset
+
+    @property
+    def user_id(self) -> str:
+        return str(self.user.id)
+
+    @property
+    def dataset_id(self) -> str:
+        return str(self.dataset.id)
+
+    def result(self, status: str, documents: Optional[List[str]] = None) -> DistillationResult:
+        return DistillationResult(
+            session_id=self.session_id,
+            dataset_id=self.dataset_id,
+            status=status,
+            documents=documents or [],
+        )
+
+
+# -- Public entry point -------------------------------------------------------
 
 
 async def distill_session(
     session_id: str,
-    dataset: Union[str, UUID, None] = None,
+    dataset: Union[str, UUID],
     user: Optional[User] = None,
 ) -> DistillationResult:
-    """Distill one finished session's gated learnings into its dataset's knowledge graph."""
-    resolved_user = await _resolve_user(user)
-    dataset_obj = await _resolve_dataset(session_id, dataset, resolved_user)
-    dataset_id = str(dataset_obj.id)
+    """Distill one finished session's distillable learnings into its dataset's knowledge graph."""
+    scope = await _resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
 
-    # 1. LOAD
+    qa_rows, context_entries = await _load_distillable_session_inputs(scope)
+    if not context_entries:
+        return scope.result("no_gated_entries")
+
+    proposed = await _propose_lessons(qa_rows, context_entries)
+    if not proposed:
+        return scope.result("no_proposed_lessons")
+
+    accepted = await _accept_proposed_lessons(scope, proposed, context_entries)
+    if not accepted:
+        return scope.result("no_accepted_lessons")
+
+    documents = await _publish_distilled_lessons(scope, accepted)
+    return scope.result("completed", documents=documents)
+
+
+# -- Load session inputs ------------------------------------------------------
+
+
+async def _load_distillable_session_inputs(
+    scope: SessionDistillationScope,
+) -> tuple[List[dict], List[SessionContextEntry]]:
+    """Load QA turns and keep context entries worth distilling."""
     session_manager = get_session_manager()
     context_rows = await session_manager.get_session_context_entries(
-        user_id=str(resolved_user.id), session_id=session_id
-    )
-    gated = gate_context_entries(context_rows)
-    if not gated:
-        return DistillationResult(
-            session_id=session_id, dataset_id=dataset_id, status="no_gated_entries"
-        )
-    qa_rows = await _load_qa_rows(session_manager, str(resolved_user.id), session_id)
-
-    # 2. BATCH
-    batches = build_batches(qa_rows, gated)
-    entries_by_id = {entry.id: entry for entry in gated}
-
-    async with set_database_global_context_variables(dataset_obj.id, dataset_obj.owner_id):
-        vector_engine = get_vector_engine()
-
-        # 3. CURATE (parallel by batch)
-        proposed = await curate_batches(batches)
-        if not proposed:
-            return DistillationResult(
-                session_id=session_id,
-                dataset_id=dataset_id,
-                status="no_proposed_lessons",
-                gated_entry_count=len(gated),
-                batch_count=len(batches),
-            )
-
-        # 4. JUDGE + WRITE (parallel by lesson)
-        decisions = await judge_and_write(vector_engine, proposed, entries_by_id)
-
-    accepted = [lesson for lesson in decisions if lesson.accept and lesson.statement.strip()]
-    rejected_count = len(decisions) - len(accepted)
-    if not accepted:
-        return DistillationResult(
-            session_id=session_id,
-            dataset_id=dataset_id,
-            status="no_accepted_lessons",
-            gated_entry_count=len(gated),
-            batch_count=len(batches),
-            proposed_lesson_count=len(proposed),
-            rejected_lesson_count=rejected_count,
-        )
-
-    # 5. PERSIST
-    distilled_on = datetime.utcnow().strftime("%Y-%m-%d")
-    documents = [
-        render_lesson_document(lesson, session_id=session_id, distilled_on=distilled_on)
-        for lesson in accepted
-    ]
-    await _persist_lessons(documents, dataset_obj, resolved_user)
-
-    return DistillationResult(
-        session_id=session_id,
-        dataset_id=dataset_id,
-        status="completed",
-        documents=documents,
-        gated_entry_count=len(gated),
-        batch_count=len(batches),
-        proposed_lesson_count=len(proposed),
-        accepted_lesson_count=len(accepted),
-        rejected_lesson_count=rejected_count,
+        user_id=scope.user_id,
+        session_id=scope.session_id,
     )
 
-
-# -- 1. Load + gate -----------------------------------------------------------
-
-
-def gate_context_entries(raw_entries: list) -> List[SessionContextEntry]:
-    """Keep entries worth distilling: never rated harmful, confidence above the gate.
-
-    Deterministic — no search, no LLM. ``coerce_active_context_entries`` first drops
-    non-context rows (feedback entries, garbage); ``harmful_count == 0`` is stricter than
-    "net helpfulness >= 0" (one harmful rating drops the entry).
-    """
-    gated = []
-    for entry in coerce_active_context_entries(raw_entries):
-        if entry.harmful_count > 0:
-            continue
-        if entry.confidence < MIN_GATE_CONFIDENCE:
-            continue
-        gated.append(entry)
-    return gated
-
-
-async def _load_qa_rows(session_manager, user_id: str, session_id: str) -> List[dict]:
     raw_qa = await session_manager.get_session(
-        user_id=user_id, session_id=session_id, formatted=False
+        user_id=scope.user_id,
+        session_id=scope.session_id,
+        formatted=False,
     )
-    return [
+    qa_rows = [
         entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
         for entry in (raw_qa if isinstance(raw_qa, list) else [])
     ]
 
+    context_entries = [
+        entry
+        for entry in coerce_active_context_entries(context_rows)
+        if entry.harmful_count == 0 and entry.confidence >= MIN_GATE_CONFIDENCE
+    ]
+    return qa_rows, context_entries
 
-# -- 2. Batch -----------------------------------------------------------------
+
+# -- Curate proposed lessons --------------------------------------------------
 
 
-def build_batches(qa_rows: List[dict], gated: List[SessionContextEntry]) -> List[str]:
+def build_batches(qa_rows: List[dict], context_entries: List[SessionContextEntry]) -> List[str]:
     """Pack the session timeline into size-bounded batches of turns + candidates.
 
     Turns and candidates are interleaved in chronological order, then greedily packed so
@@ -185,7 +155,7 @@ def build_batches(qa_rows: List[dict], gated: List[SessionContextEntry]) -> List
         if not question and not answer:
             continue
         timeline.append((row.get("time") or "", f"User: {question}\nAssistant: {answer}"))
-    for entry in gated:
+    for entry in context_entries:
         block = f"Candidate {entry.id} ({entry.section}): {entry.content}"
         timeline.append((entry.created_at or "", block))
 
@@ -205,9 +175,6 @@ def build_batches(qa_rows: List[dict], gated: List[SessionContextEntry]) -> List
     return batches
 
 
-# -- 3. Curate (parallel by batch) -------------------------------------------
-
-
 async def curate_batches(batches: List[str]) -> List[ProposedLesson]:
     """Run one curator call per batch in parallel; flatten the proposed lessons.
 
@@ -218,6 +185,13 @@ async def curate_batches(batches: List[str]) -> List[ProposedLesson]:
         [lambda b=batch: _curate_batch(b) for batch in batches], CURATOR_CONCURRENCY
     )
     return [lesson for batch_lessons in per_batch for lesson in batch_lessons]
+
+
+async def _propose_lessons(
+    qa_rows: List[dict],
+    context_entries: List[SessionContextEntry],
+) -> List[ProposedLesson]:
+    return await curate_batches(build_batches(qa_rows, context_entries))
 
 
 async def _curate_batch(batch_text: str) -> List[ProposedLesson]:
@@ -238,10 +212,10 @@ async def _curate_batch(batch_text: str) -> List[ProposedLesson]:
         return []
 
 
-# -- 4. Judge + write (parallel by lesson) -----------------------------------
+# -- Accept proposed lessons --------------------------------------------------
 
 
-async def judge_and_write(
+async def _judge_and_write(
     vector_engine,
     proposed: List[ProposedLesson],
     entries_by_id: dict,
@@ -256,8 +230,19 @@ async def judge_and_write(
         ]
         # The two searches are independent; run them concurrently, then write once both land.
         prior_lessons, glossary = await asyncio.gather(
-            existing_lessons(vector_engine, lesson.working_statement),
-            anchor_entities(vector_engine, lesson.working_statement),
+            _search_payload_texts(
+                vector_engine,
+                "DocumentChunk_text",
+                NOVELTY_LESSONS_PER_LESSON,
+                query_text=lesson.working_statement,
+                node_name=DISTILLATE_NODE_SET,
+            ),
+            _search_payload_texts(
+                vector_engine,
+                "Entity_name",
+                GLOSSARY_ENTITIES_PER_LESSON,
+                query_text=lesson.working_statement,
+            ),
         )
         return await _write_or_reject(lesson, members, prior_lessons, glossary)
 
@@ -265,6 +250,18 @@ async def judge_and_write(
         [lambda lesson=lesson: judge_one(lesson) for lesson in proposed], WRITER_CONCURRENCY
     )
     return [decision for decision in decisions if decision is not None]
+
+
+async def _accept_proposed_lessons(
+    scope: SessionDistillationScope,
+    proposed: List[ProposedLesson],
+    context_entries: List[SessionContextEntry],
+) -> List[WrittenLesson]:
+    entries_by_id = {entry.id: entry for entry in context_entries}
+    async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
+        vector_engine = get_vector_engine()
+        decisions = await _judge_and_write(vector_engine, proposed, entries_by_id)
+    return [lesson for lesson in decisions if lesson.accept and lesson.statement.strip()]
 
 
 async def _write_or_reject(
@@ -302,29 +299,7 @@ async def _write_or_reject(
         return None
 
 
-async def existing_lessons(vector_engine, statement: str) -> List[str]:
-    """Previously persisted lessons most similar to this statement — the novelty signal.
-
-    Scoped to the session-learnings node set, so it compares against prior distilled
-    lessons rather than all graph content.
-    """
-    return await _search_payload_texts(
-        vector_engine,
-        "DocumentChunk_text",
-        NOVELTY_LESSONS_PER_LESSON,
-        query_text=statement,
-        node_name=DISTILLATE_NODE_SET,
-    )
-
-
-async def anchor_entities(vector_engine, statement: str) -> List[str]:
-    """Existing entity names similar to a lesson statement, for verbatim anchoring."""
-    return await _search_payload_texts(
-        vector_engine, "Entity_name", GLOSSARY_ENTITIES_PER_LESSON, query_text=statement
-    )
-
-
-# -- 5. Persist ---------------------------------------------------------------
+# -- Publish accepted lessons -------------------------------------------------
 
 
 def render_lesson_document(
@@ -344,13 +319,23 @@ def render_lesson_document(
     return f"# Session learning — {distilled_on} (session {session_id})\n\n{body}\n"
 
 
-async def _persist_lessons(documents: List[str], dataset_obj, user: User) -> None:
+async def _publish_distilled_lessons(
+    scope: SessionDistillationScope,
+    accepted: List[WrittenLesson],
+) -> List[str]:
+    distilled_on = datetime.utcnow().strftime("%Y-%m-%d")
+    documents = [
+        render_lesson_document(lesson, session_id=scope.session_id, distilled_on=distilled_on)
+        for lesson in accepted
+    ]
+
     # Imported lazily to avoid a circular import through the cognee package root.
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify import cognify
 
-    await add(documents, dataset_id=dataset_obj.id, user=user, node_set=DISTILLATE_NODE_SET)
-    await cognify(datasets=[dataset_obj.id], user=user)
+    await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=DISTILLATE_NODE_SET)
+    await cognify(datasets=[scope.dataset.id], user=scope.user)
+    return documents
 
 
 # -- Shared helpers -----------------------------------------------------------
@@ -407,49 +392,43 @@ async def _search_payload_texts(
     return texts
 
 
-# -- Resolution ---------------------------------------------------------------
+# -- Resolve distillation scope ----------------------------------------------
 
 
-async def _resolve_user(user: Optional[User]) -> User:
+async def _resolve_distillation_scope(
+    *,
+    session_id: str,
+    dataset: Union[str, UUID],
+    user: Optional[User],
+) -> SessionDistillationScope:
     if user is not None and getattr(user, "id", None) is not None:
-        return user
-    ctx_user = session_user.get()
-    if ctx_user is not None and getattr(ctx_user, "id", None) is not None:
-        return ctx_user
-    return await get_default_user()
+        resolved_user = user
+    else:
+        ctx_user = session_user.get()
+        resolved_user = (
+            ctx_user
+            if ctx_user is not None and getattr(ctx_user, "id", None) is not None
+            else await get_default_user()
+        )
 
+    if dataset is None:
+        raise CogneeValidationError(
+            message=(
+                "dataset is required so the distilled learnings land in the graph "
+                "they should connect to."
+            ),
+            name="SessionDistillationError",
+        )
 
-async def _resolve_dataset(session_id: str, dataset: Union[str, UUID, None], user: User):
-    """Explicit arg wins, then the SessionRecord's dataset_id, else a clear error."""
-    if dataset is not None:
-        resolved = await _lookup_dataset(dataset, user)
-        if resolved is None:
-            raise CogneeValidationError(
-                message=f"Dataset '{dataset}' not found for this user.",
-                name="SessionDistillationError",
-            )
-        return resolved
+    writable_datasets = await get_authorized_existing_datasets([dataset], "write", resolved_user)
+    if not writable_datasets:
+        raise CogneeValidationError(
+            message=f"Dataset '{dataset}' not found or not writable for this user.",
+            name="SessionDistillationError",
+        )
 
-    record = await get_session_row(session_id=session_id, user_id=user.id)
-    if record is not None and record.dataset_id is not None:
-        resolved = await get_dataset(user.id, record.dataset_id)
-        if resolved is not None:
-            return resolved
-
-    raise CogneeValidationError(
-        message=(
-            f"Session '{session_id}' has no associated dataset. Pass dataset=<name or id> "
-            "so the distilled learnings land in the graph they should connect to."
-        ),
-        name="SessionDistillationError",
+    return SessionDistillationScope(
+        session_id=session_id,
+        user=resolved_user,
+        dataset=writable_datasets[0],
     )
-
-
-async def _lookup_dataset(dataset: Union[str, UUID], user: User):
-    if isinstance(dataset, UUID):
-        return await get_dataset(user.id, dataset)
-    try:
-        return await get_dataset(user.id, UUID(str(dataset)))
-    except (ValueError, TypeError):
-        matches = await get_datasets_by_name(str(dataset), user.id)
-        return matches[0] if matches else None

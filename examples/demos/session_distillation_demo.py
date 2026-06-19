@@ -264,11 +264,7 @@ async def main():
 
     progress("Distilling the session into the knowledge graph.")
     result = await cognee.session.distill_session(SESSION_ID, dataset=DATASET_NAME, user=user)
-    progress(
-        f"Distillation status={result.status} gated={result.gated_entry_count} "
-        f"proposed={result.proposed_lesson_count} accepted={result.accepted_lesson_count} "
-        f"rejected={result.rejected_lesson_count}"
-    )
+    progress(f"Distillation status={result.status} documents={len(result.documents)}")
     if result.documents:
         print(
             f"\n----- {len(result.documents)} distilled lesson documents -----\n", file=sys.stderr
