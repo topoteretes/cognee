@@ -129,7 +129,6 @@ async def run_tasks(
 
             gathered = await asyncio.gather(
                 *[asyncio.create_task(_run_item(item)) for item in data],
-                return_exceptions=True,
             )
 
             # Separate successes from unhandled exceptions
