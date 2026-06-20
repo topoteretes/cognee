@@ -203,7 +203,7 @@ class CogneeClient:
         query_type: str,
         datasets: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
-        top_k: int = 10,
+        top_k: int = 15,
     ) -> Any:
         """
         Search the knowledge graph.
@@ -366,8 +366,13 @@ class CogneeClient:
             Status information keyed by dataset ID
         """
         if self.use_api:
-            # Note: This would need a custom endpoint on the API side
-            raise NotImplementedError("Pipeline status is not available via API")
+            # API mode: query the server's dataset-status endpoint, which
+            # reports the pipeline run state keyed by dataset id.
+            endpoint = f"{self.api_url}/api/v1/datasets/status"
+            params = [("dataset", str(d)) for d in dataset_ids]
+            response = await self.client.get(endpoint, params=params, headers=self._get_headers())
+            response.raise_for_status()
+            return response.json()
         else:
             # Direct mode: Call cognee directly
             from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
@@ -463,11 +468,40 @@ class CogneeClient:
         Without session_id: full add + cognify pipeline (permanent).
         """
         if self.use_api:
+            if session_id:
+                if custom_prompt:
+                    logger.warning(
+                        "remember: custom_prompt is not supported with session_id in API mode "
+                        "(the /remember/entry endpoint does not forward custom_prompt)"
+                    )
+                    raise ValueError(
+                        "custom_prompt is not supported when session_id is provided in API mode"
+                    )
+                # Session mode: POST a JSON QAEntry so the backend receives
+                # real text, not a multipart-file placeholder that triggers
+                # the _SESSION_PLACEHOLDER_PREFIXES skip in _add_to_session.
+                endpoint = f"{self.api_url}/api/v1/remember/entry"
+                payload = {
+                    "entry": {
+                        "type": "qa",
+                        "question": "",
+                        "answer": str(data),
+                        "context": "",
+                    },
+                    "dataset_name": dataset_name,
+                    "session_id": session_id,
+                }
+                response = await self.client.post(
+                    endpoint,
+                    json=payload,
+                    headers=self._get_headers(),
+                )
+                response.raise_for_status()
+                return response.json()
+
             endpoint = f"{self.api_url}/api/v1/remember"
             files = self._text_upload(data)
             form_data = {"datasetName": dataset_name}
-            if session_id:
-                form_data["session_id"] = session_id
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             response = await self.client.post(
@@ -501,7 +535,7 @@ class CogneeClient:
         search_type: Optional[str] = None,
         datasets: Optional[List[str]] = None,
         session_id: Optional[str] = None,
-        top_k: int = 10,
+        top_k: int = 15,
     ) -> Any:
         """Search memory via recall() with auto-routing and session awareness."""
         if self.use_api:

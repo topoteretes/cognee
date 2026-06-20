@@ -6,10 +6,12 @@ import getUser from "@/modules/users/getUser";
 import getLocalUser from "@/modules/users/getLocalUser";
 import CogneeUser from "@/modules/users/CogneeUser";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
-import createWorkspace from "@/modules/tenant/createWorkspace";
+
+import Image from "next/image";
 import HelpMenu from "./HelpMenu";
 import ProfileMenu from "./ProfileMenu";
 import { useFilter } from "./FilterContext";
+import { useTenant } from "@/modules/tenant/TenantContext";
 import useBoolean from "@/utils/useBoolean";
 import useOutsideClick from "@/utils/useOutsideClick";
 
@@ -21,23 +23,11 @@ function Chevron({ color = "#A1A1AA", up = false }: { color?: string; up?: boole
 function Check() {
   return <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ marginLeft: "auto", flexShrink: 0 }}><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#6510F4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
-function AgentIcon({ color = "#52525B" }: { color?: string }) {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="8" r="4" /><path d="M5.5 21a6.5 6.5 0 0113 0" /></svg>;
-}
 function DatasetIcon({ color = "#52525B" }: { color?: string }) {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></svg>;
 }
-function PlusIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A1A1AA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>;
-}
 function Slash() {
   return <span style={{ color: "#D4D4D8", fontSize: 16, flexShrink: 0 }}>/</span>;
-}
-
-function StatusDot({ status }: { status: string }) {
-  const color = status === "LIVE" ? "#10B981" : status === "STAGING" ? "#F59E0B" : "#A1A1AA";
-  const label = status === "LIVE" ? "Live" : status === "STAGING" ? "Staging" : "Inactive";
-  return <span style={{ color, fontSize: 11, fontWeight: 500, whiteSpace: "nowrap" }}>● {label}</span>;
 }
 
 // ── Reusable Dropdown ──
@@ -63,62 +53,50 @@ function Dropdown({ trigger, children, width = 280 }: { trigger: React.ReactNode
 
 const ROUTE_LABELS: Record<string, string> = {
   "/": "Overview", "/dashboard": "Overview",
-  "/datasets": "Datasets", "/search": "Search",
+  "/datasets": "Brains", "/search": "Search",
   "/knowledge-graph": "Knowledge Graph",
   "/connect-agent": "Connect Agent",
   "/connections": "Connections", "/api-keys": "API Keys",
-  "/activity": "Activity", "/settings": "Settings",
-  "/onboarding": "Onboarding",
+  "/settings": "Settings",
+  "/onboarding": "Onboarding", "/members": "Members",
 };
 
 // ── TopBar ──
+
+function PlusIcon() {
+  return <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}><line x1="6" y1="2" x2="6" y2="10" stroke="#6510F4" strokeWidth="1.5" strokeLinecap="round" /><line x1="2" y1="6" x2="10" y2="6" stroke="#6510F4" strokeWidth="1.5" strokeLinecap="round" /></svg>;
+}
 
 export default function TopBar() {
   const [user, setUser] = useState<CogneeUser>();
   const cloud = isCloudEnvironment();
   const pathname = usePathname();
-  const { workspace, workspaces, setWorkspace, selectedAgent, selectedDataset, setSelectedAgent, setSelectedDataset, agents, datasets } = useFilter();
-
-  // Create workspace modal state
-  const [showCreateWsModal, setShowCreateWsModal] = useState(false);
-  const [wsName, setWsName] = useState("");
-  const [wsCreating, setWsCreating] = useState(false);
-  const [wsError, setWsError] = useState<string | null>(null);
-
-  async function handleCreateWorkspace() {
-    if (!wsName.trim()) return;
-    setWsCreating(true);
-    setWsError(null);
-    const result = await createWorkspace(wsName.trim());
-    setWsCreating(false);
-    if (result.success) {
-      setWsName("");
-      setShowCreateWsModal(false);
-      window.location.reload();
-    } else {
-      setWsError(result.error || "Failed to create workspace");
-    }
-  }
+  const { workspace, workspaces, setWorkspace, selectedDataset, setSelectedDataset, datasets } = useFilter();
+  const { requestCreateWorkspace, availableTenants } = useTenant();
 
   useEffect(() => {
     if (cloud) { getUser().then(setUser); }
     else { getLocalUser().then((u) => { if (u) setUser(u); }); }
   }, [cloud]);
 
-  const agentList = agents.filter((a) => a.is_agent);
-
   // Derive page label
   const basePath = "/" + (pathname.split("/").filter(Boolean)[0] || "");
   const pageName = ROUTE_LABELS[basePath] || basePath.slice(1).charAt(0).toUpperCase() + basePath.slice(2).replace(/-/g, " ");
 
   // Check if we're on a dataset detail page
-  const datasetDetailMatch = pathname.match(/^\/datasets\/(.+)$/);
-  const isDatasetDetail = !!datasetDetailMatch;
+  const isDatasetDetail = /^\/datasets\/.+$/.test(pathname);
+
+  // Pages where the dataset selector is NOT relevant
+  const datasetHiddenPaths = ["/datasets", "/api-keys", "/connect-agent", "/connections", "/settings", "/onboarding", "/members"];
 
   return (
-    <header className="flex items-center justify-between border-b border-cognee-border bg-white flex-shrink-0" style={{ height: 53, paddingInline: 24, fontFamily: '"Inter", system-ui, sans-serif' }}>
-      {/* Left: breadcrumbs */}
+    <header className="flex items-center justify-between border-b border-cognee-border bg-white flex-shrink-0" style={{ height: 53, paddingInline: 24, fontFamily: '"Inter", system-ui, sans-serif', position: "relative", zIndex: 300 }}>
+      {/* Left: logo + breadcrumbs */}
       <div className="flex items-center" style={{ gap: 8 }}>
+        {/* Logo fixed-width box so workspace aligns with right edge of navbar (240px - 24px padding) */}
+        <div style={{ width: 240, flexShrink: 0, display: "flex", alignItems: "center" }}>
+          <Image src="/cognee-logo-black.svg" alt="Cognee" width={110} height={24} style={{ flexShrink: 0 }} />
+        </div>
 
         {/* 1. Workspace switcher */}
         <Dropdown
@@ -128,45 +106,60 @@ export default function TopBar() {
                 <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>{workspace.initial}</span>
               </div>
               <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B", flexShrink: 0 }}>{workspace.name}</span>
-              <span style={{ background: "#F0EDFF", borderRadius: 2, padding: "2px 8px", fontSize: 11, fontWeight: 500, color: "#6C5CE7", flexShrink: 0 }}>Free</span>
               <Chevron />
             </div>
           }
           width={220}
         >
-          {workspaces.map((ws) => (
-            <div key={ws.id} onClick={() => setWorkspace(ws)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6, background: workspace.id === ws.id ? "#F0EDFF" : "transparent" }}>
-              <div style={{ width: 16, height: 16, borderRadius: 3, background: ws.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <span style={{ color: "#fff", fontSize: 8, fontWeight: 700 }}>{ws.initial}</span>
+          {workspaces.map((ws) => {
+            const tenantInfo = availableTenants.find((t) => t.id === ws.id);
+            const blocked = tenantInfo ? !tenantInfo.ownerHasSubscription : false;
+            return (
+              <div key={ws.id} onClick={() => !blocked && setWorkspace(ws)} className={blocked ? "" : "cursor-pointer"} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6, background: workspace.id === ws.id ? "#F0EDFF" : "transparent", opacity: blocked ? 0.5 : 1, cursor: blocked ? "default" : "pointer" }}>
+                <div style={{ width: 16, height: 16, borderRadius: 3, background: blocked ? "#D4D4D8" : ws.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ color: "#fff", fontSize: 8, fontWeight: 700 }}>{ws.initial}</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <span style={{ fontSize: 13, fontWeight: workspace.id === ws.id ? 500 : 400, color: blocked ? "#A1A1AA" : workspace.id === ws.id ? "#6510F4" : "#3F3F46" }}>{ws.name}</span>
+                  {blocked && <span style={{ fontSize: 10, color: "#A1A1AA" }}>No active subscription</span>}
+                </div>
+                {workspace.id === ws.id && !blocked && <Check />}
               </div>
-              <span style={{ fontSize: 13, fontWeight: workspace.id === ws.id ? 500 : 400, color: workspace.id === ws.id ? "#6510F4" : "#3F3F46" }}>{ws.name}</span>
-              {ws.type === "personal" && <span style={{ fontSize: 11, color: "#A1A1AA", marginLeft: "auto" }}>Personal</span>}
-              {workspace.id === ws.id && <Check />}
-            </div>
-          ))}
-          <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
-          <div onClick={(e) => { e.stopPropagation(); setShowCreateWsModal(true); }} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6 }}>
-            <PlusIcon />
-            <span style={{ fontSize: 13, color: "#A1A1AA" }}>Create workspace</span>
-          </div>
+            );
+          })}
+          {cloud && (
+            <>
+              <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
+              <div
+                onClick={requestCreateWorkspace}
+                className="cursor-pointer"
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6 }}
+              >
+                <PlusIcon />
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#6510F4" }}>
+                  Create new workspace
+                </span>
+              </div>
+            </>
+          )}
         </Dropdown>
 
         {/* 2. Dataset selector — hidden on pages where datasets are not relevant */}
-        {!["/datasets", "/api-keys", "/connect-agent", "/connections", "/settings", "/onboarding"].includes(basePath) && (
+        {!datasetHiddenPaths.includes(basePath) && (
           <>
             <Slash />
             <Dropdown
               trigger={
                 <div className="flex items-center" style={{ gap: 6 }}>
                   <DatasetIcon color="#52525B" />
-                  <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{selectedDataset ? selectedDataset.name : "All datasets"}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "#18181B" }}>{selectedDataset ? selectedDataset.name : "All brains"}</span>
                   <Chevron />
                 </div>
               }
               width={240}
             >
               <div onClick={() => setSelectedDataset(null)} className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 6, background: !selectedDataset ? "#F0EDFF" : "transparent" }}>
-                <span style={{ fontSize: 13, fontWeight: !selectedDataset ? 500 : 400, color: !selectedDataset ? "#6510F4" : "#3F3F46" }}>All datasets</span>
+                <span style={{ fontSize: 13, fontWeight: !selectedDataset ? 500 : 400, color: !selectedDataset ? "#6510F4" : "#3F3F46" }}>All brains</span>
                 {!selectedDataset && <Check />}
               </div>
               <div style={{ height: 1, background: "#E4E4E7", margin: "4px 0" }} />
@@ -199,36 +192,6 @@ export default function TopBar() {
         />
       </div>
 
-      {/* Create workspace modal */}
-      {showCreateWsModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { setShowCreateWsModal(false); setWsError(null); setWsName(""); }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", fontFamily: '"Inter", system-ui, sans-serif' }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: "#18181B", margin: 0 }}>Create workspace</h2>
-            <p style={{ fontSize: 13, color: "#71717A", margin: 0 }}>Workspaces let you organize users and resources into isolated environments.</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 13, fontWeight: 500, color: "#3F3F46" }}>Workspace name</label>
-              <input
-                autoFocus
-                type="text"
-                value={wsName}
-                onChange={(e) => setWsName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleCreateWorkspace(); }}
-                placeholder="e.g. My Team, Production, Research..."
-                style={{ width: "100%", height: 40, border: `1px solid ${wsError ? "#EF4444" : "#E4E4E7"}`, borderRadius: 8, paddingInline: 14, fontSize: 14, color: "#18181B", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
-                onFocus={(e) => { e.target.style.borderColor = "#6510F4"; e.target.style.boxShadow = "0 0 0 3px rgba(101,16,244,0.1)"; }}
-                onBlur={(e) => { e.target.style.borderColor = wsError ? "#EF4444" : "#E4E4E7"; e.target.style.boxShadow = "none"; }}
-              />
-              {wsError && <span style={{ fontSize: 12, color: "#EF4444" }}>{wsError}</span>}
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => { setShowCreateWsModal(false); setWsError(null); setWsName(""); }} className="cursor-pointer" style={{ background: "#fff", border: "1px solid #E4E4E7", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "#3F3F46", fontFamily: "inherit" }}>Cancel</button>
-              <button onClick={handleCreateWorkspace} disabled={wsCreating || !wsName.trim()} className="cursor-pointer" style={{ background: wsName.trim() ? "#6510F4" : "#E4E4E7", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: wsName.trim() ? "#fff" : "#A1A1AA", fontFamily: "inherit" }}>
-                {wsCreating ? "Creating..." : "Create"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </header>
   );
 }

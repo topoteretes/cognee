@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import useBoolean from "@/utils/useBoolean";
 import useOutsideClick from "@/utils/useOutsideClick";
 
@@ -61,6 +62,15 @@ function MeetingIcon() {
   );
 }
 
+function OnboardingIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#333333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 11l3 3L22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </svg>
+  );
+}
+
 function StatusIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#333333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -71,20 +81,29 @@ function StatusIcon() {
 
 const MENU_ITEMS = [
   { label: "Docs", href: "https://docs.cognee.ai", external: true, icon: <DocsIcon /> },
-  { label: "Contact us", href: "mailto:social@cognee.ai", external: true, icon: <EnvelopeIcon /> },
-  { label: "Talk to us", href: "https://calendly.com/luca-topoteretes/new-meeting", external: true, icon: <MeetingIcon /> },
+  { label: "Contact us (email)", href: "mailto:social@cognee.ai", external: true, icon: <EnvelopeIcon /> },
+  { label: "Contact us (30-minute call)", href: "https://calendly.com/luca-topoteretes/new-meeting", external: true, icon: <MeetingIcon /> },
   { label: "Discord community", href: "https://discord.gg/m63hxKsp4p", external: true, icon: <DiscordIcon /> },
 ];
 
 const CHANGELOG_ITEMS = [
-  { label: "Improved graph visualization", date: "Mar 28" },
-  { label: "New dataset import flow", date: "Mar 15" },
+  { label: "Full agent support — create agents, track sessions, live status, and per-agent metrics", date: "May 8" },
+  { label: "Custom graph models, custom prompts, and ontology uploads for memory customization", date: "Apr 24" },
 ];
 
 export default function HelpMenu() {
+  const router = useRouter();
   const { value: isOpen, toggle, setFalse: close } = useBoolean(false);
   const closeCallback = useCallback(() => close(), [close]);
   const containerRef = useOutsideClick<HTMLDivElement>(closeCallback, isOpen);
+
+  function startOnboarding() {
+    sessionStorage.removeItem("cognee-onboarding-skipped");
+    sessionStorage.removeItem("cognee-welcome-banner-dismissed");
+    localStorage.removeItem("cognee-onboarding-complete");
+    close();
+    router.push("/onboarding");
+  }
 
   return (
     <div ref={containerRef} className="relative">
@@ -111,6 +130,19 @@ export default function HelpMenu() {
             padding: 6,
           }}
         >
+          {/* Onboarding */}
+          <button
+            onClick={startOnboarding}
+            className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] hover:bg-cognee-hover w-full cursor-pointer"
+            style={{ fontSize: 13, color: "#333333", background: "none", border: "none", textAlign: "left", fontFamily: "inherit" }}
+          >
+            <OnboardingIcon />
+            Onboarding
+          </button>
+
+          {/* Separator */}
+          <div style={{ height: 1, background: "#EEEEEE", margin: "2px -6px" }} />
+
           {MENU_ITEMS.map((item) => (
             <Link
               key={item.label}
@@ -194,13 +226,6 @@ export default function HelpMenu() {
               </div>
             </div>
           ))}
-          <Link
-            href="#"
-            className="block px-3 py-[6px] pb-[8px]"
-            style={{ fontSize: 12, color: "#6C47FF", textDecoration: "none" }}
-          >
-            Full changelog
-          </Link>
         </div>
       )}
     </div>

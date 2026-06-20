@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func, text
 from sqlalchemy import exc
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 from sqlalchemy.engine import make_url
@@ -15,6 +15,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
 from distributed.utils import override_distributed
 from distributed.tasks.queued_add_data_points import queued_add_data_points
@@ -32,6 +33,10 @@ from .serialize_data import serialize_data
 logger = get_logger("PGVectorAdapter")
 QUERY_BATCH_SIZE = 1000
 
+# Default pool sizing for per-dataset PGVector engines when ENABLE_BACKEND_ACCESS_CONTROL=True.
+# Much smaller than the relational default (20+20) to limit connection fan-out across datasets.
+_ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 2}
+
 
 class IndexSchema(DataPoint):
     """
@@ -43,6 +48,15 @@ class IndexSchema(DataPoint):
     """
 
     text: str
+
+    # Optional reference scalars carried for the search "Evidence" feature.
+    # They stay None for non-chunk data points, so this schema remains
+    # compatible with every indexed DataPoint type.
+    document_id: Optional[str] = None
+    document_name: Optional[str] = None
+    chunk_index: Optional[int] = None
+    source_chunk_id: Optional[str] = None
+    importance_weight: Optional[float] = 0.5
 
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: List[str] = []
@@ -64,32 +78,62 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
         self.VECTOR_DB_LOCK = asyncio.Lock()
+        self._write_locks: dict[str, asyncio.Lock] = {}
         self._metadata = MetaData()
+        # True when this adapter created its own engine and must dispose it on close().
+        # False when the engine is borrowed from the relational adapter.
+        self._owns_engine: bool = False
 
         relational_db = get_relational_engine()
         relational_config = get_relational_config()
+        vector_config = get_vectordb_config()
+
+        # Resolve effective pool_args for any new PGVector engine we create:
+        # 1. Explicit VECTOR_POOL_ARGS always wins.
+        # 2. When access control is on, each dataset gets its own engine — use a small default
+        #    to avoid connection fan-out (N datasets × pool_size).
+        # 3. Otherwise inherit the relational pool config.
+        if vector_config.vector_pool_args is not None:
+            effective_pool_args = dict(vector_config.vector_pool_args)
+        elif backend_access_control_enabled():
+            effective_pool_args = _ACCESS_CONTROL_DEFAULT_POOL_ARGS
+        else:
+            effective_pool_args = (
+                dict(relational_config.pool_args) if relational_config.pool_args else {}
+            )
+
+        # A per-dataset PGVector engine may connect to managed
+        # Postgres (Neon) which requires SSL. Reuse the relational connect_args
+        # (e.g. {"ssl": "require"} from DATABASE_CONNECT_ARGS); {} for in-cluster.
+        effective_connect_args = (
+            dict(relational_config.database_connect_args)
+            if relational_config.database_connect_args
+            else None
+        )
 
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
         db_name2 = make_url(self.db_uri).database
         if backend_access_control_enabled() and (db_name1 != db_name2):
             # If backend access control create new instances of engine and sessionmaker
-            # To make sure we use the same pool_args as for the relational database, we create the engine via the SQLAlchemy constructor
             super().__init__(
                 connection_string=self.db_uri,
-                pool_args=dict(relational_config.pool_args) if relational_config.pool_args else {},
+                connect_args=effective_connect_args,
+                pool_args=effective_pool_args,
             )
+            self._owns_engine = True
         elif relational_db.engine.dialect.name == "postgresql":
             # If postgreSQL is used and not backend access control we must use the same engine and sessionmaker
             self.engine = relational_db.engine
             self.sessionmaker = relational_db.sessionmaker
         else:
             # If not postgreSQL and not backend access control create new instances of engine and sessionmaker
-            # To make sure we use the same pool_args as for the relational database, we create the engine via the SQLAlchemy constructor
             super().__init__(
                 connection_string=self.db_uri,
-                pool_args=dict(relational_config.pool_args) if relational_config.pool_args else {},
+                connect_args=effective_connect_args,
+                pool_args=effective_pool_args,
             )
+            self._owns_engine = True
 
         # Has to be imported at class level
         # Functions reading tables from database need to know what a Vector column type is
@@ -102,6 +146,26 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         Reset SQLAlchemy metadata reflection cache for this adapter instance.
         """
         self._metadata = MetaData()
+
+    async def close(self) -> None:
+        """
+        Release connection-pool resources held by this adapter.
+
+        Only disposes the engine when this adapter owns it. When the engine is
+        borrowed from the relational adapter (shared-engine mode), disposal is
+        left to the relational adapter so the pool is not torn down while the
+        relational layer is still using it.
+
+        Called automatically by ``closing_lru_cache`` when this adapter is
+        evicted from ``_create_vector_engine``'s cache.
+        """
+        if self._owns_engine:
+            await self.engine.dispose(close=True)
+
+    def _get_write_lock(self, collection_name: str) -> asyncio.Lock:
+        if collection_name not in self._write_locks:
+            self._write_locks[collection_name] = asyncio.Lock()
+        return self._write_locks[collection_name]
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
@@ -193,12 +257,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
                             )
-                            await connection.run_sync(
-                                self._metadata.reflect, only=[collection_name]
-                            )
+                    # Reflect AFTER the DDL transaction commits so
+                    # _metadata is never populated for a table that
+                    # might be rolled back.
+                    async with self.engine.begin() as connection:
+                        await connection.run_sync(self._metadata.reflect, only=[collection_name])
 
     @retry(
-        retry=retry_if_exception_type(DeadlockDetectedError),
+        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
@@ -241,99 +307,76 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 self.payload = payload
                 self.vector = vector
 
-        async with self.get_async_session() as session:
-            pgvector_data_points = []
+        pgvector_data_points = []
 
-            for data_index, data_point in enumerate(data_points):
-                # Check to see if data should be updated or a new data item should be created
-                # data_point_db = (
-                #     await session.execute(
-                #         select(PGVectorDataPoint).filter(PGVectorDataPoint.id == data_point.id)
-                #     )
-                # ).scalar_one_or_none()
-
-                # If data point exists update it, if not create a new one
-                # if data_point_db:
-                #     data_point_db.id = data_point.id
-                #     data_point_db.vector = data_vectors[data_index]
-                #     data_point_db.payload = serialize_data(data_point.model_dump())
-                #     pgvector_data_points.append(data_point_db)
-                # else:
-                pgvector_data_points.append(
-                    PGVectorDataPoint(
-                        id=data_point.id,
-                        vector=data_vectors[data_index],
-                        payload=serialize_data(data_point.model_dump()),
-                    )
+        for data_index, data_point in enumerate(data_points):
+            pgvector_data_points.append(
+                PGVectorDataPoint(
+                    id=data_point.id,
+                    vector=data_vectors[data_index],
+                    payload=serialize_data(data_point.model_dump()),
                 )
+            )
 
-            def to_dict(obj):
-                """Dump a mapped PGVectorDataPoint row to a plain column→value dict."""
-                return {
-                    column.key: getattr(obj, column.key)
-                    for column in inspect(obj).mapper.column_attrs
-                }
+        def to_dict(obj):
+            """Dump a mapped PGVectorDataPoint row to a plain column→value dict."""
+            return {
+                column.key: getattr(obj, column.key) for column in inspect(obj).mapper.column_attrs
+            }
 
-            # Dedup by id within the batch — with ON CONFLICT DO UPDATE,
-            # Postgres raises "cannot affect row a second time" if the same
-            # id appears twice in one INSERT. The prior ON CONFLICT DO NOTHING
-            # path silently tolerated duplicates, so entity extraction may
-            # still emit same-UUID5 rows in one batch. Union the duplicates'
-            # belongs_to_set arrays before collapsing so a tag that only
-            # appears on one duplicate isn't dropped (mirrors the in-batch
-            # tag merge in Neo4jAdapter.add_nodes).
-            deduped_by_id: dict = {}
-            for dp in pgvector_data_points:
-                existing = deduped_by_id.get(dp.id)
-                if existing is None:
-                    deduped_by_id[dp.id] = dp
-                    continue
-                existing_payload = existing.payload or {}
-                incoming_payload = dp.payload or {}
-                existing_tags = existing_payload.get("belongs_to_set") or []
-                incoming_tags = incoming_payload.get("belongs_to_set") or []
-                if existing_tags or incoming_tags:
-                    merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
-                    # Keep the latest row as representative (refreshing any
-                    # non-tag payload fields) and overwrite only the tag list.
-                    dp.payload = {**incoming_payload, "belongs_to_set": merged_tags}
+        # Dedup by id within the batch — with ON CONFLICT DO UPDATE,
+        # Postgres raises "cannot affect row a second time" if the same
+        # id appears twice in one INSERT. The prior ON CONFLICT DO NOTHING
+        # path silently tolerated duplicates, so entity extraction may
+        # still emit same-UUID5 rows in one batch. Union the duplicates'
+        # belongs_to_set arrays before collapsing so a tag that only
+        # appears on one duplicate isn't dropped (mirrors the in-batch
+        # tag merge in Neo4jAdapter.add_nodes).
+        deduped_by_id: dict = {}
+        for dp in pgvector_data_points:
+            existing = deduped_by_id.get(dp.id)
+            if existing is None:
                 deduped_by_id[dp.id] = dp
-            pgvector_data_points = list(deduped_by_id.values())
+                continue
+            existing_payload = existing.payload or {}
+            incoming_payload = dp.payload or {}
+            existing_tags = existing_payload.get("belongs_to_set") or []
+            incoming_tags = incoming_payload.get("belongs_to_set") or []
+            if existing_tags or incoming_tags:
+                merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
+                dp.payload = {**incoming_payload, "belongs_to_set": merged_tags}
+            deduped_by_id[dp.id] = dp
+        pgvector_data_points = list(deduped_by_id.values())
 
-            # session.add_all(pgvector_data_points)
-            point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
+        point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
 
-            for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
-                point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
-                insert_statement = insert(PGVectorDataPoint).values(point_batch)
-                # On conflict, merge the `belongs_to_set` arrays so a DataPoint
-                # cognified into multiple datasets keeps every dataset tag. Take
-                # the incoming payload as the base (refreshing any other fields)
-                # and rewrite only `belongs_to_set` with the union of existing
-                # and incoming values. `collection_name` is cognee-controlled,
-                # not user input, so interpolation is safe.
-                quoted_table = f'"{collection_name}"'
-                merged_payload_expr = text(
-                    f"""
-                                jsonb_set(
-                                    EXCLUDED.payload::jsonb,
-                                    '{{belongs_to_set}}',
-                                    (
-                                        SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
-                                        FROM jsonb_array_elements_text(
-                                            COALESCE({quoted_table}.payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                                            || COALESCE(EXCLUDED.payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                                        ) AS val
-                                    )
-                                )::json
-                                """
-                )
-                insert_statement = insert_statement.on_conflict_do_update(
-                    index_elements=["id"],
-                    set_={"payload": merged_payload_expr},
-                )
-                await session.execute(insert_statement)
-            await session.commit()
+        async with self._get_write_lock(collection_name):
+            async with self.get_async_session() as session:
+                for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
+                    point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
+                    insert_statement = insert(PGVectorDataPoint).values(point_batch)
+                    quoted_table = f'"{collection_name}"'
+                    merged_payload_expr = text(
+                        f"""
+                                    jsonb_set(
+                                        EXCLUDED.payload::jsonb,
+                                        '{{belongs_to_set}}',
+                                        (
+                                            SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
+                                            FROM jsonb_array_elements_text(
+                                                COALESCE({quoted_table}.payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                                                || COALESCE(EXCLUDED.payload::jsonb->'belongs_to_set', '[]'::jsonb)
+                                            ) AS val
+                                        )
+                                    )::json
+                                    """
+                    )
+                    insert_statement = insert_statement.on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={"payload": merged_payload_expr},
+                    )
+                    await session.execute(insert_statement)
+                await session.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""
@@ -349,6 +392,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 IndexSchema(
                     id=data_point.id,
                     text=DataPoint.get_embeddable_data(data_point),
+                    # Reference scalars for search "Evidence". Pulled via getattr
+                    # so non-chunk data points (which lack these fields) simply
+                    # fall back to None instead of raising.
+                    document_id=getattr(data_point, "document_id", None),
+                    document_name=getattr(data_point, "document_name", None),
+                    chunk_index=getattr(data_point, "chunk_index", None),
+                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
+                    importance_weight=getattr(data_point, "importance_weight", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
@@ -548,23 +599,23 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if not await self.has_collection(collection_name):
             return None
 
-        async with self.get_async_session() as session:
-            # Get PGVectorDataPoint Table from database
-            PGVectorDataPoint = await self.get_table(collection_name)
+        async with self._get_write_lock(collection_name):
+            async with self.get_async_session() as session:
+                PGVectorDataPoint = await self.get_table(collection_name)
 
-            results = None
-            if not data_point_ids:
-                results = await session.execute(
-                    delete(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(data_point_ids))
-                )
-            else:
-                for start_index in range(0, len(data_point_ids), QUERY_BATCH_SIZE):
-                    id_batch = data_point_ids[start_index : start_index + QUERY_BATCH_SIZE]
+                results = None
+                if not data_point_ids:
                     results = await session.execute(
-                        delete(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(id_batch))
+                        delete(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(data_point_ids))
                     )
-            await session.commit()
-            return results
+                else:
+                    for start_index in range(0, len(data_point_ids), QUERY_BATCH_SIZE):
+                        id_batch = data_point_ids[start_index : start_index + QUERY_BATCH_SIZE]
+                        results = await session.execute(
+                            delete(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(id_batch))
+                        )
+                await session.commit()
+                return results
 
     async def remove_belongs_to_set_tags(
         self,
@@ -668,20 +719,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # no `payload::jsonb` column) must not roll back updates already
             # committed for other tables.
             try:
-                async with self.get_async_session() as session:
-                    target_rows = await session.execute(select_targets_sql, bind_params)
-                    target_ids = [row[0] for row in target_rows.all()]
-                    if not target_ids:
-                        await session.commit()
-                        continue
+                async with self._get_write_lock(table_name):
+                    async with self.get_async_session() as session:
+                        target_rows = await session.execute(select_targets_sql, bind_params)
+                        target_ids = [row[0] for row in target_rows.all()]
+                        if not target_ids:
+                            await session.commit()
+                            continue
 
-                    scoped_params: Dict[str, Any] = {
-                        "tags": list(tags),
-                        "target_ids": target_ids,
-                    }
-                    await session.execute(update_sql, scoped_params)
-                    await session.execute(delete_empties_sql, {"target_ids": target_ids})
-                    await session.commit()
+                        scoped_params: Dict[str, Any] = {
+                            "tags": list(tags),
+                            "target_ids": target_ids,
+                        }
+                        await session.execute(update_sql, scoped_params)
+                        await session.execute(delete_empties_sql, {"target_ids": target_ids})
+                        await session.commit()
             except exc.SQLAlchemyError as e:
                 logger.debug(
                     "remove_belongs_to_set_tags skipped '%s': %s",

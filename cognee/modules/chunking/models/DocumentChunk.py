@@ -23,6 +23,8 @@ class DocumentChunk(DataPoint):
     - cut_type: The type of cut that defined this chunk.
     - is_part_of: The document to which this chunk belongs.
     - contains: A list of entities or events contained within the chunk (default is None).
+    - document_id: Flat string id of the source document, for reference rendering.
+    - document_name: Display name (basename) of the source document, for reference rendering.
     - metadata: A dictionary to hold meta information related to the chunk, including index
     fields.
     """
@@ -34,4 +36,6 @@ class DocumentChunk(DataPoint):
     is_part_of: Document
     contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
     importance_weight: Optional[float] = 0.5
+    document_id: Optional[str] = None
+    document_name: Optional[str] = None
     metadata: dict = {"index_fields": ["text"]}

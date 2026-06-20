@@ -283,7 +283,7 @@ async def test_graph_completion_get_triplets_empty(setup_test_environment_empty)
 @pytest.mark.asyncio
 async def test_graph_completion_batch_queries_context_simple(setup_test_environment_simple):
     """Integration test: verify GraphCompletionRetriever can retrieve context with multiple queries (simple)."""
-    retriever = GraphCompletionRetriever()
+    retriever = GraphCompletionRetriever(top_k=20)
     query_batch = ["Who works at Canva?", "Who works at Figma?"]
 
     triplets = await retriever.get_retrieved_objects(query_batch=query_batch)

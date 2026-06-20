@@ -7,11 +7,22 @@ from cognee.modules.graph.legacy.mark_ledger_as_deleted import (
     mark_ledger_nodes_as_deleted,
 )
 from cognee.modules.graph.models import Node, Edge
+from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.engine.utils import generate_node_id
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("delete_from_graph_and_vector")
+
+
+def _get_deleted_edge_retrieval_text(edge: Edge) -> str:
+    attributes = edge.attributes or {}
+    return get_edge_retrieval_text(attributes.get("edge_text"), edge.relationship_name)
+
+
+def _get_remaining_edge_retrieval_text(edge) -> str:
+    properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+    return get_edge_retrieval_text(properties.get("edge_text"), edge[2])
 
 
 async def delete_from_graph_and_vector(
@@ -79,10 +90,13 @@ async def delete_from_graph_and_vector(
                 seen_edge_slugs.add(edge.slug)
                 unique_edges.append(edge)
 
-        await vector_engine.delete_data_points(
-            "EdgeType_relationship_name",
-            [str(edge.slug) for edge in unique_edges],
-        )
+        edge_type_ids = []
+        for edge in unique_edges:
+            edge_text = _get_deleted_edge_retrieval_text(edge)
+            if edge_text:
+                edge_type_ids.append(str(EdgeType.id_for(edge_text)))
+
+        await vector_engine.delete_data_points("EdgeType_relationship_name", edge_type_ids)
 
         triplet_ids = [
             str(
@@ -102,22 +116,30 @@ async def delete_from_graph_and_vector(
                 pass
 
     # Clean up orphaned EdgeType nodes from the graph.
-    # EdgeType nodes are created by index_graph_edges for each unique
-    # relationship_name. When edges are deleted, check if any edges of
-    # that type remain in the graph. If not, remove the EdgeType node.
+    # EdgeType nodes are created by index_graph_edges for each unique edge
+    # retrieval text. When edges are deleted, check if any edges with that
+    # retrieval text remain in the graph. If not, remove the EdgeType node.
     if non_legacy_edges:
-        deleted_rel_names = {edge.relationship_name for edge in unique_edges}
+        deleted_edge_texts = set()
+        for edge in unique_edges:
+            edge_text = _get_deleted_edge_retrieval_text(edge)
+            if edge_text:
+                deleted_edge_texts.add(edge_text)
 
         try:
             if not graph_engine:
                 graph_engine = await get_graph_engine()
             _, remaining_edges = await graph_engine.get_graph_data()
-            remaining_rel_names = {edge[2] for edge in remaining_edges}
+            remaining_edge_texts = set()
+            for edge in remaining_edges:
+                edge_text = _get_remaining_edge_retrieval_text(edge)
+                if edge_text:
+                    remaining_edge_texts.add(edge_text)
 
             orphaned_edge_type_ids = [
-                str(generate_edge_id(edge_id=rel_name))
-                for rel_name in deleted_rel_names
-                if rel_name not in remaining_rel_names
+                str(EdgeType.id_for(edge_text))
+                for edge_text in deleted_edge_texts
+                if edge_text not in remaining_edge_texts
             ]
 
             if orphaned_edge_type_ids:

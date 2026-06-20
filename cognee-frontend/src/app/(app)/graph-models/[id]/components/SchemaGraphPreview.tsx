@@ -215,8 +215,8 @@ function CollapseIcon() {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const NODE_R = 13;
-const ENTITY_COLOR = "#5C10F4";
-const MISSING_COLOR = "#f59e0b";
+const ENTITY_COLOR = "#6510F4";
+const MISSING_COLOR = "#D8D8D8";
 const SELECTED_COLOR = "#0DFF00";
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -410,39 +410,25 @@ export default function SchemaGraphPreview({
         />
       )}
 
-      <Stack
-        className="rounded-[0.5rem] px-[2rem] pt-[1.5rem] pb-[1.75rem] !gap-[0]"
-        bg="white"
+      <div
         style={
           isExpanded
-            ? { position: "fixed", inset: 10, zIndex: 50, overflow: "auto", display: "flex", flexDirection: "column" }
-            : undefined
+            ? { position: "fixed", inset: 10, zIndex: 50, overflow: "auto", display: "flex", flexDirection: "column", background: "#FAFAFA", borderRadius: "0.5rem" }
+            : { display: "flex", flexDirection: "column", width: "100%", height: "100%" }
         }
       >
-        {/* Header */}
-        <Flex justify="space-between" align="center" mb="1.625rem">
-          <Title size="h2">Schema Graph</Title>
-          <UnstyledButton
-            onClick={() => setIsExpanded((v) => !v)}
-            title={isExpanded ? "Collapse" : "Expand"}
-            style={{ padding: "4px 8px", borderRadius: 4, color: tokens.textSecondary }}
-          >
-            {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
-          </UnstyledButton>
-        </Flex>
-
         {/* Canvas area */}
         <div
           ref={containerRef}
-          className="relative w-full overflow-hidden rounded-[0.375rem]"
+          className="relative w-full overflow-hidden"
           style={{
-            height: isExpanded ? "100%" : `${resolvedHeight}px`,
-            flex: isExpanded ? 1 : undefined,
-            background: "linear-gradient(135deg, #101010 0%, #1a1a2e 100%)",
+            height: isExpanded ? "100%" : "100%",
+            flex: 1,
+            background: "#FAFAFA",
           }}
         >
           {isEmpty ? (
-            <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "0.75rem", color: "rgba(219,216,216,0.4)" }}>
+            <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "0.75rem", color: "#9CA3AF" }}>
               <p style={{ margin: 0, fontSize: "1rem", fontWeight: 500 }}>No schema graph yet</p>
               <p style={{ margin: 0, fontSize: "0.875rem" }}>Add entities and relation fields to visualise the schema</p>
             </div>
@@ -478,10 +464,10 @@ export default function SchemaGraphPreview({
 
                 {/* Arrow markers */}
                 <marker id="sg-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto">
-                  <path d="M0,1 L0,7 L7,4 z" fill="rgba(255,255,255,0.7)" />
+                  <path d="M0,1 L0,7 L7,4 z" fill="rgba(101,16,244,0.6)" />
                 </marker>
                 <marker id="sg-arrow-missing" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto">
-                  <path d="M0,1 L0,7 L7,4 z" fill="rgba(245,158,11,0.8)" />
+                  <path d="M0,1 L0,7 L7,4 z" fill="rgba(216,216,216,0.8)" />
                 </marker>
               </defs>
 
@@ -510,8 +496,8 @@ export default function SchemaGraphPreview({
                     ? isAdj ? 1 : 0.12
                     : 0.35;
                   const lineStroke = isAdj
-                    ? link.isMissing ? "rgba(245,158,11,0.95)" : "rgba(255,255,255,0.95)"
-                    : link.isMissing ? "rgba(245,158,11,0.25)" : "rgba(160,160,160,0.25)";
+                    ? link.isMissing ? "rgba(216,216,216,0.95)" : "rgba(101,16,244,0.6)"
+                    : link.isMissing ? "rgba(216,216,216,0.5)" : "rgba(216,216,216,0.6)";
                   const lineWidth = isAdj ? 1.8 : 1.2;
 
                   const midX = (src.x + tgt.x) / 2;
@@ -537,9 +523,9 @@ export default function SchemaGraphPreview({
                           dominantBaseline="middle"
                           fontSize="9"
                           fontFamily="Inter, system-ui, sans-serif"
-                          fill="#F4F4F4"
+                          fill="#6510F4"
                           paintOrder="stroke"
-                          stroke="rgba(15,10,35,0.85)"
+                          stroke="rgba(250,250,250,0.9)"
                           strokeWidth="3"
                           style={{ pointerEvents: "none", userSelect: "none" }}
                         >
@@ -593,9 +579,8 @@ export default function SchemaGraphPreview({
                       <circle
                         r={r}
                         fill={color}
-                        stroke="white"
-                        strokeWidth="0.5"
-                        filter={glowFilter}
+                        stroke="#fff"
+                        strokeWidth="2"
                       />
 
                       {/* Label */}
@@ -606,9 +591,9 @@ export default function SchemaGraphPreview({
                         fontSize={isHovered || isAdj ? "11" : "10"}
                         fontWeight="bold"
                         fontFamily="Inter, system-ui, sans-serif"
-                        fill={node.type === "missing" ? MISSING_COLOR : "#F4F4F4"}
+                        fill={node.type === "missing" ? "#9CA3AF" : "#323332"}
                         paintOrder="stroke"
-                        stroke="rgba(0,0,0,0.85)"
+                        stroke="rgba(250,250,250,0.9)"
                         strokeWidth="2.5"
                         style={{ userSelect: "none", pointerEvents: "none" }}
                       >
@@ -636,7 +621,7 @@ export default function SchemaGraphPreview({
               ].map(({ color, label }) => (
                 <Flex key={label} align="center" gap="0.25rem">
                   <div style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: color, flexShrink: 0 }} />
-                  <span style={{ color: "rgba(219,216,216,0.55)", fontSize: "0.65rem" }}>{label}</span>
+                  <span style={{ color: "#9CA3AF", fontSize: "0.65rem" }}>{label}</span>
                 </Flex>
               ))}
             </Flex>
@@ -650,7 +635,7 @@ export default function SchemaGraphPreview({
                 bottom: "0.75rem",
                 right: "0.75rem",
                 fontSize: "0.65rem",
-                color: "rgba(219,216,216,0.3)",
+                color: "#9CA3AF",
                 pointerEvents: "none",
                 userSelect: "none",
               }}
@@ -660,19 +645,7 @@ export default function SchemaGraphPreview({
           )}
         </div>
 
-        {/* Drag-resize handle */}
-        {!isExpanded && (
-          <div
-            onMouseDown={(e) => handleResizeStart(e.clientY)}
-            onDoubleClick={() => setManualHeight(null)}
-            style={{ height: 6, width: "100%", cursor: "row-resize", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 4, borderRadius: 3, background: "#f3f4f6", transition: "background 0.15s" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#e5e7eb")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "#f3f4f6")}
-          >
-            <div style={{ width: 32, height: 3, borderRadius: 2, background: "#d1d5db" }} />
-          </div>
-        )}
-      </Stack>
+      </div>
     </>
   );
 }

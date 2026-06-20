@@ -21,6 +21,61 @@ from .npm_utils import run_npm_command
 logger = get_logger()
 
 
+def _check_docker_available() -> Tuple[bool, str]:
+    """
+    Check if the Docker daemon is reachable by running `docker info`.
+
+    Returns:
+        Tuple of (is_available: bool, message: str) where message provides
+        actionable guidance when Docker is not available.
+    """
+    docker_path = shutil.which("docker")
+    if docker_path is None:
+        return False, (
+            "Docker CLI not found on PATH.\n"
+            "Install Docker Desktop (https://www.docker.com/products/docker-desktop/) "
+            "or Colima (https://github.com/abiosoft/colima) and ensure the `docker` "
+            "binary is on your PATH."
+        )
+
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            return True, "Docker daemon is running."
+
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        return False, (
+            f"Docker CLI is installed but the daemon is not responding.\n"
+            f"  docker info stderr: {stderr}\n\n"
+            f"Possible fixes:\n"
+            f"  - Docker Desktop: open the Docker Desktop application and wait for it to start.\n"
+            f"  - Colima: run `colima start` (add `--network-address` for host.docker.internal support).\n"
+            f"  - Linux: run `sudo systemctl start docker` or `sudo service docker start`."
+        )
+    except subprocess.TimeoutExpired:
+        return False, (
+            "Docker daemon did not respond within 15 seconds.\n"
+            "The daemon may be starting up. Wait a moment and try again, or:\n"
+            "  - Docker Desktop: open the Docker Desktop application.\n"
+            "  - Colima: run `colima start`."
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        # Covers FileNotFoundError (binary vanished after the shutil.which check),
+        # PermissionError / "Exec format error" (TOCTOU race, noexec mount, foreign
+        # arch binary), and any other exec-time failure. Returning a tuple here keeps
+        # start_ui's graceful-skip guarantee total instead of crashing the UI launch.
+        return False, (
+            f"Docker CLI could not be executed ({type(e).__name__}: {e}).\n"
+            "Install Docker Desktop (https://www.docker.com/products/docker-desktop/) "
+            "or Colima (https://github.com/abiosoft/colima) and ensure the `docker` "
+            "binary is on your PATH and executable."
+        )
+
+
 def _stream_process_output(
     process: subprocess.Popen, stream_name: str, prefix: str, color_code: str = ""
 ) -> threading.Thread:
@@ -445,9 +500,33 @@ def start_ui(
 
     if start_mcp:
         logger.info("Starting Cognee MCP server with Docker...")
+
+        # Preflight: verify the Docker daemon is reachable before pulling images
+        docker_ok, docker_msg = _check_docker_available()
+        if not docker_ok:
+            logger.error(f"Docker preflight check failed:\n{docker_msg}")
+            logger.error(
+                "The MCP server requires a running Docker (or Colima) daemon. "
+                "Skipping MCP server startup."
+            )
+            # Continue without MCP — the UI and backend can still work
+            start_mcp = False
+
+    if start_mcp:
         try:
             image = "cognee/cognee-mcp:main"
-            subprocess.run(["docker", "pull", image], check=True)
+            # Bound the pull so a reachable-but-stalled daemon / registry can't hang
+            # start_ui indefinitely. On timeout, degrade to skipping MCP like the
+            # preflight failure path rather than blocking the whole UI launch.
+            try:
+                subprocess.run(["docker", "pull", image], check=True, timeout=300)
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    f"Timed out after 300s pulling Docker image '{image}'. "
+                    "The daemon is reachable but the pull stalled (slow network or "
+                    "registry). Skipping MCP server startup."
+                )
+                raise
 
             import uuid
 

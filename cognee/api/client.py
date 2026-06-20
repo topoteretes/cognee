@@ -16,7 +16,6 @@ from fastapi.openapi.utils import get_openapi
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.api.v1.cloud.routers import get_checks_router
-from cognee.api.v1.notebooks.routers import get_notebooks_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -46,6 +45,10 @@ from cognee.api.v1.users.routers import (
     get_user_id_by_email_router,
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
+from cognee.api.v1.agents.routers import get_agents_router
+from cognee.api.v1.visualize.routers import get_schema_router
+from cognee.api.v1.skills.routers import get_skills_router
+from cognee.api.v1.proposals.routers import get_proposals_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
@@ -79,19 +82,22 @@ async def lifespan(app: FastAPI):
     # await prune_system(metadata = True)
     # if app_environment == "local" or app_environment == "dev":
     from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.run_migrations import run_startup_migrations
+    from cognee.run_migrations import run_migrations
 
     try:
-        await run_startup_migrations()
+        await run_migrations()
     except Exception:
         db_engine = get_relational_engine()
         await db_engine.create_database()
 
-        await run_startup_migrations()
+        await run_migrations()
 
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
+    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+
+    await recover_stale_cognify_runs_on_startup()
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
@@ -253,6 +259,11 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
+app.include_router(get_schema_router(), prefix="/api/v1/schema", tags=["schema"])
+
+app.include_router(get_skills_router(), prefix="/api/v1/skills", tags=["skills"])
+app.include_router(get_proposals_router(), prefix="/api/v1/proposals", tags=["skills"])
+
 app.include_router(
     get_configuration_router(),
     prefix="/api/v1/configuration",
@@ -282,12 +293,6 @@ app.include_router(
 )
 
 app.include_router(
-    get_notebooks_router(),
-    prefix="/api/v1/notebooks",
-    tags=["notebooks"],
-)
-
-app.include_router(
     get_checks_router(),
     prefix="/api/v1/checks",
     tags=["checks"],
@@ -298,6 +303,8 @@ app.include_router(
     prefix="/health",
     tags=["health"],
 )
+
+app.include_router(get_agents_router(), prefix="/api/v1/agents")
 
 # Activity / observability
 app.include_router(
@@ -334,10 +341,21 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     host (str): The host for the server.
     port (int): The port for the server.
     """
+    import socket
+
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        uvicorn.run(app, host=host, port=port)
+        # Bind before serving so the port is held during startup (including the
+        # lifespan migration): uvicorn runs the lifespan before it accepts on this
+        # socket, so while migrating, a second server on the same host:port fails
+        # fast with EADDRINUSE and no endpoint is served yet (requests queue).
+        # reuse_port=False keeps that guard — SO_REUSEPORT would let a second
+        # process share the port.
+        sock = socket.create_server((host, port), reuse_port=False)
+
+        config = uvicorn.Config(app, host=host, port=port)
+        uvicorn.Server(config).run(sockets=[sock])
     except Exception as e:
         logger.exception(f"Failed to start server: {e}")
         # Here you could add any cleanup code or error recovery code.
@@ -345,8 +363,27 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Cognee API server")
+    parser.add_argument(
+        "--agent-mode",
+        action="store_true",
+        default=None,
+        help="Enable agent mode (overrides COGNEE_AGENT_MODE env var)",
+    )
+    args = parser.parse_args()
+
+    from cognee.modules.agents.agent_mode import is_agent_mode_enabled, set_agent_mode
+
+    if args.agent_mode:
+        set_agent_mode(True)
+
+    default_port = 8011 if is_agent_mode_enabled() else 8000
+
     logger = setup_logging()
 
     start_api_server(
-        host=os.getenv("HTTP_API_HOST", "0.0.0.0"), port=int(os.getenv("HTTP_API_PORT", 8000))
+        host=os.getenv("HTTP_API_HOST", "0.0.0.0"),
+        port=int(os.getenv("HTTP_API_PORT", default_port)),
     )

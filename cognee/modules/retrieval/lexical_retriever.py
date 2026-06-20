@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Any, Callable, Optional, List, Union
 from heapq import nlargest
 
@@ -11,9 +12,20 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("LexicalRetriever")
 
 
+def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str]:
+    """Lowercase, split on word characters, and drop any stop words.
+
+    Shared by the lexical retrievers so tokenization stays consistent across scorers.
+    """
+    tokens = re.findall(r"\w+", text.lower())
+    if not stop_words:
+        return tokens
+    return [token for token in tokens if token not in stop_words]
+
+
 class LexicalRetriever(BaseRetriever):
     def __init__(
-        self, tokenizer: Callable, scorer: Callable, top_k: int = 10, with_scores: bool = False
+        self, tokenizer: Callable, scorer: Callable, top_k: int = 15, with_scores: bool = False
     ):
         if not callable(tokenizer) or not callable(scorer):
             raise TypeError("tokenizer and scorer must be callables")
@@ -59,8 +71,12 @@ class LexicalRetriever(BaseRetriever):
                         tokens = self.tokenizer(document["text"])
                         if not tokens:
                             continue
-                        self.chunks[str(document.get("id", chunk_id))] = tokens
-                        self.payloads[str(document.get("id", chunk_id))] = document
+                        # Some graph adapters (e.g. kuzu) omit "id" from node payloads;
+                        # downstream consumers match chunks across channels by payload id.
+                        document_id = str(document.get("id") or chunk_id)
+                        document.setdefault("id", document_id)
+                        self.chunks[document_id] = tokens
+                        self.payloads[document_id] = document
                         chunk_count += 1
                     except Exception as e:
                         logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))

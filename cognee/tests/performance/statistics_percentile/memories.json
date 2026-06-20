@@ -1,0 +1,252 @@
+[
+  {
+    "title": "First Day at University",
+    "content": "I remember my first day at the University of Belgrade. The campus was bustling with new students, and I felt both excited and nervous. I enrolled in the Computer Science program, which would shape the next four years of my life. The Professor gave an inspiring opening lecture about the future of computing.",
+    "references": ["University of Belgrade", "Computer Science"]
+  },
+  {
+    "title": "Learning to Ride a Bicycle",
+    "content": "My grandfather taught me to ride a bicycle in the park near our house when I was six years old. He held the back of the seat and ran alongside me until I found my balance. The moment he let go and I kept riding was one of pure joy. I crashed into a bush moments later, but it didn't matter.",
+    "references": ["childhood", "family"]
+  },
+  {
+    "title": "The Solar Eclipse of 1999",
+    "content": "On August 11, 1999, a total solar eclipse was visible from parts of Europe. I watched it from the rooftop with special glasses my father had bought. The sky darkened in the middle of the day, and the birds went silent. It lasted only a couple of minutes but left a lasting impression on me.",
+    "references": ["solar eclipse", "1999", "astronomy"]
+  },
+  {
+    "title": "Cooking Grandmother's Stew",
+    "content": "My grandmother's beef stew recipe has been in the family for three generations. The secret ingredient is a splash of red wine vinegar added at the very end. She always cooked it in a cast-iron pot over low heat for at least four hours. I still use her exact recipe every winter.",
+    "references": ["family recipe", "cooking"]
+  },
+  {
+    "title": "First Programming Language",
+    "content": "I wrote my first program in BASIC on a Commodore 64 when I was twelve. It was a simple number guessing game that printed 'Too high' or 'Too low' based on the user's input. The sense of accomplishment when it ran without errors was addictive. That moment sparked my lifelong passion for programming.",
+    "references": ["BASIC", "Commodore 64", "programming"]
+  },
+  {
+    "title": "Hiking in the Alps",
+    "content": "In the summer of 2015, I hiked the Tour du Mont Blanc with two friends. The 170-kilometer trail took us through France, Italy, and Switzerland over eleven days. The views from Col de la Seigne were breathtaking. We carried all our gear and camped along the way.",
+    "references": ["Tour du Mont Blanc", "Alps", "hiking"]
+  },
+  {
+    "title": "Adopting a Cat",
+    "content": "We adopted our cat Luna from a local shelter in 2020. She was shy at first and hid under the couch for three days. Gradually she warmed up to us and now she sleeps on my keyboard while I work. She has a distinctive orange patch on her left ear.",
+    "references": ["pets", "cat adoption"]
+  },
+  {
+    "title": "The Blackout of 2003",
+    "content": "During the Northeast blackout of August 2003, the power went out for nearly two days. Neighbors gathered on the street and shared food from their fridges before it spoiled. Someone brought out a guitar and we sang songs by candlelight. It was a rare moment of community in an otherwise isolating city.",
+    "references": ["2003 blackout", "community"]
+  },
+  {
+    "title": "Learning to Swim",
+    "content": "I learned to swim at the municipal pool when I was eight. The instructor, Mrs. Petrovic, was patient but firm. She made us practice floating on our backs before anything else. I was terrified of the deep end for months until one day I just dove in without thinking.",
+    "references": ["swimming", "childhood"]
+  },
+  {
+    "title": "First Job Interview",
+    "content": "My first real job interview was at a small software consultancy in 2010. I was so nervous that I forgot my portfolio at home. The interviewer asked me to whiteboard a sorting algorithm, and I blanked on quicksort but managed to explain merge sort clearly. They offered me the job two days later.",
+    "references": ["career", "job interview", "software"]
+  },
+  {
+    "title": "Moving to a New City",
+    "content": "When I moved to Berlin in 2018, I knew nobody in the city. The first month was lonely — I spent weekends exploring neighborhoods on foot. Eventually I found a co-working space where I met people who became close friends. The Kreuzberg district felt like home within six months.",
+    "references": ["Berlin", "relocation", "Kreuzberg"]
+  },
+  {
+    "title": "Building a Treehouse",
+    "content": "My father and I built a treehouse in the oak tree in our backyard when I was ten. We spent three weekends measuring, cutting, and nailing boards. It had a rope ladder and a small window facing west. I used it as a reading nook every summer until we moved.",
+    "references": ["childhood", "father", "DIY"]
+  },
+  {
+    "title": "Attending a Live Concert",
+    "content": "The first live concert I attended was Radiohead at a festival in 2006. The band opened with 'There There' and the crowd erupted. Standing in a field with thousands of people, all singing along to 'Karma Police', was transcendent. I still have the wristband from that day.",
+    "references": ["Radiohead", "music", "concerts"]
+  },
+  {
+    "title": "Debugging a Production Outage",
+    "content": "In 2019, our production database went down at 3 AM due to a misconfigured connection pool. I spent four hours tracing the issue through logs before finding that a recent deployment had changed the max connections from 100 to 10. The fix was a one-line config change but the investigation was grueling.",
+    "references": ["production outage", "debugging", "database"]
+  },
+  {
+    "title": "Visiting a Museum in Florence",
+    "content": "Seeing Michelangelo's David at the Galleria dell'Accademia in Florence was overwhelming. No photograph prepares you for the scale and detail of the sculpture. I stood there for twenty minutes just looking at the hands. The museum was crowded, but in that moment everything else faded away.",
+    "references": ["Florence", "Michelangelo", "art", "travel"]
+  },
+  {
+    "title": "First Open Source Contribution",
+    "content": "My first open source contribution was a bug fix to a Python logging library in 2014. The issue was a race condition in the file rotation handler that caused log files to be truncated. My pull request took three rounds of review before being merged. Seeing my name in the changelog was incredibly satisfying.",
+    "references": ["open source", "Python", "contribution"]
+  },
+  {
+    "title": "Snow Day in School",
+    "content": "The heaviest snowfall I remember was in January 1998 when school was canceled for three days. We built an enormous snow fort in the park with tunnels and a watchtower. My hands were frozen but I refused to go inside. The fort survived until February before it collapsed.",
+    "references": ["childhood", "snow", "winter"]
+  },
+  {
+    "title": "Reading Lord of the Rings",
+    "content": "I read the entire Lord of the Rings trilogy in one week during summer break when I was fourteen. I barely slept or ate, completely absorbed in Middle-earth. The chapter 'The Bridge of Khazad-dûm' gave me chills. It was the first time a book made me cry — during the Grey Havens ending.",
+    "references": ["Tolkien", "Lord of the Rings", "books"]
+  },
+  {
+    "title": "Learning to Cook Pasta",
+    "content": "An Italian roommate in college taught me that you must salt the pasta water generously — it should taste like the sea. He also taught me that you never break spaghetti and always save some pasta water for the sauce. These simple rules transformed my cooking forever.",
+    "references": ["cooking", "pasta", "college"]
+  },
+  {
+    "title": "Winning a Hackathon",
+    "content": "Our team won a 48-hour hackathon in 2017 by building a real-time translator for sign language using computer vision. We used a pre-trained CNN model and fine-tuned it on ASL datasets. The judges were impressed by the demo, which translated basic signs with 85% accuracy. We split the prize four ways.",
+    "references": ["hackathon", "computer vision", "machine learning"]
+  },
+  {
+    "title": "A Flat Tire on a Road Trip",
+    "content": "Halfway through a road trip to the coast, we got a flat tire on a deserted stretch of highway. None of us had changed a tire before, but we figured it out using the car manual. A truck driver stopped to help and showed us we had the jack in the wrong position. We made it to the beach two hours late.",
+    "references": ["road trip", "car trouble"]
+  },
+  {
+    "title": "Setting Up My First Server",
+    "content": "I set up my first Linux server in 2011 — a Debian box running Apache and MySQL. I spent an entire weekend configuring iptables rules and SSH keys. The thrill of seeing my website accessible from the internet for the first time was unmatched. It was hacked within a week because I left port 22 on the default config.",
+    "references": ["Linux", "server", "sysadmin"]
+  },
+  {
+    "title": "Planting a Garden",
+    "content": "In spring 2021, I started a small vegetable garden on my balcony. I planted tomatoes, basil, and peppers in large pots. The tomatoes thrived but the peppers struggled with insufficient sunlight. By August, I was harvesting enough basil to make pesto every week. The garden became a meditative morning ritual.",
+    "references": ["gardening", "vegetables", "balcony"]
+  },
+  {
+    "title": "Watching the World Cup Final",
+    "content": "The 2014 World Cup final between Germany and Argentina was one of the most tense matches I've watched. We gathered at a friend's apartment with snacks and drinks. When Götze scored in extra time, half the room erupted and the other half went silent. The energy in that small living room was electric.",
+    "references": ["World Cup", "2014", "football"]
+  },
+  {
+    "title": "Power of a Mentor",
+    "content": "My first real mentor was a senior engineer named David who took the time to review my code line by line. He never just told me what was wrong — he asked questions that led me to see the issues myself. His approach taught me that good mentorship is about developing thinking, not providing answers.",
+    "references": ["mentorship", "career", "engineering"]
+  },
+  {
+    "title": "A Thunderstorm at the Beach",
+    "content": "We were at the beach when a sudden thunderstorm rolled in from the sea. The sky turned dark green and the wind picked up in seconds. We ran to the car as lightning struck the water offshore. Watching the storm from inside the car, with rain hammering the roof, was both terrifying and beautiful.",
+    "references": ["weather", "beach", "thunderstorm"]
+  },
+  {
+    "title": "Learning Git the Hard Way",
+    "content": "I learned git by accidentally deleting a week's worth of work with git reset --hard in 2013. After that painful lesson, I spent an entire weekend reading the Pro Git book cover to cover. Understanding the reflog saved me multiple times after that. I now teach git workshops to junior developers.",
+    "references": ["git", "version control", "learning"]
+  },
+  {
+    "title": "Baking Bread During Lockdown",
+    "content": "Like many people, I started baking sourdough bread during the 2020 lockdown. My first starter took two weeks to become active. The first loaf was dense and sour, but by the fifth attempt I was producing bread with a good crumb and crispy crust. I named my starter 'Clint Yeastwood'.",
+    "references": ["baking", "sourdough", "lockdown", "2020"]
+  },
+  {
+    "title": "A Conversation with a Stranger",
+    "content": "On a delayed train from Prague to Vienna, I sat next to a retired physicist who told me about his work on particle accelerators in the 1980s. He explained quantum tunneling using a coffee cup metaphor that I still remember. That three-hour conversation made me reconsider my assumptions about time and randomness.",
+    "references": ["travel", "physics", "trains"]
+  },
+  {
+    "title": "Migrating a Monolith to Microservices",
+    "content": "Our team spent eight months in 2020 migrating a monolithic Python application to microservices. We used the strangler fig pattern, gradually routing traffic to new services. The hardest part was splitting the shared database. In the end, latency improved by 40% but operational complexity tripled.",
+    "references": ["microservices", "architecture", "migration"]
+  },
+  {
+    "title": "Childhood Pet Dog",
+    "content": "Our family dog Rex was a German Shepherd who lived with us for thirteen years. He waited at the door every day when I came home from school. He once chased a deer through the woods and came back three hours later covered in mud. When he passed away, the house felt empty for months.",
+    "references": ["pets", "dog", "childhood"]
+  },
+  {
+    "title": "First Flight Experience",
+    "content": "My first time on an airplane was a flight from Belgrade to London when I was sixteen. I got a window seat and watched the clouds from above for the first time. The takeoff made my stomach drop but once we leveled off, the view was serene. I pressed my face against the window for the entire two-hour flight.",
+    "references": ["flying", "travel", "first experience"]
+  },
+  {
+    "title": "Learning a New Language",
+    "content": "I started learning Japanese in 2019 using a combination of apps and textbooks. Hiragana took a week, katakana another week, but kanji felt endless. After two years, I could hold basic conversations. Visiting Tokyo and ordering food in Japanese for the first time made all the study hours worth it.",
+    "references": ["Japanese", "language learning", "Tokyo"]
+  },
+  {
+    "title": "A Broken Deployment Pipeline",
+    "content": "Our CI/CD pipeline broke silently for two weeks in 2021 — tests were passing but not actually running due to a misconfigured GitHub Actions workflow. We only discovered it when a clearly broken PR was merged to main. After that, we added a canary test that intentionally fails to ensure the suite actually executes.",
+    "references": ["CI/CD", "GitHub Actions", "testing"]
+  },
+  {
+    "title": "The Neighborhood Bookstore",
+    "content": "There was a tiny bookstore on my street run by an elderly couple. They knew every book in the store by heart and could recommend titles based on a vague description of what you were in the mood for. When they retired and closed the shop in 2019, the whole neighborhood felt the loss.",
+    "references": ["bookstore", "neighborhood", "community"]
+  },
+  {
+    "title": "Running My First Marathon",
+    "content": "I ran my first marathon in 2016 in Vienna. Training took five months with a gradual buildup from 5K to the full 42 kilometers. I hit the wall at kilometer 35 and seriously considered stopping. But the crowd cheering along the Ringstrasse pushed me through. I finished in 4 hours and 12 minutes.",
+    "references": ["marathon", "Vienna", "running"]
+  },
+  {
+    "title": "Setting Up a Home Network",
+    "content": "When I set up a mesh Wi-Fi network in my apartment, I learned more about networking than in any class. I configured VLANs to separate IoT devices from my work machines, set up Pi-hole for DNS-level ad blocking, and ran Ethernet through the walls. My partner thought I was overcomplicating things, but the network has been rock-solid.",
+    "references": ["networking", "home lab", "Wi-Fi"]
+  },
+  {
+    "title": "A Sunrise Over the Mountains",
+    "content": "I woke up at 4 AM to hike to a summit in the Dolomites to watch the sunrise. The trail was dark and cold, with only a headlamp to guide me. When the sun broke over the peaks, the rock faces turned orange and pink. I sat there alone for thirty minutes, not wanting to move.",
+    "references": ["Dolomites", "sunrise", "hiking"]
+  },
+  {
+    "title": "Understanding Recursion",
+    "content": "The moment recursion clicked for me was during a lecture on the Tower of Hanoi. The professor showed how the solution was just the same problem on a smaller scale. I went home and implemented it, then wrote a recursive maze solver that evening. It was the first time an abstract concept felt physically intuitive.",
+    "references": ["recursion", "computer science", "learning"]
+  },
+  {
+    "title": "Coffee Culture Discovery",
+    "content": "I discovered specialty coffee when a friend took me to a third-wave coffee shop in 2017. The barista explained the difference between washed and natural processing. I started with a pour-over of an Ethiopian Yirgacheffe and tasted blueberries in coffee for the first time. I've been a coffee enthusiast since that cup.",
+    "references": ["coffee", "specialty coffee", "Ethiopian"]
+  },
+  {
+    "title": "A Power Outage During a Demo",
+    "content": "During a client demo in 2018, the office power went out just as I was showing the new dashboard. I switched to my phone's hotspot and continued the demo from my laptop on battery. The client was impressed by the quick recovery. We later learned a construction crew had cut a cable outside the building.",
+    "references": ["demo", "client", "power outage"]
+  },
+  {
+    "title": "Learning to Play Chess",
+    "content": "My uncle taught me chess when I was seven. He never let me win, which frustrated me at first but taught me to actually improve. I joined the school chess club and eventually placed third in a regional tournament. I still play online most evenings — it's the best way I know to decompress.",
+    "references": ["chess", "uncle", "childhood"]
+  },
+  {
+    "title": "First Time Using Docker",
+    "content": "The first time I used Docker in 2015, it felt like magic. I went from 'it works on my machine' to reproducible environments in an afternoon. The Dockerfile for our Python app was fifteen lines and solved months of deployment headaches. I became the Docker evangelist on the team for the next year.",
+    "references": ["Docker", "containers", "DevOps"]
+  },
+  {
+    "title": "Volunteering at a Food Bank",
+    "content": "I volunteered at a local food bank every Saturday for six months in 2019. We sorted donations and packed boxes for families in need. The logistics of managing perishable items taught me more about supply chain management than any business course. The gratitude from recipients made the early mornings worthwhile.",
+    "references": ["volunteering", "food bank", "community"]
+  },
+  {
+    "title": "Stargazing in the Countryside",
+    "content": "On a camping trip far from city lights, I saw the Milky Way clearly for the first time. The sheer number of visible stars was overwhelming. A friend pointed out the constellations — Orion, Cassiopeia, the Big Dipper. We stayed up until 3 AM watching satellites cross the sky and saw two shooting stars.",
+    "references": ["stargazing", "astronomy", "camping"]
+  },
+  {
+    "title": "Refactoring Legacy Code",
+    "content": "I spent three months refactoring a 10,000-line PHP file that had been accumulating features for eight years. The first step was writing characterization tests to lock down existing behavior. I extracted classes one at a time, running the test suite after every change. By the end, the code was in twenty well-named files and the team could actually modify it safely.",
+    "references": ["refactoring", "legacy code", "PHP", "testing"]
+  },
+  {
+    "title": "A Rainy Day in Kyoto",
+    "content": "It rained the entire day I visited Kyoto's bamboo grove. Most tourists left, but I stayed and walked through the grove almost alone. The sound of rain on bamboo leaves created a natural symphony. The green was more vivid in the wet light. Sometimes bad weather makes the best memories.",
+    "references": ["Kyoto", "Japan", "travel", "bamboo"]
+  },
+  {
+    "title": "Teaching Someone to Code",
+    "content": "I taught my younger cousin the basics of Python over a summer. We started with variables and loops, then built a simple text adventure game together. Watching her face light up when her code ran correctly for the first time reminded me why I fell in love with programming. She's now studying computer science in university.",
+    "references": ["teaching", "Python", "mentorship"]
+  },
+  {
+    "title": "The Importance of Backups",
+    "content": "I learned the importance of backups when my laptop's hard drive failed in 2016, taking six months of personal projects with it. I had no backup whatsoever. After that, I set up automated backups to an external drive and cloud storage. The rule is simple: if it exists in only one place, it doesn't really exist.",
+    "references": ["backups", "data loss", "hard lesson"]
+  },
+  {
+    "title": "Discovering Podcasts",
+    "content": "I discovered podcasts during my daily commute in 2016. The first one I binged was a technology history series that covered the invention of the transistor. Listening to experts discuss their fields while stuck in traffic transformed my commute from wasted time into a learning opportunity. I now listen to about ten hours of podcasts per week.",
+    "references": ["podcasts", "commute", "learning"]
+  }
+]

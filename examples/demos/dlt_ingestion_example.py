@@ -1,5 +1,6 @@
 import asyncio
 import os
+
 import cognee
 
 try:
@@ -8,16 +9,21 @@ except ImportError:
     dlt = None
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-from cognee.modules.visualization.cognee_network_visualization import cognee_network_visualization
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.visualization.cognee_network_visualization import cognee_network_visualization
+
+DLT_REMEMBER_KWARGS = {
+    "primary_key": "id",
+    "incremental_loading": False,
+    "self_improvement": False,
+}
 
 
 async def main():
     """Demonstrates all DLT-based data ingestion modes in Cognee."""
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     # ── Mode 1: Explicit dlt resource with nested data (merge/upsert) ──
 
@@ -40,15 +46,13 @@ async def main():
     def users_and_pets():
         yield data
 
-    await cognee.add(
+    await cognee.remember(
         users_and_pets,
         dataset_name="users_and_pets",
-        primary_key="id",
-        incremental_loading=False,
+        **DLT_REMEMBER_KWARGS,
     )
-    await cognee.cognify()
 
-    result = await cognee.search("Which pet does Alice have?")
+    result = await cognee.recall("Which pet does Alice have?")
     print("Mode 1 results:", result)
 
     # ── Mode 2: CSV auto-detection ──
@@ -57,15 +61,13 @@ async def main():
 
     csv_path = os.path.join(os.path.dirname(__file__), "test_data", "employees.csv")
 
-    await cognee.add(
+    await cognee.remember(
         csv_path,
         dataset_name="employees",
-        primary_key="id",
-        incremental_loading=False,
+        **DLT_REMEMBER_KWARGS,
     )
-    await cognee.cognify()
 
-    result = await cognee.search("Who works in Engineering?")
+    result = await cognee.recall("Who works in Engineering?")
     print("Mode 2 results:", result)
 
     # ── Mode 3: Write disposition - append (always insert, no dedup) ──
@@ -90,24 +92,21 @@ async def main():
         yield batch_2
 
     # First batch
-    await cognee.add(
+    await cognee.remember(
         event_batch_1,
         dataset_name="events_append",
-        primary_key="id",
         write_disposition="append",
-        incremental_loading=False,
+        **DLT_REMEMBER_KWARGS,
     )
     # Second batch appended (no dedup)
-    await cognee.add(
+    await cognee.remember(
         event_batch_2,
         dataset_name="events_append",
-        primary_key="id",
         write_disposition="append",
-        incremental_loading=False,
+        **DLT_REMEMBER_KWARGS,
     )
-    await cognee.cognify()
 
-    result = await cognee.search("What events happened?")
+    result = await cognee.recall("What events happened?")
     print("Mode 3 results:", result)
 
     # ── Mode 4: Write disposition - replace (drop & recreate each run) ──
@@ -132,26 +131,23 @@ async def main():
         yield new_inventory
 
     # First load
-    await cognee.add(
+    await cognee.remember(
         inventory_old,
         dataset_name="inventory_replace",
-        primary_key="id",
         write_disposition="replace",
-        incremental_loading=False,
+        **DLT_REMEMBER_KWARGS,
     )
     # Replace entirely with new data
-    await cognee.add(
+    await cognee.remember(
         inventory_new,
         dataset_name="inventory_replace",
-        primary_key="id",
         write_disposition="replace",
-        incremental_loading=False,
+        **DLT_REMEMBER_KWARGS,
     )
-    await cognee.cognify()
 
     # ── Mode 5: Adding some unstructured text about users and pets along with the dlt resource ──
 
-    result = await cognee.search("What products are in inventory?")
+    result = await cognee.recall("What products are in inventory?")
     print("Mode 4 results:", result)
 
     text = """Alice has two pets: a cat named Fluffy and a dog named Spot.
@@ -160,26 +156,16 @@ async def main():
     Recently, a new user named Diana joined their pet group with her cat, Luna.
     Diana says Luna is playful and curious, and Luna quickly became friends with Fluffy during their first meetup."""
 
-    await cognee.add(
+    await cognee.remember(
         [text, users_and_pets],
         dataset_name="users_and_pets_with_text",
-        primary_key="id",
-        incremental_loading=False,
+        **DLT_REMEMBER_KWARGS,
     )
 
-    await cognee.cognify()
-
-    result = await cognee.search("Who is Diana?")
+    result = await cognee.recall("Who is Diana?")
     print("Mode 5 results:", result)
 
     # ── Mode 6: Adding a csv along with an ontology ──
-
-    await cognee.add(
-        csv_path,
-        dataset_name="employees",
-        primary_key="id",
-        incremental_loading=False,
-    )
 
     ontology_path = os.path.join(os.path.dirname(__file__), "test_data", "employees_ontology.owl")
 
@@ -190,9 +176,14 @@ async def main():
         }
     }
 
-    await cognee.cognify(config=config)
+    await cognee.remember(
+        csv_path,
+        dataset_name="employees",
+        config=config,
+        **DLT_REMEMBER_KWARGS,
+    )
 
-    result = await cognee.search("Who works in Engineering and is female?")
+    result = await cognee.recall("Who works in Engineering and is female?")
     print("Mode 6 results:", result)
 
     # ── Visualize the final graph ──

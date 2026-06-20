@@ -401,3 +401,437 @@ class TestDatasetQueueEdgeCases:
 
             result = await async_wrapper()
             assert result == "sync_result"
+
+
+class TestReleaseSlotFor:
+    """Tests for release_slot_for — verifies that _teardown_subprocess_engines
+    fires at the right time (last holder) and that the semaphore is always
+    released regardless of teardown outcome."""
+
+    @pytest.fixture(autouse=True)
+    def reset_queue_singleton(self):
+        try:
+            from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+            dataset_queue._instance = None
+        except (ImportError, AttributeError):
+            pass
+        yield
+
+    @staticmethod
+    def _mock_teardown(queue):
+        """Replace _teardown_subprocess_engines with a counter."""
+        call_count = 0
+
+        async def fake_teardown():
+            nonlocal call_count
+            call_count += 1
+
+        queue._teardown_subprocess_engines = fake_teardown
+
+        class Counter:
+            @property
+            def value(self):
+                return call_count
+
+        return Counter()
+
+    @pytest.mark.asyncio
+    async def test_teardown_fires_for_single_holder(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+
+        await queue.ensure_slot("ds-A")
+        await queue.release_slot_for("ds-A")
+        assert counter.value == 1
+
+    @pytest.mark.asyncio
+    async def test_teardown_skipped_for_nested_depth(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+
+        await queue.ensure_slot("ds-B")
+        await queue.ensure_slot("ds-B")  # depth = 2
+
+        await queue.release_slot_for("ds-B")
+        assert counter.value == 0  # inner exit — skipped
+
+        await queue.release_slot_for("ds-B")
+        assert counter.value == 1  # outer exit — fires
+
+    @pytest.mark.asyncio
+    async def test_teardown_skipped_when_cross_task_holder_exists(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+        ds = "ds-C"
+
+        other_ready = asyncio.Event()
+        check_done = asyncio.Event()
+
+        async def other_task():
+            await queue.ensure_slot(ds)
+            other_ready.set()
+            await check_done.wait()
+            await queue.release_slot_for(ds)
+
+        task = asyncio.create_task(other_task())
+        await other_ready.wait()
+
+        await queue.ensure_slot(ds)
+        await queue.release_slot_for(ds)
+        assert counter.value == 0  # other task still holds the dataset
+
+        check_done.set()
+        await task
+        assert counter.value == 1  # other task was last
+
+    @pytest.mark.asyncio
+    async def test_teardown_fires_after_last_cross_task_holder_releases(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+        ds = "ds-D"
+
+        other_ready = asyncio.Event()
+        main_released = asyncio.Event()
+
+        async def other_task():
+            await queue.ensure_slot(ds)
+            other_ready.set()
+            await main_released.wait()
+            await queue.release_slot_for(ds)
+
+        task = asyncio.create_task(other_task())
+        await other_ready.wait()
+
+        await queue.ensure_slot(ds)
+        await queue.release_slot_for(ds)
+        assert counter.value == 0  # not last
+
+        main_released.set()
+        await task
+        assert counter.value == 1  # other task was last, teardown fired
+
+    @pytest.mark.asyncio
+    async def test_different_dataset_does_not_block_teardown(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+
+        other_ready = asyncio.Event()
+        check_done = asyncio.Event()
+
+        async def other_task():
+            await queue.ensure_slot("dataset-OTHER")
+            other_ready.set()
+            await check_done.wait()
+            await queue.release_slot_for("dataset-OTHER")
+
+        task = asyncio.create_task(other_task())
+        await other_ready.wait()
+
+        await queue.ensure_slot("dataset-OURS")
+        await queue.release_slot_for("dataset-OURS")
+        assert counter.value == 1  # different dataset — we're last for ours
+
+        check_done.set()
+        await task
+
+    @pytest.mark.asyncio
+    async def test_disabled_queue_skips_teardown(self):
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=False, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+
+        await queue.release_slot_for("any-dataset")
+        assert counter.value == 0
+
+    @pytest.mark.asyncio
+    async def test_teardown_exception_still_releases_slot(self):
+        """Slot must be freed even if _teardown_subprocess_engines raises."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=1)
+        ds = "ds-E"
+
+        async def failing_teardown():
+            raise ValueError("engine teardown failed")
+
+        queue._teardown_subprocess_engines = failing_teardown
+
+        await queue.ensure_slot(ds)
+
+        with pytest.raises(ValueError, match="engine teardown failed"):
+            await queue.release_slot_for(ds)
+
+        # Replace the failing mock so the verification calls below don't blow up.
+        self._mock_teardown(queue)
+
+        # Semaphore must have been released — acquiring again should not block.
+        await queue.ensure_slot(ds)
+        await queue.release_slot_for(ds)
+
+    @pytest.mark.asyncio
+    async def test_release_without_ensure_is_noop(self):
+        """Releasing a slot that was never acquired must not crash."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+
+        await queue.release_slot_for("never-acquired")
+        assert counter.value == 0  # no entry — teardown not called
+        assert queue._semaphore._value == 5  # nothing consumed
+
+    @pytest.mark.asyncio
+    async def test_double_release_is_idempotent(self):
+        """Calling release twice for the same slot must not crash or over-release."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=2)
+        counter = self._mock_teardown(queue)
+        ds = "ds-G"
+
+        await queue.ensure_slot(ds)
+        assert queue._semaphore._value == 1
+
+        await queue.release_slot_for(ds)
+        assert queue._semaphore._value == 2
+        assert counter.value == 1
+
+        # Second release — entry already popped, should be a no-op.
+        await queue.release_slot_for(ds)
+        assert queue._semaphore._value == 2  # not over-released
+        assert counter.value == 1  # not called again
+
+    @pytest.mark.asyncio
+    async def test_semaphore_accounting_after_mixed_operations(self):
+        """Semaphore value must be exactly right after acquires and releases."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=3)
+        self._mock_teardown(queue)
+
+        await queue.ensure_slot("ds1")
+        await queue.ensure_slot("ds2")
+        assert queue._semaphore._value == 1  # 2 consumed
+
+        await queue.ensure_slot("ds1")  # re-entrant, no new acquire
+        assert queue._semaphore._value == 1
+
+        await queue.release_slot_for("ds1")  # depth 2 → 1
+        assert queue._semaphore._value == 1  # not freed yet
+
+        await queue.release_slot_for("ds1")  # depth 1 → 0, freed
+        assert queue._semaphore._value == 2
+
+        await queue.release_slot_for("ds2")
+        assert queue._semaphore._value == 3  # all back
+
+    @pytest.mark.asyncio
+    async def test_three_tasks_teardown_fires_only_on_last(self):
+        """With three tasks on the same dataset, teardown fires once on the last exit."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+        ds = "shared-ds"
+
+        gate_1 = asyncio.Event()
+        gate_2 = asyncio.Event()
+        ready_1 = asyncio.Event()
+        ready_2 = asyncio.Event()
+
+        async def task_a():
+            await queue.ensure_slot(ds)
+            ready_1.set()
+            await gate_1.wait()
+            await queue.release_slot_for(ds)
+
+        async def task_b():
+            await queue.ensure_slot(ds)
+            ready_2.set()
+            await gate_2.wait()
+            await queue.release_slot_for(ds)
+
+        t1 = asyncio.create_task(task_a())
+        t2 = asyncio.create_task(task_b())
+        await ready_1.wait()
+        await ready_2.wait()
+
+        await queue.ensure_slot(ds)
+
+        await queue.release_slot_for(ds)
+        assert counter.value == 0
+
+        gate_1.set()
+        await t1
+        assert counter.value == 0
+
+        gate_2.set()
+        await t2
+        assert counter.value == 1
+
+    @pytest.mark.asyncio
+    async def test_teardown_fires_exactly_once_under_stress(self):
+        """Many tasks on the same dataset; teardown fires exactly once total."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        n_tasks = 20
+        queue = DatasetQueue(enabled=True, max_concurrent=n_tasks + 1)
+        counter = self._mock_teardown(queue)
+        ds = "stress-ds"
+
+        arrived = 0
+        all_arrived = asyncio.Event()
+
+        async def worker():
+            nonlocal arrived
+            await queue.ensure_slot(ds)
+            arrived += 1
+            if arrived == n_tasks:
+                all_arrived.set()
+            else:
+                await all_arrived.wait()
+            await queue.release_slot_for(ds)
+
+        await asyncio.gather(*[asyncio.create_task(worker()) for _ in range(n_tasks)])
+        assert counter.value == 1
+
+    @pytest.mark.asyncio
+    async def test_backstop_frees_slot_then_remaining_task_fires_teardown(self):
+        """Task-end backstop releases a crashed task's slot without teardown.
+        The surviving task should then be the last holder and fire teardown."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+        ds = "backstop-ds"
+
+        crashed_ready = asyncio.Event()
+
+        async def crashing_task():
+            await queue.ensure_slot(ds)
+            crashed_ready.set()
+            raise RuntimeError("boom")
+
+        task = asyncio.create_task(crashing_task())
+        await crashed_ready.wait()
+
+        try:
+            await task
+        except RuntimeError:
+            pass
+
+        # Done-callbacks are scheduled via call_soon; yield so the backstop fires.
+        await asyncio.sleep(0)
+
+        await queue.ensure_slot(ds)
+        await queue.release_slot_for(ds)
+        assert counter.value == 1
+
+    @pytest.mark.asyncio
+    async def test_nested_depth_plus_cross_task(self):
+        """Depth > 1 with another task holding — inner exit skips,
+        outer exit skips (other task present), other task fires."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+        ds = "combo-ds"
+
+        other_ready = asyncio.Event()
+        main_done = asyncio.Event()
+
+        async def other_task():
+            await queue.ensure_slot(ds)
+            other_ready.set()
+            await main_done.wait()
+            await queue.release_slot_for(ds)
+
+        task = asyncio.create_task(other_task())
+        await other_ready.wait()
+
+        await queue.ensure_slot(ds)
+        await queue.ensure_slot(ds)  # depth = 2
+
+        await queue.release_slot_for(ds)
+        assert counter.value == 0  # depth 2 → 1
+
+        await queue.release_slot_for(ds)
+        assert counter.value == 0  # depth 0, but other task holds it
+
+        main_done.set()
+        await task
+        assert counter.value == 1  # other task was last
+
+    @pytest.mark.asyncio
+    async def test_two_datasets_release_one_keeps_other(self):
+        """Releasing one dataset doesn't affect a slot held for another."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        counter = self._mock_teardown(queue)
+
+        await queue.ensure_slot("ds-A")
+        await queue.ensure_slot("ds-B")
+        assert queue._semaphore._value == 3
+
+        await queue.release_slot_for("ds-A")
+        assert counter.value == 1
+        assert queue._semaphore._value == 4
+
+        await queue.release_slot_for("ds-B")
+        assert counter.value == 2
+        assert queue._semaphore._value == 5
+
+    @pytest.mark.asyncio
+    async def test_none_dataset_id(self):
+        """dataset_id=None uses the ds:<none> key and works correctly."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=2)
+        counter = self._mock_teardown(queue)
+
+        await queue.ensure_slot(None)
+        assert queue._semaphore._value == 1
+
+        await queue.release_slot_for(None)
+        assert counter.value == 1
+        assert queue._semaphore._value == 2
+
+    @pytest.mark.asyncio
+    async def test_teardown_exception_does_not_affect_other_datasets(self):
+        """If teardown raises for one dataset, another dataset's slot is unaffected."""
+        from cognee.infrastructure.databases.dataset_queue.queue import DatasetQueue
+
+        queue = DatasetQueue(enabled=True, max_concurrent=5)
+        call_count = 0
+
+        async def teardown_fails_once():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("kaboom")
+
+        queue._teardown_subprocess_engines = teardown_fails_once
+
+        await queue.ensure_slot("ds-ok")
+        await queue.ensure_slot("ds-fail")
+
+        with pytest.raises(RuntimeError, match="kaboom"):
+            await queue.release_slot_for("ds-fail")
+
+        # ds-ok is still held and can be released normally.
+        await queue.release_slot_for("ds-ok")
+        assert call_count == 2
+        assert queue._semaphore._value == 5

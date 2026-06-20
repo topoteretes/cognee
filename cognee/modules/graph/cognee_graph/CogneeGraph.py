@@ -1,6 +1,6 @@
 import time
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable, Any
 
 from cognee.modules.graph.exceptions import (
@@ -52,7 +52,7 @@ class CogneeGraph(CogneeAbstractGraph):
 
         edge_text = edge.attributes.get("edge_text") or edge.attributes.get("relationship_type")
         edge.attributes["edge_type_id"] = (
-            generate_edge_id(edge_id=edge_text) if edge_text else None
+            EdgeType.id_for(edge_text) if edge_text else None
         )  # Update edge with generated edge_type_id
 
         edge.node1.add_skeleton_edge(edge)
@@ -204,9 +204,17 @@ class CogneeGraph(CogneeAbstractGraph):
                 )
                 self.add_edge(edge)
             else:
-                raise EntityNotFoundError(
-                    message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                # Skip edges whose endpoints were not projected (e.g. filtered out
+                # by node_properties_to_project or label filters) instead of aborting
+                # the whole projection. Raising EntityNotFoundError here breaks
+                # retrieval on real-world graphs where partial filtering is the norm.
+                # See issue #2897. Same pattern as merged PR #2485.
+                logger.debug(
+                    "Skipping edge with unprojectable endpoints: %s -> %s",
+                    source_id,
+                    target_id,
                 )
+                continue
 
         # Final statistics
         projection_time = time.time() - start_time
@@ -282,9 +290,13 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                     self.add_edge(edge)
                 else:
-                    raise EntityNotFoundError(
-                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                    # See note at first call-site above and issue #2897.
+                    logger.debug(
+                        "Skipping edge with unprojectable endpoints: %s -> %s",
+                        source_id,
+                        target_id,
                     )
+                    continue
 
             # Final statistics
             projection_time = time.time() - start_time
@@ -372,9 +384,13 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                     self.add_edge(edge)
                 else:
-                    raise EntityNotFoundError(
-                        message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
+                    # See note at first call-site above and issue #2897.
+                    logger.debug(
+                        "Skipping edge with unprojectable endpoints: %s -> %s",
+                        source_id,
+                        target_id,
                     )
+                    continue
 
             projection_time = time.time() - start_time
             logger.info(

@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException
 from ..models import User
 from ..get_fastapi_users import get_fastapi_users
 from .get_default_user import get_default_user
+from .get_user import get_user
 from cognee.shared.logging_utils import get_logger
 
 
@@ -99,5 +100,11 @@ async def get_authenticated_user(
             raise HTTPException(
                 status_code=500, detail=f"Failed to create default user: {str(e)}"
             ) from e
+    else:
+        # FastAPI Users returns a session-bound instance without eager-loaded
+        # relationships. Re-fetch so callers (including background tasks that
+        # outlive the request) can access user.tenants / user.roles without
+        # DetachedInstanceError.
+        user = await get_user(user.id)
 
     return user

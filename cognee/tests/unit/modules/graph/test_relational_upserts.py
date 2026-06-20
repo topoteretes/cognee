@@ -90,7 +90,7 @@ async def test_upsert_nodes_sanitizes_strings_before_insert():
     assert payload["attributes"]["text"] == "Bad text"
     assert payload["attributes"]["details"] == {"summary": "Nested value", "items": ["A", "B"]}
     session.execute.assert_awaited_once_with(statement)
-    session.commit.assert_awaited_once()
+    session.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -129,7 +129,7 @@ async def test_upsert_edges_sanitizes_strings_before_insert():
         "nested": {"value": "still here"},
     }
     session.execute.assert_awaited_once_with(statement)
-    session.commit.assert_awaited_once()
+    session.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -143,7 +143,7 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
         target_id,
         "contains",
         {
-            "edge_text": "relationship_name: con\x00tains; entity_description: bad\x00 text",
+            "edge_text": "Document chunk mentions Ali\x00ce: bad\x00 text",
             "no\x00te": "nul\x00 byte",
         },
     )
@@ -159,7 +159,7 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
         )
 
     payload = statement.values_arg[0]
-    expected_relationship_name = "relationship_name: contains; entity_description: bad text"
+    expected_relationship_name = "Document chunk mentions Alice: bad text"
     assert payload["relationship_name"] == expected_relationship_name
     assert payload["label"] == "contains"
     assert payload["attributes"] == {
@@ -167,4 +167,4 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
         "note": "nul byte",
     }
     session.execute.assert_awaited_once_with(statement)
-    session.commit.assert_awaited_once()
+    session.commit.assert_not_called()

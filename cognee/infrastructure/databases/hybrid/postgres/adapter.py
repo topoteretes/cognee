@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 
 logger = get_logger()
 
@@ -335,6 +335,12 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 index_point = IndexSchema(
                     id=dp.id,
                     text=embed_text,
+                    # Reference scalars for search "Evidence"; None for non-chunks.
+                    document_id=getattr(dp, "document_id", None),
+                    document_name=getattr(dp, "document_name", None),
+                    chunk_index=getattr(dp, "chunk_index", None),
+                    source_chunk_id=getattr(dp, "source_chunk_id", None),
+                    importance_weight=getattr(dp, "importance_weight", None),
                     belongs_to_set=(dp.belongs_to_set or []),
                 )
                 payload = serialize_data(index_point.model_dump())
@@ -398,8 +404,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         edge_texts = []
         for edge in edges:
             props = edge[3] if len(edge) > 3 and edge[3] else {}
-            edge_text = props.get("edge_text", edge[2])
-            edge_texts.append(edge_text)
+            edge_text = get_edge_retrieval_text(props.get("edge_text"), edge[2])
+            if edge_text:
+                edge_texts.append(edge_text)
 
         edge_type_counts = Counter(edge_texts)
 
@@ -439,15 +446,14 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         vector_rows = []
         table = _validate_table_name(collection)
         for edge_text, count in edge_type_counts.items():
-            edge_id = generate_edge_id(edge_id=edge_text)
             vector = text_to_vector.get(edge_text)
             if vector is None:
                 continue
             edge_type_dp = EdgeType(
-                id=edge_id,
                 relationship_name=edge_text,
                 number_of_edges=count,
             )
+            edge_id = edge_type_dp.id
             index_point = IndexSchema(
                 id=edge_id,
                 text=edge_text,

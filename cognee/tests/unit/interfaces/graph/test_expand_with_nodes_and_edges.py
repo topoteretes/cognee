@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import expand_with_nodes_and_edges
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
 
@@ -56,6 +57,71 @@ def test_entity_relations_populated_from_graph_edges():
     edge_obj, target = alice.relations[0]
     assert target.name == "bob"
     assert edge_obj.relationship_type == "knows"
+    assert edge_obj.edge_text is None
+
+
+def test_chunk_contains_edge_text_uses_per_chunk_description():
+    chunk1, chunk2 = _make_chunk(), _make_chunk()
+    graph1 = _make_graph(
+        [Node(id="n1", name="Alice", type="Person", description="Alice founded Acme.")],
+        [],
+    )
+    graph2 = _make_graph(
+        [Node(id="n1", name="Alice", type="Person", description="Alice lives in Paris.")],
+        [],
+    )
+
+    expand_with_nodes_and_edges([chunk1, chunk2], [graph1, graph2], _mock_resolver())
+
+    first_edge, first_entity = chunk1.contains[0]
+    second_edge, second_entity = chunk2.contains[0]
+
+    assert first_entity is second_entity
+    assert first_edge.edge_text == "Document chunk mentions alice: Alice founded Acme."
+    assert second_edge.edge_text == "Document chunk mentions alice: Alice lives in Paris."
+
+
+def test_blank_chunk_description_leaves_edge_text_none_before_storage():
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [Node(id="n1", name="Alice", type="Person", description="   ")],
+        [],
+    )
+
+    expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+
+    edge_obj, _ = chunk.contains[0]
+    assert edge_obj.edge_text is None
+
+
+def test_entity_relation_preserves_llm_edge_description():
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [
+            Node(id="n1", name="Alice", type="Person", description="desc"),
+            Node(id="n2", name="Acme", type="Company", description="desc"),
+        ],
+        [
+            KGEdge(
+                source_node_id="n1",
+                target_node_id="n2",
+                relationship_name="works_at",
+                description="Alice works at Acme.",
+            )
+        ],
+    )
+
+    _, entity_nodes = expand_with_nodes_and_edges([chunk], [graph], _mock_resolver())
+
+    alice = next(e for e in entity_nodes if e.name == "alice")
+    edge_obj, target = alice.relations[0]
+    assert target.name == "acme"
+    assert edge_obj.relationship_type == "works_at"
+    assert edge_obj.edge_text == "Alice works at Acme."
+
+
+def test_edge_model_does_not_default_edge_text_from_relationship_type():
+    assert Edge(relationship_type="contains").edge_text is None
 
 
 def test_returns_chunks_and_entity_nodes():

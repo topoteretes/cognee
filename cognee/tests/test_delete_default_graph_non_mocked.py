@@ -4,7 +4,7 @@ import pathlib
 
 import cognee
 from cognee.api.v1.datasets import datasets
-from cognee.context_global_variables import is_multi_user_support_possible
+from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.operations.setup import setup
@@ -22,7 +22,7 @@ logger = get_logger()
 
 async def _exclusive_nodes_and_edges_for_data(dataset_id, data_id):
     """Return graph nodes/edges removable with that data (not shared with other data by slug)."""
-    if is_multi_user_support_possible():
+    if backend_access_control_enabled():
         nodes = await get_data_related_nodes(dataset_id, data_id)
         edges = await get_data_related_edges(dataset_id, data_id)
     else:

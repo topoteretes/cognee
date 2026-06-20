@@ -182,19 +182,18 @@ async def test_cognee_client_api_remember_sends_session_id():
     client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
     content = "hello"
-    digest = hashlib.md5(content.encode("utf-8")).hexdigest()
 
     try:
         await client.remember(content, dataset_name="ds", session_id="session-1")
     finally:
         await client.close()
 
-    assert requests[0].url.path == "/api/v1/remember"
-    body = requests[0].content.decode()
-    assert f'filename="text_{digest}.txt"' in body
-    assert "data.txt" not in body
-    assert 'name="session_id"' in body
-    assert "session-1" in body
+    assert requests[0].url.path == "/api/v1/remember/entry"
+    payload = json.loads(requests[0].content.decode())
+    assert payload["dataset_name"] == "ds"
+    assert payload["session_id"] == "session-1"
+    assert payload["entry"]["type"] == "qa"
+    assert payload["entry"]["answer"] == content
 
 
 @pytest.mark.asyncio

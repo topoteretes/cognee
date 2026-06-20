@@ -6,12 +6,13 @@ from collections import Counter
 from typing import List, Optional, Any, Dict, Tuple
 from uuid import UUID
 
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryParametersError
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
@@ -35,6 +36,14 @@ class IndexSchema(DataPoint):
 
     id: str
     text: str
+    # Optional reference scalars carried for the search "Evidence" feature.
+    # They stay None for non-chunk data points, so this schema remains
+    # compatible with every indexed DataPoint type.
+    document_id: Optional[str] = None
+    document_name: Optional[str] = None
+    chunk_index: Optional[int] = None
+    source_chunk_id: Optional[str] = None
+    importance_weight: Optional[float] = 0.5
     belongs_to_set: List[str] = []
     metadata: dict = {"index_fields": ["text"]}
 
@@ -464,6 +473,14 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 IndexSchema(
                     id=str(data_point.id),
                     text=getattr(data_point, data_point.metadata["index_fields"][0]),
+                    # Reference scalars for search "Evidence". Pulled via getattr
+                    # so non-chunk data points (which lack these fields) simply
+                    # fall back to None instead of raising.
+                    document_id=getattr(data_point, "document_id", None),
+                    document_name=getattr(data_point, "document_name", None),
+                    chunk_index=getattr(data_point, "chunk_index", None),
+                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
+                    importance_weight=getattr(data_point, "importance_weight", None),
                 )
                 for data_point in data_points
             ],
@@ -538,6 +555,11 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 IndexSchema(
                     id=str(dp.id),
                     text=getattr(dp, field_name),
+                    document_id=getattr(dp, "document_id", None),
+                    document_name=getattr(dp, "document_name", None),
+                    chunk_index=getattr(dp, "chunk_index", None),
+                    source_chunk_id=getattr(dp, "source_chunk_id", None),
+                    importance_weight=getattr(dp, "importance_weight", None),
                     belongs_to_set=dp.belongs_to_set or [],
                 )
                 for dp in points
@@ -568,8 +590,9 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         edge_texts = []
         for edge in edges:
             props = edge[3] if len(edge) > 3 and edge[3] else {}
-            edge_text = props.get("edge_text", edge[2])
-            edge_texts.append(edge_text)
+            edge_text = get_edge_retrieval_text(props.get("edge_text"), edge[2])
+            if edge_text:
+                edge_texts.append(edge_text)
 
         edge_type_counts = Counter(edge_texts)
         if not edge_type_counts:
@@ -578,7 +601,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         await self.create_vector_index("EdgeType", "relationship_name")
         index_schemas = [
             IndexSchema(
-                id=str(generate_edge_id(edge_id=text)),
+                id=str(EdgeType.id_for(text)),
                 text=text,
                 belongs_to_set=[],
             )

@@ -170,6 +170,21 @@ async def test_add_edges_with_vectors_uses_edge_text_property_when_present():
     assert schemas[0].text == "custom text"
 
 
+@pytest.mark.asyncio
+async def test_add_edges_with_vectors_falls_back_from_blank_edge_text_to_relationship_name():
+    adapter = _FakeAdapter()
+    src, tgt = str(uuid4()), str(uuid4())
+    edges = [
+        (src, tgt, "blank_rel", {"edge_text": "   "}),
+        (tgt, src, "none_rel", {"edge_text": None}),
+    ]
+
+    await adapter.add_edges_with_vectors(edges)
+
+    schemas = adapter.create_data_points.call_args[0][1]
+    assert {schema.text for schema in schemas} == {"blank_rel", "none_rel"}
+
+
 # ---------------------------------------------------------------------------
 # search: include_payload and node_name filtering
 # ---------------------------------------------------------------------------

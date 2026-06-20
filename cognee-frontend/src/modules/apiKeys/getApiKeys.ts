@@ -2,9 +2,9 @@ import localFetch from "@/modules/instances/localFetch";
 
 export interface ApiKey {
   id: string;
-  api_key: string;
+  key: string;
   label: string;
-  name?: string;
+  name: string;
 }
 
 export default async function getApiKeys(): Promise<ApiKey[]> {
@@ -15,7 +15,7 @@ export default async function getApiKeys(): Promise<ApiKey[]> {
     if (!Array.isArray(data)) return [];
     return data.map((item: Record<string, unknown>) => ({
       id: String(item.id ?? ""),
-      api_key: String(item.key ?? ""),
+      key: String(item.key ?? ""),
       label: String(item.label ?? ""),
       name: String(item.name ?? ""),
     }));

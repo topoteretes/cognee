@@ -1,9 +1,13 @@
 from dataclasses import asdict
 
 import pytest
+from pydantic import BaseModel
 
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api import (
+    adapter as generic_adapter,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
     _LLM_CLIENT_CACHE_MAXSIZE,
     LLMProvider,
@@ -12,6 +16,12 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     _get_llm_client_cached,
     _raise_for_missing_api_key,
     _unfreeze_from_cache,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai import (
+    adapter as openai_adapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
+    OpenAIAdapter,
 )
 
 
@@ -116,3 +126,82 @@ def test_api_key_validation_still_happens_before_cache_lookup():
         raise_api_key_error=True,
         use_managed_identity=True,
     )
+
+
+def test_openai_adapter_preserves_default_instructor_mode_for_non_gpt5_models(monkeypatch):
+    calls = []
+
+    def fake_from_litellm(completion, **kwargs):
+        calls.append((completion, kwargs))
+        return object()
+
+    monkeypatch.setattr(generic_adapter.instructor, "from_litellm", fake_from_litellm)
+    monkeypatch.setattr(openai_adapter.instructor, "from_litellm", fake_from_litellm)
+
+    OpenAIAdapter(api_key="test-key", model="openai/gpt-4o-mini", max_completion_tokens=1024)
+
+    assert calls[-2][1] == {}
+    assert calls[-1][1] == {}
+
+
+def test_openai_adapter_honors_explicit_instructor_mode_for_non_gpt5_models(monkeypatch):
+    calls = []
+
+    def fake_from_litellm(completion, **kwargs):
+        calls.append((completion, kwargs))
+        return object()
+
+    monkeypatch.setattr(generic_adapter.instructor, "from_litellm", fake_from_litellm)
+    monkeypatch.setattr(openai_adapter.instructor, "from_litellm", fake_from_litellm)
+
+    OpenAIAdapter(
+        api_key="test-key",
+        model="openai/qwen36-35b-a3b-fp8-gpu0",
+        max_completion_tokens=1024,
+        instructor_mode="json_mode",
+    )
+
+    assert calls[-2][1]["mode"].value == "json_mode"
+    assert calls[-1][1]["mode"].value == "json_mode"
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_passes_fallback_endpoint_on_policy_fallback(monkeypatch):
+    class PolicyFallbackTrigger(Exception):
+        pass
+
+    calls = []
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise PolicyFallbackTrigger("blocked")
+            return "fallback-response"
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    monkeypatch.setattr(openai_adapter, "ContentFilterFinishReasonError", PolicyFallbackTrigger)
+    monkeypatch.setattr(generic_adapter.instructor, "from_litellm", lambda *args, **kwargs: object())
+    monkeypatch.setattr(openai_adapter.instructor, "from_litellm", lambda *args, **kwargs: object())
+
+    adapter = OpenAIAdapter(
+        api_key="primary-key",
+        model="openai/gpt-5-mini",
+        endpoint="https://primary.example.test",
+        max_completion_tokens=1024,
+        fallback_api_key="fallback-key",
+        fallback_endpoint="https://fallback.example.test",
+        fallback_model="openai/gpt-5-mini-fallback",
+    )
+    adapter.aclient = FakeClient()
+
+    result = await adapter.acreate_structured_output("input", "system", BaseModel)
+
+    assert result == "fallback-response"
+    assert calls[0]["api_base"] == "https://primary.example.test"
+    assert calls[1]["api_base"] == "https://fallback.example.test"

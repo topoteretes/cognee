@@ -91,10 +91,10 @@ export default function AddDataToCognee({ datasets, refreshDatasets, instance }:
       <Modal isOpen={isAddDataModalOpen}>
         <div className="w-full max-w-2xl">
           <div className="flex flex-row items-center justify-between">
-            <span className="text-2xl">Add new data to a dataset?</span>
+            <span className="text-2xl">Add new data to a brain?</span>
             <IconButton disabled={isProcessingDataWithCognee} onClick={closeAddDataModal}><CloseIcon /></IconButton>
           </div>
-          <div className="mt-8 mb-6">Please select a {useCloud ? "cloud" : "local"} dataset to add data in.<br/> If you don&apos;t have any, don&apos;t worry, we will create one for you.</div>
+          <div className="mt-8 mb-6">Please select a {useCloud ? "cloud" : "local"} brain to add data in.<br/> If you don&apos;t have any, don&apos;t worry, we will create one for you.</div>
           <form onSubmit={submitDataToCognee}>
             <div className="max-w-md flex flex-col gap-4">
               <Select disabled={isProcessingDataWithCognee} defaultValue={datasets.length ? datasets[0].id : ""} name="datasetName">

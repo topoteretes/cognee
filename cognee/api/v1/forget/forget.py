@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.shared.logging_utils import get_logger
@@ -16,10 +16,11 @@ logger = get_logger("forget")
 async def forget(
     *,
     data_id: Optional[UUID] = None,
-    dataset: Optional[Union[str, UUID]] = None,
+    dataset: Optional[str] = None,
+    dataset_id: Optional[UUID] = None,
     everything: bool = False,
     memory_only: bool = False,
-    user=None,
+    user: Any = None,
 ) -> dict:
     """Remove data from the knowledge graph.
 
@@ -29,7 +30,7 @@ async def forget(
     Usage patterns::
 
         # Forget a specific data item from a dataset
-        await cognee.forget(data_id=data_id, dataset=dataset_id)
+        await cognee.forget(data_id=data_id, dataset_id=dataset_id)
 
         # Forget an entire dataset (all data + graph nodes + vector entries)
         await cognee.forget(dataset="scientists")
@@ -45,13 +46,14 @@ async def forget(
 
     Args:
         data_id: UUID of a specific data item to remove.
-            Requires ``dataset`` to also be set.
-        dataset: Dataset name or UUID. When set alone, deletes the
-            entire dataset. When set with ``data_id``, deletes that
-            item from this dataset.
+            Requires ``dataset`` or ``dataset_id`` to also be set.
+        dataset: Dataset name. When set alone, deletes the
+            entire dataset. When set with ``data_id``, deletes that item
+            from this dataset.
+        dataset_id: Dataset UUID. Alternative to ``dataset``.
         everything: If True, delete all datasets and data the user owns.
-            Ignores ``data_id`` and ``dataset``.
-        memory_only: If True (requires ``dataset``), delete only memory
+            Ignores ``data_id``, ``dataset``, and ``dataset_id``.
+        memory_only: If True (requires ``dataset`` or ``dataset_id``), delete only memory
             (graph nodes/edges and vector embeddings) and reset pipeline status.
             Raw files and data records are preserved so the dataset can
             be re-cognified with different settings.
@@ -63,15 +65,20 @@ async def forget(
     from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
 
+    dataset_ref = dataset_id or dataset
+
+    if dataset and dataset_id:
+        raise ValueError("Provide either dataset or dataset_id, not both.")
+
     if everything:
         target = "everything"
     elif memory_only and data_id:
         target = "data_item_memory_only"
-    elif memory_only and dataset:
+    elif memory_only and dataset_ref:
         target = "dataset_memory_only"
     elif data_id:
         target = "data_item"
-    elif dataset:
+    elif dataset_ref:
         target = "dataset"
     else:
         target = "unknown"
@@ -81,7 +88,8 @@ async def forget(
         user if user and hasattr(user, "id") else "sdk",
         additional_properties={
             "target": target,
-            "dataset": str(dataset) if dataset else "",
+            "dataset_name": dataset or "",
+            "dataset_id": str(dataset_id) if dataset_id else "",
             "data_id": str(data_id) if data_id else "",
             "cognee_version": cognee_version,
         },
@@ -89,15 +97,19 @@ async def forget(
 
     with new_span("cognee.api.forget") as span:
         span.set_attribute(COGNEE_FORGET_TARGET, target)
-        if dataset:
-            span.set_attribute(COGNEE_DATASET_NAME, str(dataset))
+        if dataset_ref:
+            span.set_attribute(COGNEE_DATASET_NAME, str(dataset_ref))
 
         from cognee.api.v1.serve.state import get_remote_client
 
         client = get_remote_client()
         if client is not None:
             result = await client.forget(
-                data_id=data_id, dataset=dataset, everything=everything, memory_only=memory_only
+                data_id=data_id,
+                dataset=dataset,
+                dataset_id=dataset_id,
+                everything=everything,
+                memory_only=memory_only,
             )
             span.set_attribute(
                 COGNEE_RESULT_COUNT,
@@ -115,32 +127,36 @@ async def forget(
         if user is None:
             user = await get_default_user()
 
-        async with set_database_global_context_variables(dataset, user.id):
-            if everything:
-                result = await _forget_everything(user)
-                span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
-                return result
+        # `everything` deletes across all datasets; the per-dataset DB context is
+        # established per-dataset inside datasets.delete_all -> empty_dataset, so we
+        # must NOT enter a single-dataset context here (dataset_ref is None, which
+        # would try to create a dataset_database row for a non-existent dataset).
+        if everything:
+            result = await _forget_everything(user)
+            span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
+            return result
 
+        # All remaining operations are scoped to a single dataset.
+        if dataset_ref is None:
             if memory_only:
-                if dataset is None:
-                    raise ValueError("memory_only requires dataset to be specified.")
+                raise ValueError("memory_only requires dataset or dataset_id.")
+            if data_id is not None:
+                raise ValueError("data_id requires dataset or dataset_id.")
+            raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
+
+        async with set_database_global_context_variables(dataset_ref, user.id):
+            if memory_only:
                 if data_id is not None:
-                    return await _forget_data_memory(data_id, dataset, user)
-                return await _forget_dataset_memory(dataset, user)
-
-            if dataset is not None and data_id is not None:
-                return await _forget_data_item(data_id, dataset, user)
-
-            if dataset is not None:
-                return await _forget_dataset(dataset, user)
+                    return await _forget_data_memory(data_id, dataset_ref, user)
+                return await _forget_dataset_memory(dataset_ref, user)
 
             if data_id is not None:
-                raise ValueError("data_id requires dataset to be specified.")
+                return await _forget_data_item(data_id, dataset_ref, user)
 
-            raise ValueError("Specify dataset, data_id+dataset, or everything=True.")
+            return await _forget_dataset(dataset_ref, user)
 
 
-async def _forget_everything(user) -> dict:
+async def _forget_everything(user: Any) -> dict:
     """Delete all datasets, data, and session cache owned by the user.
 
     Cleanup scope:
@@ -173,7 +189,7 @@ async def _forget_everything(user) -> dict:
     return {"datasets_removed": count, "status": "success"}
 
 
-async def _forget_dataset(dataset_ref: Union[str, UUID], user) -> dict:
+async def _forget_dataset(dataset_ref: Union[str, UUID], user: Any) -> dict:
     """Delete an entire dataset by name or UUID.
 
     Cleanup scope:
@@ -194,7 +210,7 @@ async def _forget_dataset(dataset_ref: Union[str, UUID], user) -> dict:
     return {"dataset_id": str(dataset_id), "status": "success"}
 
 
-async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user) -> dict:
+async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user: Any) -> dict:
     """Delete a single data item from a dataset."""
     from cognee.api.v1.datasets.datasets import datasets
 
@@ -216,7 +232,7 @@ async def _forget_data_item(data_id: UUID, dataset_ref: Union[str, UUID], user) 
     return {"data_id": str(data_id), "dataset_id": str(dataset_id), "status": "success"}
 
 
-async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
+async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> dict:
     """Delete only memory (graph + vector) for a dataset, preserving raw files.
 
     This allows re-cognifying the dataset with different settings
@@ -289,7 +305,7 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user) -> dict:
     }
 
 
-async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user) -> dict:
+async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user: Any) -> dict:
     """Delete only memory (graph + vector) for a single data item, preserving the raw file.
 
     This allows re-cognifying a specific file with different settings
@@ -351,7 +367,7 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     }
 
 
-async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user) -> UUID:
+async def _resolve_dataset_id(dataset_ref: Union[str, UUID], user: Any) -> UUID:
     """Resolve a dataset name or UUID to a UUID, with permission check."""
     if isinstance(dataset_ref, UUID):
         from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset

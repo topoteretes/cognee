@@ -1,9 +1,9 @@
 from collections import Counter
 from typing import Optional, Dict, Any, List, Tuple, Union
 
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData
 from cognee.tasks.storage.index_data_points import index_data_points
@@ -11,30 +11,43 @@ from cognee.tasks.storage.index_data_points import index_data_points
 logger = get_logger()
 
 
-def _get_edge_text(item: dict) -> str:
-    """Extract edge text for embedding - prefers edge_text field with fallback."""
-    if "edge_text" in item:
-        return item["edge_text"]
+def _get_edge_properties(edge) -> dict:
+    if isinstance(edge, dict):
+        return edge
 
-    if "relationship_name" in item:
-        return item["relationship_name"]
+    for item in reversed(edge):
+        if isinstance(item, dict):
+            return item
 
-    return ""
+    return {}
+
+
+def _get_edge_relationship_name(edge, properties: dict) -> str:
+    if isinstance(edge, (list, tuple)) and len(edge) >= 3 and not isinstance(edge[2], dict):
+        return edge[2]
+
+    return properties.get("relationship_name", "")
+
+
+def _get_edge_text(edge) -> str:
+    """Extract nonblank edge retrieval text with relationship_name fallback."""
+    properties = _get_edge_properties(edge)
+    relationship_name = _get_edge_relationship_name(edge, properties)
+    return get_edge_retrieval_text(properties.get("edge_text"), relationship_name)
 
 
 def create_edge_type_datapoints(edges_data) -> list[EdgeType]:
     """Transform raw edge data into EdgeType datapoints."""
-    edge_texts = [
-        _get_edge_text(item)
-        for edge in edges_data
-        for item in edge
-        if isinstance(item, dict) and "relationship_name" in item
-    ]
+    edge_texts = []
+    for edge in edges_data:
+        edge_text = _get_edge_text(edge)
+        if edge_text:
+            edge_texts.append(edge_text)
 
     edge_types = Counter(edge_texts)
 
     return [
-        EdgeType(id=generate_edge_id(edge_id=text), relationship_name=text, number_of_edges=count)
+        EdgeType(relationship_name=text, number_of_edges=count)
         for text, count in edge_types.items()
     ]
 

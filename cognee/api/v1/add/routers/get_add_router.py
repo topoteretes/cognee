@@ -113,11 +113,16 @@ def get_add_router() -> APIRouter:
             )
 
             if isinstance(add_run, PipelineRunErrored):
+                # The failing task's error is carried on ``payload`` (set to
+                # ``repr(error)`` by the pipeline runner). Surface it directly so
+                # the client gets an actionable message instead of an empty body
+                # or the model's repr.
+                detail = add_run.payload if isinstance(add_run.payload, str) else None
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     content=ErrorResponse(
                         error="Pipeline run errored",
-                        detail=getattr(add_run, "error", None) or str(add_run),
+                        detail=detail or str(add_run),
                     ).model_dump(),
                 )
             return add_run.model_dump()

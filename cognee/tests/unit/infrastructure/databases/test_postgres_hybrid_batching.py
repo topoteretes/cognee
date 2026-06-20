@@ -9,6 +9,7 @@ before calling embed_data, mirroring index_data_points.
 
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+import json
 
 import pytest
 
@@ -24,6 +25,12 @@ from cognee.infrastructure.databases.hybrid.postgres.adapter import (  # noqa: E
 class _Node(DataPoint):
     name: str
     metadata: dict = {"index_fields": ["name"]}
+
+
+class _SummaryNode(DataPoint):
+    text: str
+    source_chunk_id: str
+    metadata: dict = {"index_fields": ["text"]}
 
 
 def _make_fake_hybrid(batch_size: int):
@@ -64,6 +71,10 @@ def _make_fake_hybrid(batch_size: int):
     return fake
 
 
+def _session_from_fake_hybrid(adapter):
+    return adapter._graph._session.return_value.__aenter__.return_value
+
+
 @pytest.mark.asyncio
 async def test_add_nodes_with_vectors_chunks_by_batch_size():
     """5 nodes + batch_size=2 → embed_data must be called 3 times in chunks of ≤2."""
@@ -83,6 +94,21 @@ async def test_add_nodes_with_vectors_chunks_by_batch_size():
 
 
 @pytest.mark.asyncio
+async def test_add_nodes_with_vectors_preserves_summary_source_chunk_id_in_payload():
+    adapter = _make_fake_hybrid(batch_size=10)
+    source_chunk_id = str(uuid4())
+    node = _SummaryNode(text="summary", source_chunk_id=source_chunk_id, importance_weight=0.9)
+
+    await adapter.add_nodes_with_vectors([node])
+
+    session = _session_from_fake_hybrid(adapter)
+    vector_rows = session.execute.await_args_list[1].args[1]
+    payload = json.loads(vector_rows[0]["payload"])
+    assert payload["source_chunk_id"] == source_chunk_id
+    assert payload["importance_weight"] == 0.9
+
+
+@pytest.mark.asyncio
 async def test_add_edges_with_vectors_chunks_by_batch_size():
     """5 unique edge types + batch_size=2 → embed_data must be called 3 times."""
     adapter = _make_fake_hybrid(batch_size=2)
@@ -98,6 +124,20 @@ async def test_add_edges_with_vectors_chunks_by_batch_size():
         assert len(texts) <= 2, f"chunk size {len(texts)} exceeds batch_size 2"
         all_texts.extend(texts)
     assert sorted(all_texts) == sorted(f"rel_{i}" for i in range(5))
+
+
+@pytest.mark.asyncio
+async def test_add_edges_with_vectors_falls_back_from_blank_edge_text_to_relationship_name():
+    adapter = _make_fake_hybrid(batch_size=10)
+    edges = [
+        (str(uuid4()), str(uuid4()), "blank_rel", {"edge_text": "   "}),
+        (str(uuid4()), str(uuid4()), "none_rel", {"edge_text": None}),
+    ]
+
+    await adapter.add_edges_with_vectors(edges)
+
+    (texts,) = adapter._vector.embed_data.await_args.args
+    assert sorted(texts) == ["blank_rel", "none_rel"]
 
 
 @pytest.mark.asyncio
