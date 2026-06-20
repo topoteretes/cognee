@@ -1,11 +1,10 @@
 """Deterministic builder, ranker, and candidate applier for the active session-context layer.
 
-This module loads stored active ``SessionContextEntry`` rows, ranks them with a pure-arithmetic
-deterministic ranker (no LLM), applies per-section and total character budgets, and renders a
-compact four-heading guidance block. It also houses the deterministic candidate applier that
-turns ``CandidateContextUpdate`` items into stored entries (validate -> confidence >= 0.75 ->
-normalize -> dup-link-or-create, no LLM / no auto-delete). Duplicates are detected by exact
-normalized content or, when embeddings are available, by cosine similarity (fail-open).
+This module loads stored active ``SessionContextEntry`` rows, ranks them with a deterministic
+lexical ranker (no LLM), applies per-section and total character budgets, and renders a compact
+four-heading guidance block. It also houses the deterministic candidate applier that turns
+``CandidateContextUpdate`` items into stored entries (validate -> confidence >= 0.75 -> normalize
+-> exact-dup-link-or-create, no LLM / no auto-delete).
 
 Public orchestration coroutines are fail-open so they can never block answer generation. Pure
 helpers are deliberately strict so tests catch malformed stored data and scoring mistakes.
@@ -22,11 +21,6 @@ from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
     SessionContextEntry,
     normalize_content,
-)
-from cognee.infrastructure.session.session_embeddings import (
-    NEAR_DUP_SIMILARITY,
-    cosine_similarity,
-    embed_text_safe,
 )
 
 # Default budgets. Kept conservative so the rendered block never bloats the prompt.
@@ -60,13 +54,12 @@ class DeterministicRanker:
     Higher score sorts first. The score is a weighted sum of:
       * section priority (rules > goals > preferences/lessons),
       * confidence,
-      * query relevance (cosine similarity when both the query and the entry carry an
-        embedding, otherwise token overlap — the pre-embedding behavior),
+      * query relevance (token overlap),
       * net helpfulness (helpful_count - harmful_count),
       * recency (newer last_served_at / created_at sorts slightly higher),
       * explicit priority.
 
-    No LLM, no I/O; deterministic for a fixed (entry, query, query_embedding) triple.
+    No LLM, no I/O; deterministic for a fixed (entry, query) pair.
     """
 
     SECTION_PRIORITY = {"rules": 3, "goals": 2, "preferences": 1, "lessons_learned": 1}
@@ -78,9 +71,6 @@ class DeterministicRanker:
     W_NET_HELP = 2.0
     W_PRIORITY = 1.0
     W_RECENCY = 0.5
-
-    def __init__(self, query_embedding: List[float] | None = None):
-        self.query_embedding = query_embedding
 
     def _query_overlap(self, content: str, query: str) -> float:
         content_tokens = set(normalize_content(content).split())
@@ -104,16 +94,10 @@ class DeterministicRanker:
         # Normalize to a small fraction so recency only tie-breaks.
         return parsed.timestamp() / 1.0e12
 
-    def _query_relevance(self, entry: SessionContextEntry, query: str) -> float:
-        """Cosine similarity (clamped to 0..1) when embeddings exist, else token overlap."""
-        if self.query_embedding is not None and entry.embedding:
-            return max(0.0, cosine_similarity(self.query_embedding, entry.embedding))
-        return self._query_overlap(entry.content, query)
-
     def score(self, entry: SessionContextEntry, query: str) -> float:
         section_priority = self.SECTION_PRIORITY.get(entry.section, 0)
         net_help = max(-3, min(3, entry.helpful_count - entry.harmful_count))
-        relevance = self._query_relevance(entry, query)
+        relevance = self._query_overlap(entry.content, query)
         return (
             self.W_SECTION * section_priority
             + self.W_CONFIDENCE * float(entry.confidence)
@@ -221,7 +205,6 @@ async def build_active_context_block(
     session_id,
     query,
     ranker: ContextRanker | None = None,
-    query_embedding: List[float] | None = None,
     per_section_char_budget: int = DEFAULT_PER_SECTION_CHAR_BUDGET,
     total_char_budget: int = DEFAULT_TOTAL_CHAR_BUDGET,
 ) -> Tuple[str, List[str]]:
@@ -232,7 +215,7 @@ async def build_active_context_block(
     """
     try:
         if ranker is None:
-            ranker = DeterministicRanker(query_embedding=query_embedding)
+            ranker = DeterministicRanker()
 
         raw_entries = await session_manager.get_session_context_entries(
             user_id=user_id,
@@ -293,7 +276,7 @@ async def _apply_single_candidate(
     """Apply one validated candidate. Returns the touched/created entry id, or None to skip.
 
     Implements validate -> confidence>=0.75 -> normalize -> dup-link-or-create, where a dup is
-    an exact normalized-content match or a same-section entry with cosine similarity >= 0.9.
+    an exact same-section normalized-content match.
     Raises on store errors; the caller wraps this so one failure never aborts the batch.
     """
     section = candidate.section
@@ -309,16 +292,14 @@ async def _apply_single_candidate(
         return None
 
     normalized = normalize_content(content)
-    candidate_embedding = await embed_text_safe(content)
 
-    # Look for an existing same-section entry that duplicates the candidate: first by exact
-    # normalized content, then by embedding similarity (same guidance worded differently).
+    # Look for an existing same-section entry that duplicates the candidate by exact
+    # normalized content.
     existing = await session_manager.get_session_context_entries(
         user_id=user_id,
         session_id=session_id,
     )
     duplicate_row = None
-    best_similarity = 0.0
     for raw in existing or []:
         if isinstance(raw, SessionContextEntry):
             row = raw.model_dump()
@@ -331,11 +312,6 @@ async def _apply_single_candidate(
         if row.get("normalized_content") == normalized:
             duplicate_row = row
             break
-        if candidate_embedding and row.get("embedding"):
-            similarity = cosine_similarity(candidate_embedding, row["embedding"])
-            if similarity >= NEAR_DUP_SIMILARITY and similarity > best_similarity:
-                duplicate_row = row
-                best_similarity = similarity
 
     if duplicate_row is not None:
         entry_id = duplicate_row.get("id")
@@ -359,7 +335,6 @@ async def _apply_single_candidate(
         confidence=float(candidate.confidence),
         created_at=datetime.utcnow().isoformat(),
         source_feedback_ids=[feedback_entry_id] if feedback_entry_id else [],
-        embedding=candidate_embedding,
         kind="context",
     )
     await session_manager.create_session_context_entry(

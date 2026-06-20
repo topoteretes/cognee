@@ -63,7 +63,6 @@ class FSCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
-        embedding: list | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
@@ -77,7 +76,6 @@ class FSCacheAdapter(CacheDBInterface):
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
             used_session_context_ids=used_session_context_ids,
-            embedding=embedding,
         )
         return entry.model_dump()
 
@@ -213,7 +211,6 @@ class FSCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
-        embedding: list | None = None,
     ) -> None:
         """Append one QA entry to the filesystem-backed session history."""
         try:
@@ -228,7 +225,6 @@ class FSCacheAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
-                embedding=embedding,
             )
             with self.cache.transact():
                 entries = self._load_entries(session_key)

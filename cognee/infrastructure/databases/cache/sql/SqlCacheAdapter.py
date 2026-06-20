@@ -280,7 +280,6 @@ class SqlCacheAdapter(CacheDBInterface):
         used_graph_element_ids: Optional[dict] = None,
         memify_metadata: Optional[dict] = None,
         used_session_context_ids: Optional[list] = None,
-        embedding: Optional[list] = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
@@ -294,7 +293,6 @@ class SqlCacheAdapter(CacheDBInterface):
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
             used_session_context_ids=used_session_context_ids,
-            embedding=embedding,
         )
         return entry.model_dump()
 
@@ -457,7 +455,6 @@ class SqlCacheAdapter(CacheDBInterface):
         used_graph_element_ids: Optional[dict] = None,
         memify_metadata: Optional[dict] = None,
         used_session_context_ids: Optional[list] = None,
-        embedding: Optional[list] = None,
     ) -> None:
         """Append one QA entry to the session. Creates the session if it doesn't exist."""
         await self._ensure_initialized()
@@ -472,7 +469,6 @@ class SqlCacheAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
-                embedding=embedding,
             )
             async with self.sessionmaker() as session, session.begin():
                 await self._purge_session_expired(session, cache_qa_entries, user_id, session_id)

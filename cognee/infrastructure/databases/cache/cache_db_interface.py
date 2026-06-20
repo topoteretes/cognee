@@ -80,7 +80,6 @@ class CacheDBInterface(ABC):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
-        embedding: list | None = None,
     ) -> None:
         """
         Add a Q/A/context triplet to a cache session.
@@ -88,7 +87,6 @@ class CacheDBInterface(ABC):
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
-        embedding: Optional embedding vector of the QA pair, computed at write time.
         """
         pass
 

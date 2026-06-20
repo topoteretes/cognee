@@ -101,6 +101,16 @@ class TestValidateSessionParams:
 class TestSessionManager:
     """Unit tests for SessionManager with mocked cache."""
 
+    @pytest.fixture(autouse=True)
+    def mock_index_session_qa(self, monkeypatch):
+        mock = AsyncMock()
+        monkeypatch.setattr("cognee.infrastructure.session.session_manager.index_session_qa", mock)
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_turn.search_session_qa_ids",
+            AsyncMock(return_value=[]),
+        )
+        return mock
+
     @pytest.fixture
     def mock_cache(self):
         """Mock cache engine."""
@@ -146,7 +156,7 @@ class TestSessionManager:
         assert call_kw["session_id"] == "default_session"
 
     @pytest.mark.asyncio
-    async def test_add_qa_returns_qa_id(self, sm, mock_cache):
+    async def test_add_qa_returns_qa_id(self, sm, mock_cache, mock_index_session_qa):
         """add_qa returns generated qa_id and calls cache."""
         used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
         qa_id = await sm.add_qa(
@@ -166,6 +176,14 @@ class TestSessionManager:
         assert call_kw["answer"] == "A"
         assert call_kw["qa_id"] == qa_id
         assert call_kw["used_graph_element_ids"] == used_ids
+        assert "embedding" not in call_kw
+        mock_index_session_qa.assert_awaited_once_with(
+            user_id="u1",
+            session_id="s1",
+            qa_id=qa_id,
+            question="Q",
+            answer="A",
+        )
 
     @pytest.mark.asyncio
     async def test_add_qa_unavailable_returns_none(self, sm_unavailable):

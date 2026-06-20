@@ -22,7 +22,7 @@ from cognee.infrastructure.session.session_context_builder import (
 )
 from cognee.infrastructure.session.session_context_models import SessionFeedbackEntry
 from cognee.infrastructure.session.session_embeddings import (
-    embed_text_safe,
+    search_session_qa_ids,
     select_hybrid_qa_entries,
 )
 from cognee.modules.retrieval.utils.completion import (
@@ -83,33 +83,36 @@ async def select_session_history(
     session_manager,
     user_id: str,
     session_id: str,
-    query_embedding: list[float] | None = None,
+    query_text: str,
 ) -> str:
     """Load session history and return it as a formatted conversation string.
 
-    With a query embedding, history is the union of the last N turns and the most
-    semantically relevant older turns, in chronological order. Without one (or on any
-    failure), this is exactly the plain last-N recency window.
+    History is the union of the last N turns and vector-engine semantic matches, in
+    chronological order. On any failure, this falls back to the plain last-N window.
     """
-    if query_embedding is not None:
-        try:
-            entries = await session_manager.get_session(
+    try:
+        entries = await session_manager.get_session(
+            user_id=user_id,
+            session_id=session_id,
+            formatted=False,
+        )
+        if isinstance(entries, list):
+            semantic_qa_ids = await search_session_qa_ids(
                 user_id=user_id,
                 session_id=session_id,
-                formatted=False,
+                query_text=query_text,
             )
-            if isinstance(entries, list):
-                selected = select_hybrid_qa_entries(
-                    entries,
-                    query_embedding,
-                    last_n=session_manager.session_history_last_n,
-                )
-                return session_manager.format_entries(
-                    [coerce_qa_entry(entry) for entry in selected],
-                    include_context=False,
-                )
-        except Exception as error:
-            logger.warning("Session history: hybrid selection failed open: %s", error)
+            selected = select_hybrid_qa_entries(
+                entries,
+                semantic_qa_ids,
+                last_n=session_manager.session_history_last_n,
+            )
+            return session_manager.format_entries(
+                [coerce_qa_entry(entry) for entry in selected],
+                include_context=False,
+            )
+    except Exception as error:
+        logger.warning("Session history: hybrid selection failed open: %s", error)
 
     history = await session_manager.get_session(
         user_id=user_id,
@@ -152,10 +155,11 @@ async def generate_session_answer(
     Returns ``(answer, context_to_store, served_context_ids)``. The active context block
     and the graph snapshot keep separate char budgets, applied before composing.
     """
-    # One embedding per turn, shared by hybrid history retrieval and context ranking.
-    query_embedding = await embed_text_safe(answer_query)
     conversation_history = await select_session_history(
-        session_manager, user_id, session_id, query_embedding=query_embedding
+        session_manager,
+        user_id,
+        session_id,
+        query_text=answer_query,
     )
 
     served_ids: list[str] = []
@@ -166,7 +170,6 @@ async def generate_session_answer(
             user_id=user_id,
             session_id=session_id,
             query=answer_query,
-            query_embedding=query_embedding,
         )
 
     # Graph-knowledge snapshot from improve() sync; its budget is separate from the block's.
@@ -201,7 +204,6 @@ async def build_active_context_block_safe(
     user_id: str,
     session_id: str,
     query: str,
-    query_embedding: list[float] | None = None,
 ) -> tuple[str, list[str]]:
     """Render the active session-context guidance block. Fail-open -> ("", [])."""
     try:
@@ -210,7 +212,6 @@ async def build_active_context_block_safe(
             user_id=user_id,
             session_id=session_id,
             query=query,
-            query_embedding=query_embedding,
         )
     except Exception as e:
         logger.warning("Active session-context block failed: %s", e)

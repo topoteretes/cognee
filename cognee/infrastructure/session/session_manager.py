@@ -11,7 +11,7 @@ from cognee.infrastructure.session.session_agent_trace import (
     fallback_agent_trace_feedback,
     generate_agent_trace_feedback,
 )
-from cognee.infrastructure.session.session_embeddings import embed_text_safe
+from cognee.infrastructure.session.session_embeddings import index_session_qa
 from cognee.infrastructure.session.session_turn import (
     SessionTurnPreparation,
     generate_session_answer,
@@ -138,7 +138,6 @@ class SessionManager:
             )
 
             qa_id = str(uuid.uuid4())
-            embedding = await embed_text_safe(f"{question or ''}\n{answer or ''}")
             await self._cache.create_qa_entry(
                 user_id=user_id,
                 session_id=session_id,
@@ -150,7 +149,13 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 used_session_context_ids=used_session_context_ids,
-                embedding=embedding,
+            )
+            await index_session_qa(
+                user_id=user_id,
+                session_id=session_id,
+                qa_id=qa_id,
+                question=question,
+                answer=answer,
             )
             await record_session_activity(user_id, session_id)
             return qa_id

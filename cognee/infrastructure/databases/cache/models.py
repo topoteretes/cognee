@@ -31,7 +31,6 @@ class SessionQAEntry(BaseModel):
         used_graph_element_ids: Optional dict with only "node_ids" and "edge_ids" (lists of str).
         memify_metadata: Optional dict with memify status keys (e.g. "feedback_weights_applied") and bool values.
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
-        embedding: Optional embedding of the QA pair, computed at write time (fail-open).
     """
 
     time: str
@@ -44,7 +43,6 @@ class SessionQAEntry(BaseModel):
     used_graph_element_ids: Optional[Dict[str, List[str]]] = None
     memify_metadata: Optional[Dict[str, bool]] = None
     used_session_context_ids: Optional[List[str]] = None
-    embedding: Optional[List[float]] = None
 
     @field_validator("used_graph_element_ids")
     @classmethod

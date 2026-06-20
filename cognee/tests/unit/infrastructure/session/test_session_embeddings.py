@@ -1,16 +1,13 @@
-"""Unit tests for the fail-open session embedding helpers and their integration points.
+"""Unit tests for session QA vector recall and active-context helpers."""
 
-Pure-math helpers (cosine, hybrid QA selection) are tested directly. The ranker's
-cosine-vs-overlap relevance and the near-duplicate candidate merge are tested with fakes
-and a patched embedder, so no vector engine or LLM is needed.
-"""
-
+import importlib
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
-import cognee.infrastructure.session.session_context_builder as builder_module
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.session.session_context_builder import (
     DeterministicRanker,
@@ -21,19 +18,22 @@ from cognee.infrastructure.session.session_context_models import (
     normalize_content,
 )
 from cognee.infrastructure.session.session_embeddings import (
-    cosine_similarity,
+    SESSION_QA_VECTOR_COLLECTION,
+    index_session_qa,
+    search_session_qa_ids,
     select_hybrid_qa_entries,
+    session_scope_tag,
 )
+from cognee.infrastructure.session.session_turn import select_session_history
 
 
-def _qa(question, answer="answer", embedding=None, time_suffix="00"):
+def _qa(question, answer="answer", qa_id=None, time_suffix="00"):
     return SessionQAEntry(
         time=f"2026-06-11T10:00:{time_suffix}",
-        qa_id=str(uuid4()),
+        qa_id=qa_id or str(uuid4()),
         question=question,
         context="",
         answer=answer,
-        embedding=embedding,
     )
 
 
@@ -70,93 +70,160 @@ class FakeSessionManager:
         return False
 
 
-class TestCosineSimilarity:
-    def test_identical_vectors(self):
-        assert cosine_similarity([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == pytest.approx(1.0)
+class FakeHistoryManager:
+    """In-memory stand-in for SessionManager's QA history surface."""
 
-    def test_orthogonal_vectors(self):
-        assert cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
+    session_history_last_n = 1
 
-    def test_opposite_vectors(self):
-        assert cosine_similarity([1.0, 0.0], [-1.0, 0.0]) == pytest.approx(-1.0)
+    def __init__(self, entries):
+        self.entries = list(entries)
 
-    def test_empty_or_mismatched_inputs_return_zero(self):
-        assert cosine_similarity([], [1.0]) == 0.0
-        assert cosine_similarity([1.0], []) == 0.0
-        assert cosine_similarity([1.0, 2.0], [1.0]) == 0.0
+    async def get_session(
+        self,
+        *,
+        user_id,
+        session_id,
+        formatted=False,
+        last_n=None,
+        include_context=True,
+    ):
+        entries = self.entries[-last_n:] if last_n is not None else self.entries
+        if formatted:
+            return self.format_entries(entries, include_context=include_context)
+        return list(entries)
 
-    def test_zero_vector_returns_zero(self):
-        assert cosine_similarity([0.0, 0.0], [1.0, 2.0]) == 0.0
+    def format_entries(self, entries, include_context=False):
+        return "\n".join(
+            f"User: {entry['question']}\nAssistant: {entry['answer']}" for entry in entries
+        )
+
+
+def test_session_qa_entry_has_no_embedding_field():
+    entry = _qa("question")
+
+    assert not hasattr(entry, "embedding")
+    assert "embedding" not in entry.model_dump()
 
 
 class TestSelectHybridQaEntries:
-    def test_no_query_embedding_falls_back_to_last_n(self):
+    def test_no_semantic_ids_falls_back_to_last_n(self):
         entries = [_qa(f"q{i}", time_suffix=f"0{i}") for i in range(5)]
         selected = select_hybrid_qa_entries(entries, None, last_n=2)
         assert selected == entries[-2:]
 
-    def test_semantic_recall_prepends_relevant_older_turns(self):
-        relevant = _qa("about cats", embedding=[1.0, 0.0], time_suffix="01")
-        irrelevant = _qa("about taxes", embedding=[0.0, 1.0], time_suffix="02")
+    def test_semantic_ids_recall_older_turns(self):
+        relevant = _qa("about cats", qa_id="qa-relevant", time_suffix="01")
+        irrelevant = _qa("about taxes", qa_id="qa-irrelevant", time_suffix="02")
         recent = [_qa(f"recent {i}", time_suffix=f"0{i + 3}") for i in range(2)]
         entries = [relevant, irrelevant] + recent
 
-        selected = select_hybrid_qa_entries(entries, [1.0, 0.0], last_n=2)
+        selected = select_hybrid_qa_entries(entries, ["qa-relevant"], last_n=2)
 
         assert selected == [relevant] + recent
 
     def test_union_is_chronological_and_deduplicated(self):
         older = [
-            _qa("a", embedding=[1.0, 0.0], time_suffix="01"),
-            _qa("b", embedding=[0.9, 0.1], time_suffix="02"),
+            _qa("a", qa_id="qa-a", time_suffix="01"),
+            _qa("b", qa_id="qa-b", time_suffix="02"),
         ]
-        recent = [_qa("c", embedding=[1.0, 0.0], time_suffix="03")]
+        recent = [_qa("c", qa_id="qa-c", time_suffix="03")]
         entries = older + recent
 
-        selected = select_hybrid_qa_entries(entries, [1.0, 0.0], last_n=1, semantic_top_k=5)
+        selected = select_hybrid_qa_entries(entries, ["qa-c", "qa-b", "qa-a"], last_n=1)
 
-        # Older relevant turns come first in original order; recent window untouched.
+        # Selected turns come back in original order; recent window is not duplicated.
         assert selected == older + recent
         assert len(selected) == len({entry.qa_id for entry in selected})
 
-    def test_similarity_floor_excludes_weak_matches(self):
-        weak = _qa("weak", embedding=[0.3, 0.95], time_suffix="01")
-        recent = [_qa("recent", time_suffix="02")]
-        entries = [weak] + recent
-
-        selected = select_hybrid_qa_entries(entries, [1.0, 0.0], last_n=1, min_similarity=0.5)
-
-        assert selected == recent
-
-    def test_entries_without_embedding_are_never_recalled(self):
-        no_embedding = _qa("no embedding", time_suffix="01")
-        recent = [_qa("recent", time_suffix="02")]
-        selected = select_hybrid_qa_entries([no_embedding] + recent, [1.0, 0.0], last_n=1)
-        assert selected == recent
-
-    def test_semantic_top_k_caps_recalled_turns(self):
-        older = [_qa(f"q{i}", embedding=[1.0, 0.0], time_suffix=f"0{i}") for i in range(4)]
-        recent = [_qa("recent", time_suffix="09")]
-        selected = select_hybrid_qa_entries(older + recent, [1.0, 0.0], last_n=1, semantic_top_k=2)
-        assert len(selected) == 3  # 2 recalled + 1 recent
-
     def test_dict_entries_are_supported(self):
-        older = _qa("dict entry", embedding=[1.0, 0.0], time_suffix="01").model_dump()
+        older = _qa("dict entry", qa_id="qa-dict", time_suffix="01").model_dump()
         recent = _qa("recent", time_suffix="02").model_dump()
-        selected = select_hybrid_qa_entries([older, recent], [1.0, 0.0], last_n=1)
+        selected = select_hybrid_qa_entries([older, recent], ["qa-dict"], last_n=1)
         assert selected == [older, recent]
+
+    @pytest.mark.asyncio
+    async def test_session_history_ignores_vector_hits_outside_loaded_session(self, monkeypatch):
+        entries = [
+            _qa("current session old", qa_id="current-old", time_suffix="01").model_dump(),
+            _qa("current session recent", qa_id="current-recent", time_suffix="02").model_dump(),
+        ]
+        manager = FakeHistoryManager(entries)
+        search = AsyncMock(return_value=["other-session-hit", "current-old"])
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_turn.search_session_qa_ids", search
+        )
+
+        history = await select_session_history(
+            manager,
+            user_id="u1",
+            session_id="s1",
+            query_text="old",
+        )
+
+        assert "current session old" in history
+        assert "current session recent" in history
+        assert "other-session-hit" not in history
+
+
+class TestSessionQaVectorHelpers:
+    @pytest.mark.asyncio
+    async def test_index_session_qa_uses_session_scope_tag(self, monkeypatch):
+        indexed = []
+
+        async def fake_index_data_points(points):
+            indexed.extend(points)
+
+        index_module = importlib.import_module("cognee.tasks.storage.index_data_points")
+        monkeypatch.setattr(index_module, "index_data_points", fake_index_data_points)
+        qa_id = str(uuid4())
+
+        await index_session_qa(
+            user_id="u1",
+            session_id="s1",
+            qa_id=qa_id,
+            question="Question?",
+            answer="Answer.",
+        )
+
+        assert len(indexed) == 1
+        assert str(indexed[0].id) == qa_id
+        assert indexed[0].text == "Question?\nAnswer."
+        assert indexed[0].belongs_to_set == [session_scope_tag("u1", "s1")]
+
+    @pytest.mark.asyncio
+    async def test_search_session_qa_ids_uses_vector_engine_scope(self, monkeypatch):
+        result_id = uuid4()
+        vector_engine = SimpleNamespace()
+
+        async def fake_search(*args, **kwargs):
+            vector_engine.search_call = (args, kwargs)
+            return [SimpleNamespace(id=result_id)]
+
+        vector_engine.search = fake_search
+        monkeypatch.setattr(
+            "cognee.infrastructure.databases.vector.get_vector_engine",
+            lambda: vector_engine,
+        )
+
+        qa_ids = await search_session_qa_ids(
+            user_id="u1",
+            session_id="s1",
+            query_text="Question?",
+            limit=3,
+        )
+
+        assert qa_ids == [str(result_id)]
+        args, kwargs = vector_engine.search_call
+        assert args == (SESSION_QA_VECTOR_COLLECTION,)
+        assert kwargs["query_text"] == "Question?"
+        assert kwargs["query_vector"] is None
+        assert kwargs["limit"] == 3
+        assert kwargs["node_name"] == [session_scope_tag("u1", "s1")]
 
 
 class TestRankerRelevance:
-    def test_cosine_used_when_both_embeddings_exist(self):
-        ranker = DeterministicRanker(query_embedding=[1.0, 0.0])
-        aligned = _entry("rules", "completely different words", embedding=[1.0, 0.0])
-        misaligned = _entry("rules", "completely different words two", embedding=[0.0, 1.0])
-
-        assert ranker.score(aligned, "query") > ranker.score(misaligned, "query")
-
-    def test_falls_back_to_token_overlap_without_embeddings(self):
-        ranker = DeterministicRanker(query_embedding=[1.0, 0.0])
+    def test_token_overlap_boosts_relevant_entries(self):
+        ranker = DeterministicRanker()
         overlapping = _entry("rules", "graph database tips")
         unrelated = _entry("rules", "something else entirely here")
 
@@ -164,29 +231,18 @@ class TestRankerRelevance:
             unrelated, "graph database tips"
         )
 
-    def test_no_query_embedding_matches_legacy_behavior(self):
-        legacy = DeterministicRanker()
-        entry = _entry("rules", "graph database tips", embedding=[1.0, 0.0])
-        assert legacy.score(entry, "graph database tips") == DeterministicRanker(
-            query_embedding=None
-        ).score(entry, "graph database tips")
+    def test_stored_embeddings_do_not_affect_ranking(self):
+        ranker = DeterministicRanker()
+        aligned = _entry("rules", "same words", embedding=[1.0, 0.0])
+        misaligned = _entry("rules", "same words", embedding=[0.0, 1.0])
 
-    def test_negative_cosine_clamped_to_zero(self):
-        ranker = DeterministicRanker(query_embedding=[1.0, 0.0])
-        opposite = _entry("rules", "abc", embedding=[-1.0, 0.0])
-        neutral = _entry("rules", "abc two", embedding=[0.0, 1.0])
-        assert ranker.score(opposite, "zz") == pytest.approx(ranker.score(neutral, "zz"), abs=0.6)
+        assert ranker.score(aligned, "same words") == ranker.score(misaligned, "same words")
 
 
-class TestNearDuplicateCandidateMerge:
+class TestCandidateExactDuplicateMerge:
     @pytest.mark.asyncio
-    async def test_near_duplicate_links_instead_of_creating(self, monkeypatch):
-        async def fake_embed(text):
-            return [1.0, 0.0]
-
-        monkeypatch.setattr(builder_module, "embed_text_safe", fake_embed)
-
-        existing = _entry("rules", "Always answer in formal English.", embedding=[0.99, 0.01])
+    async def test_exact_duplicate_links_instead_of_creating(self):
+        existing = _entry("rules", "Always answer in formal English.")
         manager = FakeSessionManager([existing])
 
         touched = await apply_candidate_updates(
@@ -197,7 +253,7 @@ class TestNearDuplicateCandidateMerge:
             candidates=[
                 {
                     "section": "rules",
-                    "content": "Respond using formal English at all times.",
+                    "content": "always answer in formal english.",
                     "confidence": 0.9,
                 }
             ],
@@ -208,13 +264,8 @@ class TestNearDuplicateCandidateMerge:
         assert "fb-1" in manager.store[0]["source_feedback_ids"]
 
     @pytest.mark.asyncio
-    async def test_dissimilar_candidate_creates_entry_with_embedding(self, monkeypatch):
-        async def fake_embed(text):
-            return [0.0, 1.0]
-
-        monkeypatch.setattr(builder_module, "embed_text_safe", fake_embed)
-
-        existing = _entry("rules", "Always answer in formal English.", embedding=[1.0, 0.0])
+    async def test_reworded_candidate_creates_entry_without_embedding(self):
+        existing = _entry("rules", "Always answer in formal English.")
         manager = FakeSessionManager([existing])
 
         touched = await apply_candidate_updates(
@@ -228,16 +279,11 @@ class TestNearDuplicateCandidateMerge:
         assert len(touched) == 1
         assert touched[0] != existing.id
         assert len(manager.store) == 2
-        assert manager.store[1]["embedding"] == [0.0, 1.0]
+        assert manager.store[1].get("embedding") is None
 
     @pytest.mark.asyncio
-    async def test_embedding_failure_degrades_to_exact_match_only(self, monkeypatch):
-        async def fake_embed(text):
-            return None
-
-        monkeypatch.setattr(builder_module, "embed_text_safe", fake_embed)
-
-        existing = _entry("rules", "Always answer in formal English.", embedding=[1.0, 0.0])
+    async def test_exact_and_reworded_candidates_are_handled_separately(self):
+        existing = _entry("rules", "Always answer in formal English.")
         manager = FakeSessionManager([existing])
 
         touched = await apply_candidate_updates(
@@ -255,6 +301,5 @@ class TestNearDuplicateCandidateMerge:
             ],
         )
 
-        # Exact (normalized) dup links; the reworded one cannot be matched without embeddings.
         assert touched[0] == existing.id
         assert len(manager.store) == 2
