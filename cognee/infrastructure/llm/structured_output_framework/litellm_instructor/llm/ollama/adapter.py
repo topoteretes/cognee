@@ -115,7 +115,12 @@ class OllamaAPIAdapter(LLMInterface):
         """
         merged_kwargs = {**self.llm_args, **kwargs}
         async with llm_rate_limiter_context_manager():
-            response = self.aclient.chat.completions.create(
+            # ``self.aclient`` wraps a *synchronous* ``OpenAI`` client, so calling
+            # ``.create()`` directly blocks the event loop for the full duration of
+            # the LLM request. Offload it to a worker thread so concurrent async
+            # callers are not serialized behind it.
+            response = await asyncio.to_thread(
+                self.aclient.chat.completions.create,
                 model=self.model,
                 messages=[
                     {
@@ -168,7 +173,9 @@ class OllamaAPIAdapter(LLMInterface):
         """
 
         async with open_data_file(input, mode="rb") as audio_file:
-            transcription = self.aclient.audio.transcriptions.create(
+            # Synchronous client call -- offload so it does not block the loop.
+            transcription = await asyncio.to_thread(
+                self.aclient.audio.transcriptions.create,
                 model="whisper-1",  # Ensure the correct model for transcription
                 file=audio_file,
                 language="en",
@@ -216,7 +223,9 @@ class OllamaAPIAdapter(LLMInterface):
         async with open_data_file(input, mode="rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
-        response = self.aclient.chat.completions.create(
+        # Synchronous client call -- offload so it does not block the loop.
+        response = await asyncio.to_thread(
+            self.aclient.chat.completions.create,
             model=self.model,
             messages=[
                 {
