@@ -43,6 +43,6 @@ class Dataset(Base):
             "createdAt": self.created_at.isoformat(),
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
             "ownerId": str(self.owner_id),
-            "tenantId": str(self.tenant_id),
+            "tenantId": str(self.tenant_id) if self.tenant_id else None,
             "data": [data.to_json() for data in self.data],
         }
