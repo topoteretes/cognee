@@ -1,6 +1,7 @@
 from dataclasses import asdict
 
 import pytest
+from pydantic import BaseModel
 
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
@@ -162,3 +163,45 @@ def test_openai_adapter_honors_explicit_instructor_mode_for_non_gpt5_models(monk
 
     assert calls[-2][1]["mode"].value == "json_mode"
     assert calls[-1][1]["mode"].value == "json_mode"
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_passes_fallback_endpoint_on_policy_fallback(monkeypatch):
+    class PolicyFallbackTrigger(Exception):
+        pass
+
+    calls = []
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise PolicyFallbackTrigger("blocked")
+            return "fallback-response"
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    monkeypatch.setattr(openai_adapter, "ContentFilterFinishReasonError", PolicyFallbackTrigger)
+    monkeypatch.setattr(generic_adapter.instructor, "from_litellm", lambda *args, **kwargs: object())
+    monkeypatch.setattr(openai_adapter.instructor, "from_litellm", lambda *args, **kwargs: object())
+
+    adapter = OpenAIAdapter(
+        api_key="primary-key",
+        model="openai/gpt-5-mini",
+        endpoint="https://primary.example.test",
+        max_completion_tokens=1024,
+        fallback_api_key="fallback-key",
+        fallback_endpoint="https://fallback.example.test",
+        fallback_model="openai/gpt-5-mini-fallback",
+    )
+    adapter.aclient = FakeClient()
+
+    result = await adapter.acreate_structured_output("input", "system", BaseModel)
+
+    assert result == "fallback-response"
+    assert calls[0]["api_base"] == "https://primary.example.test"
+    assert calls[1]["api_base"] == "https://fallback.example.test"
