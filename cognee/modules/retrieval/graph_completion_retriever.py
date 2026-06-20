@@ -55,6 +55,7 @@ class GraphCompletionRetriever(BaseRetriever):
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = 10,
+        wide_search_max_distance: Optional[float] = 1.5,
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
     ):
@@ -75,6 +76,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self.response_model = response_model
         self.neighborhood_depth = neighborhood_depth
         self.neighborhood_seed_top_k = neighborhood_seed_top_k
+        self.wide_search_max_distance = wide_search_max_distance
         self.include_global_context_index = include_global_context_index
         self.global_context_index_top_k = global_context_index_top_k
 
@@ -185,6 +187,7 @@ class GraphCompletionRetriever(BaseRetriever):
             unified_engine=unified_engine,
             neighborhood_depth=self.neighborhood_depth,
             neighborhood_seed_top_k=self.neighborhood_seed_top_k,
+            wide_search_max_distance=self.wide_search_max_distance,
         )
 
     async def get_triplets_batch(

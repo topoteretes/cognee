@@ -94,16 +94,42 @@ class NodeEdgeVectorSearch:
             for collection_results in self.node_distances.values()
         )
 
-    def extract_relevant_node_ids(self) -> List[str]:
-        """Extracts unique node IDs from search results."""
+    def extract_relevant_node_ids(
+        self, max_distance: Optional[float] = None
+    ) -> List[str]:
+        """Extracts unique node IDs from search results.
+
+        Args:
+            max_distance: Optional cosine distance threshold. Only node IDs
+                whose score is below this threshold are included. When ``None``
+                (the default), all IDs are returned regardless of score, which
+                preserves backward compatibility but can cause the graph filter
+                to be ineffective on small datasets where ``wide_search_top_k``
+                exceeds the collection size — see issue #2720.
+
+        Returns:
+            List of unique node ID strings extracted from scored results.
+        """
         if self.query_list_length is not None:
             return []
+        total_candidates = 0
         relevant_node_ids = set()
         for scored_results in self.node_distances.values():
             for scored_node in scored_results:
+                total_candidates += 1
                 node_id = getattr(scored_node, "id", None)
-                if node_id:
-                    relevant_node_ids.add(str(node_id))
+                if not node_id:
+                    continue
+                if max_distance is not None:
+                    score = getattr(scored_node, "score", None)
+                    if score is not None and score > max_distance:
+                        continue
+                relevant_node_ids.add(str(node_id))
+        if max_distance is not None and total_candidates > 0:
+            logger.info(
+                f"extract_relevant_node_ids: {len(relevant_node_ids)}/{total_candidates} "
+                f"candidates passed max_distance={max_distance:.2f} filter"
+            )
         return list(relevant_node_ids)
 
     def set_distances_from_results(

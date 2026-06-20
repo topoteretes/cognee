@@ -46,6 +46,7 @@ async def search(
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
+    wide_search_max_distance: Optional[float] = 1.5,
     skills: Optional[List[Union[str, Skill]]] = None,
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
@@ -322,6 +323,7 @@ async def search(
             retriever_specific_config=retriever_specific_config,
             neighborhood_depth=neighborhood_depth,
             neighborhood_seed_top_k=neighborhood_seed_top_k,
+            wide_search_max_distance=wide_search_max_distance,
         )
 
         n = len(filtered_search_results) if filtered_search_results else 0

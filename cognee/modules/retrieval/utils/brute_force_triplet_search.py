@@ -131,6 +131,7 @@ async def _get_top_triplet_importances(
     graph_engine=None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
+    wide_search_max_distance: Optional[float] = 1.5,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
@@ -152,7 +153,7 @@ async def _get_top_triplet_importances(
         if wide_search_limit is None:
             relevant_node_ids = None
         else:
-            relevant_node_ids = vector_search.extract_relevant_node_ids()
+            relevant_node_ids = vector_search.extract_relevant_node_ids(max_distance=wide_search_max_distance)
 
         memory_fragment = await get_memory_fragment(
             properties_to_project=properties_to_project,
@@ -224,6 +225,7 @@ async def brute_force_triplet_search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
+    wide_search_max_distance: Optional[float] = 1.5,
     triplet_distance_penalty: Optional[float] = 6.5,
     feedback_influence: float = 0.0,
     unified_engine: Optional[UnifiedStoreEngine] = None,
@@ -244,6 +246,12 @@ async def brute_force_triplet_search(
         node_name: node name to filter
         wide_search_top_k (Optional[int]): Number of initial elements to retrieve from collections.
             Ignored in batch mode (always None to project full graph).
+        wide_search_max_distance (Optional[float]): Maximum cosine distance for a vector hit to be
+            considered relevant when building the ID-filtered graph projection.  Results with
+            distance above this threshold are excluded from relevant_node_ids, preventing
+            the graph filter from becoming ineffective on small datasets where
+            wide_search_top_k exceeds the collection size.  Defaults to 1.5 (cosine).
+            Set to None to disable distance-based filtering (pre-1.1.2 behaviour).
         triplet_distance_penalty (Optional[float]): Default distance penalty in graph projection
         feedback_influence (float): Weight of feedback influence in range [0, 1]
 
@@ -330,6 +338,7 @@ async def brute_force_triplet_search(
                 graph_engine=graph_engine,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                wide_search_max_distance=wide_search_max_distance,
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)
