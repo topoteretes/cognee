@@ -16,6 +16,7 @@ logger = get_logger()
 
 async def visualize_graph(
     destination_file_path: str = None,
+    datasets: list = None,
     include_session_events: bool = True,
     session_ids: list = None,
     user=None,
@@ -24,6 +25,7 @@ async def visualize_graph(
 
     Args:
         destination_file_path: Where to write the HTML (default: home dir).
+        datasets: List of datasets to visualize. Uses default if None.
         include_session_events: When True (default), best-effort collect the
             backend's search and feedback history from the session layer and
             show it on the Memory tab's timeline — searches as retrieval
@@ -34,7 +36,25 @@ async def visualize_graph(
             the user's most recently active sessions.
         user: User whose sessions are read. Defaults to the default user.
     """
-    graph_engine = await get_graph_engine()
+    from cognee.modules.users.methods import get_default_user
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.infrastructure.databases.unified import get_unified_engine
+
+    if user is None:
+        user = await get_default_user()
+
+    if datasets is not None:
+        if all(isinstance(dataset, str) for dataset in datasets):
+            authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
+            dataset_ids = [dataset.id for dataset in authorized_datasets]
+        else:
+            dataset_ids = datasets
+    else:
+        dataset_ids = None
+
+    unified = await get_unified_engine(user, dataset_ids[0] if dataset_ids else None)
+    graph_engine = unified.graph
+
     graph_data = await graph_engine.get_graph_data()
 
     search_events = None
