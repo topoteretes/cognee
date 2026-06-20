@@ -83,37 +83,40 @@ class SessionDistillationScope:
         )
 
 
-# -- Public entry point -------------------------------------------------------
-
-
-async def distill_session(
+async def resolve_distillation_scope(
+    *,
     session_id: str,
     dataset: Union[str, UUID],
-    user: Optional[User] = None,
-) -> DistillationResult:
-    """Distill one finished session's distillable learnings into its dataset's knowledge graph."""
-    scope = await _resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
+    user: Optional[User],
+) -> SessionDistillationScope:
+    resolved_user = user if user is not None else session_user.get()
+    if resolved_user is None or getattr(resolved_user, "id", None) is None:
+        resolved_user = await get_default_user()
 
-    qa_rows, context_entries = await _load_distillable_session_inputs(scope)
-    if not context_entries:
-        return scope.result("no_gated_entries")
+    if dataset is None:
+        raise CogneeValidationError(
+            message=(
+                "dataset is required so the distilled learnings land in the graph "
+                "they should connect to."
+            ),
+            name="SessionDistillationError",
+        )
 
-    proposed = await _propose_lessons(qa_rows, context_entries)
-    if not proposed:
-        return scope.result("no_proposed_lessons")
+    writable_datasets = await get_authorized_existing_datasets([dataset], "write", resolved_user)
+    if not writable_datasets:
+        raise CogneeValidationError(
+            message=f"Dataset '{dataset}' not found or not writable for this user.",
+            name="SessionDistillationError",
+        )
 
-    accepted = await _accept_proposed_lessons(scope, proposed, context_entries)
-    if not accepted:
-        return scope.result("no_accepted_lessons")
-
-    documents = await _publish_distilled_lessons(scope, accepted)
-    return scope.result("completed", documents=documents)
-
-
-# -- Load session inputs ------------------------------------------------------
+    return SessionDistillationScope(
+        session_id=session_id,
+        user=resolved_user,
+        dataset=writable_datasets[0],
+    )
 
 
-async def _load_distillable_session_inputs(
+async def load_distillable_session_inputs(
     scope: SessionDistillationScope,
 ) -> tuple[List[dict], List[SessionContextEntry]]:
     """Load QA turns and keep context entries worth distilling."""
@@ -141,26 +144,7 @@ async def _load_distillable_session_inputs(
     return qa_rows, context_entries
 
 
-# -- Curate proposed lessons --------------------------------------------------
-
-
-async def _propose_lessons(
-    qa_rows: List[dict],
-    context_entries: List[SessionContextEntry],
-) -> List[ProposedLesson]:
-    """Pack session inputs into curator batches, then flatten proposed lessons."""
-    batches = _build_curator_batches(qa_rows, context_entries)
-    if not batches:
-        return []
-
-    curator_calls = [lambda batch=batch: _curate_batch(batch) for batch in batches]
-    per_batch = await gather_with_concurrency_limit(curator_calls, CURATOR_CONCURRENCY)
-
-    proposed = [lesson for batch_lessons in per_batch for lesson in batch_lessons]
-    return proposed
-
-
-def _build_curator_batches(
+def build_curator_batches(
     qa_rows: List[dict],
     context_entries: List[SessionContextEntry],
 ) -> List[str]:
@@ -188,7 +172,7 @@ def _build_curator_batches(
     ]
 
 
-async def _curate_batch(batch_text: str) -> List[ProposedLesson]:
+async def curate_batch(batch_text: str) -> List[ProposedLesson]:
     """One curator call over one batch slice. Fail-open -> []."""
     system_prompt = read_query_prompt(CURATOR_PROMPT_FILE)
     if not system_prompt:
@@ -206,149 +190,23 @@ async def _curate_batch(batch_text: str) -> List[ProposedLesson]:
         return []
 
 
-# -- Accept proposed lessons --------------------------------------------------
-
-
-async def _accept_proposed_lessons(
-    scope: SessionDistillationScope,
-    proposed: List[ProposedLesson],
+async def propose_lessons(
+    qa_rows: List[dict],
     context_entries: List[SessionContextEntry],
-) -> List[WrittenLesson]:
-    entries_by_id = {entry.id: entry for entry in context_entries}
-    async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
-        vector_engine = get_vector_engine()
+) -> List[ProposedLesson]:
+    """Pack session inputs into curator batches, then flatten proposed lessons."""
+    batches = build_curator_batches(qa_rows, context_entries)
+    if not batches:
+        return []
 
-        def write_lesson(lesson: ProposedLesson):
-            return lambda: _evaluate_proposed_lesson(
-                vector_engine,
-                lesson,
-                entries_by_id,
-            )
+    curator_calls = [lambda batch=batch: curate_batch(batch) for batch in batches]
+    per_batch = await gather_with_concurrency_limit(curator_calls, CURATOR_CONCURRENCY)
 
-        writer_calls = [write_lesson(lesson) for lesson in proposed]
-        decisions = await gather_with_concurrency_limit(writer_calls, WRITER_CONCURRENCY)
-
-    accepted = [
-        lesson
-        for lesson in decisions
-        if lesson is not None and lesson.accept and lesson.statement.strip()
-    ]
-    return accepted
+    proposed = [lesson for batch_lessons in per_batch for lesson in batch_lessons]
+    return proposed
 
 
-async def _evaluate_proposed_lesson(
-    vector_engine,
-    lesson: ProposedLesson,
-    entries_by_id: dict,
-) -> Optional[WrittenLesson]:
-    members = [
-        entries_by_id[entry_id] for entry_id in lesson.member_entry_ids if entry_id in entries_by_id
-    ]
-    prior_lessons, glossary = await asyncio.gather(
-        _search_payload_texts(
-            vector_engine,
-            "DocumentChunk_text",
-            NOVELTY_LESSONS_PER_LESSON,
-            query_text=lesson.working_statement,
-            node_name=DISTILLATE_NODE_SET,
-        ),
-        _search_payload_texts(
-            vector_engine,
-            "Entity_name",
-            GLOSSARY_ENTITIES_PER_LESSON,
-            query_text=lesson.working_statement,
-        ),
-    )
-    return await _write_or_reject(lesson, members, prior_lessons, glossary)
-
-
-async def _write_or_reject(
-    lesson: ProposedLesson,
-    members: List[SessionContextEntry],
-    prior_lessons: List[str],
-    glossary: List[str],
-) -> Optional[WrittenLesson]:
-    """One writer/rejecter call for one proposed lesson. Fail-open -> None."""
-    system_prompt = read_query_prompt(WRITER_PROMPT_FILE)
-    if not system_prompt:
-        logger.warning("Distillation writer prompt not found: %s", WRITER_PROMPT_FILE)
-        return None
-
-    text_input = _build_writer_input(lesson, members, prior_lessons, glossary)
-    try:
-        return await LLMGateway.acreate_structured_output(
-            text_input=text_input,
-            system_prompt=system_prompt,
-            response_model=WrittenLesson,
-        )
-    except Exception as error:
-        logger.warning("Distillation writer call failed open: %s", error)
-        return None
-
-
-def _build_writer_input(
-    lesson: ProposedLesson,
-    members: List[SessionContextEntry],
-    prior_lessons: List[str],
-    glossary: List[str],
-) -> str:
-    sections = [f"PROPOSED LESSON:\n{lesson.working_statement}"]
-    if members:
-        sections.append(
-            "MEMBER ENTRIES:\n" + "\n".join(f"- {member.content}" for member in members)
-        )
-    if prior_lessons:
-        sections.append(
-            "SIMILAR EXISTING LESSONS:\n" + "\n".join(f"- {prior}" for prior in prior_lessons)
-        )
-    if glossary:
-        sections.append("ENTITY GLOSSARY:\n" + "\n".join(f"- {name}" for name in glossary))
-    return "\n\n".join(sections)
-
-
-# -- Publish accepted lessons -------------------------------------------------
-
-
-def render_lesson_document(
-    lesson: WrittenLesson,
-    *,
-    session_id: str,
-    distilled_on: str,
-) -> str:
-    """Render ONE accepted lesson as a standalone markdown document.
-
-    The template — not the LLM — controls the format. One document per lesson, so each
-    learning is an independently identifiable unit in the graph.
-    """
-    statement = lesson.statement.strip()
-    why = lesson.why_learned.strip().rstrip(".")
-    body = f"{statement} ({why}.)" if why else statement
-    return f"# Session learning — {distilled_on} (session {session_id})\n\n{body}\n"
-
-
-async def _publish_distilled_lessons(
-    scope: SessionDistillationScope,
-    accepted: List[WrittenLesson],
-) -> List[str]:
-    distilled_on = datetime.utcnow().strftime("%Y-%m-%d")
-    documents = [
-        render_lesson_document(lesson, session_id=scope.session_id, distilled_on=distilled_on)
-        for lesson in accepted
-    ]
-
-    # Imported lazily to avoid a circular import through the cognee package root.
-    from cognee.api.v1.add import add
-    from cognee.api.v1.cognify import cognify
-
-    await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=DISTILLATE_NODE_SET)
-    await cognify(datasets=[scope.dataset.id], user=scope.user)
-    return documents
-
-
-# -- Shared helpers -----------------------------------------------------------
-
-
-async def _search_payload_texts(
+async def search_payload_texts(
     vector_engine,
     collection: str,
     limit: int,
@@ -388,43 +246,158 @@ async def _search_payload_texts(
     return texts
 
 
-# -- Resolve distillation scope ----------------------------------------------
+def build_writer_input(
+    lesson: ProposedLesson,
+    members: List[SessionContextEntry],
+    prior_lessons: List[str],
+    glossary: List[str],
+) -> str:
+    sections = [f"PROPOSED LESSON:\n{lesson.working_statement}"]
+    if members:
+        sections.append(
+            "MEMBER ENTRIES:\n" + "\n".join(f"- {member.content}" for member in members)
+        )
+    if prior_lessons:
+        sections.append(
+            "SIMILAR EXISTING LESSONS:\n" + "\n".join(f"- {prior}" for prior in prior_lessons)
+        )
+    if glossary:
+        sections.append("ENTITY GLOSSARY:\n" + "\n".join(f"- {name}" for name in glossary))
+    return "\n\n".join(sections)
 
 
-async def _resolve_distillation_scope(
+async def write_or_reject(
+    lesson: ProposedLesson,
+    members: List[SessionContextEntry],
+    prior_lessons: List[str],
+    glossary: List[str],
+) -> Optional[WrittenLesson]:
+    """One writer/rejecter call for one proposed lesson. Fail-open -> None."""
+    system_prompt = read_query_prompt(WRITER_PROMPT_FILE)
+    if not system_prompt:
+        logger.warning("Distillation writer prompt not found: %s", WRITER_PROMPT_FILE)
+        return None
+
+    text_input = build_writer_input(lesson, members, prior_lessons, glossary)
+    try:
+        return await LLMGateway.acreate_structured_output(
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=WrittenLesson,
+        )
+    except Exception as error:
+        logger.warning("Distillation writer call failed open: %s", error)
+        return None
+
+
+async def evaluate_proposed_lesson(
+    vector_engine,
+    lesson: ProposedLesson,
+    entries_by_id: dict,
+) -> Optional[WrittenLesson]:
+    members = [
+        entries_by_id[entry_id] for entry_id in lesson.member_entry_ids if entry_id in entries_by_id
+    ]
+    prior_lessons, glossary = await asyncio.gather(
+        search_payload_texts(
+            vector_engine,
+            "DocumentChunk_text",
+            NOVELTY_LESSONS_PER_LESSON,
+            query_text=lesson.working_statement,
+            node_name=DISTILLATE_NODE_SET,
+        ),
+        search_payload_texts(
+            vector_engine,
+            "Entity_name",
+            GLOSSARY_ENTITIES_PER_LESSON,
+            query_text=lesson.working_statement,
+        ),
+    )
+    return await write_or_reject(lesson, members, prior_lessons, glossary)
+
+
+async def accept_proposed_lessons(
+    scope: SessionDistillationScope,
+    proposed: List[ProposedLesson],
+    context_entries: List[SessionContextEntry],
+) -> List[WrittenLesson]:
+    entries_by_id = {entry.id: entry for entry in context_entries}
+    async with set_database_global_context_variables(scope.dataset.id, scope.dataset.owner_id):
+        vector_engine = get_vector_engine()
+
+        def write_lesson(lesson: ProposedLesson):
+            return lambda: evaluate_proposed_lesson(
+                vector_engine,
+                lesson,
+                entries_by_id,
+            )
+
+        writer_calls = [write_lesson(lesson) for lesson in proposed]
+        decisions = await gather_with_concurrency_limit(writer_calls, WRITER_CONCURRENCY)
+
+    accepted = [
+        lesson
+        for lesson in decisions
+        if lesson is not None and lesson.accept and lesson.statement.strip()
+    ]
+    return accepted
+
+
+def render_lesson_document(
+    lesson: WrittenLesson,
     *,
     session_id: str,
+    distilled_on: str,
+) -> str:
+    """Render ONE accepted lesson as a standalone markdown document.
+
+    The template — not the LLM — controls the format. One document per lesson, so each
+    learning is an independently identifiable unit in the graph.
+    """
+    statement = lesson.statement.strip()
+    why = lesson.why_learned.strip().rstrip(".")
+    body = f"{statement} ({why}.)" if why else statement
+    return f"# Session learning — {distilled_on} (session {session_id})\n\n{body}\n"
+
+
+async def publish_distilled_lessons(
+    scope: SessionDistillationScope,
+    accepted: List[WrittenLesson],
+) -> List[str]:
+    distilled_on = datetime.utcnow().strftime("%Y-%m-%d")
+    documents = [
+        render_lesson_document(lesson, session_id=scope.session_id, distilled_on=distilled_on)
+        for lesson in accepted
+    ]
+
+    # Imported lazily to avoid a circular import through the cognee package root.
+    from cognee.api.v1.add import add
+    from cognee.api.v1.cognify import cognify
+
+    await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=DISTILLATE_NODE_SET)
+    await cognify(datasets=[scope.dataset.id], user=scope.user)
+    return documents
+
+
+async def distill_session(
+    session_id: str,
     dataset: Union[str, UUID],
-    user: Optional[User],
-) -> SessionDistillationScope:
-    if user is not None and getattr(user, "id", None) is not None:
-        resolved_user = user
-    else:
-        ctx_user = session_user.get()
-        resolved_user = (
-            ctx_user
-            if ctx_user is not None and getattr(ctx_user, "id", None) is not None
-            else await get_default_user()
-        )
+    user: Optional[User] = None,
+) -> DistillationResult:
+    """Distill one finished session's distillable learnings into its dataset's knowledge graph."""
+    scope = await resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
 
-    if dataset is None:
-        raise CogneeValidationError(
-            message=(
-                "dataset is required so the distilled learnings land in the graph "
-                "they should connect to."
-            ),
-            name="SessionDistillationError",
-        )
+    qa_rows, context_entries = await load_distillable_session_inputs(scope)
+    if not context_entries:
+        return scope.result("no_gated_entries")
 
-    writable_datasets = await get_authorized_existing_datasets([dataset], "write", resolved_user)
-    if not writable_datasets:
-        raise CogneeValidationError(
-            message=f"Dataset '{dataset}' not found or not writable for this user.",
-            name="SessionDistillationError",
-        )
+    proposed = await propose_lessons(qa_rows, context_entries)
+    if not proposed:
+        return scope.result("no_proposed_lessons")
 
-    return SessionDistillationScope(
-        session_id=session_id,
-        user=resolved_user,
-        dataset=writable_datasets[0],
-    )
+    accepted = await accept_proposed_lessons(scope, proposed, context_entries)
+    if not accepted:
+        return scope.result("no_accepted_lessons")
+
+    documents = await publish_distilled_lessons(scope, accepted)
+    return scope.result("completed", documents=documents)

@@ -76,7 +76,7 @@ class TestLoadDistillableSessionInputs:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        qa_rows, context_entries = await distill_module._load_distillable_session_inputs(
+        qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
@@ -109,7 +109,7 @@ class TestLoadDistillableSessionInputs:
         )
         monkeypatch.setattr(distill_module, "get_session_manager", lambda: session_manager)
 
-        _qa_rows, context_entries = await distill_module._load_distillable_session_inputs(
+        _qa_rows, context_entries = await distill_module.load_distillable_session_inputs(
             SimpleNamespace(user_id="u-1", session_id="s-1")
         )
 
@@ -120,7 +120,7 @@ class TestLoadDistillableSessionInputs:
 class TestBuildCuratorBatches:
     def test_small_session_is_one_batch_with_turns_and_candidates(self):
         context_entries = [_context_entry(content="Flashing wipes calibration.")]
-        batches = distill_module._build_curator_batches(
+        batches = distill_module.build_curator_batches(
             [_qa_row("How do I update firmware?")], context_entries
         )
 
@@ -135,7 +135,7 @@ class TestBuildCuratorBatches:
         ]
         qa = [_qa_row("Later question?", time="2026-06-11T10:00:05")]
 
-        batch = distill_module._build_curator_batches(qa, context_entries)[0]
+        batch = distill_module.build_curator_batches(qa, context_entries)[0]
 
         assert batch.index("Earlier candidate.") < batch.index("Later question?")
 
@@ -145,14 +145,14 @@ class TestBuildCuratorBatches:
             _qa_row(question=long_text, answer=long_text, time=f"2026-06-11T10:00:0{i}")
             for i in range(CURATOR_BLOCKS_PER_BATCH + 1)
         ]
-        batches = distill_module._build_curator_batches(qa, [])
+        batches = distill_module.build_curator_batches(qa, [])
 
         assert len(batches) == 2
         assert all(len(batch) <= BATCH_CHAR_BUDGET for batch in batches)
 
     def test_oversized_question_is_truncated_before_batching(self):
         huge_question = "y" * (BATCH_CHAR_BUDGET * 2)
-        batch = distill_module._build_curator_batches([_qa_row(question=huge_question)], [])[0]
+        batch = distill_module.build_curator_batches([_qa_row(question=huge_question)], [])[0]
 
         assert len(batch) <= BATCH_CHAR_BUDGET
         assert huge_question not in batch
@@ -162,7 +162,7 @@ class TestBuildCuratorBatches:
         huge_content = "z" * (BATCH_CHAR_BUDGET * 2)
         context_entries = [_context_entry(content=huge_content)]
 
-        batch = distill_module._build_curator_batches([], context_entries)[0]
+        batch = distill_module.build_curator_batches([], context_entries)[0]
 
         assert len(batch) <= BATCH_CHAR_BUDGET
         assert huge_content not in batch
@@ -208,7 +208,7 @@ class TestRenderLessonDocument:
 class TestBuildWriterInput:
     def test_includes_proposed_lesson_evidence_and_context(self):
         member = _context_entry(content="Flashing firmware clears calibration.")
-        text_input = distill_module._build_writer_input(
+        text_input = distill_module.build_writer_input(
             ProposedLesson(
                 working_statement="Firmware updates can wipe calibration.",
                 member_entry_ids=[member.id],
@@ -224,7 +224,7 @@ class TestBuildWriterInput:
         assert "ENTITY GLOSSARY:\n- RoutePulse" in text_input
 
     def test_omits_empty_optional_sections(self):
-        text_input = distill_module._build_writer_input(
+        text_input = distill_module.build_writer_input(
             ProposedLesson(working_statement="A standalone lesson."),
             members=[],
             prior_lessons=[],
