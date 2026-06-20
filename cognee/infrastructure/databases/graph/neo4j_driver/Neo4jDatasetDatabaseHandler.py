@@ -1,7 +1,7 @@
 import asyncio
 import re
 from time import monotonic
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
@@ -27,7 +27,15 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """Handler for per-dataset databases in a local/self-hosted Neo4j DBMS."""
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
+        if kwargs:
+            raise ValueError(
+                "Neo4jDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
+
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "neo4j":

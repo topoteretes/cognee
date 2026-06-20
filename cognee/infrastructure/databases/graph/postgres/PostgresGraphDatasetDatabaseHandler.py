@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Optional
+from typing import Any, Optional
 
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
@@ -17,7 +17,14 @@ class PostgresGraphDatasetDatabaseHandler:
     """Handler for per-dataset Postgres graph databases."""
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
+        if kwargs:
+            raise ValueError(
+                "PostgresGraphDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "postgres":

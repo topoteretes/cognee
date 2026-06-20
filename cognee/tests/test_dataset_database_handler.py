@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 import pytest
 
@@ -11,7 +12,12 @@ from cognee.api.v1.search import SearchType
 
 class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
-    async def create_dataset(cls, dataset_id, user):
+    async def create_dataset(cls, dataset_id, user, **kwargs: Any):
+        if kwargs:
+            raise ValueError(
+                "LanceDBTestDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
         import pathlib
 
         cognee_directory_path = str(
@@ -36,7 +42,12 @@ class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
 class LadybugTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
-    async def create_dataset(cls, dataset_id, user):
+    async def create_dataset(cls, dataset_id, user, **kwargs: Any):
+        if kwargs:
+            raise ValueError(
+                "LadybugTestDatasetDatabaseHandler.create_dataset does not accept overrides; "
+                f"got unsupported keys: {sorted(kwargs)}"
+            )
         import pathlib
 
         cognee_directory_path = str(

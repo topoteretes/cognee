@@ -1,6 +1,6 @@
 import os
 from uuid import UUID
-from typing import Optional
+from typing import Any, Optional
 
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
@@ -19,7 +19,9 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
         """
         Create a new Ladybug instance for the dataset. Return connection info that will be mapped to the dataset.
 

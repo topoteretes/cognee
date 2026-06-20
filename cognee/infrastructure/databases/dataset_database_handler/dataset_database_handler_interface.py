@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 from abc import ABC, abstractmethod
 
@@ -9,7 +9,9 @@ from cognee.modules.users.models.DatasetDatabase import DatasetDatabase
 class DatasetDatabaseHandlerInterface(ABC):
     @classmethod
     @abstractmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(
+        cls, dataset_id: Optional[UUID], user: Optional[User], **kwargs: Any
+    ) -> dict:
         """
         Return a dictionary with database connection/resolution info for a graph or vector database for the given dataset.
         Function can auto handle deploying of the actual database if needed, but is not necessary.
@@ -28,6 +30,9 @@ class DatasetDatabaseHandlerInterface(ABC):
         Args:
             dataset_id: UUID of the dataset if needed by the database creation logic
             user: User object if needed by the database creation logic
+            **kwargs: Implementation-specific overrides for the database creation request.
+                Concrete handlers should document and validate the keys they accept and
+                raise ``ValueError`` for unknown keys.
         Returns:
             dict: Connection info for the created graph or vector database instance.
         """
