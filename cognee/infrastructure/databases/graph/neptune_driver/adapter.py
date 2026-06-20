@@ -751,6 +751,15 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to get neighborhood: {error_msg}")
             raise Exception(f"Failed to get neighborhood: {error_msg}") from e
 
+    async def is_empty(self) -> bool:
+        """Return True if the graph contains no nodes."""
+        query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            RETURN count(n) AS node_count
+        """
+        result = await self.query(query)
+        return result[0]["node_count"] == 0
+
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """
         Fetch metrics and statistics of the graph, possibly including optional details.
