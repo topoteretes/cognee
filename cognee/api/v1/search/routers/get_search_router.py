@@ -60,6 +60,15 @@ class SearchPayloadDTO(InDTO):
         ),
     )
     top_k: Optional[int] = Field(default=15)
+    expand_neighbors: int = Field(
+        default=0,
+        ge=0,
+        le=10,
+        description=(
+            "For CHUNKS search, attach neighboring chunks from the same parent document "
+            "to each result (0 disables enrichment)."
+        ),
+    )
     only_context: bool = Field(default=False)
     verbose: bool = Field(
         default=False,
@@ -233,6 +242,7 @@ def get_search_router() -> APIRouter:
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
+                expand_neighbors=payload.expand_neighbors,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
                 skills=payload.skills,

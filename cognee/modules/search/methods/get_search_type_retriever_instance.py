@@ -80,6 +80,8 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                "expand_neighbors": retriever_specific_config.get("expand_neighbors", 0),
+                "strict_enrichment": retriever_specific_config.get("strict_enrichment", False),
             },
         ),
         SearchType.RAG_COMPLETION: (

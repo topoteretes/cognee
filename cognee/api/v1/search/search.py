@@ -52,6 +52,7 @@ async def search(
     tools: Optional[List[str]] = None,
     max_iter: Optional[int] = None,
     include_references: bool = False,
+    expand_neighbors: int = 0,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
 ) -> List[SearchResult]:
@@ -73,6 +74,11 @@ async def search(
         raise CogneeValidationError(
             message="max_iter must be a positive integer.",
             name="InvalidMaxIter",
+        )
+    if not isinstance(expand_neighbors, int) or expand_neighbors < 0 or expand_neighbors > 10:
+        raise CogneeValidationError(
+            message="expand_neighbors must be an integer between 0 and 10.",
+            name="InvalidExpandNeighbors",
         )
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -307,6 +313,10 @@ async def search(
             for key, value in agentic_overrides.items():
                 if value is not None:
                     retriever_specific_config[key] = value
+
+        if expand_neighbors > 0:
+            retriever_specific_config = dict(retriever_specific_config or {})
+            retriever_specific_config["expand_neighbors"] = expand_neighbors
 
         filtered_search_results = await search_function(
             query_text=query_text,
