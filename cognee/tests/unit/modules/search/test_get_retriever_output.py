@@ -2,10 +2,12 @@ import importlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic import BaseModel
 
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 from cognee.modules.search.methods.get_retriever_output import (
     _count_retrieved_objects,
+    _normalize_completion_value,
     get_retriever_output,
 )
 from cognee.modules.search.types import SearchType
@@ -77,6 +79,25 @@ class _NoAnswerRetriever:
         raise AssertionError("retrieval should be skipped")
 
 
+class SampleAnswer(BaseModel):
+    answer: str
+    confidence: float
+
+
+class _StructuredCompletionRetriever:
+    async def prepare_session_turn_for_retrieval(self, query):
+        return SessionTurnPreparation(should_answer=True, effective_query=query)
+
+    async def get_retrieved_objects(self, query):
+        return []
+
+    async def get_context_from_objects(self, query, retrieved_objects):
+        return "context"
+
+    async def get_completion_from_context(self, query, retrieved_objects, context):
+        return SampleAnswer(answer="structured", confidence=0.75)
+
+
 @pytest.mark.asyncio
 async def test_get_retriever_output_uses_effective_query_before_retrieval():
     retriever = _EffectiveQueryRetriever()
@@ -133,6 +154,27 @@ async def test_get_retriever_output_skips_retrieval_for_no_answer_turn():
     assert result.completion == ["Thanks, I noted that."]
 
 
+@pytest.mark.asyncio
+async def test_get_retriever_output_normalizes_structured_response_model_completion():
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=_StructuredCompletionRetriever(),
+        ),
+    ):
+        result = await get_retriever_output(SearchType.GRAPH_COMPLETION, "structured query")
+
+    assert result.completion == {"answer": "structured", "confidence": 0.75}
+
+
 def test_count_retrieved_objects_counts_structured_lists():
     assert _count_retrieved_objects({"chunks": [1, 2], "entities": [3]}) == 3
 
@@ -143,3 +185,35 @@ def test_count_retrieved_objects_preserves_existing_shapes():
     assert _count_retrieved_objects({"triplets": []}) == 0
     assert _count_retrieved_objects({"metadata": "value"}) == 1
     assert _count_retrieved_objects("answer") == 1
+
+
+def test_normalize_completion_value_serializes_base_model():
+    model = SampleAnswer(answer="42", confidence=0.9)
+    assert _normalize_completion_value(model) == {
+        "answer": "42",
+        "confidence": 0.9,
+    }
+
+
+def test_normalize_completion_value_handles_nested_structures():
+    model = SampleAnswer(answer="yes", confidence=1.0)
+    assert _normalize_completion_value([model, "plain"]) == [
+        {"answer": "yes", "confidence": 1.0},
+        "plain",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_search_result_payload_accepts_normalized_response_model_completion():
+    """SearchResultPayload must accept structured completions after normalization (#3048)."""
+    from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+
+    model = SampleAnswer(answer="structured", confidence=0.75)
+    payload = SearchResultPayload(
+        result_object=None,
+        context=None,
+        completion=_normalize_completion_value(model),
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+
+    assert payload.completion == {"answer": "structured", "confidence": 0.75}

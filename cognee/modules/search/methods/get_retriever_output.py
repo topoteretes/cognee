@@ -1,4 +1,7 @@
 from inspect import Parameter, signature
+from typing import Any, List
+
+from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.observability import (
@@ -16,6 +19,17 @@ from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
+
+
+def _normalize_completion_value(value: Any) -> Any:
+    """Make completion JSON-serializable for SearchResultPayload."""
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if isinstance(value, list):
+        return [_normalize_completion_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalize_completion_value(val) for key, val in value.items()}
+    return value
 
 
 def _method_accepts_kwarg(method, name: str) -> bool:
@@ -104,6 +118,7 @@ async def get_retriever_output(
             if _method_accepts_kwarg(completion_method, "turn_preparation"):
                 completion_kwargs["turn_preparation"] = turn_preparation
             completion = await completion_method(**completion_kwargs)
+            completion = _normalize_completion_value(completion)
             if isinstance(completion, str):
                 span.set_attribute("cognee.retrieval.completion_length", len(completion))
             span.set_attribute(
