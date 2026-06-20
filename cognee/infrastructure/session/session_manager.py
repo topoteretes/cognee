@@ -334,7 +334,7 @@ class SessionManager:
             )
 
         # Every turn — answered or feedback-only — falls through to a single add_qa, so the
-        # whole conversation stays in history and semantic recall.
+        # whole conversation stays in history and vector recall.
         if turn_preparation.should_answer:
             answer_query = (
                 (turn_preparation.effective_query or "").strip()
@@ -357,7 +357,7 @@ class SessionManager:
             graph_elements = used_graph_element_ids
         else:
             # Feedback-only turn: nothing to answer, but we still record the exchange
-            # (question + acknowledgement) so it stays in history and semantic recall.
+            # (question + acknowledgement) so it stays in history and vector recall.
             answer = turn_preparation.response_to_user or "Thanks for your feedback."
             context_to_store = ""
             used_session_context_ids = None
@@ -449,6 +449,23 @@ class SessionManager:
             else entries_list
         )
 
+    async def get_session_entries_by_ids(
+        self,
+        *,
+        user_id: str,
+        qa_ids: list[str],
+        session_id: str | None = None,
+    ) -> list[SessionQAEntry]:
+        """Get specific session QA entries by qa_id, returned in chronological order."""
+        session_id = self._resolve_session_id(session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
+        for qa_id in qa_ids:
+            self._validate_session_params(qa_id=qa_id)
+        if not self.is_available or not qa_ids:
+            return []
+
+        return await self._cache.get_qa_entries_by_ids(user_id, session_id, qa_ids)
+
     async def get_agent_trace_session(
         self,
         *,
@@ -538,8 +555,9 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, skipping update_qa")
             return False
 
+        text_changed = question is not None or answer is not None
         async with session_lock(session_id, "update_qa"):
-            return await self._cache.update_qa_entry(
+            updated = await self._cache.update_qa_entry(
                 user_id=user_id,
                 session_id=session_id,
                 qa_id=qa_id,
@@ -552,6 +570,26 @@ class SessionManager:
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
             )
+            if not updated:
+                return False
+
+            if text_changed:
+                entries = await self.get_session_entries_by_ids(
+                    user_id=user_id,
+                    session_id=session_id,
+                    qa_ids=[qa_id],
+                )
+                await delete_session_qa_vector(qa_id=qa_id)
+                if entries:
+                    entry = entries[0]
+                    await index_session_qa(
+                        user_id=user_id,
+                        session_id=session_id,
+                        qa_id=qa_id,
+                        question=entry.question,
+                        answer=entry.answer,
+                    )
+            return True
 
     async def add_feedback(
         self,

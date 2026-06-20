@@ -139,6 +139,7 @@ class TestSessionManager:
         cache.get_agent_trace_session = AsyncMock(return_value=[])
         cache.get_agent_trace_feedback = AsyncMock(return_value=[])
         cache.get_agent_trace_count = AsyncMock(return_value=0)
+        cache.get_qa_entries_by_ids = AsyncMock(return_value=[])
         cache.update_qa_entry = AsyncMock(return_value=True)
         cache.delete_feedback = AsyncMock(return_value=True)
         cache.delete_qa_entry = AsyncMock(return_value=True)
@@ -544,9 +545,16 @@ class TestSessionManager:
         assert await sm_unavailable.get_agent_trace_count(user_id="u1", session_id="s1") == 0
 
     @pytest.mark.asyncio
-    async def test_update_qa_calls_cache(self, sm, mock_cache):
-        """update_qa delegates to cache."""
+    async def test_update_qa_calls_cache_and_reindexes_when_text_changes(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """update_qa delegates to cache and refreshes the searchable vector text."""
+        mock_cache.get_qa_entries_by_ids.return_value = [
+            SessionQAEntry(qa_id="q1", question="Q2", context="C", answer="A", time="t")
+        ]
+
         ok = await sm.update_qa(user_id="u1", qa_id="q1", question="Q2", session_id="s1")
+
         assert ok is True
         mock_cache.update_qa_entry.assert_called_once_with(
             user_id="u1",
@@ -561,6 +569,33 @@ class TestSessionManager:
             memify_metadata=None,
             used_session_context_ids=None,
         )
+        mock_cache.get_qa_entries_by_ids.assert_awaited_once_with("u1", "s1", ["q1"])
+        session_vector_mocks["delete_qa"].assert_awaited_once_with(qa_id="q1")
+        session_vector_mocks["index"].assert_awaited_once_with(
+            user_id="u1",
+            session_id="s1",
+            qa_id="q1",
+            question="Q2",
+            answer="A",
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_qa_feedback_only_does_not_touch_vectors(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """Feedback-only updates leave QA vector rows unchanged."""
+        ok = await sm.update_qa(
+            user_id="u1",
+            qa_id="q1",
+            feedback_text="useful",
+            feedback_score=5,
+            session_id="s1",
+        )
+
+        assert ok is True
+        mock_cache.get_qa_entries_by_ids.assert_not_awaited()
+        session_vector_mocks["delete_qa"].assert_not_awaited()
+        session_vector_mocks["index"].assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_delete_feedback_calls_cache(self, sm, mock_cache):

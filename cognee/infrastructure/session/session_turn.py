@@ -22,8 +22,8 @@ from cognee.infrastructure.session.session_context_builder import (
 )
 from cognee.infrastructure.session.session_context_models import SessionFeedbackEntry
 from cognee.infrastructure.session.session_embeddings import (
+    merge_hybrid_qa_entries,
     search_session_qa_ids,
-    select_hybrid_qa_entries,
 )
 from cognee.modules.retrieval.utils.completion import (
     generate_session_completion_with_optional_summary,
@@ -87,26 +87,31 @@ async def select_session_history(
 ) -> str:
     """Load session history and return it as a formatted conversation string.
 
-    History is the union of the last N turns and vector-engine semantic matches, in
+    History is the union of the last N turns and vector-engine hits, in
     chronological order. On any failure, this falls back to the plain last-N window.
     """
     try:
-        entries = await session_manager.get_session(
+        vector_qa_ids = await search_session_qa_ids(
+            user_id=user_id,
+            session_id=session_id,
+            query_text=query_text,
+        )
+        recent_entries = await session_manager.get_session(
             user_id=user_id,
             session_id=session_id,
             formatted=False,
+            last_n=session_manager.session_history_last_n,
         )
-        if isinstance(entries, list):
-            semantic_qa_ids = await search_session_qa_ids(
+        vector_entries = []
+        if vector_qa_ids:
+            vector_entries = await session_manager.get_session_entries_by_ids(
                 user_id=user_id,
                 session_id=session_id,
-                query_text=query_text,
+                qa_ids=vector_qa_ids,
             )
-            selected = select_hybrid_qa_entries(
-                entries,
-                semantic_qa_ids,
-                last_n=session_manager.session_history_last_n,
-            )
+
+        if isinstance(recent_entries, list) and isinstance(vector_entries, list):
+            selected = merge_hybrid_qa_entries(recent_entries, vector_entries)
             return session_manager.format_entries(
                 [coerce_qa_entry(entry) for entry in selected],
                 include_context=False,

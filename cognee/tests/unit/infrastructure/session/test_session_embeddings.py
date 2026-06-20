@@ -22,6 +22,7 @@ from cognee.infrastructure.session.session_embeddings import (
     delete_session_qa_vector,
     delete_session_qa_vectors,
     index_session_qa,
+    merge_hybrid_qa_entries,
     search_session_qa_ids,
     select_hybrid_qa_entries,
     session_scope_tag,
@@ -94,6 +95,10 @@ class FakeHistoryManager:
             return self.format_entries(entries, include_context=include_context)
         return list(entries)
 
+    async def get_session_entries_by_ids(self, *, user_id, session_id, qa_ids):
+        wanted_ids = set(qa_ids)
+        return [entry for entry in self.entries if entry["qa_id"] in wanted_ids]
+
     def format_entries(self, entries, include_context=False):
         return "\n".join(
             f"User: {entry['question']}\nAssistant: {entry['answer']}" for entry in entries
@@ -108,12 +113,12 @@ def test_session_qa_entry_has_no_embedding_field():
 
 
 class TestSelectHybridQaEntries:
-    def test_no_semantic_ids_falls_back_to_last_n(self):
+    def test_no_vector_ids_falls_back_to_last_n(self):
         entries = [_qa(f"q{i}", time_suffix=f"0{i}") for i in range(5)]
         selected = select_hybrid_qa_entries(entries, None, last_n=2)
         assert selected == entries[-2:]
 
-    def test_semantic_ids_recall_older_turns(self):
+    def test_vector_ids_recall_older_turns(self):
         relevant = _qa("about cats", qa_id="qa-relevant", time_suffix="01")
         irrelevant = _qa("about taxes", qa_id="qa-irrelevant", time_suffix="02")
         recent = [_qa(f"recent {i}", time_suffix=f"0{i + 3}") for i in range(2)]
@@ -143,14 +148,27 @@ class TestSelectHybridQaEntries:
         selected = select_hybrid_qa_entries([older, recent], ["qa-dict"], last_n=1)
         assert selected == [older, recent]
 
+    def test_merge_hybrid_entries_deduplicates_and_orders_chronologically(self):
+        older = _qa("old", qa_id="qa-old", time_suffix="01").model_dump()
+        middle = _qa("middle", qa_id="qa-middle", time_suffix="02").model_dump()
+        recent = _qa("recent", qa_id="qa-recent", time_suffix="03").model_dump()
+
+        selected = merge_hybrid_qa_entries(
+            recent_entries=[middle, recent],
+            vector_entries=[older, recent],
+        )
+
+        assert selected == [older, middle, recent]
+
     @pytest.mark.asyncio
-    async def test_session_history_ignores_vector_hits_outside_loaded_session(self, monkeypatch):
+    async def test_session_history_hydrates_vector_hits_by_id(self, monkeypatch):
         entries = [
             _qa("current session old", qa_id="current-old", time_suffix="01").model_dump(),
-            _qa("current session recent", qa_id="current-recent", time_suffix="02").model_dump(),
+            _qa("current session middle", qa_id="current-middle", time_suffix="02").model_dump(),
+            _qa("current session recent", qa_id="current-recent", time_suffix="03").model_dump(),
         ]
         manager = FakeHistoryManager(entries)
-        search = AsyncMock(return_value=["other-session-hit", "current-old"])
+        search = AsyncMock(return_value=["current-old"])
         monkeypatch.setattr(
             "cognee.infrastructure.session.session_turn.search_session_qa_ids", search
         )
@@ -164,7 +182,7 @@ class TestSelectHybridQaEntries:
 
         assert "current session old" in history
         assert "current session recent" in history
-        assert "other-session-hit" not in history
+        assert "current session middle" not in history
 
 
 class TestSessionQaVectorHelpers:

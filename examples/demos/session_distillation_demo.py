@@ -1,4 +1,4 @@
-"""Session semantic retrieval + distillation demo.
+"""Session vector retrieval + distillation demo.
 
 Run with:
 
@@ -60,7 +60,7 @@ MESSAGES = [
     "After a VoltaArm firmware flash, redo calibration because the flash erases it.",
     # Ordinary question; helps push the VoltaArm lesson out of the recency window.
     "How does the TerraScout rover navigate warehouses?",
-    # Ordinary question; helps semantic recall stand apart from recency.
+    # Ordinary question; helps vector recall stand apart from recency.
     "What is the HALT test suite and when does it run?",
     # Application question.
     "Draft the steps a technician should follow for a VoltaArm firmware update.",
@@ -117,17 +117,17 @@ async def print_session_evidence(user):
         )
 
 
-async def show_semantic_recall(user):
+async def show_vector_recall(user):
     """Show hybrid history selection: an old on-topic turn outside the recency window is
-    semantically recalled, while older off-topic turns are not."""
+    recalled by vector search, while older off-topic turns are not."""
     qa_entries = await cognee.session.get_session(session_id=SESSION_ID, user=user)
     query = "What happens to VoltaArm calibration when firmware is flashed?"
-    semantic_qa_ids = await search_session_qa_ids(
+    vector_qa_ids = await search_session_qa_ids(
         user_id=str(user.id),
         session_id=SESSION_ID,
         query_text=query,
     )
-    selected = select_hybrid_qa_entries(qa_entries, semantic_qa_ids, last_n=2)
+    selected = select_hybrid_qa_entries(qa_entries, vector_qa_ids, last_n=2)
 
     selected_qa_ids = {entry.qa_id for entry in selected}
     recent_qa_ids = {entry.qa_id for entry in qa_entries[-2:]}
@@ -179,7 +179,7 @@ async def main():
     await reset_demo_session(user)
 
     await run_scripted_session(user)
-    await show_semantic_recall(user)
+    await show_vector_recall(user)
     await distill_and_verify(user)
 
 
