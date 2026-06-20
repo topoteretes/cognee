@@ -17,8 +17,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 )
 
 _MODULE = (
-    "cognee.infrastructure.llm.structured_output_framework."
-    "litellm_instructor.llm.ollama.adapter"
+    "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter"
 )
 
 
