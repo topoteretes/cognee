@@ -35,6 +35,26 @@ from ..tasks.task import Task
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
+def _relational_dialect_name(relational_engine: Any) -> Optional[str]:
+    dialect = getattr(getattr(relational_engine, "engine", None), "dialect", None)
+    name = getattr(dialect, "name", None)
+    return name.lower() if isinstance(name, str) else None
+
+
+def _effective_data_per_batch(data_per_batch: Optional[int], relational_engine: Any) -> int:
+    effective_data_per_batch = max(1, int(data_per_batch or 1))
+    if (
+        effective_data_per_batch > 1
+        and _relational_dialect_name(relational_engine) == "sqlite"
+    ):
+        logger.info(
+            "SQLite relational backend detected; serializing pipeline data items to avoid "
+            "concurrent write locks."
+        )
+        return 1
+    return effective_data_per_batch
+
+
 def override_run_tasks(new_gen):
     def decorator(original_gen):
         @wraps(original_gen)
@@ -71,7 +91,9 @@ async def run_tasks(
     if not user:
         user = await get_default_user()
 
-    async with get_relational_engine().get_async_session() as session:
+    relational_engine = get_relational_engine()
+
+    async with relational_engine.get_async_session() as session:
         from cognee.modules.data.models import Dataset
 
         dataset = await session.get(Dataset, dataset_id)
@@ -102,9 +124,15 @@ async def run_tasks(
             if incremental_loading:
                 data = await resolve_data_directories(data)
 
+            relational_engine = get_relational_engine()
+            effective_data_per_batch = _effective_data_per_batch(
+                data_per_batch,
+                relational_engine,
+            )
+
             # Semaphore-based concurrency: all items are scheduled at once,
-            # but at most data_per_batch run concurrently at any time.
-            semaphore = asyncio.Semaphore(data_per_batch)
+            # but at most effective_data_per_batch run concurrently at any time.
+            semaphore = asyncio.Semaphore(effective_data_per_batch)
 
             async def _run_item(data_item):
                 async with semaphore:
@@ -167,7 +195,6 @@ async def run_tasks(
             if hasattr(graph_engine, "push_to_s3"):
                 await graph_engine.push_to_s3()
 
-            relational_engine = get_relational_engine()
             if hasattr(relational_engine, "push_to_s3"):
                 await relational_engine.push_to_s3()
 

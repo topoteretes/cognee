@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 import importlib
 from types import SimpleNamespace
@@ -26,8 +27,9 @@ class _FakeSession:
 
 
 class _FakeEngine:
-    def __init__(self, dataset):
+    def __init__(self, dataset, dialect_name="sqlite"):
         self._dataset = dataset
+        self.engine = SimpleNamespace(dialect=SimpleNamespace(name=dialect_name))
 
     def get_async_session(self):
         return _FakeSession(self._dataset)
@@ -105,3 +107,62 @@ async def test_run_tasks_calls_custom_rollback_on_pipeline_failure(monkeypatch):
     assert rollback_payload["data"] == [data_item]
     assert isinstance(rollback_payload["error"], Exception)
     assert rollback_payload["data_ingestion_info"][0]["run_info"].status == "PipelineRunErrored"
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_serializes_data_items_for_sqlite(monkeypatch):
+    dataset_id = uuid4()
+    user_id = uuid4()
+    owner_id = uuid4()
+    pipeline_run_id = uuid4()
+
+    dataset = SimpleNamespace(id=dataset_id, name="dataset-1", owner_id=owner_id)
+    user = SimpleNamespace(id=user_id, tenant_id=uuid4())
+    fake_engine = _FakeEngine(dataset, dialect_name="sqlite")
+
+    active_items = 0
+    max_active_items = 0
+
+    async def _successful_item(*_args, **_kwargs):
+        nonlocal active_items, max_active_items
+        active_items += 1
+        max_active_items = max(max_active_items, active_items)
+        await asyncio.sleep(0.01)
+        active_items -= 1
+        return {"run_info": SimpleNamespace(status="PipelineRunCompleted")}
+
+    async def _log_start(*_args, **_kwargs):
+        return SimpleNamespace(pipeline_run_id=pipeline_run_id)
+
+    async def _log_complete(*_args, **_kwargs):
+        return None
+
+    async def _log_error(*_args, **_kwargs):
+        return None
+
+    async def _get_graph_engine():
+        return SimpleNamespace()
+
+    monkeypatch.setattr(run_tasks_module, "get_relational_engine", lambda: fake_engine)
+    monkeypatch.setattr(run_tasks_module, "get_graph_engine", _get_graph_engine)
+    monkeypatch.setattr(run_tasks_module, "generate_pipeline_id", lambda *_args: uuid4())
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_start", _log_start)
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_complete", _log_complete)
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_error", _log_error)
+    monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", _successful_item)
+
+    yielded = []
+    async for item in run_tasks_module.run_tasks(
+        tasks=[Task(lambda x: x)],
+        dataset_id=dataset_id,
+        data=[object(), object(), object()],
+        user=user,
+        pipeline_name="cognify_pipeline",
+        data_per_batch=3,
+    ):
+        yielded.append(item)
+
+    assert len(yielded) == 2
+    assert isinstance(yielded[0], PipelineRunStarted)
+    assert max_active_items == 1
