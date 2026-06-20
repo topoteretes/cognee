@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Optional
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from cognee.modules.data.models import Data, Dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -12,11 +13,15 @@ async def get_last_added_data(dataset_id: UUID) -> Optional[Data]:
         result = await session.execute(
             select(Data)
             .join(Data.datasets)
+            .options(selectinload(Data.datasets))
             .where((Dataset.id == dataset_id))
             .order_by(Data.created_at.desc())
             .limit(1)
         )
 
         data = result.scalar_one_or_none()
+
+        if data is not None:
+            _ = data.datasets
 
         return data

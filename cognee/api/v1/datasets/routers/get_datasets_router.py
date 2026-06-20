@@ -346,10 +346,16 @@ def get_datasets_router() -> APIRouter:
             return []
 
         return [
-            dict(
-                **jsonable_encoder(data),
+            DataDTO(
+                id=data.id,
+                name=data.name,
+                created_at=data.created_at,
+                updated_at=data.updated_at,
+                extension=data.extension,
+                mime_type=data.mime_type,
+                raw_data_location=data.raw_data_location,
                 dataset_id=dataset_id,
-            )
+            ).model_dump(mode="json")
             for data in dataset_data
         ]
 
