@@ -1,13 +1,9 @@
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
-import litellm
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_llm_config
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
-    _normalize_llm_kwargs,
-)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
@@ -32,8 +28,10 @@ async def _direct_str_completion(text_input: str, system_prompt: str, **kwargs: 
     llama.cpp-compatible servers don't honour, causing repeated
     InstructorRetryException and tenacity retry sleeps.
     """
+    import litellm
+
     llm_config = get_llm_config()
-    merged_kwargs = _normalize_llm_kwargs({**(llm_config.llm_args or {}), **kwargs})
+    merged_kwargs = {**(llm_config.llm_args or {}), **kwargs}
 
     model = llm_config.llm_model
     if model.startswith("hosted_vllm/"):
@@ -101,17 +99,19 @@ class LLMGateway:
         **kwargs: Any,
     ) -> Coroutine[Any, Any, T]:
         text_input = _inject_agent_memory(text_input)
+        llm_config = get_llm_config()
 
         # response_model=str is a plain-text completion — instructor adds
         # JSON/tool-call schemas that local servers don't honour, causing
-        # repeated InstructorRetryException. Call litellm directly instead.
-        if response_model is str:
+        # repeated InstructorRetryException, so call litellm directly instead.
+        # BAML handles str natively via its own configured client, so only
+        # short-circuit the instructor path here.
+        if response_model is str and llm_config.structured_output_framework.upper() != "BAML":
             return _record_session_usage_after(
                 _direct_str_completion(text_input, system_prompt, **kwargs),
                 text_input=text_input,
             )
 
-        llm_config = get_llm_config()
         if llm_config.structured_output_framework.upper() == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
                 acreate_structured_output,

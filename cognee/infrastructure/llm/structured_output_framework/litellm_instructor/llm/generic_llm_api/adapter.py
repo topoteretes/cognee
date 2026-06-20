@@ -34,29 +34,6 @@ from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 logger = get_logger()
 observe = get_observe()
 
-_STANDARD_LITELLM_KEYS = frozenset({
-    "temperature", "top_p", "max_tokens", "max_completion_tokens", "stream",
-    "stop", "presence_penalty", "frequency_penalty", "logit_bias", "user",
-    "seed", "tools", "tool_choice", "response_format", "extra_body",
-    "timeout", "n", "logprobs", "top_logprobs",
-})
-
-
-def _normalize_llm_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Move non-standard litellm keys into extra_body so they reach the server.
-
-    litellm silently drops top-level keys it doesn't recognise (e.g.
-    chat_template_kwargs). Moving them into extra_body ensures they
-    reach the underlying API.
-    """
-    extra_body = dict(kwargs.pop("extra_body", {}) or {})
-    for key in list(kwargs.keys()):
-        if key not in _STANDARD_LITELLM_KEYS:
-            extra_body[key] = kwargs.pop(key)
-    if extra_body:
-        kwargs["extra_body"] = extra_body
-    return kwargs
-
 
 def _enrich_llm_span(model: str, name: str) -> None:
     """Set LLM attributes on the current OTEL span, if tracing is enabled."""
@@ -173,7 +150,7 @@ class GenericAPIAdapter(LLMInterface):
               output from the language model.
         """
 
-        merged_kwargs = _normalize_llm_kwargs({**self.llm_args, **kwargs})
+        merged_kwargs = {**self.llm_args, **kwargs}
         try:
             async with llm_rate_limiter_context_manager():
                 result = await self.aclient.chat.completions.create(
@@ -213,7 +190,7 @@ class GenericAPIAdapter(LLMInterface):
                 ) from error
 
             fallback_model = self.fallback_model
-            fallback_llm_args = _normalize_llm_kwargs({**self._base_llm_args, **kwargs})
+            fallback_llm_args = {**self._base_llm_args, **kwargs}
             if fallback_model and fallback_model.startswith("hosted_vllm/"):
                 fallback_model = fallback_model.replace("hosted_vllm/", "", 1)
                 fallback_model = "openai/" + fallback_model

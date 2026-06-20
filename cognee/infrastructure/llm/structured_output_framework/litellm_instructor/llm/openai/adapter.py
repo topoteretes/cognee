@@ -21,7 +21,6 @@ from cognee.infrastructure.llm.exceptions import (
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
-    _normalize_llm_kwargs,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
@@ -140,7 +139,7 @@ class OpenAIAdapter(GenericAPIAdapter):
               BaseModel.
         """
 
-        merged_kwargs = _normalize_llm_kwargs({**self.llm_args, **kwargs})
+        merged_kwargs = {**self.llm_args, **kwargs}
         try:
             async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(
