@@ -15,6 +15,8 @@ import uuid
 
 import pytest
 
+pytest.importorskip("langchain_text_splitters")
+
 from cognee.modules.chunking.LangchainChunker import LangchainChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
