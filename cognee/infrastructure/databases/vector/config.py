@@ -84,6 +84,7 @@ class VectorConfig(BaseSettings):
             self.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
 
         import sys
+
         if sys.platform == "win32" and self.vector_db_url and "://" not in self.vector_db_url:
             if os.path.isabs(self.vector_db_url) and not self.vector_db_url.startswith("\\\\?\\"):
                 self.vector_db_url = "\\\\?\\" + os.path.normpath(self.vector_db_url)
