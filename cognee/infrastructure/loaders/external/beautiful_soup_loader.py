@@ -155,6 +155,7 @@ class BeautifulSoupLoader(LoaderInterface):
         file_path: str,
         extraction_rules: dict[str, Any] | None = None,
         join_all_matches: bool = False,
+        deduplicate: bool = True,
         **kwargs: Any,
     ) -> str:
         """Load an HTML file, extract content, and save to storage.
@@ -163,6 +164,8 @@ class BeautifulSoupLoader(LoaderInterface):
             file_path: Path to the HTML file
             extraction_rules: Dict of CSS selector rules for content extraction
             join_all_matches: If True, extract all matching elements for each rule
+            deduplicate: If True, remove extracted pieces that are substrings of
+                other pieces to avoid duplicated content from overlapping rules
             **kwargs: Additional arguments
 
         Returns:
@@ -197,6 +200,26 @@ class BeautifulSoupLoader(LoaderInterface):
             text = self._extract_from_html(html, rule)
             if text:
                 pieces.append(text)
+
+        # Filter out pieces that are complete substrings of another piece.
+        # This handles overlapping default selectors (e.g. <article> capturing
+        # everything that individual <p> selectors also capture).
+        if deduplicate:
+            unique_pieces = []
+            for i, piece in enumerate(pieces):
+                is_substring = False
+                for j, other in enumerate(pieces):
+                    if i == j:
+                        continue
+                    if piece in other:
+                        # When two pieces are identical keep only the first one
+                        if piece == other and i < j:
+                            continue
+                        is_substring = True
+                        break
+                if not is_substring:
+                    unique_pieces.append(piece)
+            pieces = unique_pieces
 
         full_content = " ".join(pieces).strip()
 
