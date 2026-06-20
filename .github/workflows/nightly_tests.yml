@@ -21,6 +21,7 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
 
+
 jobs:
   ollama-tests:
     name: Ollama Tests
