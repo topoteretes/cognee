@@ -102,14 +102,31 @@ class TestSessionManager:
     """Unit tests for SessionManager with mocked cache."""
 
     @pytest.fixture(autouse=True)
-    def mock_index_session_qa(self, monkeypatch):
-        mock = AsyncMock()
-        monkeypatch.setattr("cognee.infrastructure.session.session_manager.index_session_qa", mock)
+    def session_vector_mocks(self, monkeypatch):
+        index_mock = AsyncMock()
+        delete_qa_mock = AsyncMock()
+        delete_session_mock = AsyncMock()
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_manager.index_session_qa",
+            index_mock,
+        )
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
+            delete_qa_mock,
+        )
+        monkeypatch.setattr(
+            "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+            delete_session_mock,
+        )
         monkeypatch.setattr(
             "cognee.infrastructure.session.session_turn.search_session_qa_ids",
             AsyncMock(return_value=[]),
         )
-        return mock
+        return {
+            "index": index_mock,
+            "delete_qa": delete_qa_mock,
+            "delete_session": delete_session_mock,
+        }
 
     @pytest.fixture
     def mock_cache(self):
@@ -156,7 +173,7 @@ class TestSessionManager:
         assert call_kw["session_id"] == "default_session"
 
     @pytest.mark.asyncio
-    async def test_add_qa_returns_qa_id(self, sm, mock_cache, mock_index_session_qa):
+    async def test_add_qa_returns_qa_id(self, sm, mock_cache, session_vector_mocks):
         """add_qa returns generated qa_id and calls cache."""
         used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
         qa_id = await sm.add_qa(
@@ -177,7 +194,7 @@ class TestSessionManager:
         assert call_kw["qa_id"] == qa_id
         assert call_kw["used_graph_element_ids"] == used_ids
         assert "embedding" not in call_kw
-        mock_index_session_qa.assert_awaited_once_with(
+        session_vector_mocks["index"].assert_awaited_once_with(
             user_id="u1",
             session_id="s1",
             qa_id=qa_id,
@@ -555,20 +572,53 @@ class TestSessionManager:
         )
 
     @pytest.mark.asyncio
-    async def test_delete_qa_calls_cache(self, sm, mock_cache):
-        """delete_qa delegates to cache."""
+    async def test_delete_qa_calls_cache_and_deletes_vector(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """delete_qa delegates to cache and removes its vector row."""
         ok = await sm.delete_qa(user_id="u1", qa_id="q1", session_id="s1")
         assert ok is True
         mock_cache.delete_qa_entry.assert_called_once_with(
             user_id="u1", session_id="s1", qa_id="q1"
         )
+        session_vector_mocks["delete_qa"].assert_awaited_once_with(qa_id="q1")
 
     @pytest.mark.asyncio
-    async def test_delete_session_calls_cache(self, sm, mock_cache):
-        """delete_session delegates to cache."""
+    async def test_delete_qa_skips_vector_delete_when_cache_delete_misses(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """delete_qa leaves vectors alone when the cache row was not deleted."""
+        mock_cache.delete_qa_entry.return_value = False
+
+        ok = await sm.delete_qa(user_id="u1", qa_id="q1", session_id="s1")
+
+        assert ok is False
+        session_vector_mocks["delete_qa"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_session_calls_cache_and_deletes_vectors(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """delete_session delegates to cache and removes its scoped vector rows."""
         ok = await sm.delete_session(user_id="u1", session_id="s1")
         assert ok is True
         mock_cache.delete_session.assert_called_once_with(user_id="u1", session_id="s1")
+        session_vector_mocks["delete_session"].assert_awaited_once_with(
+            user_id="u1",
+            session_id="s1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_session_skips_vector_cleanup_when_cache_delete_misses(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """delete_session leaves vectors alone when the cache session was not deleted."""
+        mock_cache.delete_session.return_value = False
+
+        ok = await sm.delete_session(user_id="u1", session_id="s1")
+
+        assert ok is False
+        session_vector_mocks["delete_session"].assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_no_user_id_calls_generate_completion_only(

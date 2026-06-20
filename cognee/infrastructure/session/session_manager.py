@@ -11,7 +11,11 @@ from cognee.infrastructure.session.session_agent_trace import (
     fallback_agent_trace_feedback,
     generate_agent_trace_feedback,
 )
-from cognee.infrastructure.session.session_embeddings import index_session_qa
+from cognee.infrastructure.session.session_embeddings import (
+    delete_session_qa_vector,
+    delete_session_qa_vectors,
+    index_session_qa,
+)
 from cognee.infrastructure.session.session_turn import (
     SessionTurnPreparation,
     generate_session_answer,
@@ -623,11 +627,14 @@ class SessionManager:
             return False
 
         async with session_lock(session_id, "update_qa"):
-            return await self._cache.delete_qa_entry(
+            deleted = await self._cache.delete_qa_entry(
                 user_id=user_id,
                 session_id=session_id,
                 qa_id=qa_id,
             )
+            if deleted:
+                await delete_session_qa_vector(qa_id=qa_id)
+            return deleted
 
     # -- Session context entries (active guidance layer) --------------------
 
@@ -838,7 +845,10 @@ class SessionManager:
         except Exception:
             pass
 
-        return await self._cache.delete_session(
+        deleted = await self._cache.delete_session(
             user_id=user_id,
             session_id=session_id,
         )
+        if deleted:
+            await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
+        return deleted

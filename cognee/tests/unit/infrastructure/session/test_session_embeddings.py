@@ -19,6 +19,8 @@ from cognee.infrastructure.session.session_context_models import (
 )
 from cognee.infrastructure.session.session_embeddings import (
     SESSION_QA_VECTOR_COLLECTION,
+    delete_session_qa_vector,
+    delete_session_qa_vectors,
     index_session_qa,
     search_session_qa_ids,
     select_hybrid_qa_entries,
@@ -219,6 +221,43 @@ class TestSessionQaVectorHelpers:
         assert kwargs["query_vector"] is None
         assert kwargs["limit"] == 3
         assert kwargs["node_name"] == [session_scope_tag("u1", "s1")]
+
+    @pytest.mark.asyncio
+    async def test_delete_session_qa_vector_uses_qa_id(self, monkeypatch):
+        qa_id = uuid4()
+        vector_engine = SimpleNamespace()
+
+        async def fake_delete_data_points(collection_name, data_point_ids):
+            vector_engine.delete_call = (collection_name, data_point_ids)
+
+        vector_engine.delete_data_points = fake_delete_data_points
+        monkeypatch.setattr(
+            "cognee.infrastructure.databases.vector.get_vector_engine",
+            lambda: vector_engine,
+        )
+
+        await delete_session_qa_vector(qa_id=str(qa_id))
+
+        collection_name, data_point_ids = vector_engine.delete_call
+        assert collection_name == SESSION_QA_VECTOR_COLLECTION
+        assert data_point_ids == [qa_id]
+
+    @pytest.mark.asyncio
+    async def test_delete_session_qa_vectors_removes_session_scope_tag(self, monkeypatch):
+        vector_engine = SimpleNamespace()
+
+        async def fake_remove_belongs_to_set_tags(tags):
+            vector_engine.remove_tags_call = tags
+
+        vector_engine.remove_belongs_to_set_tags = fake_remove_belongs_to_set_tags
+        monkeypatch.setattr(
+            "cognee.infrastructure.databases.vector.get_vector_engine",
+            lambda: vector_engine,
+        )
+
+        await delete_session_qa_vectors(user_id="u1", session_id="s1")
+
+        assert vector_engine.remove_tags_call == [session_scope_tag("u1", "s1")]
 
 
 class TestRankerRelevance:
