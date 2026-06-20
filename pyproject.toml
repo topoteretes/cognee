@@ -23,7 +23,10 @@ dependencies = [
     "openai>=1.80.1",
     "python-dotenv>=1.0.1,<2.0.0",
     "pydantic>=2.10.5",
-    "pydantic-settings>=2.14.2,<3",
+    # GHSA-4xgf-cpjx-pc3j: 2.12.0–2.14.1 vulnerable, fixed in 2.14.2. Exclude the
+    # vulnerable range rather than capping, so the patched 2.14.2+ is adopted once
+    # it clears the `exclude-newer` window (it was <2 days old at time of writing).
+    "pydantic-settings>=2.2.1,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3",
     "typing_extensions>=4.12.2,<5.0.0",
     "numpy>=1.26.4, <=4.0.0",
     "sqlalchemy>=2.0.39,<3.0.0",
