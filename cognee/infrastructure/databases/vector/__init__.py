@@ -4,3 +4,8 @@ from .vector_db_interface import VectorDBInterface
 from .config import get_vectordb_config
 from .get_vector_engine import get_vector_engine
 from .use_vector_adapter import use_vector_adapter
+
+try:
+    from cognee.infrastructure.databases.vector import adapters as _vector_adapters  # noqa: F401
+except ImportError:
+    pass
