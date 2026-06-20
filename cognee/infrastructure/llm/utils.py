@@ -96,7 +96,9 @@ async def test_llm_connection() -> None:
         msg = (
             f"LLM connection test timed out after {CONNECTION_TEST_TIMEOUT_SECONDS}s. "
             "Check that your LLM endpoint is reachable and responding. "
-            "Set COGNEE_SKIP_CONNECTION_TEST=true to bypass this check."
+            "For slow local inference (omlx/vLLM/custom), increase patience or set "
+            "COGNEE_SKIP_CONNECTION_TEST=true. "
+            "To abort long-running LLM calls after startup, set LLM_CALL_TIMEOUT_SECONDS."
         )
         logger.error(msg)
         raise TimeoutError(msg)

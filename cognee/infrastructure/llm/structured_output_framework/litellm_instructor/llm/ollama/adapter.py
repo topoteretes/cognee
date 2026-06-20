@@ -16,6 +16,8 @@ from tenacity import (
 )
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.llm.call_timeout import build_llm_call_label, run_with_llm_call_limits
+from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -134,22 +136,33 @@ class OllamaAPIAdapter(LLMInterface):
                 )
             return response.choices[0].message.content or ""
 
+        llm_config = get_llm_context_config()
+        call_label = build_llm_call_label(
+            provider=llm_config.llm_provider,
+            model=self.model,
+            endpoint=self.endpoint,
+        )
         async with llm_rate_limiter_context_manager():
-            response = await self.aclient.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{text_input}",
-                    },
-                ],
-                max_retries=2,
-                response_model=response_model,
-                **merged_kwargs,
+            response = await run_with_llm_call_limits(
+                self.aclient.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": f"{text_input}",
+                        },
+                    ],
+                    max_retries=2,
+                    response_model=response_model,
+                    **merged_kwargs,
+                ),
+                label=call_label,
+                timeout_seconds=llm_config.llm_call_timeout_seconds,
+                slow_warning_seconds=llm_config.llm_slow_call_warning_seconds,
             )
 
         return response
