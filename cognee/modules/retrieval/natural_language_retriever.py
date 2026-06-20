@@ -1,5 +1,8 @@
+import json
 from typing import Any, Optional
+from fastapi.encoders import jsonable_encoder
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
@@ -145,8 +148,10 @@ class NaturalLanguageRetriever(BaseRetriever):
             - Optional[Any]: Returns the context retrieved from the graph database based on the
               query.
         """
-        # TODO: Do we want to process retrieved_objects into a context string?
-        return retrieved_objects
+        if not retrieved_objects:
+            return None
+        serialized_objects = jsonable_encoder(retrieved_objects)
+        return json.dumps(serialized_objects, indent=2)
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Optional[Any] = None
@@ -172,5 +177,12 @@ class NaturalLanguageRetriever(BaseRetriever):
 
             - Any: Returns the completion derived from the given query and context.
         """
-        # TODO: Do we want to generate a completion using LLM here?
-        return context
+        if not context:
+            return None
+        completion = await generate_completion(
+            query=query,
+            context=context,
+            user_prompt_path="context_for_question.txt",
+            system_prompt_path="answer_simple_question.txt",
+        )
+        return [completion]

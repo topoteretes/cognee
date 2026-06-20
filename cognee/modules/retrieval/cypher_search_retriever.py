@@ -1,3 +1,4 @@
+import json
 from typing import Any, Optional
 from fastapi.encoders import jsonable_encoder
 
@@ -76,9 +77,10 @@ class CypherSearchRetriever(BaseRetriever):
 
             - Any: The result of the cypher query execution.
         """
-        # TODO: Do we want to return a string response here?
-        # return jsonable_encoder(retrieved_objects)
-        return None
+        if not retrieved_objects:
+            return None
+        serialized_objects = jsonable_encoder(retrieved_objects)
+        return json.dumps(serialized_objects, indent=2)
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Optional[Any] = None
@@ -101,5 +103,12 @@ class CypherSearchRetriever(BaseRetriever):
 
             - Any: The context, either provided or retrieved.
         """
-        # TODO: Do we want to generate a completion using LLM here?
-        return None
+        if not context:
+            return None
+        completion = await generate_completion(
+            query=query,
+            context=context,
+            user_prompt_path=self.user_prompt_path,
+            system_prompt_path=self.system_prompt_path,
+        )
+        return [completion]
