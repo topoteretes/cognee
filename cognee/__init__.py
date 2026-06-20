@@ -26,6 +26,7 @@ from .modules.run_custom_pipeline import run_custom_pipeline
 from .api.v1.update import update
 from .api.v1.config.config import config
 from .api.v1.datasets.datasets import datasets
+from .api.v1.agents.agents import agents
 from .api.v1.prune import prune
 from .api.v1.search import SearchType, search
 from .api.v1.visualize import (
@@ -46,13 +47,30 @@ from .modules import pipelines
 from .pipelines import Drop
 
 # Migrations
-from cognee.run_migrations import run_startup_migrations
+from cognee.run_migrations import run_migrations
 
 # ---------------------------------------------------------------------------
 # V2 memory-oriented API
 # ---------------------------------------------------------------------------
-from .api.v1 import remember, RememberResult, recall, improve, forget, serve, disconnect, visualize
+from .api.v1 import (
+    remember,
+    RememberResult,
+    recall,
+    improve,
+    forget,
+    serve,
+    disconnect,
+    visualize,
+    push,
+    PushResult,
+    export,
+    ExportResult,
+)
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
+
+# Memory migration (cognee.migration has the provider sources:
+# Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
+from . import migration
 
 # Tracing / Observability
 from cognee.modules.observability.trace_context import (
@@ -68,3 +86,4 @@ from cognee.modules.agent_memory import agent_memory
 
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
+import cognee.modules.migrations.models  # noqa: F401  (registers global_database_version)

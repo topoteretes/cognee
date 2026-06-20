@@ -184,7 +184,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                             },
                         ],
                         api_key=self.fallback_api_key,
-                        # api_base=self.fallback_endpoint,
+                        api_base=self.fallback_endpoint,
                         response_model=response_model,
                         max_retries=self.MAX_RETRIES,
                         **merged_kwargs,

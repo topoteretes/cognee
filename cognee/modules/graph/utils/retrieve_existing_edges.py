@@ -1,6 +1,7 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils import generate_edge_name, generate_node_id
+from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import _create_edge_key
 from cognee.shared.data_models import KnowledgeGraph
 
@@ -51,8 +52,8 @@ async def retrieve_existing_edges(
         graph = chunk_graphs[index]
 
         for node in graph.nodes:
-            type_node_id = generate_node_id(f"type:{node.type}")
-            entity_node_id = generate_node_id(f"entity:{node.id}")
+            type_node_id = EntityType.id_for(node.type)
+            entity_node_id = Entity.id_for(node.id)
 
             type_edge = (data_chunk.id, type_node_id, "exists_in")
             if type_edge not in processed_edges:
@@ -71,8 +72,8 @@ async def retrieve_existing_edges(
 
         graph_node_edges.extend(
             (
-                generate_node_id(f"entity:{edge.source_node_id}"),
-                generate_node_id(f"entity:{edge.target_node_id}"),
+                Entity.id_for(edge.source_node_id),
+                Entity.id_for(edge.target_node_id),
                 generate_edge_name(edge.relationship_name),
             )
             for edge in graph.edges

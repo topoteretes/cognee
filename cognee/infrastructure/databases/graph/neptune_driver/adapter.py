@@ -37,6 +37,17 @@ except ImportError:
 NEPTUNE_ENDPOINT_URL = "neptune-graph://"
 
 
+def _quote_relationship_type(relationship_name: str) -> str:
+    """Backtick-quote a relationship type for safe interpolation into openCypher.
+
+    openCypher cannot parameterize a created relationship type, so the type is
+    interpolated into the query text. Backtick-quoting it (and doubling any internal
+    backtick, per the Cypher escaping rules) lets a label contain spaces, hyphens, or
+    other characters without breaking the query or allowing injection.
+    """
+    return "`" + relationship_name.replace("`", "``") + "`"
+
+
 class NeptuneGraphDB(GraphDBInterface):
     """
     Adapter for interacting with Amazon Neptune Analytics graph store.
@@ -503,13 +514,14 @@ class NeptuneGraphDB(GraphDBInterface):
             # Prepare edge properties
             edge_props = properties or {}
             serialized_properties = self._serialize_properties(edge_props)
+            quoted_relationship = _quote_relationship_type(relationship_name)
 
             query = f"""
             MATCH (source:{self._GRAPH_NODE_LABEL})
             WHERE id(source) = $source_id
             MATCH (target:{self._GRAPH_NODE_LABEL})
             WHERE id(target) = $target_id
-            MERGE (source)-[r:{relationship_name}]->(target)
+            MERGE (source)-[r:{quoted_relationship}]->(target)
             ON CREATE SET r = $properties, r.updated_at = timestamp()
             ON MATCH SET r = $properties, r.updated_at = timestamp()
             RETURN r
@@ -553,6 +565,7 @@ class NeptuneGraphDB(GraphDBInterface):
         results = {}
         for relationship_name, edges_for_relationship in edges_by_relationship.items():
             try:
+                quoted_relationship = _quote_relationship_type(relationship_name)
                 # Create the bulk-edge OpenCypher query using UNWIND
                 query = f"""
                     UNWIND $edges AS edge
@@ -560,7 +573,7 @@ class NeptuneGraphDB(GraphDBInterface):
                     WHERE id(source) = edge.from_node
                     MATCH (target:{self._GRAPH_NODE_LABEL})
                     WHERE id(target) = edge.to_node
-                    MERGE (source)-[r:{relationship_name}]->(target)
+                    MERGE (source)-[r:{quoted_relationship}]->(target)
                     ON CREATE SET r = edge.properties, r.updated_at = timestamp()
                     ON MATCH SET r = edge.properties, r.updated_at = timestamp()
                     RETURN count(*) AS edges_processed
@@ -586,7 +599,7 @@ class NeptuneGraphDB(GraphDBInterface):
                     f"Failed to add edges for relationship {relationship_name}: {format_neptune_error(e)}"
                 )
                 logger.info("Falling back to individual edge creation")
-                for edge in edges_by_relationship:
+                for edge in edges_for_relationship:
                     try:
                         source_id, target_id, relationship_name = edge[0], edge[1], edge[2]
                         properties = edge[3] if len(edge) > 3 else {}

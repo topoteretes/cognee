@@ -27,11 +27,7 @@ on:
         required: true
       EMBEDDING_MODEL:
         required: true
-      EMBEDDING_ENDPOINT:
-        required: true
       EMBEDDING_API_KEY:
-        required: true
-      EMBEDDING_API_VERSION:
         required: true
 
 env:
@@ -65,9 +61,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_edge_centered_payload.py
 
   test-deletion-on-default-graph_with_legacy_data_1_default:
@@ -94,7 +88,6 @@ jobs:
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          ENABLE_AUTO_MIGRATIONS: 'false'
         run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py

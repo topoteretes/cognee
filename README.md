@@ -5,7 +5,7 @@
 
   <br />
 
-  Cognee - The Brain behind your Agents
+  Cognee - The Open-Source AI Memory Platform for Agents
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s">Demo</a>
@@ -37,10 +37,10 @@
   </a>
 </p>
 
-Cognee gives AI agents a shared, improving memory of your data, decisions, and workflows so they can recall, connect, and act with context.
+Cognee is the open-source AI memory platform that gives AI agents persistent long-term memory across sessions. Ingest data in any format, build a self-hosted knowledge graph, and let every agent recall, connect, and act with full context
 
   <p align="center">
-  🌐 Available Languages
+  🌐 This README is also available in:
   :
   <!-- Keep these links. Translations will automatically update with the README. -->
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=de">Deutsch</a> |
@@ -59,14 +59,12 @@ Cognee gives AI agents a shared, improving memory of your data, decisions, and w
 </div>
 </div>
 
-
+📄 Read the research paper: [Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning](https://arxiv.org/abs/2505.24478) — Markovic et al., 2025
 
 
 ## About Cognee
 
-Cognee is an open-source memory control plane for your Agents that lets you ingest data in any format or structure and continuously learns to provide the right context. It combines embeddings, graphs and cognitive science approaches to make your documents both searchable by meaning and connected by relationships as they change and evolve.
-
-
+Cognee is an open-source AI memory platform for AI Agents. Ingest data in any format, and Cognee continuously builds a self-hosted knowledge graph that gives your agents persistent long-term memory across sessions. Cognee combines vector embeddings, graph reasoning, and cognitive-science-grounded ontology generation to make documents both searchable by meaning and connected by relationships that evolve as your knowledge does.
 
 :star: _Help us reach more developers and grow the cognee community. Star this repo!_
 
@@ -171,6 +169,10 @@ To open the local UI, run:
 ```bash
 cognee-cli -ui
 ```
+
+> **Note:** The MCP server launched by `cognee-cli -ui` runs inside a Docker container.
+> Docker Desktop, Colima, or any OCI-compatible runtime with a working `docker` CLI is
+> required. See [Docker & Colima Setup](docs/docker-colima-setup.md) for details.
 
 ## Use with AI Agents
 

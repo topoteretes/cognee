@@ -41,7 +41,7 @@ ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 os.environ.setdefault("COGNEE_SKIP_CONNECTION_TEST", "true")
 
 
-def _resolve_config(args: argparse.Namespace) -> tuple[dict, str]:
+def _resolve_config(args: argparse.Namespace) -> dict:
     """Resolve config values: CLI arg → .env file → script defaults."""
     mock_llm = getattr(args, "mock_llm", False)
     env = dotenv_values(ENV_FILE) if ENV_FILE.exists() else {}
@@ -58,23 +58,23 @@ def _resolve_config(args: argparse.Namespace) -> tuple[dict, str]:
     if not api_key and not mock_llm:
         sys.exit("Error: LLM_API_KEY is not set (CLI, .env, or environment)")
 
-    return (
-        {
-            "llm_provider": pick(args.llm_provider, "LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
-            "llm_model": pick(args.llm_model, "LLM_MODEL", DEFAULT_LLM_MODEL),
-            "embedding_provider": pick(
-                args.embedding_provider, "EMBEDDING_PROVIDER", DEFAULT_EMBEDDING_PROVIDER
-            ),
-            "embedding_model": pick(
-                args.embedding_model, "EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL
-            ),
-            "embedding_dims": pick(
-                args.embedding_dims, "EMBEDDING_DIMENSIONS", DEFAULT_EMBEDDING_DIMS
-            ),
-            "mock_llm": mock_llm,
-        },
-        api_key or "mock-key",
-    )
+    # Embeddings may use a different provider/key than the LLM (e.g.
+    # + OpenAI embeddings). Resolve the embedding key independently, falling back
+    # to the LLM/OpenAI key when LLM and embeddings share a provider.
+    embedding_api_key = pick(None, "EMBEDDING_API_KEY", "") or api_key
+
+    return {
+        "api_key": api_key or "mock-key",
+        "embedding_api_key": embedding_api_key or "mock-key",
+        "llm_provider": pick(args.llm_provider, "LLM_PROVIDER", DEFAULT_LLM_PROVIDER),
+        "llm_model": pick(args.llm_model, "LLM_MODEL", DEFAULT_LLM_MODEL),
+        "embedding_provider": pick(
+            args.embedding_provider, "EMBEDDING_PROVIDER", DEFAULT_EMBEDDING_PROVIDER
+        ),
+        "embedding_model": pick(args.embedding_model, "EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+        "embedding_dims": pick(args.embedding_dims, "EMBEDDING_DIMENSIONS", DEFAULT_EMBEDDING_DIMS),
+        "mock_llm": mock_llm,
+    }
 
 
 # ── Mock LLM / Embedding ────────────────────────────────────────────────────
@@ -172,22 +172,33 @@ async def run_benchmark(
     memories: list[dict],
     *,
     config: dict,
-    api_key: str,
 ) -> dict:
     import cognee
+
+    # Register community adapters before any engine is created. Comma-separated
+    # module names; a module-level register() is called if present (some
+    # adapters register on import alone).
+    import importlib
+
+    for module_name in filter(None, os.environ.get("COGNEE_REGISTER_ADAPTERS", "").split(",")):
+        module = importlib.import_module(module_name)
+        register = getattr(module, "register", None)
+        if callable(register):
+            register()
+        print(f"Registered adapter module: {module_name}")
 
     llm_model = config["llm_model"]
     llm_provider = config["llm_provider"]
     embedding_model = config["embedding_model"]
     embedding_dims = config["embedding_dims"]
 
-    cognee.config.set_llm_api_key(api_key)
+    cognee.config.set_llm_api_key(config["api_key"])
     cognee.config.set_llm_provider(llm_provider)
     cognee.config.set_llm_model(llm_model)
     cognee.config.set_embedding_provider(config["embedding_provider"])
     cognee.config.set_embedding_model(embedding_model)
     cognee.config.set_embedding_dimensions(embedding_dims)
-    cognee.config.set_embedding_api_key(api_key)
+    cognee.config.set_embedding_api_key(config["embedding_api_key"])
 
     if config.get("mock_llm"):
         mock_data = _load_mock_data(config["mock_memories_file"])
@@ -250,7 +261,7 @@ async def run_benchmark(
     print("\nPhase 2: Running cognee.cognify() (knowledge graph build)...")
     try:
         t_cognify_start = time.time()
-        await cognee.cognify(data_per_batch=n)
+        await cognee.cognify(data_per_batch=n, chunks_per_batch=10000)
         t_cognify = time.time() - t_cognify_start
     except Exception as e:
         t_cognify = time.time() - t_cognify_start
@@ -302,8 +313,8 @@ async def run_benchmark(
     print(f"  Search total      : {t_search:.2f}s  [{status['search']}]")
     print(f"  DB setup time     : {t_db_setup:.2f}s  [{status['db_setup']}]")
     print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
-    print("  LLM config        : configured")
-    print("  Embedding dims    : configured")
+    print(f"  LLM model         : {llm_model}")
+    print(f"  Embedding model   : {embedding_model} ({embedding_dims}d)")
     if config.get("mock_llm"):
         print("  Mock mode         : ON")
     print(f"  Overall           : {'ALL OK' if all_ok else 'SOME FAILURES'}")
@@ -378,7 +389,7 @@ def main():
     )
     args = parser.parse_args()
 
-    config, api_key = _resolve_config(args)
+    config = _resolve_config(args)
     if config["mock_llm"]:
         config["mock_memories_file"] = args.mock_memories
 
@@ -387,9 +398,11 @@ def main():
         memories = memories[: args.num_memories]
     print(f"Loaded {len(memories)} memories from {args.memories}")
     mock_label = " [MOCK]" if config["mock_llm"] else ""
-    print(f"Config: LLM/embedding configured{mock_label}\n")
+    print(
+        f"Config: llm={config['llm_model']}, embeddings={config['embedding_model']} ({config['embedding_dims']}d){mock_label}\n"
+    )
 
-    results = asyncio.run(run_benchmark(memories, config=config, api_key=api_key))
+    results = asyncio.run(run_benchmark(memories, config=config))
 
     if args.output:
         with open(args.output, "w") as f:

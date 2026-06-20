@@ -17,6 +17,8 @@ from raw graph adapter output. These tests pin the contract:
 import pytest
 
 from cognee.modules.visualization.preprocessor import (
+    OTHER_ENTITY_TYPES_LABEL,
+    SCHEMA_MAX_ENTITY_TYPES,
     STAGE_ORDER,
     PreprocessedGraph,
     preprocess,
@@ -280,10 +282,16 @@ def test_node_color_preserved_from_type_map():
 
 
 def test_ontology_valid_overrides_color():
-    nodes_data = [("e", {"type": "Entity", "name": "X", "ontology_valid": True})]
+    """Ontology-grounded nodes get a distinct fill — it must differ from the
+    unknown-type fallback gray so ontology matches stand apart visually."""
+    nodes_data = [
+        ("e", {"type": "Entity", "name": "X", "ontology_valid": True}),
+        ("u", {"type": "MysteryType", "name": "Y"}),
+    ]
     edges_data = []
     result = preprocess((nodes_data, edges_data))
-    assert result.nodes[0]["color"] == "#D8D8D8"
+    assert result.nodes[0]["color"] == "#FF5CA8"
+    assert result.nodes[0]["color"] != result.nodes[1]["color"]
 
 
 def test_schema_graph_falls_back_to_type_graph_when_no_schema_nodes():
@@ -383,6 +391,113 @@ def test_schema_type_nodes_carry_full_relationship_distribution():
     }
     assert chunk_rels[("contains", "Person")] == 2
     assert chunk_rels[("contains", "Field")] == 1
+
+
+def _many_entity_types_graph(num_types):
+    """num_types semantic entity types with strictly descending instance counts:
+    Type00 has num_types instances, Type01 has num_types-1, ... down to 1."""
+    nodes_data = []
+    edges_data = []
+    for i in range(num_types):
+        type_name = f"Type{i:02d}"
+        type_id = f"etype{i}"
+        nodes_data.append((type_id, {"type": "EntityType", "name": type_name}))
+        for j in range(num_types - i):
+            entity_id = f"e{i}_{j}"
+            nodes_data.append((entity_id, {"type": "Entity", "name": f"{type_name}_inst{j}"}))
+            edges_data.append((entity_id, type_id, "is_a", {}))
+    return (nodes_data, edges_data)
+
+
+def test_entity_type_long_tail_rolls_up_into_other_entities():
+    """Beyond SCHEMA_MAX_ENTITY_TYPES, the tail of semantic entity types
+    collapses into one rollup card so the Entity column stays bounded."""
+    num_types = SCHEMA_MAX_ENTITY_TYPES + 3
+    result = preprocess(_many_entity_types_graph(num_types))
+    type_nodes = {
+        n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+
+    semantic_cards = [name for name in type_nodes if name.startswith("Type")] + (
+        [OTHER_ENTITY_TYPES_LABEL] if OTHER_ENTITY_TYPES_LABEL in type_nodes else []
+    )
+    assert len(semantic_cards) == SCHEMA_MAX_ENTITY_TYPES
+
+    # Top types keep their own cards; the smallest types are rolled up.
+    assert "Type00" in type_nodes
+    assert f"Type{num_types - 1:02d}" not in type_nodes
+
+    rollup = type_nodes[OTHER_ENTITY_TYPES_LABEL]
+    assert rollup["rollup"] is True
+    tail_size = num_types - (SCHEMA_MAX_ENTITY_TYPES - 1)
+    assert len(rollup["rolled_up_types"]) == tail_size
+    # Tail of descending counts ends at 1: tail_size + (tail_size-1) + ... + 1.
+    assert rollup["instance_count"] == tail_size * (tail_size + 1) // 2
+    # Rollup keeps the same rank as the kept entity-type cards (one column).
+    assert rollup["rank"] == type_nodes["Type00"]["rank"]
+    # The lead field announces the rollup.
+    assert any(f["name"] == "entity types" for f in rollup["fields"])
+
+    # Pair-relationship nodes never reference a rolled-up type name.
+    rolled_names = {t["name"] for t in rollup["rolled_up_types"]}
+    for node in result.schema_graph["nodes"]:
+        if node["type"] == "GraphRelationshipType":
+            assert node["source_type"] not in rolled_names
+            assert node["target_type"] not in rolled_names
+
+    # Instance drill-down still reaches the rolled-up instances.
+    instances = result.schema_graph["instances_by_type"][OTHER_ENTITY_TYPES_LABEL]
+    assert len(instances) == rollup["instance_count"]
+
+
+def test_entity_types_under_cap_are_not_rolled_up():
+    result = preprocess(_alice_like_graph())
+    names = {n["name"] for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"}
+    assert OTHER_ENTITY_TYPES_LABEL not in names
+
+    result_at_cap = preprocess(_many_entity_types_graph(SCHEMA_MAX_ENTITY_TYPES))
+    names_at_cap = {
+        n["name"] for n in result_at_cap.schema_graph["nodes"] if n["type"] == "GraphNodeType"
+    }
+    assert OTHER_ENTITY_TYPES_LABEL not in names_at_cap
+    assert sum(1 for name in names_at_cap if name.startswith("Type")) == SCHEMA_MAX_ENTITY_TYPES
+
+
+class TestUnnamedNodeFallbacks:
+    UUID_NAME = "13e52fce-2d52-4a8b-9f01-aabbccddeeff"
+    HASH_NAME = "a" * 64
+
+    def test_uuid_name_gets_readable_placeholder(self):
+        nodes_data = [("n1", {"type": "Entity", "name": self.UUID_NAME})]
+        result = preprocess((nodes_data, []))
+        node = result.nodes[0]
+        assert node["name"].startswith("Unnamed Entity")
+        assert self.UUID_NAME not in node["name"]
+        assert node["is_unnamed"] is True
+
+    def test_hash_fallback_fields_are_skipped(self):
+        nodes_data = [
+            ("n1", {"type": "DocumentChunk", "text": self.HASH_NAME, "description": "real text"})
+        ]
+        result = preprocess((nodes_data, []))
+        assert result.nodes[0]["name"] == "real text"
+
+    def test_unnamed_nodes_never_get_label_priority(self):
+        # Documents are always-label landmarks — unless they are unnamed.
+        nodes_data = [
+            ("d1", {"type": "TextDocument", "name": self.UUID_NAME}),
+            ("d2", {"type": "TextDocument", "name": "alice.md"}),
+        ]
+        result = preprocess((nodes_data, []))
+        by_name_priority = {n["is_unnamed"]: n["label_priority"] for n in result.nodes}
+        assert by_name_priority[True] is False
+        assert by_name_priority[False] is True
+
+    def test_regular_names_untouched(self):
+        result = preprocess(_alice_like_graph())
+        names = {n["name"] for n in result.nodes}
+        assert "Alice" in names
+        assert not any(name.startswith("Unnamed ") for name in names)
 
 
 def test_empty_graph_does_not_crash():

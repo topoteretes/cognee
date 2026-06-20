@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: '0 3 * * *'
   workflow_dispatch:
+  # Note: Run Nightly CI on change to any of the following files.
+  pull_request:
+    paths:
+      - '.github/workflows/nightly_tests.yml'
+      - '.github/workflows/performance_report.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -27,18 +32,49 @@ jobs:
     uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
 
-  performance-llm:
-    name: Performance (real LLM)
+  # ══ Performance: each caller runs BOTH file_based and postgres backends ════
+  perf-small-llm:
+    name: Performance — 50 Small Documents (real LLM)
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: llm
+      label: 50_small_documents
+      runs: '3'
+      num_memories: '50'
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
     secrets: inherit
 
-  performance-mock:
-    name: Performance (mock LLM)
+  perf-small-mock:
+    name: Performance — 50 Small Documents (mock LLM)
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
+      label: 50_small_documents
+      runs: '3'
+      num_memories: '50'
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
+      mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_memories.json
+    secrets: inherit
+
+  perf-wap-llm:
+    name: Performance — War and Peace (real LLM)
+    uses: ./.github/workflows/performance_report.yml
+    with:
+      mode: llm
+      label: war_and_peace
+      runs: '3'
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
+    secrets: inherit
+
+  perf-wap-mock:
+    name: Performance — War and Peace (mock LLM)
+    uses: ./.github/workflows/performance_report.yml
+    with:
+      mode: mock_llm
+      label: war_and_peace
+      runs: '3'
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
+      mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_war_and_peace.json
     secrets: inherit
 
   notify:
@@ -46,8 +82,10 @@ jobs:
     needs: [
       ollama-tests,
       llamacpp-tests,
-      performance-llm,
-      performance-mock,
+      perf-small-llm,
+      perf-small-mock,
+      perf-wap-llm,
+      perf-wap-mock,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -56,7 +94,11 @@ jobs:
         id: status
         run: |
           if [[ "${{ needs.ollama-tests.result }}" == "success" &&
-                "${{ needs.llamacpp-tests.result }}" == "success" ]]; then
+                "${{ needs.llamacpp-tests.result }}" == "success" &&
+                "${{ needs.perf-small-llm.result }}" == "success" &&
+                "${{ needs.perf-small-mock.result }}" == "success" &&
+                "${{ needs.perf-wap-llm.result }}" == "success" &&
+                "${{ needs.perf-wap-mock.result }}" == "success" ]]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
             echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
@@ -74,18 +116,25 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
           AWS_DEFAULT_REGION: eu-west-1
           BUCKET: github-runner-cognee-tests
-          LLM_KEY: ${{ needs.performance-llm.outputs.html_key }}
-          MOCK_KEY: ${{ needs.performance-mock.outputs.html_key }}
+          # "<slack-output-name> <s3-key>" per line. The key already encodes the
+          # backend (file_based/ or postgres/), so presigning is fully generic.
+          REPORT_KEYS: |
+            url_file_small_llm ${{ needs.perf-small-llm.outputs.file_based_html_key }}
+            url_file_small_mock ${{ needs.perf-small-mock.outputs.file_based_html_key }}
+            url_file_wap_llm ${{ needs.perf-wap-llm.outputs.file_based_html_key }}
+            url_file_wap_mock ${{ needs.perf-wap-mock.outputs.file_based_html_key }}
+            url_pg_small_llm ${{ needs.perf-small-llm.outputs.postgres_html_key }}
+            url_pg_small_mock ${{ needs.perf-small-mock.outputs.postgres_html_key }}
+            url_pg_wap_llm ${{ needs.perf-wap-llm.outputs.postgres_html_key }}
+            url_pg_wap_mock ${{ needs.perf-wap-mock.outputs.postgres_html_key }}
         run: |
           set -euo pipefail
           # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
-          # Guard for empty keys (a failed perf job produces no report).
-          if [ -n "${LLM_KEY:-}" ]; then
-            echo "url_llm=$(aws s3 presign "s3://$BUCKET/$LLM_KEY" --expires-in 604800)" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -n "${MOCK_KEY:-}" ]; then
-            echo "url_mock=$(aws s3 presign "s3://$BUCKET/$MOCK_KEY" --expires-in 604800)" >> "$GITHUB_OUTPUT"
-          fi
+          # Skip empty keys (a failed perf job produces no report).
+          while read -r name key; do
+            [ -n "${key:-}" ] || continue
+            echo "$name=$(aws s3 presign "s3://$BUCKET/$key" --expires-in 604800)" >> "$GITHUB_OUTPUT"
+          done <<< "$REPORT_KEYS"
 
       - name: Post status to Slack
         uses: slackapi/slack-github-action@v2.1.0
@@ -103,21 +152,90 @@ jobs:
                     ${{ steps.status.outputs.emoji }} *Nightly Tests* — ${{ steps.status.outputs.summary }}
                     *Ran at:* `${{ steps.status.outputs.ran_at }}`
                     *Ollama:* `${{ needs.ollama-tests.result }}`  •  *Llama-cpp:* `${{ needs.llamacpp-tests.result }}`
-
-                    *📊 Performance — Real LLM* (`${{ needs.performance-llm.result }}`)  •  runs `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').success }}`
-                    add      p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').add.p99 }}s`
-                    cognify  p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').cognify.p99 }}s`
-                    search     p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').search.p99 }}s`
-                    total      p50 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-llm.outputs.metrics || '{}').total.p99 }}s`
-                    <${{ steps.presign.outputs.url_llm }}|HTML report>
-
-                    *📊 Performance — Mock LLM* (`${{ needs.performance-mock.result }}`)  •  runs `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').success }}`
-                    add      p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').add.p99 }}s`
-                    cognify  p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').cognify.p99 }}s`
-                    search     p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').search.p99 }}s`
-                    total      p50 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.performance-mock.outputs.metrics || '{}').total.p99 }}s`
-                    <${{ steps.presign.outputs.url_mock }}|HTML report>
-
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📊 File Based — 50 Small Documents — Real LLM* (`${{ needs.perf-small-llm.result }}`)  •  runs `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-llm.outputs.file_based_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_file_small_llm }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📊 File Based — 50 Small Documents — Mock LLM* (`${{ needs.perf-small-mock.result }}`)  •  runs `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-mock.outputs.file_based_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_file_small_mock }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📚 File Based — War and Peace — Real LLM* (`${{ needs.perf-wap-llm.result }}`)  •  runs `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-llm.outputs.file_based_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_file_wap_llm }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📚 File Based — War and Peace — Mock LLM* (`${{ needs.perf-wap-mock.result }}`)  •  runs `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.file_based_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_file_wap_mock }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📊 Full Postgres — 50 Small Documents — Real LLM* (`${{ needs.perf-small-llm.result }}`)  •  runs `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-llm.outputs.postgres_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_pg_small_llm }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📊 Full Postgres — 50 Small Documents — Mock LLM* (`${{ needs.perf-small-mock.result }}`)  •  runs `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-small-mock.outputs.postgres_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_pg_small_mock }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📚 Full Postgres — War and Peace — Real LLM* (`${{ needs.perf-wap-llm.result }}`)  •  runs `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-llm.outputs.postgres_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_pg_wap_llm }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    *📚 Full Postgres — War and Peace — Mock LLM* (`${{ needs.perf-wap-mock.result }}`)  •  runs `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').success }}`
+                    add      p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').add.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').add.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').add.p99 }}s`
+                    cognify  p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').cognify.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').cognify.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').cognify.p99 }}s`
+                    search     p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').search.p99 }}s`
+                    total      p50 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p50 }}s`  •  p90 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p90 }}s`  •  p99 `${{ fromJSON(needs.perf-wap-mock.outputs.postgres_metrics || '{}').total.p99 }}s`
+                    <${{ steps.presign.outputs.url_pg_wap_mock }}|HTML report>
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
                     <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
 
       - name: Fail if any suite failed

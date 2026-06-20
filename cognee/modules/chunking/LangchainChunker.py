@@ -1,4 +1,5 @@
 from cognee.shared.logging_utils import get_logger
+from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.modules.chunking.Chunker import Chunker
@@ -21,33 +22,43 @@ class LangchainChunker(Chunker):
         self,
         document,
         get_text: callable,
-        max_chunk_tokens: int,
-        chunk_size: int = 1024,
+        max_chunk_size: int,
+        chunk_size: int | None = None,
         chunk_overlap=10,
     ):
-        super().__init__(document, get_text, max_chunk_tokens, chunk_size)
+        super().__init__(document, get_text, max_chunk_size)
+
+        # Every Document.read call passes only max_chunk_size and lets chunk_size
+        # default, so the splitter must honor that budget. Otherwise it keeps
+        # emitting ~1024-word chunks that then trip the size guard in read().
+        effective_chunk_size = (
+            max_chunk_size if chunk_size is None else min(chunk_size, max_chunk_size)
+        )
 
         self.splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
+            chunk_size=effective_chunk_size,
+            chunk_overlap=min(chunk_overlap, max(effective_chunk_size - 1, 0)),
             length_function=lambda text: len(text.split()),
         )
 
     async def read(self):
+        document_id = str(self.document.id)
+        document_name = self.document.name or basename(self.document.raw_data_location)
         async for content_text in self.get_text():
             for chunk in self.splitter.split_text(content_text):
                 embedding_engine = get_vector_engine().embedding_engine
                 token_count = embedding_engine.tokenizer.count_tokens(chunk)
-                if token_count <= self.max_chunk_tokens:
+                if token_count <= self.max_chunk_size:
                     yield DocumentChunk(
                         id=uuid5(NAMESPACE_OID, chunk),
                         text=chunk,
-                        word_count=len(chunk.split()),
-                        token_count=token_count,
+                        chunk_size=token_count,
                         is_part_of=self.document,
                         chunk_index=self.chunk_index,
                         cut_type="missing",
                         contains=[],
+                        document_id=document_id,
+                        document_name=document_name,
                         metadata={
                             "index_fields": ["text"],
                         },
@@ -55,5 +66,5 @@ class LangchainChunker(Chunker):
                     self.chunk_index += 1
                 else:
                     raise ValueError(
-                        f"Chunk of {token_count} tokens is larger than the maximum of {self.max_chunk_tokens} tokens. Please reduce chunk_size in RecursiveCharacterTextSplitter."
+                        f"Chunk of {token_count} tokens is larger than the maximum of {self.max_chunk_size} tokens. Please reduce chunk_size in RecursiveCharacterTextSplitter."
                     )

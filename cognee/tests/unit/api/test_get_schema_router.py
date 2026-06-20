@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 inventory_module = import_module("cognee.api.v1.visualize.get_schema_inventory")
-router_module = import_module("cognee.api.v1.visualize.get_schema_router")
+router_module = import_module("cognee.api.v1.visualize.routers.get_schema_router")
 
 
 def _app() -> FastAPI:

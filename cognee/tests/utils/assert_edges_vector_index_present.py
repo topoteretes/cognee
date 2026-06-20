@@ -3,7 +3,8 @@ from typing import Dict, List, Tuple
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.engine.utils import generate_edge_id, generate_node_name
+from cognee.modules.engine.utils import generate_node_name
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.tests.utils.get_contains_edge_text import get_contains_edge_text
 
@@ -29,7 +30,7 @@ def format_relationship(
                 node["description"],
             )
 
-    return {str(generate_edge_id(relationship_name)): relationship_name}
+    return {str(EdgeType.id_for(relationship_name)): relationship_name}
 
 
 async def assert_edges_vector_index_present(
@@ -56,7 +57,7 @@ async def assert_edges_vector_index_present(
                     graph_edges_by_key,
                 )
                 if convert_to_new_format
-                else {str(generate_edge_id(relationship[2])): relationship[2]}
+                else {str(EdgeType.id_for(relationship[2])): relationship[2]}
             ),
         }
 
