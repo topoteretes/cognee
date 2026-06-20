@@ -1,10 +1,10 @@
 """Deterministic builder, ranker, and candidate applier for the active session-context layer.
 
-This module loads stored active ``SessionContextEntry`` rows, ranks them with a pure-arithmetic
-deterministic ranker (no LLM), applies per-section and total character budgets, and renders a
-compact four-heading guidance block. It also houses the deterministic candidate applier that
-turns ``CandidateContextUpdate`` items into stored entries (validate -> confidence >= 0.75 ->
-normalize -> exact-dup-link-or-create, no LLM / no fuzzy / no auto-delete).
+This module loads stored active ``SessionContextEntry`` rows, ranks them with a deterministic
+lexical ranker (no LLM), applies per-section and total character budgets, and renders a compact
+four-heading guidance block. It also houses the deterministic candidate applier that turns
+``CandidateContextUpdate`` items into stored entries (validate -> confidence >= 0.75 -> normalize
+-> exact-dup-link-or-create, no LLM / no auto-delete).
 
 Public orchestration coroutines are fail-open so they can never block answer generation. Pure
 helpers are deliberately strict so tests catch malformed stored data and scoring mistakes.
@@ -54,7 +54,7 @@ class DeterministicRanker:
     Higher score sorts first. The score is a weighted sum of:
       * section priority (rules > goals > preferences/lessons),
       * confidence,
-      * query-term overlap (fraction of entry tokens that appear in the query),
+      * query relevance (token overlap),
       * net helpfulness (helpful_count - harmful_count),
       * recency (newer last_served_at / created_at sorts slightly higher),
       * explicit priority.
@@ -64,7 +64,7 @@ class DeterministicRanker:
 
     SECTION_PRIORITY = {"rules": 3, "goals": 2, "preferences": 1, "lessons_learned": 1}
 
-    # Weights chosen so section priority dominates, then confidence/overlap, then signals.
+    # Weights chosen so section priority dominates, then confidence/relevance, then signals.
     W_SECTION = 10.0
     W_CONFIDENCE = 5.0
     W_OVERLAP = 4.0
@@ -97,11 +97,11 @@ class DeterministicRanker:
     def score(self, entry: SessionContextEntry, query: str) -> float:
         section_priority = self.SECTION_PRIORITY.get(entry.section, 0)
         net_help = max(-3, min(3, entry.helpful_count - entry.harmful_count))
-        overlap = self._query_overlap(entry.content, query)
+        relevance = self._query_overlap(entry.content, query)
         return (
             self.W_SECTION * section_priority
             + self.W_CONFIDENCE * float(entry.confidence)
-            + self.W_OVERLAP * overlap
+            + self.W_OVERLAP * relevance
             + self.W_NET_HELP * net_help
             + self.W_PRIORITY * entry.priority
             + self.W_RECENCY * self._recency(entry)
@@ -275,7 +275,8 @@ async def _apply_single_candidate(
 ) -> str | None:
     """Apply one validated candidate. Returns the touched/created entry id, or None to skip.
 
-    Implements validate -> confidence>=0.75 -> normalize -> exact-dup-link-or-create.
+    Implements validate -> confidence>=0.75 -> normalize -> dup-link-or-create, where a dup is
+    an exact same-section normalized-content match.
     Raises on store errors; the caller wraps this so one failure never aborts the batch.
     """
     section = candidate.section
@@ -292,11 +293,13 @@ async def _apply_single_candidate(
 
     normalized = normalize_content(content)
 
-    # Look for an existing active entry with the same section + normalized content (exact dup).
+    # Look for an existing same-section entry that duplicates the candidate by exact
+    # normalized content.
     existing = await session_manager.get_session_context_entries(
         user_id=user_id,
         session_id=session_id,
     )
+    duplicate_row = None
     for raw in existing or []:
         if isinstance(raw, SessionContextEntry):
             row = raw.model_dump()
@@ -304,20 +307,24 @@ async def _apply_single_candidate(
             row = raw
         else:
             continue
-        if row.get("kind", "context") != "context":
+        if row.get("kind", "context") != "context" or row.get("section") != section:
             continue
-        if row.get("section") == section and row.get("normalized_content") == normalized:
-            entry_id = row.get("id")
-            source_ids = list(row.get("source_feedback_ids") or [])
-            if feedback_entry_id and feedback_entry_id not in source_ids:
-                source_ids.append(feedback_entry_id)
-                await session_manager.update_session_context_entry(
-                    user_id=user_id,
-                    session_id=session_id,
-                    entry_id=entry_id,
-                    merge={"source_feedback_ids": source_ids},
-                )
-            return entry_id
+        if row.get("normalized_content") == normalized:
+            duplicate_row = row
+            break
+
+    if duplicate_row is not None:
+        entry_id = duplicate_row.get("id")
+        source_ids = list(duplicate_row.get("source_feedback_ids") or [])
+        if feedback_entry_id and feedback_entry_id not in source_ids:
+            source_ids.append(feedback_entry_id)
+            await session_manager.update_session_context_entry(
+                user_id=user_id,
+                session_id=session_id,
+                entry_id=entry_id,
+                merge={"source_feedback_ids": source_ids},
+            )
+        return entry_id
 
     # Novel content: create a new active entry.
     new_entry = SessionContextEntry(

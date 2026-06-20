@@ -47,6 +47,7 @@ async def get_file_metadata(file: BinaryIO, name: str | None = None) -> FileMeta
         - FileMetadata: A dictionary containing the file's name, path, MIME type, file
           extension, and content hash.
     """
+    content_hash = ""
     try:
         file.seek(0)
         content_hash = await get_file_content_hash(file)

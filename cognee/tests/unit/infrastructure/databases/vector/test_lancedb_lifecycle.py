@@ -114,6 +114,39 @@ async def test_close_is_idempotent(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_retrieve_empty_ids_returns_empty(monkeypatch, tmp_path):
+    """retrieve() with no ids must return [] rather than build an ``id IN ()``
+    filter, which lance rejects as a parse error (parity with pgvector/chromadb;
+    e.g. has_new_chunks() passes an empty id list when data_chunks is empty)."""
+
+    class _FakeQuery:
+        def where(self, *_args, **_kwargs):
+            return self
+
+        async def to_list(self):
+            # Rows the filter path would surface; the empty-id guard must
+            # short-circuit before we ever reach here.
+            return [{"id": "00000000-0000-0000-0000-000000000000", "payload": {"text": "x"}}]
+
+    class _FakeCollection:
+        def query(self):
+            return _FakeQuery()
+
+    async def _fake_get_collection(_name):
+        return _FakeCollection()
+
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "lance_db"),
+        api_key=None,
+        embedding_engine=_FakeEmbeddingEngine(),
+    )
+    monkeypatch.setattr(adapter, "get_collection", _fake_get_collection)
+
+    assert await adapter.retrieve("any_collection", []) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
 async def test_concurrent_first_get_connection_returns_same_object(monkeypatch, tmp_path):
     """Two coroutines reaching the lazy-create path simultaneously must
     end up returning the SAME ``self.connection`` object. Without the
@@ -201,3 +234,25 @@ async def test_close_does_not_block_event_loop(monkeypatch, tmp_path):
     assert ticks >= 5, (
         f"event loop appears blocked: only {ticks} heartbeats during a 150ms shutdown"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_prune_removes_local_db_directory(tmp_path):
+    """prune() must delete the local database directory from the filesystem."""
+    from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import IndexSchema
+
+    db_path = tmp_path / "lance_db"
+    adapter = LanceDBAdapter(
+        url=str(db_path),
+        api_key=None,
+        embedding_engine=_FakeEmbeddingEngine(),
+    )
+
+    # Materialize the directory by creating a collection
+    await adapter.create_collection("test_col", IndexSchema)
+
+    assert db_path.exists() is True
+    await adapter.prune()
+    assert db_path.exists() is False
+
