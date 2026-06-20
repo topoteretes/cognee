@@ -1,6 +1,7 @@
 import asyncio
+
 import cognee
-from cognee.api.v1.search import SearchType
+from cognee import SearchType
 
 custom_prompt = """
 Extract only people and cities as entities.

@@ -170,6 +170,10 @@ To open the local UI, run:
 cognee-cli -ui
 ```
 
+> **Note:** The MCP server launched by `cognee-cli -ui` runs inside a Docker container.
+> Docker Desktop, Colima, or any OCI-compatible runtime with a working `docker` CLI is
+> required. See [Docker & Colima Setup](docs/docker-colima-setup.md) for details.
+
 ## Use with AI Agents
 
 ### Claude Code

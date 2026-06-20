@@ -3,6 +3,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   check-uv-lock:
     name: Lockfile and Pre-commit Hooks

@@ -57,16 +57,24 @@ def guess_file_type(file: BinaryIO, name: str | None = None) -> filetype.Type:
         return file_type
 
     if ext in [".csv"]:
-        file_type = Type("text/csv", "csv")
-        return file_type
+        return Type("text/csv", "csv")
+
+    if ext in [".md", ".markdown"]:
+        return Type("text/markdown", "md")
+
+    if ext in [".json"]:
+        return Type("application/json", "json")
+
+    if ext in [".xml"]:
+        return Type("application/xml", "xml")
+
+    if ext in [".yaml", ".yml"]:
+        return Type("application/yaml", "yaml")
 
     file_type = filetype.guess(file)
 
     # If file type could not be determined consider it a plain text file as they don't have magic number encoding
     if file_type is None:
         file_type = Type("text/plain", "txt")
-
-    if file_type is None:
-        raise FileTypeException(f"Unknown file detected: {file.name}.")
 
     return file_type

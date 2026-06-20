@@ -78,7 +78,7 @@ async def handle_search(arguments: Dict[str, Any], user) -> list:
         datasets=datasets,
         user=user,
         system_prompt_path=system_prompt_path,
-        top_k=top_k if isinstance(top_k, int) else 10,
+        top_k=top_k if isinstance(top_k, int) else 15,
     )
 
     return results
