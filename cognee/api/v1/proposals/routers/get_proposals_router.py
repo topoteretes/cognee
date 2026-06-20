@@ -30,7 +30,9 @@ class ProposalDetail(BaseModel):
     proposal_id: str = Field(description="Stable proposal identifier.")
     skill_id: str = Field(default="", description="Identifier of the skill being improved.")
     skill_name: str = Field(default="", description="Name of the skill being improved.")
-    status: str = Field(default="proposed", description="Lifecycle status: 'proposed' or 'applied'.")
+    status: str = Field(
+        default="proposed", description="Lifecycle status: 'proposed' or 'applied'."
+    )
     confidence: float = Field(default=0.0, description="Model confidence in the proposed change.")
     rationale: str = Field(default="", description="Why the change was proposed.")
     model_name: str = Field(default="", description="LLM that generated the proposal.")

@@ -61,7 +61,8 @@ class SkillIngestRequest(BaseModel):
         default=None, description="Name/slug for the skill (defaults to 'skill')."
     )
     dataset_name: Optional[str] = Field(
-        default=None, description="Target dataset name (created if needed). Required unless dataset_id is given."
+        default=None,
+        description="Target dataset name (created if needed). Required unless dataset_id is given.",
     )
     dataset_id: Optional[UUID] = Field(
         default=None, description="Target dataset UUID (alternative to dataset_name)."

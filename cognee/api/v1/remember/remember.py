@@ -798,26 +798,25 @@ async def remember(
 
 
 def _materialize_inline_skill(skills_text, skill_name):
-    """Write inline SKILL.md markdown into a temp ``<slug>/SKILL.md`` folder.
+    """Write inline SKILL.md markdown into a temporary ``<slug>/SKILL.md`` folder.
 
     The no-code companion to the file-upload skills path: callers can pass the
     SKILL.md body as a string (e.g. from an n8n field) instead of uploading a
     file. The parser derives the skill name from the parent directory, so the
-    file is nested under ``<slug>/``. Returns ``(TemporaryDirectory, source_root)``;
-    the caller owns cleanup of the TemporaryDirectory.
+    file is nested under ``<slug>/``. Returns ``(cleanup_handle, source_root)``.
     """
     import tempfile
     from pathlib import Path as _Path
 
     slug = _Path((skill_name or "skill").strip() or "skill").name
-    tmp_dir = tempfile.TemporaryDirectory(prefix="cognee-skills-", dir=_Path.cwd())
-    skill_dir = _Path(tmp_dir.name) / slug
+    tmp = tempfile.TemporaryDirectory(prefix="cognee-skills-")
+    skill_dir = _Path(tmp.name) / slug
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
         skills_text if isinstance(skills_text, str) else str(skills_text),
         encoding="utf-8",
     )
-    return tmp_dir, _Path(tmp_dir.name)
+    return tmp, _Path(tmp.name)
 
 
 async def _remember_inner(
@@ -938,9 +937,7 @@ async def _remember_inner(
         # an uploaded file. Reuses the same add_skills pipeline as the upload path.
         skills_text = kwargs.get("skills_text")
         if not normalized_uploads and skills_text:
-            tmp_dir, skill_source = _materialize_inline_skill(
-                skills_text, kwargs.get("skill_name")
-            )
+            tmp_dir, skill_source = _materialize_inline_skill(skills_text, kwargs.get("skill_name"))
 
         try:
             async with set_database_global_context_variables(dataset.id, owner_id):

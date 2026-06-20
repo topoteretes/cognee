@@ -332,12 +332,16 @@ async def _load_nodes_by_type(model):
 def _coerce_model(raw, model):
     if isinstance(raw, model):
         return raw
+    node_id = None
     if isinstance(raw, (list, tuple)) and len(raw) > 1:
+        node_id = raw[0]
         raw = raw[1]
     data = raw.model_dump() if hasattr(raw, "model_dump") else raw
     if not isinstance(data, dict):
         return None
     data = {k: v for k, v in data.items() if k != "metadata"}
+    if node_id is not None and "id" not in data:
+        data["id"] = node_id
     try:
         return model.model_validate(data)
     except Exception:
