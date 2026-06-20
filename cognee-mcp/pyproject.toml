@@ -64,9 +64,6 @@ constraint-dependencies = [
     "onnxruntime>=1.24.1 ; python_version >= '3.14'",
 ]
 
-# Note: exclude newer packages that are less than 2 days old
-exclude-newer = "2 days"
-
 [project.scripts]
 cognee = "src:main"
 cognee-mcp = "src:main_mcp"
