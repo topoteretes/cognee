@@ -4,12 +4,37 @@ import asyncio
 import inspect
 import logging
 import weakref
+import atexit
 from collections import OrderedDict
 from functools import wraps
 from threading import Lock
 from typing import Optional
 
+# Force these modules to register their atexit hooks FIRST, so that our
+# atexit hook (registered below) runs BEFORE them (LIFO order). This prevents
+# concurrent.futures from hanging on shutdown trying to join threads that
+# are blocked on subprocesses we haven't closed yet.
+import concurrent.futures
+import multiprocessing
+
 logger = logging.getLogger(__name__)
+
+_ALL_CACHES = weakref.WeakSet()
+
+def _clear_all_caches_atexit():
+    """Clear all ClosingLRUCache instances on process exit.
+    
+    Ensures that leased adapters (and their worker threads/subprocesses)
+    are deterministically closed before the Python interpreter starts joining
+    non-daemon threads.
+    """
+    for cache in list(_ALL_CACHES):
+        try:
+            cache.cache_clear()
+        except Exception:
+            logger.warning("Error clearing cache at exit", exc_info=True)
+
+atexit.register(_clear_all_caches_atexit)
 
 
 class CacheInfo(dict):
@@ -232,6 +257,7 @@ class ClosingLRUCache:
         self._maxsize = maxsize
         self._lease = lease
         self._lock = Lock()
+        _ALL_CACHES.add(self)
 
     def _wrap_cached_value(self, entry):
         if self._lease:
