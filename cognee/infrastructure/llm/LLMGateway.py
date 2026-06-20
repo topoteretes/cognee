@@ -1,24 +1,12 @@
-import logging
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
-import litellm
 from pydantic import BaseModel
-from tenacity import (
-    before_sleep_log,
-    retry,
-    retry_if_not_exception_type,
-    stop_after_delay,
-    wait_exponential_jitter,
-)
 
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
-from cognee.shared.logging_utils import get_logger
-
-logger = get_logger()
 
 T = TypeVar("T", bound="BaseModel | str")
 
@@ -31,42 +19,6 @@ def _inject_agent_memory(text_input: str) -> str:
         return text_input
 
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
-
-
-@retry(
-    stop=stop_after_delay(128),
-    wait=wait_exponential_jitter(8, 128),
-    retry=retry_if_not_exception_type(
-        (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
-    ),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-    reraise=True,
-)
-async def direct_str_completion(text_input: str, system_prompt: str, **kwargs: Any) -> str:
-    """Call litellm directly for plain-text completions, bypassing instructor.
-
-    Instructor wraps the call in JSON/tool-call schemas that local
-    llama.cpp-compatible servers don't honour, causing repeated
-    InstructorRetryException and tenacity retry sleeps.
-    """
-    from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-
-    llm_config = get_llm_config()
-    merged_kwargs = {**(llm_config.llm_args or {}), **kwargs}
-
-    async with llm_rate_limiter_context_manager():
-        resp = await litellm.acompletion(
-            model=llm_config.llm_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text_input},
-            ],
-            api_key=llm_config.llm_api_key,
-            api_base=llm_config.llm_endpoint,
-            api_version=llm_config.llm_api_version,
-            **merged_kwargs,
-        )
-    return resp.choices[0].message.content or ""
 
 
 async def _record_session_usage_after(
@@ -112,18 +64,6 @@ class LLMGateway:
     ) -> Coroutine[Any, Any, T]:
         text_input = _inject_agent_memory(text_input)
         llm_config = get_llm_config()
-
-        # response_model=str is a plain-text completion — instructor adds
-        # JSON/tool-call schemas that local servers don't honour, causing
-        # repeated InstructorRetryException, so call litellm directly instead.
-        # BAML handles str natively via its own configured client, so only
-        # short-circuit the instructor path here.
-        if response_model is str and llm_config.structured_output_framework.upper() != "BAML":
-            return _record_session_usage_after(
-                direct_str_completion(text_input, system_prompt, **kwargs),
-                text_input=text_input,
-            )
-
         if llm_config.structured_output_framework.upper() == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
                 acreate_structured_output,

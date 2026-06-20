@@ -107,6 +107,30 @@ class GenericAPIAdapter(LLMInterface):
             litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
         )
 
+    async def acreate_str_output(
+        self, text_input: str, system_prompt: str, **merged_kwargs: Any
+    ) -> str:
+        """Plain-text completion that skips instructor.
+
+        Instructor wraps the call in JSON/tool-call schemas that local
+        llama.cpp-compatible servers don't honour, causing repeated parse
+        failures and retry storms. A plain string needs no schema, so call
+        litellm directly using this adapter's own connection config.
+        """
+        async with llm_rate_limiter_context_manager():
+            response = await litellm.acompletion(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text_input},
+                ],
+                api_key=self.api_key,
+                api_base=self.endpoint,
+                api_version=self.api_version,
+                **merged_kwargs,
+            )
+        return response.choices[0].message.content or ""
+
     @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
@@ -118,8 +142,12 @@ class GenericAPIAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs: Any
-    ) -> BaseModel:
+        self,
+        text_input: str,
+        system_prompt: str,
+        response_model: type[BaseModel | str],
+        **kwargs: Any,
+    ) -> BaseModel | str:
         """
         Generate a response from a user query.
 
@@ -144,6 +172,11 @@ class GenericAPIAdapter(LLMInterface):
         """
 
         merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor (see acreate_str_output).
+        if response_model is str:
+            return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
+
         try:
             async with llm_rate_limiter_context_manager():
                 result = await self.aclient.chat.completions.create(

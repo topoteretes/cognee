@@ -4,7 +4,7 @@ from typing import Any
 
 import instructor
 import litellm
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
@@ -109,6 +109,24 @@ class OllamaAPIAdapter(LLMInterface):
             - BaseModel: A structured output that conforms to the specified response model.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor and hit the OpenAI-
+        # compatible endpoint directly. Instructor's JSON/tool-call schemas cause
+        # parse failures and retry storms on local llama.cpp-compatible servers.
+        if response_model is str:
+            async with llm_rate_limiter_context_manager():
+                response = await AsyncOpenAI(
+                    base_url=self.endpoint, api_key=self.api_key
+                ).chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text_input},
+                    ],
+                    **merged_kwargs,
+                )
+            return response.choices[0].message.content or ""
+
         async with llm_rate_limiter_context_manager():
             response = self.aclient.chat.completions.create(
                 model=self.model,

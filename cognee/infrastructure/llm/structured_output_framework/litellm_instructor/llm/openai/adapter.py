@@ -140,6 +140,11 @@ class OpenAIAdapter(GenericAPIAdapter):
         """
 
         merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor (see acreate_str_output).
+        if response_model is str:
+            return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
+
         try:
             async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(
