@@ -32,6 +32,29 @@ def session_manager(sql_adapter):
     return SessionManager(cache_engine=sql_adapter)
 
 
+@pytest.fixture(autouse=True)
+def session_vector_mocks():
+    with (
+        patch(
+            "cognee.infrastructure.session.session_manager.index_session_qa", new_callable=AsyncMock
+        ),
+        patch(
+            "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "cognee.infrastructure.session.session_turn.search_session_qa_ids",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        yield
+
+
 async def _qa_expirations(adapter, user_id: str, session_id: str):
     """Read expires_at for every QA row of a session directly from the table."""
     async with adapter.sessionmaker() as session:
