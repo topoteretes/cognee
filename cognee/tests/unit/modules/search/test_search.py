@@ -276,6 +276,64 @@ async def test_search_no_access_control_keeps_all_dataset_results(monkeypatch, s
 
 
 @pytest.mark.asyncio
+async def test_search_in_datasets_context_scopes_each_dataset_when_access_control_disabled(
+    monkeypatch, search_mod
+):
+    """Explicit datasets must be searched per-dataset even when ACCESS_CONTROL=false (#2867)."""
+    user = _make_user()
+    ds_one = _make_dataset(name="dataset_a")
+    ds_two = _make_dataset(name="dataset_b")
+    searched_dataset_ids = []
+
+    async def fake_get_retriever_output(**kwargs):
+        dataset = kwargs.get("dataset")
+        searched_dataset_ids.append(dataset.id if dataset else None)
+        return SearchResultPayload(
+            result_object="object",
+            context="ctx",
+            completion="ok",
+            search_type=SearchType.CHUNKS,
+            dataset_name=dataset.name if dataset else None,
+            dataset_id=dataset.id if dataset else None,
+            dataset_tenant_id=dataset.tenant_id if dataset else None,
+        )
+
+    class DummyGraphEngine:
+        async def is_empty(self):
+            return False
+
+    async def fake_get_graph_engine():
+        return DummyGraphEngine()
+
+    class DummyContext:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: False)
+    monkeypatch.setattr(search_mod, "get_retriever_output", fake_get_retriever_output)
+    monkeypatch.setattr(search_mod, "get_graph_engine", fake_get_graph_engine)
+    monkeypatch.setattr(
+        search_mod,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: DummyContext(),
+    )
+
+    results = await search_mod.search_in_datasets_context(
+        search_datasets=[ds_one, ds_two],
+        query_type=SearchType.CHUNKS,
+        query_text="q",
+        user=user,
+    )
+
+    assert searched_dataset_ids == [ds_one.id, ds_two.id]
+    assert len(results) == 2
+    assert {result.dataset_id for result in results} == {ds_one.id, ds_two.id}
+
+
+@pytest.mark.asyncio
 async def test_search_passes_retriever_specific_config_to_authorized_search(
     monkeypatch, search_mod
 ):
