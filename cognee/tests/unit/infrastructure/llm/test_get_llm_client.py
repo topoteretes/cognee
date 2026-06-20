@@ -186,7 +186,9 @@ async def test_openai_adapter_passes_fallback_endpoint_on_policy_fallback(monkey
         chat = FakeChat()
 
     monkeypatch.setattr(openai_adapter, "ContentFilterFinishReasonError", PolicyFallbackTrigger)
-    monkeypatch.setattr(generic_adapter.instructor, "from_litellm", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        generic_adapter.instructor, "from_litellm", lambda *args, **kwargs: object()
+    )
     monkeypatch.setattr(openai_adapter.instructor, "from_litellm", lambda *args, **kwargs: object())
 
     adapter = OpenAIAdapter(
