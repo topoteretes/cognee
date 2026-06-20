@@ -1,5 +1,6 @@
 """Adapter for Generic API LLM provider API"""
 
+import asyncio
 import base64
 import logging
 import mimetypes
@@ -86,6 +87,7 @@ class GenericAPIAdapter(LLMInterface):
         fallback_api_key: str | None = None,
         fallback_endpoint: str | None = None,
         llm_args: dict[str, Any] | None = None,
+        timeout: int | None = None,
     ) -> None:
         self.name = name
         self.model = model
@@ -100,6 +102,7 @@ class GenericAPIAdapter(LLMInterface):
         self.fallback_endpoint = fallback_endpoint
         self._base_llm_args: dict[str, Any] = llm_args or {}
         self.llm_args = self._base_llm_args
+        self.timeout = timeout
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -153,23 +156,27 @@ class GenericAPIAdapter(LLMInterface):
         merged_kwargs = {**self.llm_args, **kwargs}
         try:
             async with llm_rate_limiter_context_manager():
-                result = await self.aclient.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": system_prompt,
-                        },
-                        {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                    ],
-                    max_retries=2,
-                    api_key=self.api_key,
-                    api_base=self.endpoint,
-                    response_model=response_model,
-                    **merged_kwargs,
+                timeout_val = self.timeout if self.timeout else None
+                result = await asyncio.wait_for(
+                    self.aclient.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
+                            },
+                        ],
+                        max_retries=2,
+                        api_key=self.api_key,
+                        api_base=self.endpoint,
+                        response_model=response_model,
+                        **merged_kwargs,
+                    ),
+                    timeout=timeout_val,
                 )
                 _enrich_llm_span(self.model, self.name)
                 return result
@@ -200,23 +207,27 @@ class GenericAPIAdapter(LLMInterface):
 
             try:
                 async with llm_rate_limiter_context_manager():
-                    return await self.aclient.chat.completions.create(
-                        model=fallback_model,
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": system_prompt,
-                            },
-                            {
-                                "role": "user",
-                                "content": f"""{text_input}""",
-                            },
-                        ],
-                        max_retries=2,
-                        api_key=self.fallback_api_key,
-                        api_base=self.fallback_endpoint,
-                        response_model=response_model,
-                        **fallback_llm_args,
+                    timeout_val = self.timeout if self.timeout else None
+                    return await asyncio.wait_for(
+                        self.aclient.chat.completions.create(
+                            model=fallback_model,
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": system_prompt,
+                                },
+                                {
+                                    "role": "user",
+                                    "content": f"""{text_input}""",
+                                },
+                            ],
+                            max_retries=2,
+                            api_key=self.fallback_api_key,
+                            api_base=self.fallback_endpoint,
+                            response_model=response_model,
+                            **fallback_llm_args,
+                        ),
+                        timeout=timeout_val,
                     )
             except (
                 ContentFilterFinishReasonError,

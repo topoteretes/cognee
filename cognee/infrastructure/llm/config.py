@@ -49,6 +49,7 @@ class LLMConfig(BaseSettings):
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
+    llm_timeout: int = 120
 
     baml_llm_provider: str = "openai"
     baml_llm_model: str = "gpt-5-mini"

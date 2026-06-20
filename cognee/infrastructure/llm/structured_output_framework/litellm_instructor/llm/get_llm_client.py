@@ -64,6 +64,7 @@ class _LLMClientCacheKey:
     llama_cpp_n_ctx: int
     llama_cpp_n_gpu_layers: int
     llama_cpp_chat_format: str
+    timeout: int
 
 
 # Define an Enum for LLM Providers
@@ -178,6 +179,7 @@ def _build_llm_client_cache_key(llm_config, max_completion_tokens: int) -> _LLMC
         llama_cpp_n_ctx=llm_config.llama_cpp_n_ctx,
         llama_cpp_n_gpu_layers=llm_config.llama_cpp_n_gpu_layers,
         llama_cpp_chat_format=llm_config.llama_cpp_chat_format,
+        timeout=llm_config.llm_timeout,
     )
 
 
@@ -289,6 +291,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             fallback_endpoint=cache_key.fallback_endpoint,
             fallback_model=cache_key.fallback_model,
             llm_args=llm_args,
+            timeout=cache_key.timeout,
         )
 
     elif provider == LLMProvider.GEMINI:
