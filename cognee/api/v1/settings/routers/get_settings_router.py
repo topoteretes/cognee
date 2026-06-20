@@ -90,9 +90,16 @@ def get_settings_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Invalid settings provided
+        - **403 Forbidden**: Only superusers can modify global settings
         - **500 Internal Server Error**: Error saving settings
         """
         from cognee.modules.settings import save_llm_config, save_vector_db_config
+        from fastapi import HTTPException
+
+        if not user.is_superuser:
+            raise HTTPException(
+                status_code=403, detail="Only superusers can modify global settings"
+            )
 
         if new_settings.llm is not None:
             await save_llm_config(new_settings.llm)
