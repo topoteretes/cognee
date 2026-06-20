@@ -1,9 +1,10 @@
 from typing import Union
 from uuid import UUID
 
+from cognee.modules.data.exceptions import DatasetTypeError
 from cognee.modules.data.models import Dataset
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
-from cognee.modules.data.methods.get_dataset_ids import get_dataset_ids
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 
@@ -23,15 +24,28 @@ async def get_authorized_existing_datasets(
 
     """
     if datasets:
-        # Function handles transforming dataset input to dataset IDs (if possible)
-        dataset_ids = await get_dataset_ids(datasets, user)
-        # If dataset_ids are provided filter these datasets based on what user has permission for.
-        if dataset_ids:
+        if all(isinstance(dataset, UUID) for dataset in datasets):
             existing_datasets = await get_specific_user_permission_datasets(
-                user.id, permission_type, dataset_ids
+                user.id, permission_type, list(datasets)
             )
+        elif all(isinstance(dataset, str) for dataset in datasets):
+            # Resolve names against ACL-visible datasets, not only owner-scoped rows.
+            # Fixes shared-dataset add/search when a collaborator uses dataset_name=...
+            permitted_datasets = await get_all_user_permission_datasets(user, permission_type)
+            requested_names = set(datasets)
+            existing_datasets = [
+                dataset for dataset in permitted_datasets if dataset.name in requested_names
+            ]
+            resolved_names = {dataset.name for dataset in existing_datasets}
+            if resolved_names != requested_names:
+                raise PermissionDeniedError(
+                    f"Request owner does not have necessary permission: [{permission_type}] "
+                    "for all datasets requested."
+                )
         else:
-            existing_datasets = []
+            raise DatasetTypeError(
+                f"One or more of the provided dataset types is not handled: {datasets}"
+            )
     else:
         # If no datasets are provided, work with all existing datasets user has permission for.
         existing_datasets = await get_all_user_permission_datasets(user, permission_type)
