@@ -176,7 +176,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             - bool: True if the node exists, otherwise False.
         """
-        results = self.query(
+        results = await self.query(
             f"""
                 MATCH (n:`{BASE_LABEL}`)
                 WHERE n.id = $node_id
