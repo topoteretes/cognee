@@ -1,12 +1,24 @@
+import logging
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
+import litellm
 from pydantic import BaseModel
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_not_exception_type,
+    stop_after_delay,
+    wait_exponential_jitter,
+)
 
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 T = TypeVar("T", bound="BaseModel | str")
 
@@ -21,30 +33,30 @@ def _inject_agent_memory(text_input: str) -> str:
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
 
 
-async def _direct_str_completion(text_input: str, system_prompt: str, **kwargs: Any) -> str:
+@retry(
+    stop=stop_after_delay(128),
+    wait=wait_exponential_jitter(8, 128),
+    retry=retry_if_not_exception_type(
+        (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
+    ),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
+async def direct_str_completion(text_input: str, system_prompt: str, **kwargs: Any) -> str:
     """Call litellm directly for plain-text completions, bypassing instructor.
 
     Instructor wraps the call in JSON/tool-call schemas that local
     llama.cpp-compatible servers don't honour, causing repeated
     InstructorRetryException and tenacity retry sleeps.
     """
-    import litellm
+    from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
     llm_config = get_llm_config()
     merged_kwargs = {**(llm_config.llm_args or {}), **kwargs}
 
-    model = llm_config.llm_model
-    if model.startswith("hosted_vllm/"):
-        model = "openai/" + model.removeprefix("hosted_vllm/")
-        extra_body = dict(merged_kwargs.get("extra_body", {}) or {})
-        extra_body["strict"] = False
-        merged_kwargs["extra_body"] = extra_body
-
-    from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-
     async with llm_rate_limiter_context_manager():
         resp = await litellm.acompletion(
-            model=model,
+            model=llm_config.llm_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text_input},
@@ -108,7 +120,7 @@ class LLMGateway:
         # short-circuit the instructor path here.
         if response_model is str and llm_config.structured_output_framework.upper() != "BAML":
             return _record_session_usage_after(
-                _direct_str_completion(text_input, system_prompt, **kwargs),
+                direct_str_completion(text_input, system_prompt, **kwargs),
                 text_input=text_input,
             )
 

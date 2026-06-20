@@ -103,13 +103,6 @@ class GenericAPIAdapter(LLMInterface):
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
-        if self.model.startswith("hosted_vllm/"):
-            model_without_prefix = self.model.replace("hosted_vllm/", "", 1)
-            self.model = "openai/" + model_without_prefix
-            extra_body = dict(self.llm_args.get("extra_body", {}))
-            extra_body["strict"] = False
-            self.llm_args["extra_body"] = extra_body
-
         self.aclient = instructor.from_litellm(
             litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
         )
@@ -191,12 +184,6 @@ class GenericAPIAdapter(LLMInterface):
 
             fallback_model = self.fallback_model
             fallback_llm_args = {**self._base_llm_args, **kwargs}
-            if fallback_model and fallback_model.startswith("hosted_vllm/"):
-                fallback_model = fallback_model.replace("hosted_vllm/", "", 1)
-                fallback_model = "openai/" + fallback_model
-                fallback_extra_body = dict(fallback_llm_args.get("extra_body", {}))
-                fallback_extra_body["strict"] = False
-                fallback_llm_args["extra_body"] = fallback_extra_body
 
             try:
                 async with llm_rate_limiter_context_manager():
