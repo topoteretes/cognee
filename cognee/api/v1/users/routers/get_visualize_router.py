@@ -9,7 +9,6 @@ from cognee.modules.users.methods import get_authenticated_user, get_user
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.models import User
 
-from cognee.context_global_variables import set_database_global_context_variables
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 
@@ -86,9 +85,7 @@ def get_visualize_router() -> APIRouter:
             # Verify user has permission to read dataset
             dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-            # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True.
-            async with set_database_global_context_variables(dataset[0].id, dataset[0].owner_id):
-                html_visualization = await visualize_graph()
+            html_visualization = await visualize_graph(dataset=dataset[0].id, user=user)
             return HTMLResponse(html_visualization)
 
         except Exception as error:
