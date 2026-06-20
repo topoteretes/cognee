@@ -56,6 +56,13 @@ async def improve(
        sessions is cognified into the permanent graph, tagged with
        ``node_set="user_sessions_from_cache"``.
 
+    2c. **Distill sessions** -- each session's gated active-guidance
+       entries are curated into entity-anchored lessons and
+       add+cognified into the graph (tagged ``session_learnings``).
+       Sessions with no gated guidance produce nothing. This is what
+       lets ``remember(session, self_improvement=True)`` cover session
+       distillation without an explicit ``distill_session`` call.
+
     3. **Default enrichment** -- triplet embeddings are extracted and
        indexed (same as calling ``improve()`` without sessions).
 
@@ -174,6 +181,19 @@ async def improve(
                     run_in_background=run_in_background,
                 )
                 stages_run.append("persist_trace_steps")
+
+                # Stage 2c: distill each session's gated guidance into curated,
+                # entity-anchored lessons and add+cognify them into the graph.
+                # This is what lets remember(session, self_improvement=True)
+                # cover session distillation without an explicit
+                # cognee.session.distill_session call.
+                distilled = await _distill_sessions(
+                    dataset=dataset,
+                    session_ids=session_ids,
+                    user=user,
+                )
+                if distilled:
+                    stages_run.append("distill_sessions")
             except Exception:
                 if acquired_lock_for:
                     from cognee.infrastructure.locks import release_improve_lock
@@ -315,6 +335,48 @@ async def _bridge_sessions(
         logger.info("improve: session Q&A persisted from %d session(s)", len(session_ids))
     except Exception as e:
         logger.warning("improve: session persistence failed (non-fatal): %s", e)
+
+
+async def _distill_sessions(
+    dataset: Union[str, UUID],
+    session_ids: List[str],
+    user,
+) -> int:
+    """Distill each session's gated learnings into curated lessons in the graph.
+
+    Delegates to ``session_distillation.distill_session`` per session: it loads
+    the session's gated active-guidance entries, curates them into proposed
+    lessons, writes/rejects each with entity anchoring, and add+cognifies the
+    accepted lessons into ``dataset`` (tagged ``session_learnings``).
+
+    Best-effort and fail-open: a session with no gated guidance simply yields no
+    lessons (status ``no_gated_entries``), and an error on one session never
+    blocks the others or the rest of ``improve()``. Returns the total number of
+    lesson documents written across all sessions.
+
+    Note: ``distill_session`` runs its own ``add``/``cognify`` (it does not call
+    ``improve``), so there is no recursion back into this function.
+    """
+    from cognee.modules.session_distillation import distill_session
+
+    distilled = 0
+    for session_id in session_ids:
+        try:
+            result = await distill_session(session_id, dataset=dataset, user=user)
+            distilled += len(result.documents)
+            logger.info(
+                "improve: distilled session '%s' -> status=%s documents=%d",
+                session_id,
+                result.status,
+                len(result.documents),
+            )
+        except Exception as e:
+            logger.warning(
+                "improve: session distillation failed for '%s' (non-fatal): %s",
+                session_id,
+                e,
+            )
+    return distilled
 
 
 async def _persist_session_traces(

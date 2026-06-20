@@ -531,6 +531,35 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
+    async def get_qa_entries_by_ids(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_ids: List[str],
+    ) -> List[SessionQAEntry]:
+        """Return matching QA entries for the given session, oldest first."""
+        if not qa_ids:
+            return []
+
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                result = await session.execute(
+                    select(cache_qa_entries.c.payload)
+                    .where(
+                        self._session_filter(cache_qa_entries, user_id, session_id),
+                        cache_qa_entries.c.qa_id.in_(qa_ids),
+                        self._not_expired(cache_qa_entries),
+                    )
+                    .order_by(cache_qa_entries.c.seq.asc())
+                )
+                rows = result.scalars().all()
+            return [SessionQAEntry.model_validate(payload) for payload in rows]
+        except Exception as error:
+            error_msg = f"Unexpected error while reading Q&A by ids from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
     async def _update_qa_payload(self, user_id: str, session_id: str, qa_id: str, merge_fn) -> bool:
         """Shared FOR UPDATE read-merge-write transaction for QA updates."""
         attempt = 0

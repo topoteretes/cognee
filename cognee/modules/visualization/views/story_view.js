@@ -549,6 +549,18 @@ function updateLegend(){
       '</span>'+
       '<span style="opacity:0.7">low → high</span>'+
     '</div>';
+  // Memory section — only when the graph actually contains distilled
+  // session learnings, so we don't advertise a cue that isn't present.
+  var memorySection="";
+  if(nodes.some(function(n){return n.is_memory_learning===true})){
+    memorySection=
+      '<span class="legend-sep"></span>'+
+      '<div class="legend-section">'+
+        '<span class="legend-title">Memory</span>'+
+        '<span class="legend-item"><span class="legend-dot" style="background:#FFC53D"></span>session learning</span>'+
+        '<span class="legend-item"><span class="legend-ring memory"></span>distilled into graph</span>'+
+      '</div>';
+  }
   legendEl.innerHTML=
     '<div class="legend-section">'+
       '<span class="legend-title">'+esc(sectionLabel)+'</span>'+
@@ -556,6 +568,7 @@ function updateLegend(){
     '</div>'+
     '<span class="legend-sep"></span>'+
     ontologySection+
+    memorySection+
     '<span class="legend-sep"></span>'+
     importanceSection;
 }
@@ -1916,6 +1929,19 @@ function draw(){
         ctx.strokeStyle=_light ? "rgba(13,180,40,0.85)" : "rgba(13,255,0,0.85)";
         ctx.lineWidth=1.6/scale;
         ctx.stroke();
+      }
+
+      // Distilled session-learning marker: a dashed gold ring (drawn outside
+      // the ontology ring so both can coexist) flags memory promoted into the
+      // graph by the self-improvement loop, regardless of color-by mode.
+      if(n.is_memory_learning===true){
+        ctx.beginPath();
+        ctx.arc(n.x,n.y,r+3.8/scale,0,Math.PI*2);
+        ctx.strokeStyle=_light ? "rgba(217,164,6,0.95)" : "rgba(255,197,61,0.95)";
+        ctx.lineWidth=1.6/scale;
+        ctx.setLineDash([3/scale,2/scale]);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
       ctx.globalAlpha=1;
     });

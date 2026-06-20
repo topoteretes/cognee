@@ -191,6 +191,7 @@ class SessionContextEntry(BaseModel):
     harmful_count: int = 0
     priority: int = 0
     last_served_at: Optional[str] = None
+    embedding: Optional[List[float]] = None
     kind: Literal["context"] = "context"
 
     @field_validator("id")
