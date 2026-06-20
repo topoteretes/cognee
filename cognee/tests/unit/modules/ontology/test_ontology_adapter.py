@@ -491,6 +491,73 @@ def test_get_ontology_resolver_from_env_resolver_functionality():
     assert start_node is None
 
 
+def test_file_object_ontology_loading_guesses_turtle_format():
+    """Test loading a Turtle ontology from a file-like object."""
+    import io
+
+    ttl = """
+        @prefix ex: <http://example.org/test#> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+        ex:Car a owl:Class .
+    """
+    ontology_file = io.StringIO(ttl)
+    ontology_file.name = "ontology.ttl"
+
+    resolver = RDFLibOntologyResolver(ontology_file=ontology_file)
+
+    assert resolver.graph is not None
+    assert "car" in resolver.lookup["classes"]
+
+
+def test_file_object_ontology_loading_falls_back_without_name():
+    """Test unnamed file-like ontology content falls back to supported RDF formats."""
+    import io
+
+    ttl = """
+        @prefix ex: <http://example.org/test#> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+        ex:Truck a owl:Class .
+    """
+
+    resolver = RDFLibOntologyResolver(ontology_file=io.StringIO(ttl))
+
+    assert resolver.graph is not None
+    assert "truck" in resolver.lookup["classes"]
+
+
+def test_file_object_ontology_loading_invalid_content_sets_empty_graph():
+    """Test invalid file-like ontology content is skipped after all formats fail."""
+    import io
+
+    ontology_file = io.StringIO("@prefix ex: <http://example.org/test#> . ex:Broken a")
+    ontology_file.name = "ontology.ttl"
+
+    resolver = RDFLibOntologyResolver(ontology_file=ontology_file)
+
+    assert resolver.graph is None
+    assert resolver.lookup["classes"] == {}
+
+
+def test_file_object_ontology_loading_accepts_explicit_format():
+    """Test caller-provided ontology format is accepted for file-like content."""
+    import io
+
+    json_ld = """
+        {
+          "@context": {"ex": "http://example.org/test#", "owl": "http://www.w3.org/2002/07/owl#"},
+          "@id": "ex:Plane",
+          "@type": "owl:Class"
+        }
+    """
+
+    resolver = RDFLibOntologyResolver(ontology_file=io.StringIO(json_ld), ontology_format="json-ld")
+
+    assert resolver.graph is not None
+    assert "plane" in resolver.lookup["classes"]
+
+
 def test_multifile_ontology_loading_success():
     """Test successful loading of multiple ontology files."""
     ns1 = Namespace("http://example.org/cars#")

@@ -4,6 +4,7 @@ from cognee.shared.logging_utils import get_logger
 from collections import deque
 from typing import List, Tuple, Dict, Optional, Any, Union, IO
 from rdflib import Graph, URIRef, RDF, RDFS, OWL
+from rdflib.util import guess_format
 
 from cognee.modules.ontology.exceptions import (
     OntologyInitializationError,
@@ -28,6 +29,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         self,
         ontology_file: Optional[Union[str, List[str], IO, List[IO]]] = None,
         matching_strategy: Optional[MatchingStrategy] = None,
+        ontology_format: Optional[str] = None,
     ) -> None:
         super().__init__(matching_strategy)
         self.ontology_file = ontology_file
@@ -57,7 +59,33 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     for file_obj in file_objects:
                         try:
                             content = file_obj.read()
-                            self.graph.parse(data=content, format="xml")
+                            source_name = getattr(file_obj, "name", "")
+                            guessed_format = guess_format(source_name)
+                            formats = [ontology_format] if ontology_format else []
+                            if guessed_format and guessed_format not in formats:
+                                formats.append(guessed_format)
+                            formats.extend(
+                                rdf_format
+                                for rdf_format in ("xml", "turtle", "n3", "json-ld", "nt")
+                                if rdf_format not in formats
+                            )
+
+                            for rdf_format in formats:
+                                try:
+                                    graph = Graph()
+                                    graph.parse(data=content, format=rdf_format)
+                                except Exception:
+                                    continue
+                                self.graph += graph
+                                logger.info(
+                                    "Successfully parsed ontology file object '%s' using format: %s",
+                                    source_name or "<unnamed>",
+                                    rdf_format,
+                                )
+                                break
+                            else:
+                                raise ValueError("No supported RDF format could parse file object")
+
                             loaded_objects.append(file_obj)
                             logger.info("Ontology loaded successfully from file object")
                         except Exception as e:
