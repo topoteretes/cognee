@@ -24,17 +24,15 @@ logger = get_logger()
 
 async def visualize_graph(
     destination_file_path: str = None,
-    datasets: Optional[Union[str, UUID, List[Union[str, UUID]]]] = None,
+    dataset: Optional[Union[str, UUID]] = None,
     user: Optional[User] = None,
 ) -> str:
     if backend_access_control_enabled():
-        if isinstance(datasets, (str, UUID)):
-            datasets = [datasets]
-
         if user is None:
             user = await get_default_user()
 
-        authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
+        # get_authorized_existing_datasets expects a list, so wrap the single dataset.
+        authorized_datasets = await get_authorized_existing_datasets([dataset], "read", user)
 
         if authorized_datasets:
             dataset = authorized_datasets[0]

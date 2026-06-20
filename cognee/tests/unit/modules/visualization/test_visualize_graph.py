@@ -22,5 +22,5 @@ async def test_visualize_graph_uses_dataset_context(monkeypatch):
         visualize_module, "cognee_network_visualization", AsyncMock(return_value="<html></html>")
     )
 
-    assert await visualize_module.visualize_graph(datasets="NLP") == "<html></html>"
+    assert await visualize_module.visualize_graph(dataset="NLP") == "<html></html>"
     set_context.assert_awaited_once_with(dataset.id, dataset.owner_id)
