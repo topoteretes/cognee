@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
 
@@ -136,6 +137,9 @@ async def search_session_qa_ids(
             limit=limit,
             node_name=[session_scope_tag(user_id, session_id)],
         )
+    except CollectionNotFoundError:
+        logger.debug("Session QA vector collection is not initialized yet.")
+        return []
     except Exception as error:
         logger.warning("Session QA vector search failed open: %s", error)
         return []

@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.session.session_context_builder import (
     DeterministicRanker,
     apply_candidate_updates,
@@ -239,6 +240,28 @@ class TestSessionQaVectorHelpers:
         assert kwargs["query_vector"] is None
         assert kwargs["limit"] == 3
         assert kwargs["node_name"] == [session_scope_tag("u1", "s1")]
+
+    @pytest.mark.asyncio
+    async def test_search_session_qa_ids_treats_missing_collection_as_empty(self, monkeypatch):
+        vector_engine = SimpleNamespace()
+
+        async def fake_search(*_args, **_kwargs):
+            raise CollectionNotFoundError("Collection not found")
+
+        vector_engine.search = fake_search
+        monkeypatch.setattr(
+            "cognee.infrastructure.databases.vector.get_vector_engine",
+            lambda: vector_engine,
+        )
+
+        qa_ids = await search_session_qa_ids(
+            user_id="u1",
+            session_id="s1",
+            query_text="Question?",
+            limit=3,
+        )
+
+        assert qa_ids == []
 
     @pytest.mark.asyncio
     async def test_delete_session_qa_vector_uses_qa_id(self, monkeypatch):
