@@ -552,7 +552,9 @@ class CogneeClient:
             return response.json()
         else:
             with redirect_stdout(sys.stderr):
-                kwargs = {"top_k": top_k, "auto_route": True}
+                from cognee.modules.users.methods import get_default_user
+
+                kwargs = {"top_k": top_k, "auto_route": True, "user": await get_default_user()}
                 if search_type:
                     from cognee.modules.search.types import SearchType
 
