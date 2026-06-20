@@ -12,10 +12,10 @@ logger = get_logger()
 
 
 async def run_custom_pipeline(
-    tasks: Union[List[Task], List[str]] = None,
+    tasks: Optional[Union[List[Task], List[str]]] = None,
     data: Any = None,
     dataset: Union[str, UUID] = "main_dataset",
-    user: User = None,
+    user: Optional[User] = None,
     vector_db_config: Optional[dict] = None,
     graph_db_config: Optional[dict] = None,
     use_pipeline_cache: bool = False,
@@ -54,7 +54,7 @@ async def run_custom_pipeline(
     """
 
     custom_tasks = [
-        *tasks,
+        *(tasks or []),
     ]
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for

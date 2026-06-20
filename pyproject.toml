@@ -274,7 +274,8 @@ include = [
     "cognee/infrastructure/locks",
     "cognee/infrastructure/session",
     "cognee/infrastructure/utils",
-    "cognee/shared"
+    "cognee/shared",
+    "cognee/modules/run_custom_pipeline"
 ]
 # Exclude generated files
 exclude = ["cognee/infrastructure/llm/structured_output_framework/baml/baml_client/"]
