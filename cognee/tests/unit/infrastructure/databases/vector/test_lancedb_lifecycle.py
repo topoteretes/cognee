@@ -234,3 +234,25 @@ async def test_close_does_not_block_event_loop(monkeypatch, tmp_path):
     assert ticks >= 5, (
         f"event loop appears blocked: only {ticks} heartbeats during a 150ms shutdown"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_prune_removes_local_db_directory(tmp_path):
+    """prune() must delete the local database directory from the filesystem."""
+    from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import IndexSchema
+
+    db_path = tmp_path / "lance_db"
+    adapter = LanceDBAdapter(
+        url=str(db_path),
+        api_key=None,
+        embedding_engine=_FakeEmbeddingEngine(),
+    )
+
+    # Materialize the directory by creating a collection
+    await adapter.create_collection("test_col", IndexSchema)
+
+    assert db_path.exists() is True
+    await adapter.prune()
+    assert db_path.exists() is False
+
