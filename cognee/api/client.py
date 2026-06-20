@@ -48,6 +48,7 @@ from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.agents.routers import get_agents_router
 from cognee.api.v1.visualize.routers import get_schema_router
 from cognee.api.v1.skills.routers import get_skills_router
+from cognee.api.v1.proposals.routers import get_proposals_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
@@ -261,6 +262,7 @@ app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["vi
 app.include_router(get_schema_router(), prefix="/api/v1/schema", tags=["schema"])
 
 app.include_router(get_skills_router(), prefix="/api/v1/skills", tags=["skills"])
+app.include_router(get_proposals_router(), prefix="/api/v1/proposals", tags=["skills"])
 
 app.include_router(
     get_configuration_router(),
