@@ -57,31 +57,11 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     for file_obj in file_objects:
                         try:
                             content = file_obj.read()
-                        except Exception as e:
-                            logger.warning("Failed to read ontology file object: %s", str(e))
-                            continue
-
-                        parsed = False
-                        for rdf_format in ("xml", "turtle", "n3", "json-ld"):
-                            try:
-                                candidate_graph = Graph()
-                                candidate_graph.parse(data=content, format=rdf_format)
-                            except Exception:
-                                continue
-                            self.graph += candidate_graph
-                            parsed = True
-                            logger.info(
-                                "Ontology loaded successfully from file object (format=%s)",
-                                rdf_format,
-                            )
-                            break
-
-                        if parsed:
+                            self.graph.parse(data=content, format="xml")
                             loaded_objects.append(file_obj)
-                        else:
-                            logger.warning(
-                                "Failed to parse ontology file object with any supported format (xml, turtle, n3, json-ld)"
-                            )
+                            logger.info("Ontology loaded successfully from file object")
+                        except Exception as e:
+                            logger.warning("Failed to parse ontology file object: %s", str(e))
 
                     if not loaded_objects:
                         logger.info(
