@@ -21,48 +21,6 @@ from .npm_utils import run_npm_command
 logger = get_logger()
 
 
-def _mcp_docker_api_url(backend_port: int) -> str:
-    """Backend URL reachable from inside the MCP container (Docker Desktop / Colima)."""
-    return f"http://host.docker.internal:{backend_port}"
-
-
-def build_mcp_docker_command(
-    *,
-    container_name: str,
-    mcp_port: int,
-    image: str,
-    backend_port: Optional[int] = None,
-    env_file: Optional[str] = None,
-) -> list[str]:
-    """Build the docker run argv for launching the MCP server container."""
-    docker_cmd = [
-        "docker",
-        "run",
-        "--name",
-        container_name,
-        "-p",
-        f"{mcp_port}:8000",
-        "--rm",
-        "--add-host",
-        "host.docker.internal:host-gateway",
-        "-e",
-        "TRANSPORT_MODE=sse",
-    ]
-
-    if backend_port is not None:
-        docker_cmd.extend(
-            [
-                "-e",
-                f"API_URL={_mcp_docker_api_url(backend_port)}",
-            ]
-        )
-    elif env_file:
-        docker_cmd.extend(["--env-file", env_file])
-
-    docker_cmd.append(image)
-    return docker_cmd
-
-
 def _check_docker_available() -> Tuple[bool, str]:
     """
     Check if the Docker daemon is reachable by running `docker info`.
@@ -574,26 +532,35 @@ def start_ui(
 
             container_name = f"cognee-mcp-{uuid.uuid4().hex[:8]}"
 
-            env_file = None
-            backend_port_for_mcp = backend_port if start_backend else None
-            if not start_backend:
-                env_file = os.path.join(os.getcwd(), ".env")
-
-            docker_cmd = build_mcp_docker_command(
-                container_name=container_name,
-                mcp_port=mcp_port,
-                image=image,
-                backend_port=backend_port_for_mcp,
-                env_file=env_file,
-            )
+            docker_cmd = [
+                "docker",
+                "run",
+                "--name",
+                container_name,
+                "-p",
+                f"{mcp_port}:8000",
+                "--rm",
+                "-e",
+                "TRANSPORT_MODE=sse",
+            ]
 
             if start_backend:
-                logger.info(
-                    f"Configuring MCP to connect to backend API at "
-                    f"{_mcp_docker_api_url(backend_port)}"
+                docker_cmd.extend(
+                    [
+                        "-e",
+                        f"API_URL=http://localhost:{backend_port}",
+                    ]
                 )
-            elif env_file:
-                logger.info(f"Configuring MCP with env file: {env_file}")
+                logger.info(
+                    f"Configuring MCP to connect to backend API at http://localhost:{backend_port}"
+                )
+                logger.info("(localhost will be auto-converted to host.docker.internal)")
+            else:
+                cwd = os.getcwd()
+                env_file = os.path.join(cwd, ".env")
+                docker_cmd.extend(["--env-file", env_file])
+
+            docker_cmd.append(image)
 
             mcp_process = subprocess.Popen(
                 docker_cmd,
