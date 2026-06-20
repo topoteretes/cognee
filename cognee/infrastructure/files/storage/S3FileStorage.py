@@ -49,7 +49,12 @@ class S3FileStorage(Storage):
                 client_kwargs={"region_name": s3_config.aws_region},
             )
         else:
-            raise ValueError("S3 credentials are not set in the configuration.")
+            # No credentials provided, let s3fs discover them via the IAM Role/Chain
+         self.s3 = s3fs.S3FileSystem(
+         anon=False,
+         endpoint_url=s3_config.aws_endpoint_url,
+         client_kwargs={"region_name": s3_config.aws_region},
+    )
 
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
