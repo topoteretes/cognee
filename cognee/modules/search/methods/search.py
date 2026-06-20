@@ -311,9 +311,11 @@ async def search_in_datasets_context(
                     include_references=include_references,
                 )
 
-    # Search every dataset async based on query and appropriate database configuration
+    # Search every dataset async based on query and appropriate database configuration.
+    # When callers pass explicit datasets, always scope search per dataset — even if
+    # backend access control is disabled (self-hosted Neo4j without per-dataset DBs).
     tasks = []
-    if backend_access_control_enabled():
+    if backend_access_control_enabled() or search_datasets:
         for dataset in search_datasets:
             tasks.append(
                 _search_in_dataset_context(
@@ -338,14 +340,12 @@ async def search_in_datasets_context(
                 )
             )
     else:
-        # Run search without setting database context in case access control is disabled
-        # Needed for low level pipelines that need to run search without dataset context.
-        dataset = search_datasets[0] if len(search_datasets) == 1 else None
+        # Low-level pipelines may run search without an explicit dataset scope.
         retriever_kwargs = dict(
             query_type=query_type,
             query_text=query_text,
             user=user,
-            dataset=dataset,
+            dataset=None,
             system_prompt_path=system_prompt_path,
             system_prompt=system_prompt,
             top_k=top_k,
@@ -364,13 +364,9 @@ async def search_in_datasets_context(
         )
 
         async def _search_without_context() -> SearchResultPayload:
-            # No dataset DB context to set when access control is disabled, but
-            # still forward any per-call LLM/embedding overrides onto the async
-            # context (set_database_global_context_variables applies these even
-            # in single-tenant mode and ignores the dataset argument).
             if llm_config is not None or embedding_config is not None:
                 async with set_database_global_context_variables(
-                    dataset.id if dataset else None,
+                    None,
                     user.id,
                     llm_config=llm_config,
                     embedding_config=embedding_config,
