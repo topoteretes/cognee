@@ -1,9 +1,8 @@
 from fastapi.responses import JSONResponse
 from fastapi import File, UploadFile as UF, Depends, Form, Query, status
-from typing import Optional, Annotated
+from typing import Annotated, List, Optional
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
-from typing import List
 from uuid import UUID
 from pydantic import WithJsonSchema
 from cognee.shared.logging_utils import get_logger
@@ -49,7 +48,7 @@ def get_update_router() -> APIRouter:
             description="UUID of the dataset containing the document to update.",
             examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
         ),
-        data: List[UploadFile] = File(
+        data: Optional[List[UploadFile]] = File(
             default=None,
             description=(
                 "New version of the document that replaces the existing one. The existing "

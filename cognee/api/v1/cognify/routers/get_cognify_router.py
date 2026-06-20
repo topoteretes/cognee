@@ -3,6 +3,8 @@ import asyncio
 from uuid import UUID
 from pydantic import Field
 from typing import List, Optional
+
+from cognee.api.dto_types import OptionalStringList, OptionalUUIDList
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
@@ -42,18 +44,19 @@ class CognifyPayloadDTO(InDTO):
     # Examples double as the Swagger try-it-out prefill, which is SUBMITTED
     # as-is on Execute — keep them behavior-neutral (empty/None) for every
     # field where a value changes processing.
-    datasets: Optional[List[str]] = Field(
+    datasets: OptionalStringList = Field(
         default=None,
-        examples=[["default_dataset"]],
+        examples=["default_dataset", ["default_dataset"]],
         description=(
-            "Dataset names to process; resolved against datasets owned by the authenticated user."
+            "Dataset name or list of names to process; resolved against datasets owned "
+            "by the authenticated user."
         ),
     )
-    dataset_ids: Optional[List[UUID]] = Field(
+    dataset_ids: OptionalUUIDList = Field(
         default=None,
-        examples=[[]],
+        examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890", []],
         description=(
-            "Dataset UUIDs to process (required for datasets shared with you). "
+            "Dataset UUID or list of UUIDs to process (required for datasets shared with you). "
             "Takes precedence over the datasets name list when both are provided."
         ),
     )

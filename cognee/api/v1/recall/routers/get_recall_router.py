@@ -9,6 +9,7 @@ from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.dto_types import OptionalStringList, OptionalUUIDList
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
@@ -33,32 +34,32 @@ class RecallPayloadDTO(InDTO):
             "Pass null to let cognee auto-route the query to the best strategy."
         ),
     )
-    datasets: Optional[list[str]] = Field(
+    datasets: OptionalStringList = Field(
         default=None,
-        examples=[["main_dataset"]],
+        examples=["main_dataset", ["main_dataset"]],
         description=(
-            "Dataset names to search within. Omit (null) to search all datasets "
-            "you have read access to."
+            "Dataset name or list of names to search within. Omit (null) to search all "
+            "datasets you have read access to."
         ),
     )
-    dataset_ids: Optional[list[UUID]] = Field(
+    dataset_ids: OptionalUUIDList = Field(
         default=None,
         examples=[[]],
         description=(
-            "Dataset UUIDs to search within; takes precedence over 'datasets' names "
-            "when both are provided. Leave empty to resolve by name."
+            "Dataset UUID or list of UUIDs to search within; takes precedence over "
+            "'datasets' names when both are provided. Leave empty to resolve by name."
         ),
     )
     query: str = Field(default="What is in the document?")
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(
+    node_name: OptionalStringList = Field(
         default=None,
-        examples=[["tech_docs"]],
+        examples=["tech_docs", ["tech_docs"]],
         description=(
-            "Restrict results to these node sets (the node_set values passed to "
-            "/v1/add or /v1/remember). Omit to search all nodes."
+            "Node set name or list of names to restrict results "
+            "(the node_set values passed to /v1/add or /v1/remember). Omit to search all nodes."
         ),
     )
     top_k: Optional[int] = Field(default=15)

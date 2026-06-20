@@ -9,6 +9,7 @@ from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
+from cognee.api.dto_types import OptionalStringList, OptionalUUIDList
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.modules.search.operations import get_history
@@ -31,32 +32,35 @@ class SearchPayloadDTO(InDTO):
             " AGENTIC_COMPLETION (enables skills/tools/max_iter)."
         ),
     )
-    datasets: Optional[list[str]] = Field(
+    datasets: OptionalStringList = Field(
         default=None,
-        examples=[["main_dataset"]],
+        examples=["main_dataset", ["main_dataset"]],
         description=(
-            "Dataset names to search. Names only resolve to datasets owned by the caller;"
-            " use dataset_ids for datasets shared with you."
+            "Dataset name or list of names to search. Names only resolve to datasets owned "
+            "by the caller; use dataset_ids for datasets shared with you."
         ),
     )
-    dataset_ids: Optional[list[UUID]] = Field(
+    dataset_ids: OptionalUUIDList = Field(
         default=None,
-        examples=[["a1b2c3d4-5678-40ab-8cde-1234567890ab"]],
+        examples=[
+            "a1b2c3d4-5678-40ab-8cde-1234567890ab",
+            ["a1b2c3d4-5678-40ab-8cde-1234567890ab"],
+        ],
         description=(
-            "Dataset UUIDs to search (required for datasets shared with you)."
-            " When provided, the datasets name list is ignored."
+            "Dataset UUID or list of UUIDs to search (required for datasets shared with you). "
+            "When provided, the datasets name list is ignored."
         ),
     )
     query: str = Field(default="What is in the document?")
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(
+    node_name: OptionalStringList = Field(
         default=None,
-        examples=[["tech_docs"]],
+        examples=["tech_docs", ["tech_docs"]],
         description=(
-            "Restrict results to nodes in these node_sets"
-            " (the node_set values used during add/remember)."
+            "Node set name or list of names to restrict results "
+            "(the node_set values used during add/remember)."
         ),
     )
     top_k: Optional[int] = Field(default=15)
