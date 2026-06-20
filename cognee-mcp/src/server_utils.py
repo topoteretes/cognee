@@ -4,6 +4,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 
@@ -60,24 +61,50 @@ def looks_like_file_path(data: str) -> bool:
     )
 
 
+def _local_file_paths_allowed() -> bool:
+    """Mirror cognee ACCEPT_LOCAL_FILE_PATH (default True)."""
+    raw = os.environ.get("ACCEPT_LOCAL_FILE_PATH", "true").strip().lower()
+    return raw in {"true", "1", "yes"}
+
+
+def _normalize_ingest_path(data: str) -> str:
+    path = data.strip()
+    if path.startswith("file://"):
+        path = path[7:]
+    return path
+
+
 def validate_file_path(
     data: str,
     *,
     path_exists: Callable[[str], bool] = os.path.exists,
     is_running_in_docker: Callable[[], bool] = lambda: False,
+    local_file_paths_allowed: Callable[[], bool] = _local_file_paths_allowed,
 ) -> Optional[str]:
     """Validate path-like input and return an MCP-friendly error when invalid."""
     if not looks_like_file_path(data):
         return None
 
-    path = data.strip()
-    if path.startswith("file://"):
-        path = path[7:]
+    if not local_file_paths_allowed():
+        return (
+            "Local file paths are disabled (ACCEPT_LOCAL_FILE_PATH=false). "
+            "Pass inline text or enable local file ingestion in the server environment."
+        )
 
-    if path_exists(path):
+    raw_path = _normalize_ingest_path(data)
+    path = Path(raw_path).expanduser()
+    if ".." in path.parts:
+        return f"Invalid file path (path traversal not allowed): {raw_path}"
+
+    try:
+        resolved = str(path.resolve(strict=False))
+    except (OSError, ValueError) as exc:
+        return f"Invalid file path: {raw_path} ({exc})"
+
+    if path_exists(resolved) or path_exists(raw_path):
         return None
 
-    msg = f"File not found: {path}"
+    msg = f"File not found: {raw_path}"
     if is_running_in_docker():
         msg += (
             "\n\nIt looks like you're running inside Docker. Host file paths are not "
