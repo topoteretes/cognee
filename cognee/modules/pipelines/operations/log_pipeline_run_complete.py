@@ -8,12 +8,8 @@ from typing import Any
 async def log_pipeline_run_complete(
     pipeline_run_id: UUID, pipeline_id: UUID, pipeline_name: str, dataset_id: UUID, data: Any
 ):
-    if not data:
-        data_info = "None"
-    elif isinstance(data, list) and all(isinstance(item, Data) for item in data):
-        data_info = [str(item.id) for item in data]
-    else:
-        data_info = str(data)
+    from cognee.modules.pipelines.utils.extract_data_info import extract_data_info
+    data_info = extract_data_info(data)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
