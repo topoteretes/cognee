@@ -1,3 +1,5 @@
+from io import StringIO
+
 import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
@@ -18,6 +20,24 @@ def test_ontology_adapter_initialization_file_not_found():
     """Test OntologyAdapter initialization with nonexistent file."""
     adapter = RDFLibOntologyResolver(ontology_file="nonexistent.owl")
     assert adapter.graph is None
+
+
+def test_ontology_adapter_loads_turtle_file_object():
+    """Turtle-serialized file objects should not be silently dropped (issue #2907)."""
+    turtle_content = """
+    @prefix : <http://example.org/test#> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+    :Car a owl:Class .
+    :Audi a :Car .
+    """
+
+    adapter = RDFLibOntologyResolver(ontology_file=StringIO(turtle_content))
+
+    assert adapter.graph is not None
+    assert "car" in adapter.lookup["classes"]
+    assert "audi" in adapter.lookup["individuals"]
 
 
 def test_build_lookup():
