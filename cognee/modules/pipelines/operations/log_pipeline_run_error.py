@@ -13,12 +13,9 @@ async def log_pipeline_run_error(
     data: Any,
     e: Exception,
 ):
-    if not data:
-        data_info = "None"
-    elif isinstance(data, list) and all(isinstance(item, Data) for item in data):
-        data_info = [str(item.id) for item in data]
-    else:
-        data_info = str(data)
+    from cognee.modules.pipelines.utils.format_data_info import format_data_info
+
+    data_info = format_data_info(data)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
