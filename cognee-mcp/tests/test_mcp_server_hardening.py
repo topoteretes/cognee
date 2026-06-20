@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import importlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -21,6 +22,7 @@ format_search_results = server_utils.format_search_results
 normalize_delete_mode = server_utils.normalize_delete_mode
 parse_cognify_data = server_utils.parse_cognify_data
 validate_cognify_file_paths = server_utils.validate_cognify_file_paths
+validate_file_path = server_utils.validate_file_path
 validate_top_k = server_utils.validate_top_k
 get_chunk_neighbors_from_graph = retrieval_utils.get_chunk_neighbors_from_graph
 get_document_from_graph = retrieval_utils.get_document_from_graph
@@ -51,6 +53,26 @@ def test_parse_cognify_data_preserves_plain_text_starting_with_bracket():
 
     assert parsed.items == ["[note: inline memory"]
     assert parsed.is_batch is False
+
+
+def test_validate_file_path_rejects_path_traversal(tmp_path):
+    target = tmp_path / "secret.txt"
+    target.write_text("secret", encoding="utf-8")
+    traversal = str(tmp_path / ".." / tmp_path.name / "secret.txt")
+
+    error = validate_file_path(traversal, path_exists=os.path.exists)
+    assert error is not None
+    assert "path traversal" in error.lower()
+
+
+def test_validate_file_path_rejects_when_local_paths_disabled(monkeypatch, tmp_path):
+    data_file = tmp_path / "note.txt"
+    data_file.write_text("note", encoding="utf-8")
+
+    monkeypatch.setenv("ACCEPT_LOCAL_FILE_PATH", "false")
+    error = validate_file_path(str(data_file), path_exists=os.path.exists)
+    assert error is not None
+    assert "ACCEPT_LOCAL_FILE_PATH" in error
 
 
 def test_validate_cognify_file_paths_reports_batch_index():

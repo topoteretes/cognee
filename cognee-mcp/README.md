@@ -500,6 +500,16 @@ By default, each MCP client gets its own auto-named dataset (e.g. Cursor → `cu
 
 LLM-direct calls to `cognify`, `remember`, `improve`, `cognify_status`, and `cognify_file` route to the agent-scoped dataset when `dataset_name` is omitted. Pass `dataset_name` explicitly to override (e.g. `dataset_name="main_dataset"` still works).
 
+### Batch file ingestion (`cognify`)
+
+The internal `cognify` helper accepts a JSON array string so multiple files can be added before a single pipeline run:
+
+```json
+["/data/doc1.pdf", "/data/doc2.txt", "inline memory note"]
+```
+
+Path-like entries are validated before ingestion. `ACCEPT_LOCAL_FILE_PATH=false` rejects local paths. Paths containing `..` are rejected. When running inside Docker, mount host directories into the container and reference the in-container path (e.g. `/data/doc1.pdf`).
+
 To disable agent scoping and have all clients share `main_dataset` as the default, set in `.env`:
 
 ```bash

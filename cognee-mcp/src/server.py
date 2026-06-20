@@ -251,8 +251,9 @@ async def cognify(
     ----------
     data : str
         The data to be processed and transformed into structured knowledge.
-        This can include natural language, file location, or any text-based information
-        that should become part of the agent's memory.
+        Plain text, a single file path, or a JSON array batch of strings, e.g.
+        ``["/data/doc1.pdf", "/data/doc2.txt", "inline note"]``. All items are
+        added to the dataset, then a single cognify run processes them.
 
     graph_model_file : str, optional
         Path to a custom schema file that defines the structure of the generated knowledge graph.
