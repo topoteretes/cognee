@@ -463,6 +463,43 @@ def test_entity_types_under_cap_are_not_rolled_up():
     assert sum(1 for name in names_at_cap if name.startswith("Type")) == SCHEMA_MAX_ENTITY_TYPES
 
 
+class TestUnnamedNodeFallbacks:
+    UUID_NAME = "13e52fce-2d52-4a8b-9f01-aabbccddeeff"
+    HASH_NAME = "a" * 64
+
+    def test_uuid_name_gets_readable_placeholder(self):
+        nodes_data = [("n1", {"type": "Entity", "name": self.UUID_NAME})]
+        result = preprocess((nodes_data, []))
+        node = result.nodes[0]
+        assert node["name"].startswith("Unnamed Entity")
+        assert self.UUID_NAME not in node["name"]
+        assert node["is_unnamed"] is True
+
+    def test_hash_fallback_fields_are_skipped(self):
+        nodes_data = [
+            ("n1", {"type": "DocumentChunk", "text": self.HASH_NAME, "description": "real text"})
+        ]
+        result = preprocess((nodes_data, []))
+        assert result.nodes[0]["name"] == "real text"
+
+    def test_unnamed_nodes_never_get_label_priority(self):
+        # Documents are always-label landmarks — unless they are unnamed.
+        nodes_data = [
+            ("d1", {"type": "TextDocument", "name": self.UUID_NAME}),
+            ("d2", {"type": "TextDocument", "name": "alice.md"}),
+        ]
+        result = preprocess((nodes_data, []))
+        by_name_priority = {n["is_unnamed"]: n["label_priority"] for n in result.nodes}
+        assert by_name_priority[True] is False
+        assert by_name_priority[False] is True
+
+    def test_regular_names_untouched(self):
+        result = preprocess(_alice_like_graph())
+        names = {n["name"] for n in result.nodes}
+        assert "Alice" in names
+        assert not any(name.startswith("Unnamed ") for name in names)
+
+
 def test_empty_graph_does_not_crash():
     result = preprocess(([], []))
     assert result.nodes == []

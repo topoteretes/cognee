@@ -527,6 +527,52 @@ class PostgresAdapter(GraphDBInterface):
 
             return nodes, edges
 
+    async def get_id_filtered_graph_data(
+        self, target_ids: List[str]
+    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        """Retrieve the subgraph touching target_ids: edges with either endpoint
+        in the set, plus all endpoint nodes of those edges (edge-driven,
+        matching the Ladybug/Neo4j contract). Lets CogneeGraph project only the
+        vector-search neighborhood instead of the full graph.
+        """
+        if not target_ids:
+            return [], []
+        ids = [str(i) for i in target_ids]
+
+        async with self._session() as session:
+            edge_result = await session.execute(
+                text("""
+                    SELECT source_id, target_id, relationship_name, properties
+                    FROM graph_edge
+                    WHERE source_id = ANY(:ids) OR target_id = ANY(:ids)
+                """),
+                {"ids": ids},
+            )
+            edges = []
+            endpoint_ids = set()
+            for row in edge_result.fetchall():
+                props = {}
+                if row[3]:
+                    props = row[3] if isinstance(row[3], dict) else json.loads(row[3])
+                endpoint_ids.update((row[0], row[1]))
+                edges.append((row[0], row[1], row[2], props))
+
+            if not endpoint_ids:
+                return [], []
+
+            node_result = await session.execute(
+                text("SELECT id, name, type, properties FROM graph_node WHERE id = ANY(:ids)"),
+                {"ids": list(endpoint_ids)},
+            )
+            nodes = []
+            for row in node_result.fetchall():
+                data = {"name": row[1], "type": row[2]}
+                if row[3]:
+                    data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
+                nodes.append((row[0], data))
+
+            return nodes, edges
+
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:
