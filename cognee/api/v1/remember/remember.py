@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import time
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any, Literal
@@ -106,35 +107,70 @@ def _estimate_data_size(data) -> int:
     return 0
 
 
-def _data_to_text(data) -> str:
-    """Convert ingested data to its full text representation."""
+async def _coerce_session_text(data) -> str:
+    """Extract chat-shaped text from remember() input for session storage.
+
+    Session memory stores chat-shaped content (prompts, assistant answers,
+    Q&A turns). The ``/api/v1/remember`` endpoint and the cognee-mcp client
+    always transport the payload as a multipart file upload — even when the
+    caller passed a plain string — so the real session text arrives here as a
+    file-like object. Read its content as UTF-8 text instead of dropping it.
+
+    Binary (non-UTF-8) or empty payloads decode to an empty string and are
+    skipped by the caller, so genuinely non-text uploads never pollute the
+    session cache.
+    """
     if isinstance(data, str):
         return data
-    if isinstance(data, list):
+    if isinstance(data, bytes):
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
+    if isinstance(data, (list, tuple)):
         parts = []
         for item in data:
-            if isinstance(item, str):
-                parts.append(item)
-            elif hasattr(item, "name"):
-                parts.append(f"[file: {item.name}]")
-            else:
-                parts.append(f"[{type(item).__name__}]")
+            text = await _coerce_session_text(item)
+            if text and text.strip():
+                parts.append(text)
         return "\n\n".join(parts)
-    if hasattr(data, "name"):
-        return f"[file: {data.name}]"
-    return f"[{type(data).__name__}]"
 
-
-_SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
+    reader = getattr(data, "read", None)
+    if reader is None:
+        return ""
+    try:
+        raw = reader()
+        if inspect.isawaitable(raw):
+            raw = await raw
+    except Exception:
+        return ""
+    # Restore the stream position so the payload can still be read downstream.
+    seeker = getattr(data, "seek", None)
+    if seeker is not None:
+        try:
+            position = seeker(0)
+            if inspect.isawaitable(position):
+                await position
+        except Exception:
+            pass
+    if isinstance(raw, bytes):
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
+    if isinstance(raw, str):
+        return raw
+    return ""
 
 
 async def _add_to_session(session_id: str, data, user):
     """Add a Q&A entry to the session cache.
 
-    Sessions store chat-shaped content (prompts, assistant answers,
-    Q&A turns). File-upload data coerces to placeholder strings like
-    ``[UploadFile]`` / ``[file: name]`` — those are useless in the
-    session cache and pollute recall results, so they're skipped.
+    Session memory stores chat-shaped content (prompts, assistant answers,
+    Q&A turns). The remember HTTP endpoint and the cognee-mcp client transport
+    the payload as a multipart file upload, so the text is read from the
+    uploaded file here (see ``_coerce_session_text``). Binary or empty payloads
+    yield no text and are skipped.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -147,15 +183,9 @@ async def _add_to_session(session_id: str, data, user):
     if not user_id:
         return
 
-    text = _data_to_text(data)
-    stripped = text.strip()
-    if not stripped:
-        return
-    if any(stripped.startswith(prefix) for prefix in _SESSION_PLACEHOLDER_PREFIXES):
-        logger.debug(
-            "remember: skipping session write for placeholder-only payload (%.40s…)",
-            stripped,
-        )
+    text = await _coerce_session_text(data)
+    if not text.strip():
+        logger.debug("remember: skipping session write for empty/non-text payload")
         return
 
     await sm.add_qa(
