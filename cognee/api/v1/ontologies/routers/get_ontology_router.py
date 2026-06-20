@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, File, Form, Path, UploadFile, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import Optional, List
@@ -132,7 +134,11 @@ def get_ontology_router() -> APIRouter:
         )
 
         try:
-            ontology_service.delete_ontology(ontology_key=ontology_key, user=user)
+            # delete_ontology performs blocking filesystem IO (stat/unlink); run
+            # it off the event loop so this async route does not block.
+            await asyncio.to_thread(
+                ontology_service.delete_ontology, ontology_key=ontology_key, user=user
+            )
             return {"status": "success", "ontology_key": ontology_key}
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
@@ -160,7 +166,8 @@ def get_ontology_router() -> APIRouter:
         )
 
         try:
-            metadata = ontology_service.list_ontologies(user)
+            # list_ontologies reads metadata from disk; run it off the event loop.
+            metadata = await asyncio.to_thread(ontology_service.list_ontologies, user)
             return metadata
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
