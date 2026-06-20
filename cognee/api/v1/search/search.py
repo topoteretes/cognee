@@ -103,12 +103,23 @@ async def search(
         **CHUNKS**:
             Raw text segments that match the query semantically.
             Best for: Finding specific passages, citations, exact content.
-            Returns: Ranked list of relevant text chunks with metadata.
+            Returns: Ranked list of relevant text chunks, each carrying a "score"
+            (the raw vector distance, where lower is a closer match).
 
         **SUMMARIES**:
             Pre-generated summaries of content.
             Best for: Quick overviews, document abstracts, topic summaries.
-            Returns: Generated content summaries.
+            Returns: Generated content summaries, each carrying a "score" (the raw
+            vector distance, where lower is a closer match).
+
+        For CHUNKS and SUMMARIES you can drop weak matches by passing a distance
+        cutoff through retriever_specific_config, e.g.
+        retriever_specific_config={"max_distance": 0.3}. Results whose distance is
+        greater than max_distance are removed; the default (None) keeps every result.
+        The cutoff is applied after top_k, so raise top_k to surface more matches
+        within the same distance. max_distance assumes a lower score means a closer
+        match (the ScoredResult contract that cognee's built-in cosine adapters
+        follow); it is not metric-aware.
 
         **CODE**:
             Code-specific search with syntax and semantic understanding.
@@ -166,7 +177,7 @@ async def search(
 
         verbose: If True, returns detailed result information including graph representation (when possible).
 
-        retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
+        retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used. For CHUNKS and SUMMARIES, supports "max_distance" (float) to drop results whose vector distance exceeds the cutoff.
         skills: Explicit skill names or Skill objects to load into the agentic retriever.
         tools: Optional whitelist of tool names available to the agentic retriever.
         max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.

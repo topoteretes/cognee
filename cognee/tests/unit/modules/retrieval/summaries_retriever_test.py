@@ -194,3 +194,45 @@ async def test_get_completion_with_session_id(mock_vector_engine):
 
     assert len(completion) == 1
     assert completion[0]["text"] == "S.R."
+
+
+@pytest.mark.asyncio
+async def test_get_completion_attaches_score_to_payloads():
+    """get_completion_from_context exposes each summary's retrieval distance as 'score'."""
+    retriever = SummariesRetriever()
+
+    objects = [SimpleNamespace(payload={"text": "a"}, score=0.3)]
+
+    completion = await retriever.get_completion_from_context("test query", objects, None)
+
+    assert completion == [{"text": "a", "score": 0.3}]
+
+
+@pytest.mark.asyncio
+async def test_init_max_distance_default_none():
+    """max_distance defaults to None, leaving distance filtering off."""
+    assert SummariesRetriever().max_distance is None
+
+
+@pytest.mark.asyncio
+async def test_init_custom_max_distance():
+    """max_distance is stored when supplied."""
+    assert SummariesRetriever(max_distance=0.35).max_distance == 0.35
+
+
+@pytest.mark.asyncio
+async def test_get_retrieved_objects_filters_by_max_distance(mock_vector_engine):
+    """Summaries farther than max_distance are dropped before they reach the caller."""
+    near = SimpleNamespace(payload={"text": "near"}, score=0.1)
+    far = SimpleNamespace(payload={"text": "far"}, score=0.9)
+    mock_vector_engine.search.return_value = [near, far]
+
+    retriever = SummariesRetriever(max_distance=0.5)
+
+    with patch(
+        "cognee.modules.retrieval.summaries_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        objects = await retriever.get_retrieved_objects("test query")
+
+    assert [o.payload["text"] for o in objects] == ["near"]

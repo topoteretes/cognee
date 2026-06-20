@@ -1,6 +1,8 @@
+import math
 import os
 from typing import Callable, List, Optional, Type, Tuple
 
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 
 from cognee.modules.engine.models.node_set import NodeSet
@@ -56,6 +58,20 @@ async def get_search_type_retriever_instance(
     if retriever_specific_config is None:
         retriever_specific_config = {}
 
+    # max_distance is an optional vector-distance cutoff (lower is a closer match).
+    # Reject values the `<=` comparison cannot handle (non-numbers, bool, NaN) here,
+    # before they reach a retriever and abort an otherwise-valid search mid-flight.
+    max_distance = retriever_specific_config.get("max_distance")
+    if max_distance is not None and (
+        isinstance(max_distance, bool)
+        or not isinstance(max_distance, (int, float))
+        or math.isnan(max_distance)
+    ):
+        raise CogneeValidationError(
+            message="max_distance must be a real number.",
+            name="InvalidMaxDistance",
+        )
+
     # Extract common defaults with fallback values from kwargs
     top_k = kwargs.get("top_k", 15)
     system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
@@ -73,13 +89,21 @@ async def get_search_type_retriever_instance(
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
-        SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
+        SearchType.SUMMARIES: (
+            SummariesRetriever,
+            {
+                "top_k": top_k,
+                "session_id": session_id,
+                "max_distance": max_distance,
+            },
+        ),
         SearchType.CHUNKS: (
             ChunksRetriever,
             {
                 "top_k": top_k,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                "max_distance": max_distance,
             },
         ),
         SearchType.RAG_COMPLETION: (

@@ -4,6 +4,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.retrieval.utils.scoring import attach_scores, filter_by_max_distance
 
 logger = get_logger("ChunksRetriever")
 
@@ -25,6 +26,7 @@ class ChunksRetriever(BaseRetriever):
         top_k: Optional[int] = 5,
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
+        max_distance: Optional[float] = None,
     ):
         """
         Initializes the chunk retriever.
@@ -39,10 +41,14 @@ class ChunksRetriever(BaseRetriever):
               node set filtering.
             - node_name_filter_operator (str): Logical operator used when applying
               multiple node_name filters, such as "OR" or "AND". Defaults to "OR".
+            - max_distance (Optional[float]): Maximum vector distance to keep. Results
+              with a larger distance (a weaker match) are dropped. Defaults to None,
+              which keeps every result.
         """
         self.top_k = top_k
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
+        self.max_distance = max_distance
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -66,8 +72,7 @@ class ChunksRetriever(BaseRetriever):
         """
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
-            chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
-            return chunk_payloads
+            return attach_scores(retrieved_objects)
         else:
             return []
 
@@ -123,7 +128,7 @@ class ChunksRetriever(BaseRetriever):
             )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
 
-            return found_chunks
+            return filter_by_max_distance(found_chunks, self.max_distance)
 
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")

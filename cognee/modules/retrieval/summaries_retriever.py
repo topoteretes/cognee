@@ -5,6 +5,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.retrieval.utils.scoring import attach_scores, filter_by_max_distance
 
 logger = get_logger("SummariesRetriever")
 
@@ -22,10 +23,21 @@ class SummariesRetriever(BaseRetriever):
     - top_k: int - Number of top summaries to retrieve.
     """
 
-    def __init__(self, top_k: int = 5, session_id: Optional[str] = None):
-        """Initialize retriever with search parameters."""
+    def __init__(
+        self,
+        top_k: int = 5,
+        session_id: Optional[str] = None,
+        max_distance: Optional[float] = None,
+    ):
+        """Initialize retriever with search parameters.
+
+        ``max_distance`` is an optional vector-distance cutoff. Results with a
+        larger distance (a weaker match) are dropped. Defaults to None, which
+        keeps every result.
+        """
         self.top_k = top_k
         self.session_id = session_id
+        self.max_distance = max_distance
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """
@@ -57,7 +69,7 @@ class SummariesRetriever(BaseRetriever):
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
 
-            return summaries_results
+            return filter_by_max_distance(summaries_results, self.max_distance)
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
@@ -109,7 +121,7 @@ class SummariesRetriever(BaseRetriever):
         """
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
-            summary_payloads = [summary.payload for summary in retrieved_objects]
+            summary_payloads = attach_scores(retrieved_objects)
             logger.info(f"Returning {len(summary_payloads)} summary payloads")
             return summary_payloads
         else:

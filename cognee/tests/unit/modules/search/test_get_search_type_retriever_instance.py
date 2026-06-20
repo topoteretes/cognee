@@ -362,3 +362,76 @@ async def test_graph_completion_decomposition_defaults_to_answer_per_subquery():
 
     assert isinstance(retriever_instance, GraphCompletionDecompositionRetriever)
     assert retriever_instance.decomposition_mode is DecompositionMode.ANSWER_PER_SUBQUERY
+
+
+@pytest.mark.asyncio
+async def test_chunks_retriever_receives_max_distance_from_config():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.CHUNKS,
+        query_text="q",
+        retriever_specific_config={"max_distance": 0.42},
+    )
+
+    assert isinstance(retriever_instance, ChunksRetriever)
+    assert retriever_instance.max_distance == 0.42
+
+
+@pytest.mark.asyncio
+async def test_summaries_retriever_receives_max_distance_from_config():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.SUMMARIES,
+        query_text="q",
+        retriever_specific_config={"max_distance": 0.42},
+    )
+
+    assert isinstance(retriever_instance, SummariesRetriever)
+    assert retriever_instance.max_distance == 0.42
+
+
+@pytest.mark.asyncio
+async def test_max_distance_defaults_to_none_when_not_configured():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.CHUNKS, query_text="q"
+    )
+
+    assert isinstance(retriever_instance, ChunksRetriever)
+    assert retriever_instance.max_distance is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_value", ["0.3", float("nan"), True, False, [], {}])
+async def test_max_distance_rejects_invalid_values(bad_value):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.exceptions import CogneeValidationError
+
+    with pytest.raises(CogneeValidationError, match="max_distance"):
+        await mod.get_search_type_retriever_instance(
+            SearchType.CHUNKS,
+            query_text="q",
+            retriever_specific_config={"max_distance": bad_value},
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("good_value", [0.3, 0, -1.0, float("inf"), None])
+async def test_max_distance_accepts_valid_values(good_value):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.CHUNKS,
+        query_text="q",
+        retriever_specific_config={"max_distance": good_value},
+    )
+
+    assert isinstance(retriever_instance, ChunksRetriever)
+    assert retriever_instance.max_distance == good_value
