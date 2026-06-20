@@ -208,3 +208,69 @@ async def test_search_passes_retriever_specific_config_to_authorized_search(
     )
 
     assert out
+
+
+from pydantic import BaseModel
+
+class DummyModel(BaseModel):
+    message: str
+
+def test_search_result_payload_accepts_basemodel():
+    model_instance = DummyModel(message="hello")
+    payload = SearchResultPayload(
+        result_object="object",
+        context="ctx",
+        completion=model_instance,
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+    assert payload.completion == model_instance
+    assert payload.result == model_instance
+
+
+@pytest.mark.asyncio
+async def test_search_serializes_basemodel_completions(monkeypatch, search_mod):
+    user = _make_user()
+    ds = _make_dataset(name="ds1", tenant_id="t1")
+    model_instance = DummyModel(message="hello_search")
+
+    async def dummy_authorized_search(**_kwargs):
+        return [
+            SearchResultPayload(
+                result_object="object",
+                context="ctx",
+                completion=model_instance,
+                search_type=SearchType.GRAPH_COMPLETION,
+                dataset_name=ds.name,
+                dataset_id=ds.id,
+                dataset_tenant_id=ds.tenant_id,
+            )
+        ]
+
+    logged_result_value = None
+
+    async def dummy_log_result(_query_id, result_str, _user_id):
+        nonlocal logged_result_value
+        logged_result_value = result_str
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+    monkeypatch.setattr(search_mod, "log_result", dummy_log_result)
+
+    out = await search_mod.search(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[ds.id],
+        user=user,
+        verbose=False,
+    )
+
+    assert out == [
+        {
+            "search_result": model_instance,
+            "dataset_id": ds.id,
+            "dataset_name": "ds1",
+            "dataset_tenant_id": uuid5(NAMESPACE_OID, "t1"),
+        }
+    ]
+    assert logged_result_value == '[{"message": "hello_search"}]'
+
