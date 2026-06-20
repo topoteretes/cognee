@@ -41,6 +41,12 @@ nodes.forEach(function(n){
 });
 var nodeMap={};
 nodes.forEach(function(n){nodeMap[n.id]=n});
+// Share node/link details with the Memory view (views/memory_map.js) so its
+// slim structural payload never re-embeds the node JSON. _vizLinks must be
+// the UNFILTERED array: the memory payload's edge index holds integer
+// positions into the links array exactly as the preprocessor emitted it.
+window._vizNodeById=nodeMap;
+window._vizLinks=links;
 links=links.filter(function(l){
   var s=typeof l.source==="object"?(l.source.id||l.source):l.source;
   var t=typeof l.target==="object"?(l.target.id||l.target):l.target;
@@ -450,20 +456,33 @@ var nodesetCounts={};
 nodes.forEach(function(n){var s=n.source_node_set||"Unknown";nodesetCounts[s]=(nodesetCounts[s]||0)+1});
 var userCounts={};
 nodes.forEach(function(n){var u=n.source_user||"Unknown";userCounts[u]=(userCounts[u]||0)+1});
-var uniqueTasks=Object.keys(taskCounts).length;
-var uniquePipelines=Object.keys(pipeCounts).length;
-var uniqueNodesets=Object.keys(nodesetCounts).length;
-var uniqueUsers=Object.keys(userCounts).length;
+// "Unknown" is the absence of provenance, not a value — counting it produced
+// stats like "1 node sets" on graphs with no node sets at all.
+function countKnown(counts){return Object.keys(counts).filter(function(k){return k!=="Unknown"}).length}
+function pluralize(n,word){return n.toLocaleString()+" "+word+(n===1?"":"s")}
+var uniqueTasks=countKnown(taskCounts);
+var uniquePipelines=countKnown(pipeCounts);
+var uniqueNodesets=countKnown(nodesetCounts);
+var uniqueUsers=countKnown(userCounts);
 var statsEl=document.getElementById("stats");
 var perfTier=N>10000?"large":N>2000?"medium":"small";
-statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N.toLocaleString()+" nodes</span>"+
-  '<span><span class="dot" style="background:#747470"></span>'+M.toLocaleString()+" edges</span>"+
-  '<span>'+Object.keys(typeCounts).length+" types</span>"+
-  '<span>'+uniqueTasks+" tasks</span>"+
-  '<span>'+uniquePipelines+" pipelines</span>"+
-  '<span>'+uniqueNodesets+" node sets</span>"+
-  '<span>'+uniqueUsers+" users</span>"+
+statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+pluralize(N,"node")+"</span>"+
+  '<span><span class="dot" style="background:#747470"></span>'+pluralize(M,"edge")+"</span>"+
+  '<span title="Distinct node classes: documents, chunks, entities, types, summaries">'+pluralize(Object.keys(typeCounts).length,"node kind")+"</span>"+
+  '<span>'+pluralize(uniqueTasks,"task")+"</span>"+
+  '<span>'+pluralize(uniquePipelines,"pipeline")+"</span>"+
+  '<span>'+pluralize(uniqueNodesets,"node set")+"</span>"+
+  '<span>'+pluralize(uniqueUsers,"user")+"</span>"+
   '<span style="opacity:0.5">['+perfTier+']</span>';
+
+// Color-by modes for provenance the dataset doesn't carry render the whole
+// graph as one "Unknown" gray — disable them with an explanation instead.
+[["nodeset",uniqueNodesets,"No node sets in this graph"],["user",uniqueUsers,"No user provenance in this graph"]]
+  .forEach(function(entry){
+    if(entry[1]>0)return;
+    var btn=document.querySelector('.ctrl-btn[data-colorby="'+entry[0]+'"]');
+    if(btn){btn.disabled=true;btn.title=entry[2]}
+  });
 
 // ── Legend ──
 var legendEl=document.getElementById("legend");
@@ -473,7 +492,16 @@ function updateLegend(){
   if(colorByMode==="type"){
     counts=typeCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
-    colorSource=function(t){return colorByType[t]||typeColors[t]||"#DBD8D8"};
+    // Sample the color actually drawn on a node of this type (skipping the
+    // ontology-valid override) so the legend can never diverge from the
+    // canvas — the JS palette and the preprocessor palette had drifted apart.
+    colorSource=function(t){
+      for(var i=0;i<nodes.length;i++){
+        var n=nodes[i];
+        if(n.type===t&&n.ontology_valid!==true&&n.color)return n.color;
+      }
+      return colorByType[t]||typeColors[t]||"#DBD8D8";
+    };
     sectionLabel="Node type";
   }else if(colorByMode==="task"){
     counts=taskCounts;
@@ -833,17 +861,64 @@ var searchMatches=new Set();
 
 // ── Search ──
 var searchInput=document.getElementById("search-input");
+var searchCountEl=document.getElementById("search-count");
+var searchMatchList=[];  // matches ordered by importance, for Enter-cycling
+var searchMatchIdx=-1;
+
+function updateSearchCount(){
+  if(!searchCountEl)return;
+  if(!searchQuery){searchCountEl.textContent="";return}
+  var n=searchMatchList.length;
+  if(!n){searchCountEl.textContent="no matches";return}
+  searchCountEl.textContent=searchMatchIdx>=0?((searchMatchIdx%n)+1)+" / "+n:n+(n===1?" match":" matches");
+}
+
 searchInput.addEventListener("input",function(){
   searchQuery=searchInput.value.trim().toLowerCase();
   searchMatches.clear();
+  searchMatchList=[];
+  searchMatchIdx=-1;
   if(searchQuery){
     nodes.forEach(function(n){
       var name=(n.name||"").toLowerCase();
       var type=(n.type||"").toLowerCase();
-      if(name.indexOf(searchQuery)>=0||type.indexOf(searchQuery)>=0)searchMatches.add(n.id);
+      if(name.indexOf(searchQuery)>=0||type.indexOf(searchQuery)>=0){
+        searchMatches.add(n.id);
+        searchMatchList.push(n);
+      }
     });
+    searchMatchList.sort(function(a,b){return (b.importance||0)-(a.importance||0)});
   }
+  updateSearchCount();
   draw();
+});
+
+// Enter jumps to the best match and cycles onward (Shift+Enter backwards);
+// Escape clears. Search was previously display-only — highlighting with no
+// way to navigate to what you found.
+searchInput.addEventListener("keydown",function(ev){
+  if(ev.key==="Escape"){
+    searchInput.value="";
+    searchQuery="";
+    searchMatches.clear();
+    searchMatchList=[];
+    searchMatchIdx=-1;
+    updateSearchCount();
+    searchInput.blur();
+    draw();
+    return;
+  }
+  if(ev.key!=="Enter"||!searchMatchList.length)return;
+  ev.preventDefault();
+  searchMatchIdx=ev.shiftKey
+    ?(searchMatchIdx-1+searchMatchList.length)%searchMatchList.length
+    :(searchMatchIdx+1)%searchMatchList.length;
+  var match=searchMatchList[searchMatchIdx];
+  if(typeof match.x==="number"){
+    var ns=clamp(Math.max(scale,1.5),0.02,30);
+    smoothPanZoomTo(ns,W/2-match.x*ns,H/2-match.y*ns,300);
+  }
+  updateSearchCount();
 });
 
 // ── Schema → graph highlight bridge (PR3) ──
@@ -2230,5 +2305,10 @@ document.querySelectorAll(".ctrl-btn[data-layout], .ctrl-btn[data-labelbudget], 
 // Apply hash on initial load (deferred so all listeners are wired).
 setTimeout(readHashState,0);
 window.addEventListener("hashchange",readHashState);
+
+// The canvas only repaints on interaction; expose a redraw hook so the theme
+// toggle (ui_chrome.js) can request a frame instead of leaving the canvas in
+// the previous theme until the next pan/zoom.
+window._requestGraphRedraw=function(){draw()};
 
 })();
