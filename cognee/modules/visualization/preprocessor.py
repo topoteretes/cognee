@@ -106,6 +106,9 @@ _TYPE_COLOR_MAP: Dict[str, str] = {
     "EntityType": "#D5C2FF",
     "TextSummary": "#FFB454",
     "GlobalContextSummary": "#00C2FF",
+    # NodeSet container nodes (e.g. the "session_learnings" grouping) were
+    # missing here and fell through to the gray unknown-type fallback.
+    "NodeSet": "#94A3B8",
     "TableRow": "#A550FF",
     "TableType": "#6510F4",
     "ColumnValue": "#747470",
@@ -121,6 +124,38 @@ _TYPE_COLOR_MAP: Dict[str, str] = {
 # matches visually disappeared into untyped nodes.
 _ONTOLOGY_VALID_COLOR = "#FF5CA8"
 _UNKNOWN_TYPE_COLOR = "#DBD8D8"
+
+
+# Node sets produced by the self-improvement bridge (improve()/distillation).
+# These get stable, meaningful colors in the "color by node set" overlay
+# instead of the deterministic hue-rotation, so they stay recognizable across
+# graphs. session_learnings (distilled lessons) is the headline feature.
+_DISTILLED_LEARNING_NODE_SET = "session_learnings"
+_MEMORY_NODESET_COLORS: Dict[str, str] = {
+    "session_learnings": "#FFC53D",  # distilled lessons (gold)
+    "user_sessions_from_cache": "#00C2AA",  # persisted session Q&A (teal)
+    "agent_trace_feedbacks": "#FF7A59",  # persisted agent trace feedback (coral)
+}
+
+
+def _node_set_names(node_info) -> set:
+    """Collect node-set names attached to a node via source_node_set (a comma-joined
+    string) or belongs_to_set (a list of name strings), ignoring UUID-shaped refs."""
+    names: set = set()
+    raw = node_info.get("source_node_set")
+    if isinstance(raw, str):
+        names.update(part.strip() for part in raw.split(",") if part.strip())
+    belongs = node_info.get("belongs_to_set")
+    if isinstance(belongs, (list, tuple)):
+        names.update(b for b in belongs if isinstance(b, str))
+    elif isinstance(belongs, str):
+        names.add(belongs)
+    return names
+
+
+def is_distilled_learning_node(node_info) -> bool:
+    """True when a node belongs to the distilled session-learnings node set."""
+    return _DISTILLED_LEARNING_NODE_SET in _node_set_names(node_info)
 
 
 # Minimum number of structural edges between the same (source_stage,
@@ -1209,6 +1244,9 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
         )
         if node_info.get("ontology_valid") is True:
             node_info["color"] = _ONTOLOGY_VALID_COLOR
+        # Distilled session-learning nodes get a ring overlay in the renderer
+        # (type fill is preserved) so the self-improvement feature is visible.
+        node_info["is_memory_learning"] = is_distilled_learning_node(node_info)
         raw_name = node_info.get("name")
         node_info["name"] = derive_node_name(node_info, node_id)
         # Unnamed nodes (UUID/hash names) must never become Key-mode label
@@ -1332,6 +1370,11 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
         "node_set": generate_provenance_colors([n.get("source_node_set") for n in nodes]),
         "user": generate_provenance_colors([n.get("source_user") for n in nodes]),
     }
+    # Pin stable, meaningful colors for self-improvement node sets, overriding the
+    # hue-rotation only for sets actually present in this graph.
+    for set_name, color in _MEMORY_NODESET_COLORS.items():
+        if set_name in color_maps["node_set"]:
+            color_maps["node_set"][set_name] = color
 
     schema_graph = extract_schema_graph_data(nodes, links)
     build_operation_layer(schema_graph, nodes, links)
