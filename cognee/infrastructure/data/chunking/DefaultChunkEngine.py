@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import Any
 
 from cognee.shared.data_models import ChunkStrategy
+
+ChunkNumbering = list[Any]
+ChunkResult = tuple[list[str], ChunkNumbering]
 
 # /Users/vasa/Projects/cognee/cognee/infrastructure/data/chunking/DefaultChunkEngine.py
 
@@ -48,7 +52,7 @@ class DefaultChunkEngine:
         source_data: Iterable[str],
         chunk_size: int,
         chunk_overlap: int,
-    ) -> tuple[list[str], list[int]]:
+    ) -> ChunkResult:
         """
         Chunk data based on the specified strategy.
 
@@ -85,7 +89,7 @@ class DefaultChunkEngine:
 
     def chunk_data_exact(
         self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int
-    ) -> tuple[list[str], list[int]]:
+    ) -> ChunkResult:
         """
         Chunk data exactly by specified sizes and overlaps.
 
@@ -113,7 +117,7 @@ class DefaultChunkEngine:
 
     def chunk_by_sentence(
         self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int
-    ) -> tuple[list[str], list[int]]:
+    ) -> ChunkResult:
         """
         Chunk data into sentences based on specified sizes and overlaps.
 
@@ -139,10 +143,10 @@ class DefaultChunkEngine:
         sentence_chunks = []
         for sentence in sentences:
             if len(sentence) > chunk_size:
-                chunks = self.chunk_data_exact(
+                sub_chunks, _ = self.chunk_data_exact(
                     data_chunks=[sentence], chunk_size=chunk_size, chunk_overlap=chunk_overlap
                 )
-                sentence_chunks.extend(chunks)
+                sentence_chunks.extend(sub_chunks)
             else:
                 sentence_chunks.append(sentence)
 
@@ -154,7 +158,7 @@ class DefaultChunkEngine:
 
     def chunk_data_by_paragraph(
         self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int, bound: float = 0.75
-    ) -> tuple[list[str], list[int]]:
+    ) -> ChunkResult:
         """
         Chunk data based on paragraphs while considering overlaps and boundaries.
 
