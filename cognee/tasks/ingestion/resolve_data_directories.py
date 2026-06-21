@@ -4,6 +4,7 @@ from typing import List, Union, BinaryIO
 
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
 from cognee.exceptions import CogneeSystemError
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 
 
@@ -40,8 +41,11 @@ async def resolve_data_directories(
 
     for item in data:
         if isinstance(item, str):  # Check if the item is a path
+            parsed_url = urlparse(item)
+            item_path = get_data_file_path(item) if parsed_url.scheme == "file" else item
+
             # S3
-            if urlparse(item).scheme == "s3":
+            if parsed_url.scheme == "s3":
                 if fs is not None:
                     if include_subdirectories:
                         base_path = item if item.endswith("/") else item + "/"
@@ -63,18 +67,18 @@ async def resolve_data_directories(
                 else:
                     raise S3FileSystemNotFoundError()
 
-            elif os.path.isdir(item):  # If it's a directory
+            elif os.path.isdir(item_path):  # If it's a directory
                 if include_subdirectories:
                     # Recursively add all files in the directory and subdirectories
-                    for root, _, files in os.walk(item):
+                    for root, _, files in os.walk(item_path):
                         resolved_data.extend([os.path.join(root, f) for f in files])
                 else:
                     # Add all files (not subdirectories) in the directory
                     resolved_data.extend(
                         [
-                            os.path.join(item, f)
-                            for f in os.listdir(item)
-                            if os.path.isfile(os.path.join(item, f))
+                            os.path.join(item_path, f)
+                            for f in os.listdir(item_path)
+                            if os.path.isfile(os.path.join(item_path, f))
                         ]
                     )
             else:  # If it's a file or text add it directly
