@@ -1,4 +1,6 @@
 from functools import lru_cache
+import os
+
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from sqlalchemy import URL
@@ -47,6 +49,8 @@ def create_relational_engine(
     pool_args = dict(pool_args) if pool_args else {}
 
     if db_provider == "sqlite":
+        if db_path and "s3://" not in db_path:
+            os.makedirs(db_path, exist_ok=True)
         connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
 
     elif db_provider == "postgres":

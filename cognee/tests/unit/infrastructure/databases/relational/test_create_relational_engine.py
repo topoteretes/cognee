@@ -51,6 +51,28 @@ class TestCreateRelationalEngineSpecialCharacters:
         assert url.password == "p@ss:word"
 
 
+class TestCreateRelationalEngineSqliteDirectory:
+    """Verify that local SQLite database directories are created before connecting."""
+
+    @patch("cognee.infrastructure.databases.relational.create_relational_engine.SQLAlchemyAdapter")
+    def test_sqlite_creates_missing_database_directory(self, mock_adapter, tmp_path):
+        db_path = tmp_path / "missing" / "databases"
+
+        create_relational_engine(
+            db_path=str(db_path),
+            db_name="cognee_db",
+            db_host=None,
+            db_port=None,
+            db_username=None,
+            db_password=None,
+            db_provider="sqlite",
+        )
+
+        assert db_path.is_dir()
+        mock_adapter.assert_called_once()
+        assert mock_adapter.call_args.args[0] == f"sqlite+aiosqlite:///{db_path}/cognee_db"
+
+
 class TestCreateRelationalEngineConnectArgs:
     """Verify that connect_args are forwarded to the SQLAlchemyAdapter."""
 
