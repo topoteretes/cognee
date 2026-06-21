@@ -26,6 +26,11 @@ _TELEMETRY_API_KEY_TRACKING_SALT_ENV = "TELEMETRY_API_KEY_TRACKING_SALT"
 _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT = b"cognee.telemetry.api-key-tracking.v1"
 _TELEMETRY_API_KEY_TRACKING_ITERATIONS = 100_000
 
+# Strong refs for fire-and-forget telemetry tasks. asyncio only holds a weak
+# reference to a task, so without anchoring here the gc can collect an
+# in-flight telemetry request mid-run. Tasks remove themselves on done.
+_TELEMETRY_TASKS: set = set()
+
 
 def create_secure_ssl_context() -> ssl.SSLContext:
     """
@@ -270,7 +275,9 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
     }
 
     loop = asyncio.get_running_loop()
-    loop.create_task(_send_telemetry_request(payload))
+    task = loop.create_task(_send_telemetry_request(payload))
+    _TELEMETRY_TASKS.add(task)
+    task.add_done_callback(_TELEMETRY_TASKS.discard)
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
