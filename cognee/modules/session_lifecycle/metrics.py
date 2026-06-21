@@ -458,3 +458,36 @@ async def ensure_session(*, session_id, user_id, dataset_id=None):
 async def touch_session(*, session_id, user_id, dataset_id=None):
     """Deprecated: prefer ``ensure_and_touch_session``."""
     await ensure_and_touch_session(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
+
+
+_session_record_write_failed = False
+
+
+async def record_session_activity(user_id: str, session_id: str, *, errored: bool = False) -> None:
+    """Write a lifecycle heartbeat for a session: upsert + touch the SessionRecord row.
+
+    Accepts a string ``user_id`` (coerced to UUID). Swallows failures — the
+    session_records table is optional for SessionManager correctness — but logs once at
+    WARNING per process so silent breakage stays visible in ops.
+    """
+    global _session_record_write_failed
+
+    try:
+        try:
+            user_uuid = UUIDType(str(user_id))
+        except (ValueError, TypeError):
+            return
+
+        await ensure_and_touch_session(session_id=session_id, user_id=user_uuid)
+        if errored:
+            await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
+    except Exception as exc:
+        if not _session_record_write_failed:
+            _session_record_write_failed = True
+            logger.warning(
+                "session_records write failed (%s); subsequent failures will log at debug. "
+                "Check alembic migrations for the session_records table.",
+                exc,
+            )
+        else:
+            logger.debug("session_records write failed (%s)", exc)

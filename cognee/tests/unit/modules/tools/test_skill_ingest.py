@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,7 +65,10 @@ class TestSkillContract(unittest.TestCase):
             skill = skills[0]
             assert skill.name == "code-review"
             assert skill.dataset_scope == [str(dataset.id)]
-            assert skill.source_file.endswith("code-review/SKILL.md")
+            # source_file/source_dir are native normalized paths (see
+            # skill_parser._normalize_path), so use os.sep rather than a
+            # hard-coded "/" — on Windows the separator is "\".
+            assert skill.source_file.endswith(os.path.join("code-review", "SKILL.md"))
             assert skill.source_dir.endswith("code-review")
             assert isinstance(skill.belongs_to_set[0], NodeSet)
             assert skill.belongs_to_set[0].name == "skills"
@@ -469,3 +473,88 @@ class TestSkillContract(unittest.TestCase):
 
         _run(apply_proposal())
         assert skill.procedure == "# code-review\n\n- Read the diff."
+
+    def test_get_proposal_returns_proposal_preview(self):
+        from cognee.modules.engine.models import SkillImprovementProposal
+        from cognee.modules.memify.skill_improvement import get_proposal
+
+        dataset = SimpleNamespace(id=uuid4(), name="project")
+        user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+        proposal = SkillImprovementProposal(
+            proposal_id="proposal-1",
+            skill_id=str(uuid4()),
+            skill_name="code-review",
+            dataset_scope=[str(dataset.id)],
+            old_procedure="old",
+            proposed_procedure="# code-review\n\nnew",
+            rationale="Missed regression checks.",
+            confidence=0.8,
+            status="proposed",
+        )
+
+        async def fetch():
+            with patch(
+                "cognee.modules.memify.skill_improvement._find_proposal",
+                new_callable=AsyncMock,
+                return_value=proposal,
+            ) as mock_find:
+                result = await get_proposal("proposal-1", dataset=dataset, user=user)
+                return result, mock_find
+
+        result, mock_find = _run(fetch())
+        assert result is proposal
+        assert result.old_procedure == "old"
+        assert result.proposed_procedure == "# code-review\n\nnew"
+        assert result.rationale == "Missed regression checks."
+        assert result.confidence == 0.8
+        assert mock_find.await_args.kwargs["proposal_id"] == "proposal-1"
+        assert mock_find.await_args.kwargs["dataset_id"] == dataset.id
+
+    def test_get_proposal_returns_none_for_unknown_id(self):
+        from cognee.modules.memify.skill_improvement import get_proposal
+
+        dataset = SimpleNamespace(id=uuid4(), name="project")
+        user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+
+        async def fetch():
+            with patch(
+                "cognee.modules.memify.skill_improvement._find_proposal",
+                new_callable=AsyncMock,
+                return_value=None,
+            ):
+                return await get_proposal("missing", dataset=dataset, user=user)
+
+        assert _run(fetch()) is None
+
+    def test_get_proposal_requires_dataset_with_id(self):
+        from cognee.modules.memify.skill_improvement import get_proposal
+
+        with self.assertRaisesRegex(ValueError, "explicit dataset"):
+            _run(get_proposal("proposal-1", dataset=SimpleNamespace(id=None)))
+
+    def test_materialize_inline_skill_writes_slug_dir(self):
+        from cognee.api.v1.remember.remember import _materialize_inline_skill
+
+        tmp_dir, source = _materialize_inline_skill(_SKILL, "code-review")
+        try:
+            md = source / "code-review" / "SKILL.md"
+            assert md.is_file()
+            assert "Review code changes" in md.read_text()
+        finally:
+            tmp_dir.cleanup()
+
+    def test_materialize_inline_skill_defaults_and_sanitizes_slug(self):
+        from cognee.api.v1.remember.remember import _materialize_inline_skill
+
+        tmp_dir, source = _materialize_inline_skill("# x", None)
+        try:
+            assert (source / "skill" / "SKILL.md").is_file()
+        finally:
+            tmp_dir.cleanup()
+
+        # A traversal-y name collapses to a single safe path segment.
+        tmp_dir2, source2 = _materialize_inline_skill("# x", "../../etc/evil")
+        try:
+            assert (source2 / "evil" / "SKILL.md").is_file()
+        finally:
+            tmp_dir2.cleanup()

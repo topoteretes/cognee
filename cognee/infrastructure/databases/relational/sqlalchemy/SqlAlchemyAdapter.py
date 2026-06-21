@@ -1,4 +1,5 @@
 import os
+import gc
 import asyncio
 from os import path
 import tempfile
@@ -578,12 +579,51 @@ class SQLAlchemyAdapter:
         try:
             if self.engine.dialect.name == "sqlite":
                 await self.engine.dispose(close=True)
-                # Wait for the database connections to close and release the file (Windows)
+                # The create_relational_engine() lru_cache keeps this adapter
+                # (and its AsyncEngine/sessionmaker) reachable, which on Windows
+                # keeps the underlying aiosqlite connection/background thread
+                # alive and holding the file handle. Drop that strong reference
+                # so the connection can finalize before we remove the file.
+                # Imported lazily to avoid the circular import
+                # (create_relational_engine imports this adapter).
+                from cognee.infrastructure.databases.relational.create_relational_engine import (
+                    create_relational_engine,
+                )
+
+                create_relational_engine.cache_clear()
+                gc.collect()
+                # Wait for the database connections to close and release the file.
+                # This settle also preserves teardown timing other resources
+                # (e.g. the graph DB) rely on between tests, so keep it
+                # unconditional.
                 await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
                 file_name = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
-                await file_storage.remove(file_name)
+                # On Windows the SQLite file handle can still linger after the
+                # settle above (aiosqlite closes the connection on a background
+                # thread), so os.remove fails with WinError 32. Retry with short
+                # backoff and force a GC pass to finalize lingering connection
+                # objects.
+                for attempt in range(10):
+                    try:
+                        await file_storage.remove(file_name)
+                        break
+                    except (PermissionError, OSError) as remove_error:
+                        if attempt == 9:
+                            # Best-effort cleanup: a stubborn Windows file lock
+                            # must never poison teardown/prune. No test asserts
+                            # the file is gone and every create path uses
+                            # CREATE TABLE IF NOT EXISTS, so a left-behind file
+                            # is harmless. Log and continue instead of raising.
+                            logger.warning(
+                                "Could not remove sqlite database file %s after retries: %s",
+                                file_name,
+                                remove_error,
+                            )
+                            break
+                        gc.collect()
+                        await asyncio.sleep(0.5)
             else:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information

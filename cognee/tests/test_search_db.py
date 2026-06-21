@@ -102,6 +102,27 @@ def event_loop():
         loop.close()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _disable_session_turn_gating():
+    """Disable session-turn gating (auto_feedback) so retrieval answers directly.
+
+    These tests exercise pure retrieval. The session-turn analysis runs on every non-only_context
+    search when caching + auto_feedback are enabled (both default True) and can intercept
+    multi-turn queries with a clarifying acknowledgement instead of an answer, making the
+    retrieval assertions non-deterministic. That layer has its own dedicated tests
+    (e.g. test_session_context_turn_flow.py), so it is turned off here.
+    """
+    prev = os.environ.get("AUTO_FEEDBACK")
+    os.environ["AUTO_FEEDBACK"] = "False"
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("AUTO_FEEDBACK", None)
+        else:
+            os.environ["AUTO_FEEDBACK"] = prev
+
+
 async def setup_test_environment():
     """Helper function to set up test environment with data, cognify, and triplet embeddings."""
     # This test runs for multiple db settings, to run this locally set the corresponding db envs
@@ -139,7 +160,7 @@ async def _get_retriever_context(retriever, query: str):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def e2e_state():
+async def e2e_state(_disable_session_turn_gating):
     """Compute E2E artifacts once; tests only assert.
 
     This avoids repeating expensive setup and LLM calls across multiple tests.

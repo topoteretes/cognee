@@ -129,15 +129,60 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
         return obj
 
 
+# A single ClientSession is reused across telemetry calls to avoid the
+# per-call DNS + TCP + TLS handshake to `proxy_url`. The session is bound to
+# the asyncio loop it was created on; if the loop changes (tests, reload), the
+# helper rebuilds it transparently.
+_telemetry_session: aiohttp.ClientSession | None = None
+_telemetry_session_loop: asyncio.AbstractEventLoop | None = None
+_telemetry_session_lock: asyncio.Lock | None = None
+_telemetry_session_lock_loop: asyncio.AbstractEventLoop | None = None
+
+
+async def _get_telemetry_session() -> aiohttp.ClientSession:
+    """Return a process-wide aiohttp.ClientSession for telemetry, creating it lazily.
+
+    The session is bound to the asyncio loop it was created on. If the running
+    loop changes (e.g. across tests or `asyncio.run` boundaries) or the session
+    has been closed, a fresh session is built. Concurrent callers are
+    serialized by an `asyncio.Lock` that is itself re-created when the loop
+    changes, because `asyncio.Lock` captures its loop on construction. Intended
+    for use only from inside a running event loop.
+    """
+    global _telemetry_session, _telemetry_session_loop
+    global _telemetry_session_lock, _telemetry_session_lock_loop
+
+    loop = asyncio.get_running_loop()
+
+    # `asyncio.Lock` captures the running loop on creation, so a lock from a
+    # previous loop is unusable. Recreate it when the loop changes.
+    if _telemetry_session_lock is None or _telemetry_session_lock_loop is not loop:
+        _telemetry_session_lock = asyncio.Lock()
+        _telemetry_session_lock_loop = loop
+
+    async with _telemetry_session_lock:
+        if (
+            _telemetry_session is None
+            or _telemetry_session.closed
+            or _telemetry_session_loop is not loop
+        ):
+            timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
+            _telemetry_session = aiohttp.ClientSession(timeout=timeout)
+            _telemetry_session_loop = loop
+        return _telemetry_session
+
+
 async def _send_telemetry_request(payload: dict) -> None:
-    """Send telemetry payload via async HTTP. Non-blocking, no threads."""
-    timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
+    """Send telemetry payload via async HTTP. Best-effort, never raises."""
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(proxy_url, json=payload) as response:
-                if response.status != 200:
-                    logger.debug("Telemetry proxy returned status %s", response.status)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        session = await _get_telemetry_session()
+        async with session.post(proxy_url, json=payload) as response:
+            if response.status != 200:
+                logger.debug("Telemetry proxy returned status %s", response.status)
+    except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
+        # RuntimeError covers the case where the loop was closed between task
+        # creation and session use (fire-and-forget telemetry tasks can outlive
+        # the loop that scheduled them).
         logger.debug("Telemetry request failed: %s", e)
 
 

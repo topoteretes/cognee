@@ -29,7 +29,7 @@ pre-commit install
 ```
 
 ### Available Installation Extras
-- **postgres** / **postgres-binary** - PostgreSQL + PGVector support
+- **postgres** / **postgres-binary** - PostgreSQL + PGVector support (also enables the Postgres session-cache backend, `CACHE_BACKEND=postgres`)
 - **neo4j** - Neo4j graph database support
 - **neptune** - AWS Neptune support
 - **chromadb** - ChromaDB vector database
@@ -286,6 +286,14 @@ GRAPH_DATABASE_PROVIDER=postgres
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
+#### Session Cache
+```bash
+# Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
+CACHE_BACKEND=sqlite
+# Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
+CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+```
+
 ### LLM Provider Configuration
 
 Supported providers: OpenAI (default), Azure OpenAI, Google Gemini, Anthropic, AWS Bedrock, Ollama, LM Studio, Custom (OpenAI-compatible APIs)
@@ -453,7 +461,7 @@ FastAPI application with versioned routes under `cognee/api/v1/`:
 - `/search` - Query interface
 - `/memify` - Graph enrichment
 - `/datasets` - Dataset management
-- `/users` - Authentication (if `REQUIRE_AUTHENTICATION=True`)
+- `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
 
 ## Python SDK Entry Points
@@ -475,8 +483,8 @@ Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
-- `REQUIRE_AUTHENTICATION` - Enable API authentication (default: False)
-- `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True)
+- `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
+- `REQUIRE_AUTHENTICATION` - Explicit auth override. Unset (default): follows `ENABLE_BACKEND_ACCESS_CONTROL`. `false` is ignored when `ENABLE_BACKEND_ACCESS_CONTROL=true`. For a single-user deployment with auth off, set `ENABLE_BACKEND_ACCESS_CONTROL=false` (and optionally `REQUIRE_AUTHENTICATION=false`).
 
 For production deployments, review and tighten these settings.
 
