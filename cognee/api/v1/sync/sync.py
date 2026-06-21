@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from cognee.api.v1.cognify import cognify
 
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.tasks.ingestion.ingest_data import ingest_data
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
@@ -546,8 +547,9 @@ async def _extract_local_files_with_hashes(
 async def _get_file_size(file_path: str) -> int:
     """Get file size in bytes."""
     try:
-        file_dir = os.path.dirname(file_path)
-        file_name = os.path.basename(file_path)
+        normalized_path = get_data_file_path(file_path)
+        file_dir = os.path.dirname(normalized_path)
+        file_name = os.path.basename(normalized_path)
         file_storage = get_file_storage(file_dir)
 
         return await file_storage.get_size(file_name)
@@ -759,8 +761,9 @@ async def _upload_missing_files(
     async with aiohttp.ClientSession(connector=connector) as session:
         for file_info in files_to_upload:
             try:
-                file_dir = os.path.dirname(file_info.raw_data_location)
-                file_name = os.path.basename(file_info.raw_data_location)
+                normalized_path = get_data_file_path(file_info.raw_data_location)
+                file_dir = os.path.dirname(normalized_path)
+                file_name = os.path.basename(normalized_path)
                 file_storage = get_file_storage(file_dir)
 
                 async with file_storage.open(file_name, mode="rb") as file:
