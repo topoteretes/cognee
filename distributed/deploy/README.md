@@ -185,7 +185,7 @@ docker-compose --profile ui up
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `LLM_API_KEY` | Yes | — | API key for your LLM provider |
-| `LLM_MODEL` | No | `openai/gpt-4o-mini` | Model identifier |
+| `LLM_MODEL` | No | `openai/gpt-5-mini` | Model identifier |
 | `LLM_PROVIDER` | No | `openai` | LLM provider name |
 | `DB_PROVIDER` | No | `sqlite` | `sqlite` or `postgres` |
 | `DB_HOST` | If postgres | — | Database host |

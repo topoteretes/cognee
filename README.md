@@ -174,6 +174,49 @@ cognee-cli -ui
 > Docker Desktop, Colima, or any OCI-compatible runtime with a working `docker` CLI is
 > required. See [Docker & Colima Setup](docs/docker-colima-setup.md) for details.
 
+## Run with Docker
+
+Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push to `main`:
+[`cognee/cognee`](https://hub.docker.com/r/cognee/cognee) (the API server) and
+[`cognee/cognee-mcp`](https://hub.docker.com/r/cognee/cognee-mcp) (the MCP server).
+
+### Option A — Docker Compose (build from source)
+
+Clone the repo, create a `.env` with at least `LLM_API_KEY`, then:
+
+```bash
+cp .env.template .env   # then edit .env and set LLM_API_KEY
+
+# Start the API server (http://localhost:8000)
+docker compose up
+
+# Optional profiles (combine as needed):
+docker compose --profile ui up        # + frontend on http://localhost:3000
+docker compose --profile mcp up       # + MCP server on http://localhost:8001
+docker compose --profile postgres up  # + Postgres/PGVector
+docker compose --profile neo4j up     # + Neo4j
+```
+
+> The `cognee` and `cognee-mcp` services publish different host ports (`8000` vs `8001`),
+> so you can run both at once.
+
+### Option B — Pull the prebuilt image (no clone required)
+
+```bash
+# Create a minimal .env in the current directory
+echo 'LLM_API_KEY="YOUR_OPENAI_API_KEY"' > .env
+
+# API server
+docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee:main
+
+# MCP server (HTTP transport)
+docker pull cognee/cognee-mcp:main
+docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+```
+
+See the [MCP server README](cognee-mcp/README.md) for SSE/stdio transports, optional
+extras, and MCP client configuration.
+
 ## Use with AI Agents
 
 ### Claude Code
