@@ -3,6 +3,9 @@ name: test | docker compose
 on:
   workflow_call:
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
   docker-compose-test:
     runs-on: ubuntu-22.04

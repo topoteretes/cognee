@@ -148,8 +148,27 @@ async def test_create_cognee_style_network_with_logo(tmp_path):
     assert "sd-node-box" in html_output
     assert "sd-edge-path" in html_output
     assert "sd-edge-label" in html_output
-    assert "Memory schema" in html_output
-    assert "node types" in html_output  # stats line
+    assert 'id="schema-selection"' in html_output  # focus / status bar
+    assert "sd-mini-card" in html_output  # instance mini-cards
+    assert "sd-spotlight" in html_output  # instance-connection spotlight
+
+    # PR3: schema type inspector side panel + type→graph highlight bridge.
+    # The DOM mount, the inspector JS that reads the PR2 contract fields,
+    # and the highlight/tab-switch wiring must all be present (the inspector
+    # view is no longer an empty stub).
+    assert 'id="schema-side-panel"' in html_output
+    assert "window._showSchemaInspector" in html_output
+    assert "window._schemaTypeIndex" in html_output
+    assert "window._highlightSchemaType" in html_output
+    # PR2 contract field names read verbatim by the inspector.
+    assert "sample_size" in html_output
+    assert "relationships" in html_output
+    assert "to_type" in html_output
+    # Highlight action wiring + side-panel content markers.
+    assert "Highlight in graph" in html_output
+    assert 'data-action="highlight"' in html_output
+    assert 'class="si-chip"' in html_output
+    assert 'class="si-rel"' in html_output
 
 
 @pytest.mark.asyncio

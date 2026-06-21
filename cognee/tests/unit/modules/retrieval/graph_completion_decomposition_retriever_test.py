@@ -625,4 +625,6 @@ async def test_get_completion_from_context_without_context_uses_state_objects():
         query="Original query",
         retrieved_objects=state.merged_edges,
         context="Resolved context",
+        effective_query=None,
+        turn_preparation=None,
     )

@@ -139,7 +139,17 @@ def _install_json(registry: HandleRegistry, req: Request) -> None:
 def _load_extension(registry: HandleRegistry, req: Request) -> None:
     conn = registry.get(req.handle_id)
     extension_name = req.args[0]
-    conn.execute(f"LOAD EXTENSION {extension_name};")
+    try:
+        conn.execute(f"LOAD EXTENSION {extension_name};")
+    except RuntimeError as error:
+        if "not been installed" not in str(error):
+            raise
+        # The warm-up INSTALL on the throwaway database is best-effort and
+        # can fail silently (e.g. a transient network error downloading the
+        # extension on a fresh machine). Install on the live connection and
+        # retry once; if INSTALL fails here it raises with the real cause.
+        conn.execute(f"INSTALL {extension_name};")
+        conn.execute(f"LOAD EXTENSION {extension_name};")
     return None
 
 

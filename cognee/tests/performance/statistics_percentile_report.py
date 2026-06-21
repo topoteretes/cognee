@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -60,7 +62,11 @@ def run_single(run_num: int, total: int, extra_args: list[str]) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
         tmp_path = tmp.name
 
-    cmd = [sys.executable, str(BENCH_SCRIPT), "--output", tmp_path] + extra_args
+    # BENCH_CMD lets another SDK (e.g. the Rust cognee-cli bench) drive this
+    # orchestrator unchanged. When unset, fall back to the Python bench script.
+    bench_cmd = os.environ.get("BENCH_CMD")
+    base = shlex.split(bench_cmd) if bench_cmd else [sys.executable, str(BENCH_SCRIPT)]
+    cmd = base + ["--output", tmp_path] + extra_args
     print(f"\n{'=' * 60}")
     print(f"  RUN {run_num}/{total}")
     print(f"{'=' * 60}\n")
