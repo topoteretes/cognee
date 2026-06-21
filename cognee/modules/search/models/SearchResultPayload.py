@@ -72,9 +72,9 @@ class SearchResultPayload(BaseModel):
         Return context if only_context is True, else return completion if it exists, else return result_object."""
         if self.only_context:
             return self.context
-        elif self.completion:
+        elif self.completion is not None:
             return self.completion
-        elif self.context:
+        elif self.context is not None:
             return self.context
         else:
             return self.result_object

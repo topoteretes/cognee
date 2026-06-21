@@ -64,3 +64,26 @@ def test_search_result_payload_model_json_round_trip():
     payload = SearchResultPayload(completion=deal, search_type=SearchType.GRAPH_COMPLETION)
     dumped = json.loads(payload.model_dump_json())
     assert dumped["completion"] == {"deal_name": "Acme Corp", "health": "Good"}
+
+
+@pytest.mark.parametrize("completion", ["", [], {}])
+def test_search_result_payload_returns_empty_completion(completion):
+    payload = SearchResultPayload(
+        completion=completion,
+        context="fallback context",
+        result_object="fallback result",
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+
+    assert payload.result == completion
+
+
+def test_search_result_payload_returns_empty_context_without_completion():
+    payload = SearchResultPayload(
+        completion=None,
+        context="",
+        result_object="fallback result",
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+
+    assert payload.result == ""
