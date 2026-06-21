@@ -41,6 +41,9 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
     if hasattr(data_item, "file"):
         return await save_data_to_file(data_item.file, filename=data_item.filename)
 
+    if callable(getattr(data_item, "read", None)) and callable(getattr(data_item, "seek", None)):
+        return await save_data_to_file(data_item, filename=getattr(data_item, "name", None))
+
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)
 

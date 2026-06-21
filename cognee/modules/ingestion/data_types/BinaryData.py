@@ -32,7 +32,7 @@ class BinaryData(IngestionData):
         if self.metadata is None:
             self.metadata = await get_file_metadata(self.data, name=self.name)
 
-            if self.metadata["name"] is None:
+            if self.name is not None:
                 self.metadata["name"] = self.name
 
     @asynccontextmanager

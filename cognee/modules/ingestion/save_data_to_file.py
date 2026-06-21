@@ -17,9 +17,13 @@ async def save_data_to_file(
 
     async with classified_data.get_data() as data:
         if "name" not in file_metadata or file_metadata["name"] is None:
-            data_contents = data.encode("utf-8")
-            hash_contents = hashlib.md5(data_contents).hexdigest()
-            file_metadata["name"] = "text_" + hash_contents + ".txt"
+            hash_contents = file_metadata.get("content_hash")
+            if not hash_contents:
+                data_contents = data.encode("utf-8") if isinstance(data, str) else data
+                hash_contents = hashlib.md5(data_contents).hexdigest()
+
+            extension = file_metadata.get("extension") or "txt"
+            file_metadata["name"] = "text_" + hash_contents + "." + extension
 
         file_name = file_metadata["name"]
 
