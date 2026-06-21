@@ -24,7 +24,7 @@ async def visualize_graph(
     include_session_events: bool = True,
     session_ids: list = None,
     user: Optional[User] = None,
-    dataset: Optional[Union[str, UUID]] = None,
+    dataset: Optional[Union[str, UUID]] = "main_dataset",
 ) -> str:
     """Render the knowledge graph to a self-contained HTML file.
 
@@ -42,7 +42,9 @@ async def visualize_graph(
         dataset: Dataset to render, given by name or UUID. Wrapped into a
             single-element list for get_authorized_existing_datasets; the
             first authorized match selects which user+dataset database is
-            visualized. If omitted, the default graph is rendered.
+            visualized. Defaults to "main_dataset" (the same default used by
+            add/cognify/remember). Pass None to skip dataset resolution and
+            render the current context's graph.
     """
     if not user:
         user = await get_default_user()
@@ -54,7 +56,6 @@ async def visualize_graph(
     if dataset:
         dataset = await get_authorized_existing_datasets([dataset], "read", user)
 
-    # Note: In case multi-user mode is not turned on dataset info is provided as None and setting the context is a noop
     async with set_database_global_context_variables(
         dataset[0].id if dataset else None,
         dataset[0].owner_id if dataset else None,
