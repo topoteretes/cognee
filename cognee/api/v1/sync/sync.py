@@ -564,13 +564,29 @@ async def _get_file_size(file_path: str) -> int:
 
 
 async def _get_cloud_base_url() -> str:
-    """Get Cognee Cloud API base URL."""
-    return os.getenv("COGNEE_CLOUD_API_URL", "http://localhost:8001")
+    """Get Cognee Cloud API base URL.
+
+    Canonical: COGNEE_SERVICE_URL (shared with serve()/push()/MCP).
+    COGNEE_CLOUD_API_URL is accepted as a deprecated fallback.
+    """
+    return (
+        os.getenv("COGNEE_SERVICE_URL")
+        or os.getenv("COGNEE_CLOUD_API_URL")
+        or "http://localhost:8001"
+    )
 
 
 async def _get_cloud_auth_token(user: User) -> str:
-    """Get authentication token for Cognee Cloud API."""
-    return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "your-auth-token")
+    """Get authentication token for Cognee Cloud API.
+
+    Canonical: COGNEE_API_KEY (shared with serve()/push()/MCP).
+    COGNEE_CLOUD_AUTH_TOKEN is accepted as a deprecated fallback.
+    """
+    return (
+        os.getenv("COGNEE_API_KEY")
+        or os.getenv("COGNEE_CLOUD_AUTH_TOKEN")
+        or "your-auth-token"
+    )
 
 
 async def _check_hashes_diff(
