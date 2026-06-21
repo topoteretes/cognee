@@ -15,14 +15,19 @@ def get_data_file_path(file_path: str) -> str:
         # file:///path/to/file -> /path/to/file
         fs_path = unquote(parsed.path)
 
-        if os.name == "nt" and parsed.netloc:
-            # Distinguish drive letter (file://D:/path) from UNC (file://server/share)
-            if len(parsed.netloc) == 2 and parsed.netloc[1] == ":" and parsed.netloc[0].isalpha():
-                # Drive letter in netloc from malformed file://D:/path URLs
-                fs_path = parsed.netloc + fs_path
-            else:
-                # Handle UNC paths (file://server/share/...)
-                fs_path = f"//{parsed.netloc}{fs_path}"
+        if parsed.netloc:
+            netloc = unquote(parsed.netloc)
+
+            if os.name == "nt":
+                # Distinguish drive letter (file://D:/path) from UNC (file://server/share)
+                if len(netloc) == 2 and netloc[1] == ":" and netloc[0].isalpha():
+                    # Drive letter in netloc from malformed file://D:/path URLs
+                    fs_path = netloc + fs_path
+                else:
+                    # Handle UNC paths (file://server/share/...)
+                    fs_path = f"//{netloc}{fs_path}"
+            elif netloc.lower() != "localhost":
+                fs_path = os.path.join(netloc, fs_path.lstrip("/"))
 
         # Normalize the file URI for Windows - handle drive letters correctly
         if os.name == "nt":  # Windows

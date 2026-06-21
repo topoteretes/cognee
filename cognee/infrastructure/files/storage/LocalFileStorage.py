@@ -57,6 +57,10 @@ def get_parsed_path(file_path: str) -> str:
         return os.path.normpath(file_path)
 
 
+def get_file_uri(file_path: str) -> str:
+    return Path(os.path.abspath(file_path)).as_uri()
+
+
 class LocalFileStorage(Storage):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
@@ -103,7 +107,7 @@ class LocalFileStorage(Storage):
 
                 file.close()
 
-        return Path(full_file_path).as_uri()
+        return get_file_uri(full_file_path)
 
     @asynccontextmanager
     async def open(
@@ -156,7 +160,7 @@ class LocalFileStorage(Storage):
                 )
 
         with open(full_file_path, mode=mode, *args, **kwargs) as file:
-            file = FileBufferedReader(file, name=Path(full_file_path).as_uri())
+            file = FileBufferedReader(file, name=get_file_uri(full_file_path))
 
             try:
                 yield file

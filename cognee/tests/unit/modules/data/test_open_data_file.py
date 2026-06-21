@@ -3,11 +3,22 @@ import tempfile
 import pytest
 from pathlib import Path
 
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
 
 class TestOpenDataFile:
     """Test cases for open_data_file function with file:// URL handling."""
+
+    def test_relative_file_url_path(self):
+        assert get_data_file_path("file://relative/path.txt") == os.path.normpath(
+            "relative/path.txt"
+        )
+
+    def test_localhost_file_url_path(self):
+        assert get_data_file_path("file://localhost/tmp/path.txt") == os.path.normpath(
+            "/tmp/path.txt"
+        )
 
     @pytest.mark.asyncio
     async def test_regular_file_path(self):
@@ -40,6 +51,19 @@ class TestOpenDataFile:
                 assert content == test_content
         finally:
             os.unlink(temp_file_path)
+
+    @pytest.mark.asyncio
+    async def test_relative_file_url_text_mode(self, tmp_path, monkeypatch):
+        test_content = "Test content for relative file:// URL handling"
+        relative_dir = tmp_path / "relative"
+        relative_dir.mkdir()
+        (relative_dir / "path.txt").write_text(test_content)
+
+        monkeypatch.chdir(tmp_path)
+
+        async with open_data_file("file://relative/path.txt", mode="r") as f:
+            content = f.read()
+            assert content == test_content
 
     @pytest.mark.asyncio
     async def test_file_url_binary_mode(self):
