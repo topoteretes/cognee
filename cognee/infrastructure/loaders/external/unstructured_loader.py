@@ -6,7 +6,7 @@ from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
 
 try:
-    from unstructured.partition.auto import partition  # ty:ignore[unresolved-import]
+    from unstructured.partition.auto import partition
 except ImportError as e:
     raise ImportError(
         "unstructured is required for document processing. Install with: pip install unstructured"
@@ -95,11 +95,8 @@ class UnstructuredLoader(LoaderInterface):
             # Name ingested file of current loader based on original file content hash
             storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
-            # Set partitioning parameters
-            partition_kwargs = {"filename": file_path, "strategy": strategy, **kwargs}
-
             # Use partition to extract elements
-            elements = partition(**partition_kwargs)
+            elements = partition(filename=file_path, strategy=strategy, **kwargs)
 
             # Process elements into text content
             text_parts = []
