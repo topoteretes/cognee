@@ -19,6 +19,10 @@ def _binary_name(data: BinaryIO, filename: str = None) -> str | None:
     return None
 
 
+def _is_seekable_file_like(data) -> bool:
+    return callable(getattr(data, "read", None)) and callable(getattr(data, "seek", None))
+
+
 def classify(
     data: Union[str, BinaryIO], filename: str = None
 ) -> Union[TextData, BinaryData, S3BinaryData]:
@@ -34,11 +38,7 @@ def classify(
         if isinstance(data, S3File):
             return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
 
-    if (
-        isinstance(data, (BufferedReader, SpooledTemporaryFile))
-        or callable(getattr(data, "read", None))
-        and callable(getattr(data, "seek", None))
-    ):
+    if isinstance(data, (BufferedReader, SpooledTemporaryFile)) or _is_seekable_file_like(data):
         return BinaryData(data, _binary_name(data, filename))
 
     raise IngestionError(

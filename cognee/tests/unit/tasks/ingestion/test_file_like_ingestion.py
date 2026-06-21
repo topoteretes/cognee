@@ -8,6 +8,7 @@ import pytest
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.ingestion.classify import classify
 from cognee.modules.ingestion.data_types import BinaryData
+from cognee.modules.ingestion.save_data_to_file import save_data_to_file
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
 
 
@@ -51,3 +52,18 @@ async def test_save_data_item_to_storage_preserves_file_like_name_extension(tmp_
 
     assert stored_path.name == "notes.md"
     assert stored_path.read_bytes() == b"# Notes"
+
+
+@pytest.mark.asyncio
+async def test_save_data_to_file_uses_explicit_file_like_basename(tmp_path):
+    token = file_storage_config.set({"data_root_directory": str(tmp_path)})
+    try:
+        file_uri = await save_data_to_file(io.BytesIO(b"pdf"), filename="../report.pdf")
+    finally:
+        file_storage_config.reset(token)
+
+    stored_path = Path(urlparse(file_uri).path)
+
+    assert stored_path.name == "report.pdf"
+    assert stored_path.parent == tmp_path
+    assert stored_path.read_bytes() == b"pdf"
