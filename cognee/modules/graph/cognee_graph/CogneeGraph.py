@@ -134,15 +134,7 @@ class CogneeGraph(CogneeAbstractGraph):
         else:
             logger.info("Retrieving full graph from database.")
             nodes_data, edges_data = await get_graph_data_fn()
-        if hasattr(adapter, "get_id_filtered_graph_data") and (not nodes_data or not edges_data):
-            logger.warning(
-                "Id filtered graph returned empty, falling back to full graph retrieval."
-            )
-            logger.info("Retrieving full graph")
-            nodes_data, edges_data = await adapter.get_graph_data()
 
-        if not nodes_data or not edges_data:
-            raise EntityNotFoundError("Empty graph projected from the database.")
         return nodes_data, edges_data
 
     async def _get_filtered_graph(
