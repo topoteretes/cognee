@@ -1300,6 +1300,8 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          # Single-user E2E flow; calls visualize_graph() with no dataset.
+          ENABLE_BACKEND_ACCESS_CONTROL: false
         run: uv run python ./cognee/tests/test_graph_model_from_schema.py
 
   run-custom-model-test:
@@ -1328,6 +1330,8 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          # Single-user E2E flow; calls visualize_graph() with no dataset.
+          ENABLE_BACKEND_ACCESS_CONTROL: false
         run: uv run python ./cognee/tests/test_custom_model.py
 
   run-dataset-queue-test:

@@ -866,6 +866,11 @@ async def _remember_inner(
     # optional fields as empty strings.
     content_type = kwargs.pop("content_type", None) or None
     skill_improvement = kwargs.pop("skill_improvement", None)
+    # Pop skills-only kwargs so they don't reach the add()/cognify() kwarg router,
+    # which rejects unknown keys. The router always forwards these (as None for a
+    # normal remember), so they must be consumed here regardless of content_type.
+    skills_text = kwargs.pop("skills_text", None)
+    skill_name = kwargs.pop("skill_name", None)
 
     def _requested_node_set(default: str) -> str:
         requested_node_set = kwargs.get("node_set") or [default]
@@ -955,9 +960,8 @@ async def _remember_inner(
 
         # No-code path: inline SKILL.md markdown supplied as a string instead of
         # an uploaded file. Reuses the same add_skills pipeline as the upload path.
-        skills_text = kwargs.get("skills_text")
         if not normalized_uploads and skills_text:
-            tmp_dir, skill_source = _materialize_inline_skill(skills_text, kwargs.get("skill_name"))
+            tmp_dir, skill_source = _materialize_inline_skill(skills_text, skill_name)
 
         try:
             async with set_database_global_context_variables(dataset.id, owner_id):

@@ -1,10 +1,15 @@
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Optional, Union
+from uuid import UUID
+from cognee.modules.users.models.User import User
 
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
     aggregate_multi_user_graphs,
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.users.methods import get_default_user
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.shared.logging_utils import get_logger, setup_logging, ERROR
 
 
@@ -18,7 +23,8 @@ async def visualize_graph(
     destination_file_path: str = None,
     include_session_events: bool = True,
     session_ids: list = None,
-    user=None,
+    user: Optional[User] = None,
+    dataset: Optional[Union[str, UUID]] = "main_dataset",
 ) -> str:
     """Render the knowledge graph to a self-contained HTML file.
 
@@ -33,28 +39,48 @@ async def visualize_graph(
         session_ids: Restrict event collection to these sessions. Defaults to
             the user's most recently active sessions.
         user: User whose sessions are read. Defaults to the default user.
+        dataset: Dataset to render, given by name or UUID. Wrapped into a
+            single-element list for get_authorized_existing_datasets; the
+            first authorized match selects which user+dataset database is
+            visualized. Defaults to "main_dataset" (the same default used by
+            add/cognify/remember). Pass None to skip dataset resolution and
+            render the current context's graph.
     """
-    graph_engine = await get_graph_engine()
-    graph_data = await graph_engine.get_graph_data()
+    if not user:
+        user = await get_default_user()
 
-    search_events = None
-    if include_session_events:
-        from cognee.modules.visualization.session_events import collect_session_events
+    # Only authorize when a dataset is given. get_authorized_existing_datasets
+    # expects a list, so wrap the single dataset. With no dataset the context
+    # is set with None: a no-op when access control is off, and an (expected)
+    # error in multi-user mode where a dataset is required.
+    if dataset:
+        dataset = await get_authorized_existing_datasets([dataset], "read", user)
 
-        search_events = await collect_session_events(user=user, session_ids=session_ids)
+    async with set_database_global_context_variables(
+        dataset[0].id if dataset else None,
+        dataset[0].owner_id if dataset else None,
+    ):
+        graph_engine = await get_graph_engine()
+        graph_data = await graph_engine.get_graph_data()
 
-    graph = await cognee_network_visualization(
-        graph_data, destination_file_path, search_events=search_events
-    )
+        search_events = None
+        if include_session_events:
+            from cognee.modules.visualization.session_events import collect_session_events
 
-    if destination_file_path:
-        logger.info(f"The HTML file has been stored at path: {destination_file_path}")
-    else:
-        logger.info(
-            "The HTML file has been stored on your home directory! Navigate there with cd ~"
+            search_events = await collect_session_events(user=user, session_ids=session_ids)
+
+        graph = await cognee_network_visualization(
+            graph_data, destination_file_path, search_events=search_events
         )
 
-    return graph
+        if destination_file_path:
+            logger.info(f"The HTML file has been stored at path: {destination_file_path}")
+        else:
+            logger.info(
+                "The HTML file has been stored on your home directory! Navigate there with cd ~"
+            )
+
+        return graph
 
 
 async def visualize_multi_user_graph(

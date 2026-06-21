@@ -129,7 +129,8 @@ def get_remember_router() -> APIRouter:
             ),
         ),
         node_set: Optional[List[EmptyExampleStr]] = Form(
-            default=[""],
+            default=None,
+            examples=[None],
             description=(
                 "Tags the ingested data with named node sets (e.g. per-agent or per-project "
                 "groups). Extracted graph nodes are linked to these sets, and recall/search "
