@@ -35,7 +35,7 @@ class RecallPayloadDTO(InDTO):
     )
     datasets: Optional[list[str]] = Field(
         default=None,
-        examples=[["main_dataset"]],
+        examples=[["default_dataset"]],
         description=(
             "Dataset names to search within. Omit (null) to search all datasets "
             "you have read access to."
@@ -43,7 +43,7 @@ class RecallPayloadDTO(InDTO):
     )
     dataset_ids: Optional[list[UUID]] = Field(
         default=None,
-        examples=[[]],
+        examples=[None],
         description=(
             "Dataset UUIDs to search within; takes precedence over 'datasets' names "
             "when both are provided. Leave empty to resolve by name."
@@ -55,7 +55,7 @@ class RecallPayloadDTO(InDTO):
     )
     node_name: Optional[list[str]] = Field(
         default=None,
-        examples=[["tech_docs"]],
+        examples=[None],
         description=(
             "Restrict results to these node sets (the node_set values passed to "
             "/v1/add or /v1/remember). Omit to search all nodes."
@@ -70,7 +70,7 @@ class RecallPayloadDTO(InDTO):
     )
     session_id: Optional[str] = Field(
         default=None,
-        examples=["claude-code-1718000000"],
+        examples=[None],
         description=(
             "Session whose cached QA and trace entries should be searched. With "
             "search_type null and no datasets, session hits short-circuit the "

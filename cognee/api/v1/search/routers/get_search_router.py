@@ -33,7 +33,7 @@ class SearchPayloadDTO(InDTO):
     )
     datasets: Optional[list[str]] = Field(
         default=None,
-        examples=[["main_dataset"]],
+        examples=[["default_dataset"]],
         description=(
             "Dataset names to search. Names only resolve to datasets owned by the caller;"
             " use dataset_ids for datasets shared with you."
@@ -41,7 +41,7 @@ class SearchPayloadDTO(InDTO):
     )
     dataset_ids: Optional[list[UUID]] = Field(
         default=None,
-        examples=[["a1b2c3d4-5678-40ab-8cde-1234567890ab"]],
+        examples=[None],
         description=(
             "Dataset UUIDs to search (required for datasets shared with you)."
             " When provided, the datasets name list is ignored."
@@ -53,7 +53,7 @@ class SearchPayloadDTO(InDTO):
     )
     node_name: Optional[list[str]] = Field(
         default=None,
-        examples=[["tech_docs"]],
+        examples=[None],
         description=(
             "Restrict results to nodes in these node_sets"
             " (the node_set values used during add/remember)."
