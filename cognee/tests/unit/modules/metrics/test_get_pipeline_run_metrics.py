@@ -6,9 +6,7 @@ import pytest
 
 from cognee.modules.data.models import GraphMetrics
 
-metrics_mod = importlib.import_module(
-    "cognee.modules.metrics.operations.get_pipeline_run_metrics"
-)
+metrics_mod = importlib.import_module("cognee.modules.metrics.operations.get_pipeline_run_metrics")
 
 
 def _make_pipeline_run():
@@ -66,9 +64,7 @@ async def test_get_pipeline_run_metrics_returns_cached_metrics(monkeypatch, capl
     monkeypatch.setattr(metrics_mod, "get_graph_engine", fake_get_graph_engine)
 
     with caplog.at_level("INFO"):
-        result = await metrics_mod.get_pipeline_run_metrics(
-            pipeline_run, include_optional=False
-        )
+        result = await metrics_mod.get_pipeline_run_metrics(pipeline_run, include_optional=False)
 
     assert result == [cached]
     assert any("cache hit" in record.message for record in caplog.records)
@@ -125,6 +121,7 @@ async def test_get_pipeline_run_metrics_computes_and_persists_on_cache_miss(monk
         "get_relational_engine",
         lambda: DummyEngine(),
     )
+
     async def fake_get_graph_engine():
         return DummyGraphEngine()
 
@@ -140,9 +137,7 @@ async def test_get_pipeline_run_metrics_computes_and_persists_on_cache_miss(monk
     )
 
     with caplog.at_level("WARNING"):
-        result = await metrics_mod.get_pipeline_run_metrics(
-            pipeline_run, include_optional=True
-        )
+        result = await metrics_mod.get_pipeline_run_metrics(pipeline_run, include_optional=True)
 
     assert len(result) == 1
     assert result[0].num_tokens == 42
@@ -152,9 +147,7 @@ async def test_get_pipeline_run_metrics_computes_and_persists_on_cache_miss(monk
 
 
 @pytest.mark.asyncio
-async def test_get_pipeline_run_metrics_logs_and_reraises_graph_engine_errors(
-    monkeypatch, caplog
-):
+async def test_get_pipeline_run_metrics_logs_and_reraises_graph_engine_errors(monkeypatch, caplog):
     pipeline_run = _make_pipeline_run()
 
     class DummySession:
@@ -188,8 +181,6 @@ async def test_get_pipeline_run_metrics_logs_and_reraises_graph_engine_errors(
 
     with caplog.at_level("ERROR"):
         with pytest.raises(RuntimeError, match="graph unavailable"):
-            await metrics_mod.get_pipeline_run_metrics(
-                pipeline_run, include_optional=False
-            )
+            await metrics_mod.get_pipeline_run_metrics(pipeline_run, include_optional=False)
 
     assert any(record.levelname == "ERROR" for record in caplog.records)
