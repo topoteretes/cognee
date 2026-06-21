@@ -1027,7 +1027,7 @@ async def _remember_inner(
     if remaining:
         raise TypeError(f"Unexpected keyword arguments: {', '.join(remaining)}")
 
-    dataset_id = add_kwargs.pop("dataset_id", None) or shared_kwargs.get("dataset_id")
+    dataset_id = add_kwargs.get("dataset_id", None) or shared_kwargs.get("dataset_id")
 
     # Ensure database is initialized (same as add() does internally).
     # Must run before get_default_user() which queries the DB.
