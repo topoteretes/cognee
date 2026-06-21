@@ -582,11 +582,7 @@ async def _get_cloud_auth_token(user: User) -> str:
     Canonical: COGNEE_API_KEY (shared with serve()/push()/MCP).
     COGNEE_CLOUD_AUTH_TOKEN is accepted as a deprecated fallback.
     """
-    return (
-        os.getenv("COGNEE_API_KEY")
-        or os.getenv("COGNEE_CLOUD_AUTH_TOKEN")
-        or "your-auth-token"
-    )
+    return os.getenv("COGNEE_API_KEY") or os.getenv("COGNEE_CLOUD_AUTH_TOKEN") or "your-auth-token"
 
 
 async def _check_hashes_diff(
