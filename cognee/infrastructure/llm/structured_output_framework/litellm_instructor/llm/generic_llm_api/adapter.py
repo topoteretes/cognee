@@ -15,7 +15,7 @@ from tenacity import (
     before_sleep_log,
     retry,
     retry_if_not_exception_type,
-    stop_after_delay,
+    stop_after_attempt,
     wait_exponential_jitter,
 )
 
@@ -68,7 +68,7 @@ class GenericAPIAdapter(LLMInterface):
     Type[BaseModel]) -> BaseModel
     """
 
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
     default_instructor_mode = "json_mode"
 
     def __init__(
@@ -116,7 +116,7 @@ class GenericAPIAdapter(LLMInterface):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(4),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
@@ -165,7 +165,7 @@ class GenericAPIAdapter(LLMInterface):
                             "content": f"""{text_input}""",
                         },
                     ],
-                    max_retries=2,
+                    max_retries=1,
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     response_model=response_model,
@@ -212,7 +212,7 @@ class GenericAPIAdapter(LLMInterface):
                                 "content": f"""{text_input}""",
                             },
                         ],
-                        max_retries=2,
+                        max_retries=1,
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
@@ -235,7 +235,7 @@ class GenericAPIAdapter(LLMInterface):
 
     @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
@@ -293,7 +293,7 @@ class GenericAPIAdapter(LLMInterface):
 
     @observe(as_type="transcribe_image")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
