@@ -2,7 +2,7 @@ import os
 import asyncio
 from os import path
 
-# Note: OS environment
+# Note: OS environment variables need to be set before Cognee import
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
 
 from typing import Any
