@@ -161,6 +161,38 @@ jobs:
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
 
+      - name: Build and push Dev MCP Docker Image
+        if: ${{ github.ref_name == 'dev' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: cognee-mcp/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: cognee/cognee-mcp:${{ needs.release-github.outputs.version }}
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ github.ref_name }}
+          cache-from: type=registry,ref=cognee/cognee-mcp:buildcache
+          cache-to: type=registry,ref=cognee/cognee-mcp:buildcache,mode=max
+
+      - name: Build and push Main MCP Docker Image
+        if: ${{ github.ref_name == 'main' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: cognee-mcp/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            cognee/cognee-mcp:${{ needs.release-github.outputs.version }}
+            cognee/cognee-mcp:latest
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ github.ref_name }}
+          cache-from: type=registry,ref=cognee/cognee-mcp:buildcache
+          cache-to: type=registry,ref=cognee/cognee-mcp:buildcache,mode=max
+
   trigger-docs-test-suite:
     needs: release-pypi-package
     if: ${{ github.ref_name == 'main' }}

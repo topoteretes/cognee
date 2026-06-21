@@ -158,6 +158,16 @@ If you'd rather run cognee-mcp in a container, you have two options:
       - `redis` - Redis support
       - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
 2. **Pull from Docker Hub** (no build required):
+
+   The image is published to Docker Hub on every push to `main`. If you have **not** cloned the
+   repo, create the `.env` file the run commands expect first — it needs at least your LLM key:
+   ```bash
+   # Pull the prebuilt image
+   docker pull cognee/cognee-mcp:main
+
+   # Create a minimal .env in the current directory (no repo checkout required)
+   echo 'LLM_API_KEY="YOUR_OPENAI_API_KEY"' > .env
+   ```
    ```bash
    # With HTTP transport (recommended for web deployments)
    docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main

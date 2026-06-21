@@ -71,8 +71,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8000:8000" # MCP port
-      - "5678:5678" # MCP debugger port
+      # Host ports differ from the main `cognee` service so both can run together
+      # (the MCP server still listens on 8000 inside the container).
+      - "8001:8000" # MCP port
+      - "5679:5678" # MCP debugger port
     deploy:
       resources:
         limits:
