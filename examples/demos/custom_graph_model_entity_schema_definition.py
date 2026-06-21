@@ -1,7 +1,7 @@
-import os
 import asyncio
-from cognee import config, add, cognify, search, SearchType, prune, visualize_graph
+import os
 
+from cognee import SearchType, config, forget, recall, remember, visualize_graph
 from cognee.low_level import DataPoint
 
 
@@ -48,34 +48,32 @@ async def main():
     set_up_config()
 
     # Prune data and system metadata before running, only if we want "fresh" state.
-    await prune.prune_data()
-    await prune.prune_system(metadata=True)
+    await forget(everything=True)
 
     text = "The Python programming language is widely used in data analysis, web development, and machine learning."
 
-    await add(text)
-    await cognify(graph_model=ProgrammingLanguage)
+    await remember(text, graph_model=ProgrammingLanguage, self_improvement=False)
 
     await visualize_data()
 
     # Completion query that uses graph data to form context.
-    graph_completion = await search(
+    graph_completion = await recall(
         query_text="What is Python?", query_type=SearchType.GRAPH_COMPLETION
     )
     print(graph_completion)
 
     # Completion query that uses document chunks to form context.
-    rag_completion = await search(
+    rag_completion = await recall(
         query_text="What is Python?", query_type=SearchType.RAG_COMPLETION
     )
     print(rag_completion)
 
     # Query all summaries related to query.
-    summaries = await search(query_text="Python", query_type=SearchType.SUMMARIES)
+    summaries = await recall(query_text="Python", query_type=SearchType.SUMMARIES)
     for summary in summaries:
         print(summary)
 
-    chunks = await search(query_text="Python", query_type=SearchType.CHUNKS)
+    chunks = await recall(query_text="Python", query_type=SearchType.CHUNKS)
     for chunk in chunks:
         print(chunk)
 

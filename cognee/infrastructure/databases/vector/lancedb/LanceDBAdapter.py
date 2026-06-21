@@ -66,6 +66,15 @@ class IndexSchema(DataPoint):
     id: str
     text: str
 
+    # Optional reference scalars carried for the search "Evidence" feature.
+    # They stay None for non-chunk data points, so this schema remains
+    # compatible with every indexed DataPoint type.
+    document_id: Optional[str] = None
+    document_name: Optional[str] = None
+    chunk_index: Optional[int] = None
+    source_chunk_id: Optional[str] = None
+    importance_weight: Optional[float] = 0.5
+
     metadata: dict = {"index_fields": ["text"]}
     belongs_to_set: List[str] = []
 
@@ -873,6 +882,15 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
             try:
                 validated = schema_model.model_validate(raw_payload).model_dump()
+                # Re-typing must NOT introduce columns the stored row lacks. The
+                # schema model may have grown optional fields since this
+                # collection was created (e.g. reference scalars added to a text
+                # IndexSchema); model_dump() would emit them as None, and adding
+                # a field absent from the table's Arrow struct makes
+                # `collection.add` reject the row ("field '...' does not exist in
+                # table schema"). Keep exactly the stored key set, coercing the
+                # value where the model provided one.
+                validated = {key: validated.get(key, raw_payload[key]) for key in raw_payload}
             except Exception as e:
                 logger.debug(
                     "_coerce_rows_to_typed_payload: validation fell back for id=%s: %s",
@@ -888,6 +906,10 @@ class LanceDBAdapter(VectorDBInterface):
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """Return rows from `collection_name` whose id is in `data_point_ids`."""
+        if not data_point_ids:
+            # No ids requested. Avoid building an "id IN ()" filter, which lance
+            # rejects as a parse error; pgvector/chromadb return [] here too.
+            return []
         try:
             collection = await self.get_collection(collection_name)
         except CollectionNotFoundError:
@@ -1203,6 +1225,14 @@ class LanceDBAdapter(VectorDBInterface):
                 IndexSchema(
                     id=str(data_point.id),
                     text=getattr(data_point, data_point.metadata["index_fields"][0]),
+                    # Reference scalars for search "Evidence". Pulled via getattr
+                    # so non-chunk data points (which lack these fields) simply
+                    # fall back to None instead of raising.
+                    document_id=getattr(data_point, "document_id", None),
+                    document_name=getattr(data_point, "document_name", None),
+                    chunk_index=getattr(data_point, "chunk_index", None),
+                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
+                    importance_weight=getattr(data_point, "importance_weight", None),
                     belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
@@ -1218,7 +1248,9 @@ class LanceDBAdapter(VectorDBInterface):
             await collection.delete("id IS NOT NULL")
             await connection.drop_table(collection_name)
 
-        if self.url.startswith("/"):
+        if self.url and not self.url.startswith(
+            ("db://", "http://", "https://", "s3://", "gs://", "az://")
+        ):
             db_dir_path = path.dirname(self.url)
             db_file_name = path.basename(self.url)
             await get_file_storage(db_dir_path).remove_all(db_file_name)

@@ -17,7 +17,9 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import ERROR, setup_logging
 
 
-def datapoint_model_to_basemodel(model: type[BaseModel]) -> type[BaseModel]:
+def datapoint_model_to_basemodel(
+    model: type[BaseModel], *, strip_metadata: bool = False
+) -> type[BaseModel]:
     """
     Convert a DataPoint-derived model into a plain BaseModel-derived model at runtime.
 
@@ -78,6 +80,9 @@ def datapoint_model_to_basemodel(model: type[BaseModel]) -> type[BaseModel]:
             field_names = [name for name in own_annotations if name in model_fields]
         else:
             field_names = list(model_fields.keys())
+
+        if strip_metadata:
+            field_names = [name for name in field_names if name != "metadata"]
 
         converted_fields = {}
         for field_name in field_names:

@@ -41,6 +41,12 @@ class DataPoint(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # Defaults to a random UUID. A random id has NO stable identity, so such a
+    # node never deduplicates/merges across runs or mentions and cannot be looked
+    # up by recomputing its id. For a node that should be mergeable/idempotent
+    # (like Entity), declare ``identity_fields`` in ``metadata`` (or pass an
+    # explicit id via ``id_for``); the id is then derived deterministically from
+    # those fields, namespaced by class name. Custom user models must opt in.
     id: UUID = Field(default_factory=uuid4)
     created_at: int = Field(
         default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -69,9 +75,10 @@ class DataPoint(BaseModel):
         if not explicit_id:
             identity_fields = self.__class__._get_identity_fields()
             if identity_fields:
-                identity_id = self.__class__._generate_identity_id(
-                    identity_fields, self.model_dump(), self.__class__.__name__
-                )
+                # self.__dict__ holds the validated field values (defaults
+                # applied) — no model_dump(): a full recursive serialization on
+                # every construction is pure waste for reading 1-2 fields.
+                identity_id = self.__class__._generate_identity_id(identity_fields, self.__dict__)
                 if identity_id is not None:
                     object.__setattr__(self, "id", identity_id)
 
@@ -102,33 +109,65 @@ class DataPoint(BaseModel):
         return None
 
     @classmethod
-    def _generate_identity_id(
-        cls, identity_fields: list[str], data: dict, class_name: str
-    ) -> UUID | None:
-        """Generate a deterministic UUID5 from identity field values.
+    def _generate_identity_id(cls, identity_fields: list[str], data: dict) -> UUID | None:
+        """Generate the deterministic id of an instance from its ``identity_fields``.
 
-        Returns None if any identity field is missing from both data
-        and Pydantic field defaults, causing fallback to the default UUID4.
+        Collects the identity field values (from ``data`` or, if absent there, the
+        Pydantic field default) and delegates the actual id derivation to
+        :meth:`id_for`. This is intentional: ``id_for`` is the single source of
+        truth for id creation, so an instance built without an explicit id and a
+        bare ``Model.id_for(...)`` lookup can never drift apart.
+
+        Returns ``None`` if any identity field is missing from both ``data`` and
+        the Pydantic field defaults, which makes ``__init__`` fall back to the
+        default UUID4.
         """
-        parts = []
+        values = []
         for field_name in identity_fields:
             if field_name in data:
-                value = data[field_name]
+                values.append(data[field_name])
             else:
-                # Check Pydantic field default
+                # Field absent from the instance values (e.g. references a
+                # non-existent attribute) — fall back to its Pydantic default,
+                # or bail out.
                 field_info = cls.model_fields.get(field_name)
                 if field_info is not None and field_info.default is not None:
-                    value = field_info.default
+                    values.append(field_info.default)
                 else:
                     return None
-            if isinstance(value, str):
-                value = value.lower().replace(" ", "_").replace("'", "")
-            else:
-                value = str(value)
-            parts.append(value)
-        joined = "|".join(parts)
-        identity_string = f"{class_name}:{joined}"
-        return uuid5(NAMESPACE_OID, identity_string)
+        return cls.id_for(*values)
+
+    @staticmethod
+    def _normalize_identity_value(value: Any) -> str:
+        """Normalize a single identity value (lower-case, spaces→_, strip apostrophes).
+
+        Kept byte-for-byte aligned with ``generate_node_id`` (the legacy bare-name
+        hashing) so historical ids remain recomputable from a normalized value —
+        the graph id migration relies on this. Pinned by
+        ``test_identity_fields.py::TestNormalizationMatchesGenerateNodeId``.
+        """
+        if isinstance(value, str):
+            return value.lower().replace(" ", "_").replace("'", "")
+        return str(value)
+
+    @classmethod
+    def id_for(cls, *values: Any) -> UUID:
+        """Return the deterministic node id for this model from its identity value(s).
+
+        The id namespace is the class name itself —
+        ``uuid5(NAMESPACE_OID, f"{cls.__name__}:{values}")`` — so two different node
+        types can never collide on the same input string, and callers cannot forget
+        or mistype a namespace prefix: the class supplies it. This is the single
+        source of truth for "what id does a node of this kind with this identity
+        have", used both when creating nodes and when looking them up from a raw
+        string before an instance exists.
+
+        ``_generate_identity_id`` (the ``identity_fields`` path in ``__init__``)
+        delegates here, so an instance's auto-derived id and ``Model.id_for(...)``
+        are guaranteed to be the same value for the same inputs.
+        """
+        joined = "|".join(cls._normalize_identity_value(value) for value in values)
+        return uuid5(NAMESPACE_OID, f"{cls.__name__}:{joined}")
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:

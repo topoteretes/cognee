@@ -4,7 +4,7 @@ from cognee.api.v1.exceptions.exceptions import DocumentSubgraphNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models import Data
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -90,7 +90,7 @@ async def delete_document_subgraph(document_id: UUID, mode: str = "soft"):
                     chunk_connections = await graph_db.get_connections(node_id)
                     deleted_node_ids.extend(
                         [
-                            str(generate_edge_id(_get_edge_vector_text(edge)))
+                            str(EdgeType.id_for(_get_edge_vector_text(edge)))
                             for (__, edge, __) in chunk_connections
                             if _is_contains_edge(edge) and _get_edge_vector_text(edge)
                         ]

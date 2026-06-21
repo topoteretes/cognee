@@ -1,11 +1,11 @@
 import asyncio
 import os
+
 import cognee
-from cognee import visualize_graph
+from cognee import SearchType, visualize_graph
 from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
     persist_sessions_in_knowledge_graph_pipeline,
 )
-from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
@@ -14,17 +14,15 @@ logger = get_logger("conversation_session_persistence_example")
 
 async def main():
     # NOTE: CACHING has to be enabled for this example to work
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.forget(everything=True)
 
     text_1 = "Cognee is a solution that can build knowledge graph from text, creating an AI memory system"
     text_2 = "Germany is a country located next to the Netherlands"
 
-    await cognee.add([text_1, text_2])
-    await cognee.cognify()
+    await cognee.remember([text_1, text_2], self_improvement=False)
 
     question = "What can I use to create a knowledge graph?"
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=question,
     )
@@ -33,7 +31,7 @@ async def main():
     print(f"Answer: {search_results}\n")
 
     question = "You sure about that?"
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text=question
     )
     print("\nSession ID: default_session")
@@ -41,7 +39,7 @@ async def main():
     print(f"Answer: {search_results}\n")
 
     question = "This is awesome!"
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text=question
     )
     print("\nSession ID: default_session")
@@ -49,7 +47,7 @@ async def main():
     print(f"Answer: {search_results}\n")
 
     question = "Where is Germany?"
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=question,
         session_id="different_session",
@@ -59,7 +57,7 @@ async def main():
     print(f"Answer: {search_results}\n")
 
     question = "Next to which country again?"
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=question,
         session_id="different_session",
@@ -69,7 +67,7 @@ async def main():
     print(f"Answer: {search_results}\n")
 
     question = "So you remember everything I asked from you?"
-    search_results = await cognee.search(
+    search_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=question,
         session_id="different_session",

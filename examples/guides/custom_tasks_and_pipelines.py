@@ -1,16 +1,17 @@
 import asyncio
 import os
 from typing import Any, Dict, List
+from uuid import NAMESPACE_OID, UUID, uuid5
+
 from pydantic import BaseModel
 
 import cognee
-from cognee.modules.engine.operations.setup import setup
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee import visualize_graph
 from cognee.infrastructure.engine import DataPoint
-from cognee.tasks.storage import add_data_points
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.pipelines import Task
-from cognee.api.v1.visualize.visualize import visualize_graph
-from uuid import uuid5, NAMESPACE_OID, UUID
+from cognee.tasks.storage import add_data_points
 
 
 class PersonLLM(BaseModel):

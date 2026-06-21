@@ -176,6 +176,106 @@ async def test_authorized_search_delegates_to_search_in_datasets_context(monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query_type",
+    [SearchType.GRAPH_COMPLETION, SearchType.RAG_COMPLETION],
+)
+async def test_search_returns_results_for_all_datasets(monkeypatch, search_mod, query_type):
+    """Regression guard for #2617.
+
+    Multi-dataset GRAPH_COMPLETION / RAG_COMPLETION search must surface a
+    result for EVERY authorized dataset, not just the first one. The bug
+    silently dropped every dataset except ``results[0]`` and still returned
+    200/success, so the assertion is specifically about not losing datasets.
+    """
+    user = _make_user()
+    ds1 = _make_dataset(name="ds1", tenant_id="t1")
+    ds2 = _make_dataset(name="ds2", tenant_id="t1")
+
+    async def dummy_authorized_search(**_kwargs):
+        # One payload per dataset, as produced by search_in_datasets_context.
+        return [
+            SearchResultPayload(
+                result_object="object",
+                context=[f"ctx-{ds.name}"],
+                completion=[f"answer-{ds.name}"],
+                search_type=query_type,
+                dataset_name=ds.name,
+                dataset_id=ds.id,
+                dataset_tenant_id=ds.tenant_id,
+            )
+            for ds in (ds1, ds2)
+        ]
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+
+    out = await search_mod.search(
+        query_text="q",
+        query_type=query_type,
+        dataset_ids=[ds1.id, ds2.id],
+        user=user,
+    )
+
+    # Both datasets must be represented; nothing collapsed to results[0].
+    assert len(out) == 2
+    returned_dataset_ids = {row["dataset_id"] for row in out}
+    assert returned_dataset_ids == {ds1.id, ds2.id}
+
+    by_id = {row["dataset_id"]: row for row in out}
+    assert by_id[ds1.id]["search_result"] == ["answer-ds1"]
+    assert by_id[ds2.id]["search_result"] == ["answer-ds2"]
+
+
+@pytest.mark.asyncio
+async def test_search_no_access_control_keeps_all_dataset_results(monkeypatch, search_mod):
+    """Regression guard for #2617 (access-control-disabled path).
+
+    Without backend access control, multiple per-dataset payloads must not
+    be collapsed: only a SINGLE result list is unwrapped for backwards
+    compatibility, never a multi-result aggregation.
+    """
+    user = _make_user()
+    ds1 = _make_dataset(name="ds1")
+    ds2 = _make_dataset(name="ds2")
+
+    async def dummy_authorized_search(**_kwargs):
+        return [
+            SearchResultPayload(
+                result_object="object",
+                context=["ctx1"],
+                completion=["answer-ds1"],
+                search_type=SearchType.RAG_COMPLETION,
+                dataset_name=ds1.name,
+                dataset_id=ds1.id,
+                dataset_tenant_id=ds1.tenant_id,
+            ),
+            SearchResultPayload(
+                result_object="object",
+                context=["ctx2"],
+                completion=["answer-ds2"],
+                search_type=SearchType.RAG_COMPLETION,
+                dataset_name=ds2.name,
+                dataset_id=ds2.id,
+                dataset_tenant_id=ds2.tenant_id,
+            ),
+        ]
+
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: False)
+    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
+
+    out = await search_mod.search(
+        query_text="q",
+        query_type=SearchType.RAG_COMPLETION,
+        dataset_ids=[ds1.id, ds2.id],
+        user=user,
+    )
+
+    # Two datasets -> two result lists preserved (no results[0]-only collapse).
+    assert out == [["answer-ds1"], ["answer-ds2"]]
+
+
+@pytest.mark.asyncio
 async def test_search_passes_retriever_specific_config_to_authorized_search(
     monkeypatch, search_mod
 ):

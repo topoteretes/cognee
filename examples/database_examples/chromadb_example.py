@@ -1,8 +1,13 @@
+import asyncio
 import os
 import pathlib
-import asyncio
+
+# ChromaDB is available as a vector adapter, but it does not have a dataset
+# database handler for backend access control yet.
+os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+
 import cognee
-from cognee.modules.search.types import SearchType
+from cognee import SearchType
 
 
 async def main():
@@ -12,9 +17,8 @@ async def main():
     This example:
     1. Configures Cognee to use ChromaDB as vector database
     2. Sets up data directories
-    3. Adds sample data to Cognee
-    4. Processes (cognifies) the data
-    5. Performs different types of searches
+    3. Stores sample data with remember to Cognee
+    4. Performs different types of searches
     """
     # Configure ChromaDB as the vector database provider
     cognee.config.set_vector_db_config(
@@ -22,6 +26,7 @@ async def main():
             "vector_db_url": "http://localhost:8000",  # Default ChromaDB server URL
             "vector_db_key": "",  # ChromaDB doesn't require an API key by default
             "vector_db_provider": "chromadb",  # Specify ChromaDB as provider
+            "vector_dataset_database_handler": "chromadb",
         }
     )
 
@@ -35,8 +40,7 @@ async def main():
     cognee.config.system_root_directory(cognee_directory_path)
 
     # Clean any existing data (optional)
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    # await cognee.forget(everything=True)
 
     # Create a dataset
     dataset_name = "chromadb_example"
@@ -50,14 +54,11 @@ async def main():
     ChromaDB supports multiple distance metrics for vector similarity search and can be integrated with various ML frameworks."""
 
     # Add the sample text to the dataset
-    await cognee.add([sample_text], dataset_name)
-
-    # Process the added document to extract knowledge
-    await cognee.cognify([dataset_name])
+    await cognee.remember([sample_text], dataset_name=dataset_name, self_improvement=False)
 
     # Now let's perform some searches
     # 1. Search for insights related to "ChromaDB"
-    insights_results = await cognee.search(
+    insights_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text="ChromaDB"
     )
     print("\nInsights about ChromaDB:")
@@ -65,7 +66,7 @@ async def main():
         print(f"- {result}")
 
     # 2. Search for text chunks related to "vector search"
-    chunks_results = await cognee.search(
+    chunks_results = await cognee.recall(
         query_type=SearchType.CHUNKS, query_text="vector search", datasets=[dataset_name]
     )
     print("\nChunks about vector search:")
@@ -73,7 +74,7 @@ async def main():
         print(f"- {result}")
 
     # 3. Get graph completion related to databases
-    graph_completion_results = await cognee.search(
+    graph_completion_results = await cognee.recall(
         query_type=SearchType.GRAPH_COMPLETION, query_text="database"
     )
     print("\nGraph completion for databases:")
@@ -81,8 +82,7 @@ async def main():
         print(f"- {result}")
 
     # Clean up (optional)
-    # await cognee.prune.prune_data()
-    # await cognee.prune.prune_system(metadata=True)
+    # await cognee.forget(everything=True)
 
 
 if __name__ == "__main__":
