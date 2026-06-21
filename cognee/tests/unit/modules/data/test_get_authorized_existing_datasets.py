@@ -143,6 +143,4 @@ async def test_denied_dataset_name_raises_permission_error(monkeypatch, datasets
     )
 
     with pytest.raises(PermissionDeniedError, match="for all datasets requested"):
-        await datasets_mod.get_authorized_existing_datasets(
-            ["allowed", "denied"], "read", user
-        )
+        await datasets_mod.get_authorized_existing_datasets(["allowed", "denied"], "read", user)
