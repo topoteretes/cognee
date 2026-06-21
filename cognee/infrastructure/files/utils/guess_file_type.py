@@ -51,6 +51,10 @@ def guess_file_type(file: BinaryIO, name: str | None = None) -> filetype.Type:
         ext = Path(file).suffix
     elif name is not None:
         ext = Path(name).suffix
+    else:
+        file_name = getattr(file, "name", None) or getattr(file, "full_name", None)
+        if isinstance(file_name, str):
+            ext = Path(file_name).suffix
 
     if ext in [".txt", ".text"]:
         file_type = Type("text/plain", "txt")
