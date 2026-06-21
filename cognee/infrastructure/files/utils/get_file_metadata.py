@@ -3,6 +3,7 @@ import os.path
 from pathlib import Path
 from typing import BinaryIO, TypedDict
 
+from cognee.infrastructure.files.exceptions import FileContentHashingError
 from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
 from cognee.shared.logging_utils import get_logger
 
@@ -73,7 +74,7 @@ async def get_file_metadata(file: BinaryIO, name: str | None = None) -> FileMeta
         file.seek(0)
         content_hash = await get_file_content_hash(file)
         file.seek(0)
-    except io.UnsupportedOperation as error:
+    except (AttributeError, FileContentHashingError, io.UnsupportedOperation, OSError) as error:
         file_name = getattr(file, "name", name or "<unknown>")
         logger.error(f"Error retrieving content hash for file: {file_name} \n{str(error)}\n\n")
 
