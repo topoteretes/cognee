@@ -78,7 +78,7 @@ class AdvancedPdfLoader(LoaderInterface):
                 **kwargs,
             }
             # Use partition to extract elements
-            from unstructured.partition.pdf import partition_pdf  # ty:ignore[unresolved-import]
+            from unstructured.partition.pdf import partition_pdf
 
             elements = partition_pdf(**partition_kwargs)
 
