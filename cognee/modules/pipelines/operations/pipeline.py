@@ -22,9 +22,6 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
     check_pipeline_run_qualification,
 )
-from cognee.modules.pipelines.models.PipelineRunInfo import (
-    PipelineRunStarted,
-)
 from typing import Any
 
 logger = get_logger("cognee.pipeline")
@@ -95,14 +92,9 @@ async def run_pipeline_per_dataset(
             # If pipeline caching is enabled we do not proceed with re-processing
             yield process_pipeline_status
             return
-        else:
-            # If pipeline caching is disabled we always return pipeline started information and proceed with re-processing
-            yield PipelineRunStarted(
-                pipeline_run_id=process_pipeline_status.pipeline_run_id,
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-                payload=data,
-            )
+
+        # If pipeline caching is disabled we proceed with re-processing.
+        # PipelineRunStarted will be emitted by run_tasks() below.
 
     pipeline_run = run_tasks(
         tasks,
