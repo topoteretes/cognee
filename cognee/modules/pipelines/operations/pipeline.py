@@ -95,14 +95,7 @@ async def run_pipeline_per_dataset(
             # If pipeline caching is enabled we do not proceed with re-processing
             yield process_pipeline_status
             return
-        else:
-            # If pipeline caching is disabled we always return pipeline started information and proceed with re-processing
-            yield PipelineRunStarted(
-                pipeline_run_id=process_pipeline_status.pipeline_run_id,
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-                payload=data,
-            )
+            # run_tasks() will emit PipelineRunStarted for the new run
 
     pipeline_run = run_tasks(
         tasks,
