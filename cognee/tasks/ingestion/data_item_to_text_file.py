@@ -25,7 +25,7 @@ settings = SaveDataSettings()
 
 
 async def pull_from_s3(file_path, destination_file) -> None:
-    async with open_data_file(file_path) as file:
+    async with open_data_file(file_path, mode="rb") as file:
         while True:
             chunk = file.read(8192)
             if not chunk:
