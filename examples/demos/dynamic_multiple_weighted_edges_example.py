@@ -1,5 +1,10 @@
+import os
 import asyncio
 from os import path
+
+# Note: OS environment
+os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+
 from typing import Any
 
 from pydantic import SkipValidation
