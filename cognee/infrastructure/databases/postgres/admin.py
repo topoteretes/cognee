@@ -7,6 +7,8 @@ is intentionally agnostic about which subsystem (graph, vector, dlt) the
 credentials came from.
 """
 
+import json
+import os
 from typing import Union
 
 from sqlalchemy import URL, text
@@ -16,12 +18,40 @@ from sqlalchemy.ext.asyncio import create_async_engine
 _MAINTENANCE_DB_NAME = "postgres"
 
 
+def _admin_connect_args() -> dict:
+    """SSL/connect args for the maintenance engine, from DATABASE_CONNECT_ARGS.
+
+    Managed Postgres (e.g. Neon, RDS) requires SSL,
+    but asyncpg uses ``ssl`` not ``sslmode``. Returns {} for in-cluster Postgres
+    (env unset) so this stays a no-op there.
+    """
+    raw = os.environ.get("DATABASE_CONNECT_ARGS")
+    if not raw:
+        return {}
+    try:
+        args = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    out = {}
+    if args.get("ssl") is not None:
+        out["ssl"] = args["ssl"]
+    elif args.get("sslmode") is not None:  # map libpq sslmode -> asyncpg ssl
+        out["ssl"] = args["sslmode"]
+    return out
+
+
+def _direct_host(host: str) -> str:
+    """CREATE/DROP DATABASE can't run through Neon's PgBouncer pooler — use the
+    direct endpoint. No-op for non-Neon hosts."""
+    return host.replace("-pooler.", ".") if host and "-pooler." in host else host
+
+
 def _build_maintenance_url(host: str, port: Union[int, str], username: str, password: str) -> URL:
     return URL.create(
         "postgresql+asyncpg",
         username=username,
         password=password,
-        host=host,
+        host=_direct_host(host),
         port=int(port),
         database=_MAINTENANCE_DB_NAME,
     )
@@ -42,7 +72,10 @@ async def create_pg_database_if_not_exists(
     Returns:
         True if the database was created, False if it already existed.
     """
-    engine = create_async_engine(_build_maintenance_url(host, port, username, password))
+    engine = create_async_engine(
+        _build_maintenance_url(host, port, username, password),
+        connect_args=_admin_connect_args(),
+    )
     try:
         connection = await engine.connect()
         try:
@@ -74,7 +107,10 @@ async def drop_pg_database_if_exists(
     mode, terminates every backend currently connected to ``db_name`` other
     than our own, then runs ``DROP DATABASE IF EXISTS``.
     """
-    engine = create_async_engine(_build_maintenance_url(host, port, username, password))
+    engine = create_async_engine(
+        _build_maintenance_url(host, port, username, password),
+        connect_args=_admin_connect_args(),
+    )
     try:
         connection = await engine.connect()
         try:

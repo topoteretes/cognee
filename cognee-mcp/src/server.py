@@ -495,7 +495,7 @@ async def save_interaction(data: str) -> list:
 
 @log_usage(function_name="MCP search", log_type="mcp_tool")
 async def search(
-    search_query: str, search_type: str, top_k: int = 10, datasets: str = None
+    search_query: str, search_type: str, top_k: int = 15, datasets: str = None
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -1133,7 +1133,7 @@ async def recall(
     search_type: str = None,
     datasets: str = None,
     session_id: str = None,
-    top_k: int = 10,
+    top_k: int = 15,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -1968,6 +1968,8 @@ async def main():
         logger.info("Running database migrations...")
 
         await setup()
+        # Full startup migrations (relational schema + graph/vector revision
+        # chains) — MCP writes new-scheme data, so it must migrate like the API.
         await run_migrations()
 
         logger.info("Database migrations done.")

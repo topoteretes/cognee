@@ -3,13 +3,15 @@ name: test | ollama
 on:
   workflow_call:
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
 jobs:
 
   run_ollama_test:
 
-    # needs 32 Gb RAM for phi4 in a container
-    runs-on: buildjet-8vcpu-ubuntu-2204
-
+    # TODO: needs 32 Gb RAM for phi4 in a container — GitHub-hosted larger runner
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -48,7 +50,7 @@ jobs:
       - name: Pull required Ollama models
         run: |
           curl -X POST http://localhost:11434/api/pull -d '{"name": "phi4"}'
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "avr/sfr-embedding-mistral:latest"}'
+          curl -X POST http://localhost:11434/api/pull -d '{"name": "qwen3-embedding:latest"}'
 
       - name: Call ollama API
         run: |
@@ -65,7 +67,7 @@ jobs:
           curl -X POST http://127.0.0.1:11434/api/embed \
             -H "Content-Type: application/json" \
              -d '{
-              "model": "avr/sfr-embedding-mistral:latest",
+              "model": "qwen3-embedding:latest",
             "input": "This is a test sentence to generate an embedding."
             }'
 
@@ -74,6 +76,21 @@ jobs:
           docker ps
           docker logs $(docker ps --filter "ancestor=ollama/ollama" --format "{{.ID}}")
 
+      - name: Download embedding tokenizer from S3
+        # Mirrored from huggingface.co/Qwen/Qwen3-Embedding-8B (Apache-2.0) so the
+        # embedding tokenizer loads offline and never hits HuggingFace 429s in CI.
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+          TOKENIZER_KEY: nightly_ci_artifacts/huggingface_models/qwen3-embedding-tokenizer.tar.gz
+          TOKENIZER_SHA256: 8f5834d8791c8da03220feaccc2fe9c443e23b1092dcd99c576ef613990bbd00
+        run: |
+          set -euo pipefail
+          aws s3 cp "s3://$BUCKET/$TOKENIZER_KEY" tokenizer.tar.gz
+          echo "$TOKENIZER_SHA256  tokenizer.tar.gz" | sha256sum -c -
+          tar -xzf tokenizer.tar.gz -C "$GITHUB_WORKSPACE"
 
       - name: Run example test
         env:
@@ -84,8 +101,11 @@ jobs:
           LLM_ENDPOINT: "http://localhost:11434/v1/"
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
-          EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
+          EMBEDDING_MODEL: "qwen3-embedding:latest"
           EMBEDDING_ENDPOINT: "http://localhost:11434/api/embed"
           EMBEDDING_DIMENSIONS: "4096"
-          HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
+          # Load the tokenizer from the S3-mirrored local dir, fully offline.
+          HUGGINGFACE_TOKENIZER: "${{ github.workspace }}/qwen3-embedding-tokenizer"
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
         run: uv run python ./examples/demos/simple_cognee_example.py

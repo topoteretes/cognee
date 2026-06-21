@@ -203,7 +203,7 @@ class CogneeClient:
         query_type: str,
         datasets: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
-        top_k: int = 10,
+        top_k: int = 15,
     ) -> Any:
         """
         Search the knowledge graph.
@@ -535,7 +535,7 @@ class CogneeClient:
         search_type: Optional[str] = None,
         datasets: Optional[List[str]] = None,
         session_id: Optional[str] = None,
-        top_k: int = 10,
+        top_k: int = 15,
     ) -> Any:
         """Search memory via recall() with auto-routing and session awareness."""
         if self.use_api:

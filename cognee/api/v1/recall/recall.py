@@ -7,6 +7,8 @@ from typing_extensions import TypedDict
 
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.memory.entries import normalize_scope
@@ -155,7 +157,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 async def _search_session(
     query_text: str,
     session_id: str,
-    top_k: int = 10,
+    top_k: int = 15,
     user: str | None = None,
     _parent_span=None,
 ) -> list[ResponseQAEntry]:
@@ -213,7 +215,7 @@ async def _search_session(
 async def _search_trace(
     query_text: str,
     session_id: str,
-    top_k: int = 10,
+    top_k: int = 15,
     user: str | None = None,
 ) -> list[ResponseAgentTraceEntry]:
     """Search session-cache agent trace steps by keyword matching.
@@ -317,7 +319,7 @@ async def recall(
     *,
     datasets: list[str] | None = None,
     dataset_ids: list[UUID] | None = None,
-    top_k: int = 10,
+    top_k: int = 15,
     auto_route: bool = True,
     scope: str | list[str] | None = None,
     system_prompt: str | None = None,
@@ -333,7 +335,10 @@ async def recall(
     retriever_specific_config: dict | None = None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
+    include_references: bool = False,
     user: object | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
 ) -> list[RecallResponse]:
     """Search the knowledge graph for relevant information.
 
@@ -356,7 +361,7 @@ async def recall(
         query_type: Search strategy. When provided, the router is bypassed.
         datasets: Dataset names to search within.
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
-        top_k: Maximum results to return (default *10*).
+        top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to GRAPH_COMPLETION.
 
@@ -410,6 +415,7 @@ async def recall(
             "session_id": session_id or "",
             "datasets": ",".join(datasets) if datasets else "",
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
+            "include_references": include_references,
             "cognee_version": cognee_version,
         },
     )
@@ -437,6 +443,7 @@ async def recall(
                 only_context=only_context,
                 session_id=session_id,
                 verbose=verbose,
+                include_references=include_references,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -546,6 +553,9 @@ async def recall(
                 retriever_specific_config=retriever_specific_config,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                include_references=include_references,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
             )
 
             tagged = []

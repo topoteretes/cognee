@@ -148,6 +148,7 @@ class TapesCacheAdapter(FSCacheAdapter):
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ):
         await super().create_qa_entry(
             user_id,
@@ -160,6 +161,7 @@ class TapesCacheAdapter(FSCacheAdapter):
             feedback_score,
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
+            used_session_context_ids=used_session_context_ids,
         )
         await self._mirror_to_tapes(question=question, context=context, answer=answer)
 

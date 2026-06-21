@@ -1,11 +1,12 @@
 import asyncio
+import os
+from pathlib import Path
 from typing import Optional
 
-import cognee
-from cognee.api.v1.visualize.visualize import visualize_graph
 from disambiguate_entities import disambiguate_entities_pipeline
-from pathlib import Path
-import os
+
+import cognee
+from cognee import visualize_graph
 
 
 async def main(
