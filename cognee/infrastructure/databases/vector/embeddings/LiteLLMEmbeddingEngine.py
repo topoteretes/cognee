@@ -20,12 +20,6 @@ import httpx
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 
-# Over-length embedding input: litellm maps chat "context length" 400s to
-# ContextWindowExceededError, but the embeddings API returns a plain
-# BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
-# those by message so the split/pool recovery below can handle them too. Kept
-# narrow to length/token-limit phrasings so genuinely-bad requests still fail fast.
-_EMBED_LENGTH_ERROR_RE = re.compile(r"maximum\s+input\s+length", re.IGNORECASE)
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
@@ -43,6 +37,13 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
+
+# Over-length embedding input: litellm maps chat "context length" 400s to
+# ContextWindowExceededError, but the embeddings API returns a plain
+# BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
+# those by message so the split/pool recovery below can handle them too. Kept
+# narrow to length/token-limit phrasings so genuinely-bad requests still fail fast.
+_EMBED_LENGTH_ERROR_RE = re.compile(r"maximum\s+input\s+length", re.IGNORECASE)
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
