@@ -45,7 +45,7 @@ def _enrich_llm_span(model: str, name: str) -> None:
         return
 
     try:
-        from opentelemetry import trace as otel_trace  # ty:ignore[unresolved-import]
+        from opentelemetry import trace as otel_trace
 
         from cognee.modules.observability.tracing import COGNEE_LLM_MODEL, COGNEE_LLM_PROVIDER
 

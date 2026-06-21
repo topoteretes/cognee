@@ -20,14 +20,39 @@ env:
   ENV: 'dev'
 
 jobs:
+  fork-check:
+    runs-on: ubuntu-latest
+    outputs:
+      is_fork_pr: ${{ steps.check.outputs.is_fork_pr }}
+    steps:
+      - id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+            echo "is_fork_pr=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_fork_pr=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  fork-pr-test-status:
+    name: Test Completion Status
+    needs: [fork-check]
+    if: needs.fork-check.outputs.is_fork_pr == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Fork PR: skipping secret-dependent Test Suites."
+          echo "Community Tests (No Secrets) provides CI for external contributions."
+
   # ── Build pre-baked CI container ──────────────────────────────────────
   build-ci-env:
     name: Build CI Environment
+    needs: [fork-check]
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      needs.fork-check.outputs.is_fork_pr != 'true' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+       github.event.pull_request.head.repo.full_name == github.repository))
     outputs:
       ci-image: ${{ steps.set-image.outputs.image }}
     steps:
@@ -86,13 +111,15 @@ jobs:
 
   pre-test:
     name: basic checks
+    needs: [fork-check]
+    if: needs.fork-check.outputs.is_fork_pr != 'true'
     uses: ./.github/workflows/pre_test.yml
 
   basic-tests:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -100,8 +127,8 @@ jobs:
   e2e-tests:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -109,8 +136,8 @@ jobs:
   cli-tests:
     name: CLI Tests
     uses: ./.github/workflows/cli_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -118,16 +145,16 @@ jobs:
   slow-e2e-tests:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   graph-db-tests:
     name: Graph Database Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/graph_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -135,8 +162,8 @@ jobs:
 
   vector-db-tests:
     name: Vector DB Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/vector_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -144,8 +171,8 @@ jobs:
 
   example-tests:
     name: Example Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -153,8 +180,8 @@ jobs:
 
   notebook-tests:
     name: Notebook Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/notebooks_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -162,6 +189,8 @@ jobs:
 
   different-os-tests-basic:
     name: OS and Python Tests Ubuntu
+    needs: [fork-check]
+    if: needs.fork-check.outputs.is_fork_pr != 'true'
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
@@ -173,6 +202,8 @@ jobs:
 
   different-os-tests-extended:
     name: OS and Python Tests Extended
+    needs: [fork-check]
+    if: needs.fork-check.outputs.is_fork_pr != 'true'
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.13.x"]'
@@ -181,8 +212,8 @@ jobs:
 
   llm-tests:
     name: LLM Test Suite
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/test_llms.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -190,8 +221,8 @@ jobs:
 
   s3-file-storage-test:
     name: S3 File Storage Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/test_s3_file_storage.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -199,8 +230,8 @@ jobs:
 
   integration-tests:
     name: Run Integration Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/integration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -208,23 +239,29 @@ jobs:
 
   mcp-test:
     name: MCP Tests
+    needs: [fork-check]
+    if: needs.fork-check.outputs.is_fork_pr != 'true'
     uses: ./.github/workflows/test_mcp.yml
     secrets: inherit
 
   docker-compose-test:
     name: Docker Compose Test
+    needs: [fork-check]
+    if: needs.fork-check.outputs.is_fork_pr != 'true'
     uses: ./.github/workflows/docker_compose.yml
     secrets: inherit
 
   docker-ci-test:
     name: Docker CI test
+    needs: [fork-check]
+    if: needs.fork-check.outputs.is_fork_pr != 'true'
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
   temporal-graph-tests:
     name: Temporal Graph Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/temporal_graph_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -232,8 +269,8 @@ jobs:
 
   search-db-tests:
     name: Search Test on Different DBs
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/search_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -241,8 +278,8 @@ jobs:
 
   relational-db-migration-tests:
     name: Relational DB Migration Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/relational_db_migration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -253,8 +290,8 @@ jobs:
   # merges. (`continue-on-error` is not allowed on a reusable-workflow job.)
   distributed-tests:
     name: Distributed Cognee Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/distributed_test.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -262,8 +299,8 @@ jobs:
 
   db-examples-tests:
     name: DB Examples Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [fork-check, build-ci-env]
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     uses: ./.github/workflows/db_examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -272,6 +309,7 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
+      fork-check,
       pre-test,
       basic-tests,
       e2e-tests,
@@ -295,7 +333,7 @@ jobs:
       db-examples-tests,
     ]
     runs-on: ubuntu-latest
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.fork-check.outputs.is_fork_pr != 'true' }}
     steps:
       - name: Check Status
         run: |
