@@ -174,6 +174,48 @@ cognee-cli -ui
 > Docker Desktop, Colima, or any OCI-compatible runtime with a working `docker` CLI is
 > required. See [Docker & Colima Setup](docs/docker-colima-setup.md) for details.
 
+## Understanding the Knowledge Graph
+
+New to knowledge graphs? Here's what happens when you run the quickstart above.
+
+**What is a knowledge graph?** A knowledge graph stores information as **nodes** (entities like people, places, concepts) and **edges** (relationships between them). Instead of searching raw text, your AI agent can traverse structured connections to find precise answers.
+
+**What Cognee does under the hood:**
+
+1. **Chunks** the input text into manageable pieces
+2. **Extracts entities and relationships** using an LLM (e.g. "Marie Curie" → Person, "Warsaw" → Place, "born_in" → relationship)
+3. **Stores** them in a knowledge graph + vector index
+4. **Answers queries** by traversing the graph and grounding responses in the extracted knowledge
+
+**Sample output** (from [`examples/guides/beginner_knowledge_graph.py`](examples/guides/beginner_knowledge_graph.py)):
+
+```text
+Entities (graph nodes): 8
+----------------------------------------
+  [Person] Marie Curie  --  Physicist and chemist, pioneer in radioactivity
+  [Person] Pierre Curie  --  Physicist, husband of Marie Curie
+  [Person] Henri Becquerel  --  Physicist who shared the 1903 Nobel Prize
+  [Place] Warsaw  --  Birthplace of Marie Curie, in Poland
+  [Place] Paris  --  City in France where Marie Curie worked
+  ...
+
+Relationships (graph edges): 10
+----------------------------------------
+  Marie Curie  --[born_in]-->  Warsaw
+  Marie Curie  --[worked_at]-->  University of Paris
+  Marie Curie  --[won]-->  Nobel Prize in Physics
+  Marie Curie  --[married_to]-->  Pierre Curie
+  ...
+
+Q: Where was Marie Curie born?
+A: Marie Curie was born in Warsaw, Poland.
+```
+
+> **Note:** The exact entities and labels depend on the LLM, so your output may differ slightly. Run the full example to see your results:
+> ```bash
+> python examples/guides/beginner_knowledge_graph.py
+> ```
+
 ## Use with AI Agents
 
 ### Claude Code
@@ -223,6 +265,12 @@ await cognee.disconnect()
 ## Examples
 
 Browse more examples in the [`examples/`](examples/) folder — demos, guides, custom pipelines, and database configurations.
+
+**New to knowledge graphs?** Start with the [Beginner-Friendly Knowledge Graph Example](examples/guides/beginner_knowledge_graph.py) — it walks through the full remember → explore → recall workflow, prints every entity and relationship Cognee extracts, and shows how to query the graph with natural-language questions.
+
+```bash
+python examples/guides/beginner_knowledge_graph.py
+```
 
 **Use Case 1 — Customer Support Agent**
 
