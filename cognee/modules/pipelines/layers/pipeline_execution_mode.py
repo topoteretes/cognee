@@ -2,6 +2,8 @@ import asyncio
 from typing import Any, AsyncIterable, AsyncGenerator, Callable, Dict, Union, Awaitable
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 from cognee.modules.users.methods.get_default_user import get_default_user
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
@@ -113,7 +115,9 @@ async def run_pipeline_as_background_process(
         pipeline_list.append(pipeline_run)
 
     # Send all started pipelines to execute one by one in background
-    asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
+    task = asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     return pipeline_run_started_info
 

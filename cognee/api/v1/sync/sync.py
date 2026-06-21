@@ -3,6 +3,8 @@ import os
 import uuid
 import asyncio
 import aiohttp
+
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -150,7 +152,9 @@ async def sync(
         # Continue without database tracking if record creation fails
 
     # Start the sync operation in the background
-    asyncio.create_task(_perform_background_sync(run_id, datasets, user))
+    task = asyncio.create_task(_perform_background_sync(run_id, datasets, user))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     # Return immediately with run_id
     return SyncResponse(
