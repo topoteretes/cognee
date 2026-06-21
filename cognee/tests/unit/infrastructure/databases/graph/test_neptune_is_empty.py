@@ -33,3 +33,24 @@ async def test_is_empty_false_when_nodes_exist():
         query=AsyncMock(return_value=[{"node_count": 7}]),
     )
     assert await NeptuneGraphDB.is_empty(stub) is False
+
+
+@pytest.mark.asyncio
+async def test_is_empty_true_when_result_empty():
+    """A query returning no rows must not raise IndexError; treat as empty."""
+    stub = SimpleNamespace(
+        _GRAPH_NODE_LABEL="COGNEE_NODE",
+        query=AsyncMock(return_value=[]),
+    )
+    assert await NeptuneGraphDB.is_empty(stub) is True
+
+
+@pytest.mark.asyncio
+async def test_is_empty_wraps_query_error():
+    """A failing query is reported instead of bubbling up the raw driver error."""
+    stub = SimpleNamespace(
+        _GRAPH_NODE_LABEL="COGNEE_NODE",
+        query=AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    with pytest.raises(Exception, match="Failed to check if graph is empty"):
+        await NeptuneGraphDB.is_empty(stub)
