@@ -11,7 +11,7 @@ from tenacity import (
     before_sleep_log,
     retry,
     retry_if_not_exception_type,
-    stop_after_delay,
+    stop_after_attempt,
     wait_exponential_jitter,
 )
 
@@ -56,7 +56,7 @@ class OpenAIAdapter(GenericAPIAdapter):
     """
 
     default_instructor_mode = "json_schema_mode"
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
 
     """Adapter for OpenAI's GPT-3, GPT=4 API"""
 
@@ -108,7 +108,7 @@ class OpenAIAdapter(GenericAPIAdapter):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
@@ -141,6 +141,11 @@ class OpenAIAdapter(GenericAPIAdapter):
         """
 
         merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor (see acreate_str_output).
+        if response_model is str:
+            return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
+
         try:
             async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(
@@ -206,7 +211,7 @@ class OpenAIAdapter(GenericAPIAdapter):
 
     @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)

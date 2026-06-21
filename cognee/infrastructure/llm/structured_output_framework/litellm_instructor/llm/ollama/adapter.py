@@ -5,13 +5,13 @@ from typing import Any
 
 import instructor
 import litellm
-from openai import OpenAI
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
     retry_if_not_exception_type,
-    stop_after_delay,
+    stop_after_attempt,
     wait_exponential_jitter,
 )
 
@@ -72,14 +72,18 @@ class OllamaAPIAdapter(LLMInterface):
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
+        # Async client (native async I/O — no sync-call-in-event-loop blocking).
+        # ``self.client`` is the raw client for plain-text/transcription calls;
+        # ``self.aclient`` adds instructor's structured-output layer on top.
+        self.client = AsyncOpenAI(base_url=self.endpoint, api_key=self.api_key)
         self.aclient = instructor.from_openai(
-            OpenAI(base_url=self.endpoint, api_key=self.api_key),
+            self.client,
             mode=instructor.Mode(self.instructor_mode),
         )
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (
@@ -114,13 +118,24 @@ class OllamaAPIAdapter(LLMInterface):
             - BaseModel: A structured output that conforms to the specified response model.
         """
         merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor and hit the OpenAI-
+        # compatible endpoint directly. Instructor's JSON/tool-call schemas cause
+        # parse failures and retry storms on local llama.cpp-compatible servers.
+        if response_model is str:
+            async with llm_rate_limiter_context_manager():
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text_input},
+                    ],
+                    **merged_kwargs,
+                )
+            return response.choices[0].message.content or ""
+
         async with llm_rate_limiter_context_manager():
-            # ``self.aclient`` wraps a *synchronous* ``OpenAI`` client, so calling
-            # ``.create()`` directly blocks the event loop for the full duration of
-            # the LLM request. Offload it to a worker thread so concurrent async
-            # callers are not serialized behind it.
-            response = await asyncio.to_thread(
-                self.aclient.chat.completions.create,
+            response = await self.aclient.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
@@ -141,7 +156,7 @@ class OllamaAPIAdapter(LLMInterface):
 
     @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (
@@ -173,9 +188,7 @@ class OllamaAPIAdapter(LLMInterface):
         """
 
         async with open_data_file(input, mode="rb") as audio_file:
-            # Synchronous client call -- offload so it does not block the loop.
-            transcription = await asyncio.to_thread(
-                self.aclient.audio.transcriptions.create,
+            transcription = await self.client.audio.transcriptions.create(
                 model="whisper-1",  # Ensure the correct model for transcription
                 file=audio_file,
                 language="en",
@@ -188,7 +201,7 @@ class OllamaAPIAdapter(LLMInterface):
         return TranscriptionReturnType(transcription.text, transcription)
 
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (
@@ -223,9 +236,7 @@ class OllamaAPIAdapter(LLMInterface):
         async with open_data_file(input, mode="rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
-        # Synchronous client call -- offload so it does not block the loop.
-        response = await asyncio.to_thread(
-            self.aclient.chat.completions.create,
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {
