@@ -98,7 +98,7 @@ def datapoint_model_to_basemodel(
             )
 
         converted_model = create_model(
-            model_type.__name__, __base__=ConfiguredBase, **converted_fields
+            model_type.__name__, __base__=ConfiguredBase, **cast(Any, converted_fields)
         )
         converted_model.model_rebuild()
         cache[model_type] = converted_model

@@ -206,6 +206,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         merged_kwargs.pop("api_key", None)
         merged_kwargs.pop("api_base", None)
         merged_kwargs.pop("api_version", None)
+        merged_kwargs = {key: value for key, value in merged_kwargs.items() if value is not None}
 
         try:
             async with llm_rate_limiter_context_manager():
