@@ -370,10 +370,12 @@ def get_datasets_router() -> APIRouter:
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-        if dataset is None:
+        if not dataset:
             return JSONResponse(
                 status_code=404,
-                content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({str(dataset_id)}) not found."
+                ).model_dump(),
             )
 
         dataset_id = dataset[0].id
@@ -525,7 +527,7 @@ def get_datasets_router() -> APIRouter:
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-        if dataset is None:
+        if not dataset:
             return JSONResponse(
                 status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
             )
