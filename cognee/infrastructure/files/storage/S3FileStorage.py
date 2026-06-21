@@ -90,7 +90,10 @@ class S3FileStorage(Storage):
                 else:
                     with self.s3.open(full_file_path, mode="wb") as file:
                         if hasattr(data, "read"):
-                            data.seek(0)
+                            try:
+                                data.seek(0)
+                            except (AttributeError, OSError):
+                                pass
                             file.write(data.read())
                         else:
                             file.write(data)
