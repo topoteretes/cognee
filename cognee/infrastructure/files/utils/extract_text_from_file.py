@@ -28,7 +28,16 @@ def extract_text_from_file(file: BinaryIO, file_type: filetype.Type) -> str | No
     if file_type.extension == "pdf":
         reader = PdfReader(stream=file)
         pages = list(reader.pages[:3])
-        return "\n".join([page.extract_text().strip() for page in pages])
+        page_texts = []
+
+        for page in pages:
+            page_text = page.extract_text()
+            if page_text:
+                stripped_page_text = page_text.strip()
+                if stripped_page_text:
+                    page_texts.append(stripped_page_text)
+
+        return "\n".join(page_texts)
 
     if file_type.extension == "txt":
         return file.read().decode("utf-8")
