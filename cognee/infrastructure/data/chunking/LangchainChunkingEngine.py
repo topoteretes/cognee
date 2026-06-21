@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import Any
 
 from cognee.infrastructure.data.chunking.DefaultChunkEngine import DefaultChunkEngine
 from cognee.shared.data_models import ChunkStrategy
+
+ChunkNumbering = list[Any]
+ChunkResult = tuple[list[str], ChunkNumbering]
 
 
 class LangchainChunkEngine:
@@ -28,7 +32,7 @@ class LangchainChunkEngine:
         source_data: Iterable[str],
         chunk_size: int,
         chunk_overlap: int,
-    ) -> tuple[list[str], list[int]]:
+    ) -> ChunkResult:
         """
         Chunk data based on the specified strategy.
 
@@ -73,7 +77,7 @@ class LangchainChunkEngine:
         chunk_size: int,
         chunk_overlap: int = 10,
         language=None,
-    ) -> tuple[list[str], list[int]]:
+    ) -> ChunkResult:
         """
         Chunk data specifically for code snippets.
 
@@ -118,7 +122,7 @@ class LangchainChunkEngine:
 
     def chunk_data_by_character(
         self, data_chunks: Iterable[str], chunk_size: int = 1500, chunk_overlap: int = 10
-    ) -> tuple[list[str], list[int]]:
+    ) -> ChunkResult:
         """
         Chunk data based on character count.
 

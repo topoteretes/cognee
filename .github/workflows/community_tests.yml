@@ -42,7 +42,7 @@ jobs:
         uses: pre-commit/action@v3.0.1
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra docs --extra huggingface --extra monitoring
 
       - name: Ruff check
         run: uv run ruff check .
