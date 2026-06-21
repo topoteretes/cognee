@@ -27,7 +27,7 @@ class HuggingFaceTokenizer(TokenizerInterface):
         self.max_completion_tokens = max_completion_tokens
 
         # Import here to make it an optional dependency
-        from transformers import AutoTokenizer  # ty:ignore[unresolved-import]
+        from transformers import AutoTokenizer
 
         self.tokenizer = AutoTokenizer.from_pretrained(model)
 
