@@ -72,7 +72,7 @@ class PyPdfLoader(LoaderInterface):
                 for page_num, page in enumerate(reader.pages, 1):
                     try:
                         page_text = page.extract_text()
-                        if page_text.strip():  # Only add non-empty pages
+                        if page_text and page_text.strip():  # Only add non-empty pages
                             page_texts.append(page_text)
                             content_parts.append(f"Page {page_num}:\n{page_text}\n")
                     except Exception as e:

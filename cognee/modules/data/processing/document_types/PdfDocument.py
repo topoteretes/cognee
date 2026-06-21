@@ -21,7 +21,8 @@ class PdfDocument(Document):
             async def get_text():
                 for page in file.pages:
                     page_text = page.extract_text()
-                    yield page_text
+                    if page_text and page_text.strip():
+                        yield page_text
 
             chunker = chunker_cls(self, get_text=get_text, max_chunk_size=max_chunk_size)
 
