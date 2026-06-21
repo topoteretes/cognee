@@ -28,6 +28,27 @@ class FileMetadata(TypedDict):
     file_size: int
 
 
+def _get_file_size(file: BinaryIO) -> int:
+    try:
+        return os.fstat(file.fileno()).st_size
+    except (AttributeError, io.UnsupportedOperation, OSError):
+        pass
+
+    try:
+        return len(file.getbuffer())
+    except (AttributeError, BufferError, TypeError, ValueError):
+        pass
+
+    try:
+        pos = file.tell()
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(pos)
+        return file_size
+    except (AttributeError, io.UnsupportedOperation, OSError):
+        return 0
+
+
 async def get_file_metadata(file: BinaryIO, name: str | None = None) -> FileMetadata:
     """
     Retrieve metadata from a file object.
@@ -53,7 +74,8 @@ async def get_file_metadata(file: BinaryIO, name: str | None = None) -> FileMeta
         content_hash = await get_file_content_hash(file)
         file.seek(0)
     except io.UnsupportedOperation as error:
-        logger.error(f"Error retrieving content hash for file: {file.name} \n{str(error)}\n\n")
+        file_name = getattr(file, "name", name or "<unknown>")
+        logger.error(f"Error retrieving content hash for file: {file_name} \n{str(error)}\n\n")
 
     file_type = guess_file_type(file, name)
 
@@ -65,17 +87,11 @@ async def get_file_metadata(file: BinaryIO, name: str | None = None) -> FileMeta
         # In case file_path does not exist or is a integer return None
         file_name = None
 
-    # Get file size
-    pos = file.tell()  # remember current pointer
-    file.seek(0, os.SEEK_END)  # jump to end
-    file_size = file.tell()  # byte count
-    file.seek(pos)
-
     return FileMetadata(
         name=file_name,
         file_path=file_path,
         mime_type=file_type.mime,
         extension=file_type.extension,
         content_hash=content_hash,
-        file_size=file_size,
+        file_size=_get_file_size(file),
     )
