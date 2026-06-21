@@ -15,7 +15,7 @@ from tenacity import (
     before_sleep_log,
     retry,
     retry_if_not_exception_type,
-    stop_after_delay,
+    stop_after_attempt,
     wait_exponential_jitter,
 )
 
@@ -68,7 +68,7 @@ class GenericAPIAdapter(LLMInterface):
     Type[BaseModel]) -> BaseModel
     """
 
-    MAX_RETRIES = 5
+    MAX_RETRIES = 2
     default_instructor_mode = "json_mode"
 
     def __init__(
@@ -103,20 +103,37 @@ class GenericAPIAdapter(LLMInterface):
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
-        if self.model.startswith("hosted_vllm/"):
-            model_without_prefix = self.model.replace("hosted_vllm/", "", 1)
-            self.model = "openai/" + model_without_prefix
-            extra_body = dict(self.llm_args.get("extra_body", {}))
-            extra_body["strict"] = False
-            self.llm_args["extra_body"] = extra_body
-
         self.aclient = instructor.from_litellm(
             litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
         )
 
+    async def acreate_str_output(
+        self, text_input: str, system_prompt: str, **merged_kwargs: Any
+    ) -> str:
+        """Plain-text completion that skips instructor.
+
+        Instructor wraps the call in JSON/tool-call schemas that local
+        llama.cpp-compatible servers don't honour, causing repeated parse
+        failures and retry storms. A plain string needs no schema, so call
+        litellm directly using this adapter's own connection config.
+        """
+        async with llm_rate_limiter_context_manager():
+            response = await litellm.acompletion(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text_input},
+                ],
+                api_key=self.api_key,
+                api_base=self.endpoint,
+                api_version=self.api_version,
+                **merged_kwargs,
+            )
+        return response.choices[0].message.content or ""
+
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(4),
         wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
@@ -125,8 +142,12 @@ class GenericAPIAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: type[BaseModel], **kwargs: Any
-    ) -> BaseModel:
+        self,
+        text_input: str,
+        system_prompt: str,
+        response_model: type[BaseModel | str],
+        **kwargs: Any,
+    ) -> BaseModel | str:
         """
         Generate a response from a user query.
 
@@ -151,6 +172,11 @@ class GenericAPIAdapter(LLMInterface):
         """
 
         merged_kwargs = {**self.llm_args, **kwargs}
+
+        # A plain string needs no schema — skip instructor (see acreate_str_output).
+        if response_model is str:
+            return await self.acreate_str_output(text_input, system_prompt, **merged_kwargs)
+
         try:
             async with llm_rate_limiter_context_manager():
                 result = await self.aclient.chat.completions.create(
@@ -165,7 +191,7 @@ class GenericAPIAdapter(LLMInterface):
                             "content": f"""{text_input}""",
                         },
                     ],
-                    max_retries=2,
+                    max_retries=1,
                     api_key=self.api_key,
                     api_base=self.endpoint,
                     response_model=response_model,
@@ -191,12 +217,6 @@ class GenericAPIAdapter(LLMInterface):
 
             fallback_model = self.fallback_model
             fallback_llm_args = {**self._base_llm_args, **kwargs}
-            if fallback_model and fallback_model.startswith("hosted_vllm/"):
-                fallback_model = fallback_model.replace("hosted_vllm/", "", 1)
-                fallback_model = "openai/" + fallback_model
-                fallback_extra_body = dict(fallback_llm_args.get("extra_body", {}))
-                fallback_extra_body["strict"] = False
-                fallback_llm_args["extra_body"] = fallback_extra_body
 
             try:
                 async with llm_rate_limiter_context_manager():
@@ -212,7 +232,7 @@ class GenericAPIAdapter(LLMInterface):
                                 "content": f"""{text_input}""",
                             },
                         ],
-                        max_retries=2,
+                        max_retries=1,
                         api_key=self.fallback_api_key,
                         api_base=self.fallback_endpoint,
                         response_model=response_model,
@@ -235,7 +255,7 @@ class GenericAPIAdapter(LLMInterface):
 
     @observe(as_type="transcription")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
@@ -293,7 +313,7 @@ class GenericAPIAdapter(LLMInterface):
 
     @observe(as_type="transcribe_image")
     @retry(
-        stop=stop_after_delay(128),
+        stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(
             (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
