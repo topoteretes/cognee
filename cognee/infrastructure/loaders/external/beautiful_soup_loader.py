@@ -272,7 +272,7 @@ class BeautifulSoupLoader(LoaderInterface):
 
         if rule.xpath:
             try:
-                from lxml import html as lxml_html  # ty:ignore[unresolved-import]
+                from lxml import html as lxml_html
             except ImportError:
                 raise RuntimeError(
                     "XPath requested but lxml is not available. Install lxml or use CSS selectors."
