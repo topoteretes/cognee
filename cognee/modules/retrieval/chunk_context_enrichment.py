@@ -129,12 +129,7 @@ async def fetch_neighbor_chunks(
         sibling_id = _safe_chunk_id(row.get("sibling_id"))
         target_index = row.get("target_index")
         sibling_index = row.get("sibling_index")
-        if (
-            chunk_id is None
-            or sibling_id is None
-            or target_index is None
-            or sibling_index is None
-        ):
+        if chunk_id is None or sibling_id is None or target_index is None or sibling_index is None:
             continue
         if chunk_id not in neighbors_by_chunk:
             continue

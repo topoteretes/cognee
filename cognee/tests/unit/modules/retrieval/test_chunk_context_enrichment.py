@@ -29,9 +29,7 @@ async def test_fetch_parent_documents_batched_lookup():
     graph = AsyncMock()
     chunk_id = str(uuid4())
     doc_id = str(uuid4())
-    graph.query = AsyncMock(
-        return_value=[(chunk_id, doc_id, "report.pdf", "PdfDocument")]
-    )
+    graph.query = AsyncMock(return_value=[(chunk_id, doc_id, "report.pdf", "PdfDocument")])
 
     parent_map = await fetch_parent_documents(graph, [chunk_id])
     assert parent_map[chunk_id]["id"] == doc_id
