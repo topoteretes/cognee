@@ -42,7 +42,7 @@ def get_data_file_path(file_path: str) -> str:
         if not parsed.path or parsed.path == "/":
             return f"s3://{parsed.netloc}{parsed.path}"
 
-        normalized_path = posixpath.normpath(parsed.path).lstrip("/")
+        normalized_path = posixpath.normpath(unquote(parsed.path)).lstrip("/")
 
         return f"s3://{parsed.netloc}/{normalized_path}"
 
