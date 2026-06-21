@@ -40,17 +40,25 @@ async def visualize_graph(
             the user's most recently active sessions.
         user: User whose sessions are read. Defaults to the default user.
         dataset: Dataset to render, given by name or UUID. Wrapped into a
-            single-element list and permission-checked via
-            get_authorized_existing_datasets; the first authorized match
-            selects which user+dataset database is visualized (relevant when
-            ENABLE_BACKEND_ACCESS_CONTROL is True).
+            single-element list for get_authorized_existing_datasets; the
+            first authorized match selects which user+dataset database is
+            visualized. If omitted, the default graph is rendered.
     """
     if not user:
         user = await get_default_user()
 
-    # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True.
-    dataset = await get_authorized_existing_datasets([dataset], "read", user)
-    async with set_database_global_context_variables(dataset[0].id, dataset[0].owner_id):
+    # Only authorize when a dataset is given. get_authorized_existing_datasets
+    # expects a list, so wrap the single dataset. With no dataset the context
+    # is set with None: a no-op when access control is off, and an (expected)
+    # error in multi-user mode where a dataset is required.
+    if dataset:
+        dataset = await get_authorized_existing_datasets([dataset], "read", user)
+
+    # Note: In case multi-user mode is not turned on dataset info is provided as None and setting the context is a noop
+    async with set_database_global_context_variables(
+        dataset[0].id if dataset else None,
+        dataset[0].owner_id if dataset else None,
+    ):
         graph_engine = await get_graph_engine()
         graph_data = await graph_engine.get_graph_data()
 
