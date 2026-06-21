@@ -101,6 +101,13 @@ class DefaultChunkEngine:
 
             Returns the created chunks and their numbered indices.
         """
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than 0")
+        if chunk_overlap < 0:
+            raise ValueError("chunk_overlap must be greater than or equal to 0")
+        if chunk_overlap >= chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
+
         data = "".join(data_chunks)
         chunks = []
         for i in range(0, len(data), chunk_size - chunk_overlap):
