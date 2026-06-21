@@ -44,7 +44,7 @@ jobs:
 
           echo "Tag to create: ${TAG}"
 
-          git config user.name "github-actions[bot]"
+          git config user.name "Cognee Team"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
@@ -73,6 +73,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.create_tag.outputs.tag }}
+          name: ${{ steps.generate_notes.outputs.RELEASE_TITLE }}
           body: ${{ steps.generate_notes.outputs.RELEASE_NOTES }}
           prerelease: ${{ github.ref_name == 'dev' }}
         env:
