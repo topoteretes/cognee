@@ -139,7 +139,7 @@ class DefaultChunkEngine:
         sentence_chunks = []
         for sentence in sentences:
             if len(sentence) > chunk_size:
-                chunks = self.chunk_data_exact(
+                chunks, _ = self.chunk_data_exact(
                     data_chunks=[sentence], chunk_size=chunk_size, chunk_overlap=chunk_overlap
                 )
                 sentence_chunks.extend(chunks)
