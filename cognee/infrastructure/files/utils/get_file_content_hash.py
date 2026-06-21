@@ -2,9 +2,11 @@ import hashlib
 import os
 from os import path
 from typing import BinaryIO, Union
+from urllib.parse import urlparse
 
 from ..exceptions import FileContentHashingError
 from ..storage import get_file_storage
+from .get_data_file_path import get_data_file_path
 
 
 async def get_file_content_hash(file_obj: str | BinaryIO) -> str:
@@ -12,8 +14,10 @@ async def get_file_content_hash(file_obj: str | BinaryIO) -> str:
 
     try:
         if isinstance(file_obj, str):
-            # Normalize path separators to handle mixed separators on Windows
-            normalized_path = os.path.normpath(file_obj)
+            parsed_url = urlparse(file_obj)
+            normalized_path = get_data_file_path(file_obj)
+            if parsed_url.scheme != "s3":
+                normalized_path = os.path.normpath(normalized_path)
 
             file_dir_path = path.dirname(normalized_path)
             file_name = path.basename(normalized_path)

@@ -46,6 +46,24 @@ async def test_get_file_content_hash_file():
 
 
 @pytest.mark.asyncio
+async def test_get_file_content_hash_file_uri():
+    text_content = "Test content with file URI"
+
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt", encoding="utf-8") as f:
+        f.write(text_content)
+        temp_file_path = f.name
+
+    import hashlib
+
+    try:
+        expected_hash = hashlib.md5(text_content.encode("utf-8")).hexdigest()
+        result = await get_file_content_hash(Path(temp_file_path).as_uri())
+        assert result == expected_hash
+    finally:
+        os.unlink(temp_file_path)
+
+
+@pytest.mark.asyncio
 async def test_get_file_content_hash_stream():
     stream = BytesIO(b"test_data")
     import hashlib
