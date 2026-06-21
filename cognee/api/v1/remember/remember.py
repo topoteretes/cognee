@@ -1089,6 +1089,7 @@ async def _remember_inner(
         await add(
             data=data,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             **shared_kwargs,
             **add_kwargs,
         )
