@@ -137,19 +137,20 @@ async def _serve_cloud(
     creds = load_credentials()
 
     if creds and creds.service_url and creds.api_key:
-        if not is_token_expired(creds):
+        client = CloudClient(creds.service_url, creds.api_key)
+        if await client._health_check():
             logger.info("Using saved credentials for %s", creds.email)
-            client = CloudClient(creds.service_url, creds.api_key)
-            if await client._health_check():
-                set_remote_client(client)
-                print(f"  Connected to Cognee Cloud at {creds.service_url}")
-                return client
-            else:
-                logger.warning("Saved service URL unreachable, re-authenticating")
-                await client.close()
+            set_remote_client(client)
+            print(f"  Connected to Cognee Cloud at {creds.service_url}")
+            return client
 
-        elif creds.refresh_token:
-            try:
+        await client.close()
+
+        # If health check failed, try to refresh/recover using Management API.
+        try:
+            if is_token_expired(creds):
+                if not creds.refresh_token:
+                    raise ValueError("No refresh token available and Management token is expired.")
                 logger.info("Refreshing expired token for %s", creds.email)
                 token = await refresh_access_token(
                     creds.refresh_token,
@@ -160,16 +161,27 @@ async def _serve_cloud(
                 if token.refresh_token:
                     creds.refresh_token = token.refresh_token
                 creds.expires_at = time.time() + token.expires_in
-                save_credentials(creds)
 
-                client = CloudClient(creds.service_url, creds.api_key)
-                if await client._health_check():
-                    set_remote_client(client)
-                    print(f"  Connected to Cognee Cloud at {creds.service_url}")
-                    return client
-                await client.close()
-            except Exception as e:
-                logger.warning("Token refresh failed, re-authenticating: %s", e)
+            logger.info("Retrieving fresh service URL and API key from Management API")
+            tenant = await get_current_tenant(mgmt_url, creds.access_token)
+            if not tenant and creds.email:
+                tenant = await create_tenant(mgmt_url, creds.access_token, creds.email)
+            if tenant:
+                creds.tenant_id = tenant.id
+                creds.tenant_name = tenant.name
+
+            creds.service_url = await get_service_url(mgmt_url, creds.access_token)
+            creds.api_key = await get_or_create_api_key(mgmt_url, creds.access_token)
+            save_credentials(creds)
+
+            client = CloudClient(creds.service_url, creds.api_key)
+            if await client._health_check():
+                set_remote_client(client)
+                print(f"  Connected to Cognee Cloud at {creds.service_url}")
+                return client
+            await client.close()
+        except Exception as e:
+            logger.warning("Token refresh/recovery failed, re-authenticating: %s", e)
 
     # Step 2: Device Code Flow
     print("  Authenticating with Cognee Cloud...")
