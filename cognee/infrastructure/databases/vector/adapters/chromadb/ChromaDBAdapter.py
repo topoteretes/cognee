@@ -107,7 +107,9 @@ def restore_data_from_chroma(data: dict) -> dict:
 
     for key in list_keys:
         original_key = key[:-6]
-        if original_key == BELONGS_TO_SET_KEY and isinstance(restored_data.get(BELONGS_TO_SET_KEY), list):
+        if original_key == BELONGS_TO_SET_KEY and isinstance(
+            restored_data.get(BELONGS_TO_SET_KEY), list
+        ):
             continue
         try:
             restored_data[original_key] = json.loads(data[key])

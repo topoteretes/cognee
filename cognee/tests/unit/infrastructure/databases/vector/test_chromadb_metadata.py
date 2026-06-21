@@ -30,9 +30,7 @@ def test_restore_data_from_chroma_reads_native_array():
 
 
 def test_restore_data_from_chroma_reads_legacy_json_list():
-    restored = restore_data_from_chroma(
-        {LEGACY_BELONGS_TO_SET_LIST_KEY: '["legacy-tag"]'}
-    )
+    restored = restore_data_from_chroma({LEGACY_BELONGS_TO_SET_LIST_KEY: '["legacy-tag"]'})
     assert restored["belongs_to_set"] == ["legacy-tag"]
 
 
