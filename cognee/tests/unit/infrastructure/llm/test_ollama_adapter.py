@@ -1,13 +1,14 @@
-"""OllamaAPIAdapter must not block the event loop on its synchronous client.
+"""OllamaAPIAdapter uses a native async client — it must not block the event loop.
 
-The adapter wraps a synchronous ``OpenAI`` client (``instructor.from_openai``),
-so calling ``.create()`` directly from an ``async def`` blocks the event loop for
-the full LLM round-trip. The calls must be offloaded with ``asyncio.to_thread``.
+The adapter wraps an async ``AsyncOpenAI`` client (``instructor.from_openai``), so its
+``async def`` methods ``await`` the client directly. (The previous implementation wrapped a
+*synchronous* client and offloaded the blocking call via ``asyncio.to_thread``; with the
+async client that offload is gone and the call must be awaited natively.)
 """
 
 import asyncio
 from contextlib import asynccontextmanager
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import BaseModel
@@ -17,8 +18,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 )
 
 _MODULE = (
-    "cognee.infrastructure.llm.structured_output_framework."
-    "litellm_instructor.llm.ollama.adapter"
+    "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter"
 )
 
 
@@ -32,7 +32,7 @@ async def _null_rate_limiter():
 
 
 @pytest.mark.asyncio
-async def test_acreate_structured_output_offloads_blocking_client_call():
+async def test_acreate_structured_output_awaits_async_client():
     adapter = OllamaAPIAdapter(
         endpoint="http://localhost:11434/v1",
         api_key="ollama",
@@ -42,10 +42,10 @@ async def test_acreate_structured_output_offloads_blocking_client_call():
     )
 
     sentinel = _Resp(value="ok")
-    # The production client is synchronous; replace it with a sync mock so a
-    # missing offload would run inline on the event loop.
+    # Structured output goes through the instructor-wrapped async ``aclient`` and
+    # is awaited natively, so the mock must be awaitable.
     adapter.aclient = Mock()
-    adapter.aclient.chat.completions.create = Mock(return_value=sentinel)
+    adapter.aclient.chat.completions.create = AsyncMock(return_value=sentinel)
 
     with (
         patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter),
@@ -53,8 +53,8 @@ async def test_acreate_structured_output_offloads_blocking_client_call():
     ):
         result = await adapter.acreate_structured_output("hello", "system prompt", _Resp)
 
-    # The blocking synchronous call is offloaded to a worker thread...
-    assert to_thread_spy.called, "client call was not offloaded via asyncio.to_thread"
-    assert to_thread_spy.call_args.args[0] is adapter.aclient.chat.completions.create
-    # ...and its result is returned unchanged.
+    # The async client is awaited directly...
+    adapter.aclient.chat.completions.create.assert_awaited_once()
+    # ...not offloaded to a worker thread, and its result is returned unchanged.
+    assert not to_thread_spy.called, "structured call must be awaited natively, not offloaded"
     assert result is sentinel

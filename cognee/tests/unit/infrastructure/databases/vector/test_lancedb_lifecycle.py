@@ -255,4 +255,3 @@ async def test_prune_removes_local_db_directory(tmp_path):
     assert db_path.exists() is True
     await adapter.prune()
     assert db_path.exists() is False
-

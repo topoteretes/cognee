@@ -132,7 +132,7 @@ if [ "$DEBUG" = "true" ] && { [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "
     echo "Running in debug mode"
     echo "Debug port: $DEBUG_PORT"
     echo "Waiting for the debugger to attach..."
-    exec python -m debugpy --wait-for-client --listen 0.0.0.0:"$DEBUG_PORT" -m cognee-mcp "${ARGS[@]}"
+    exec python -m debugpy --wait-for-client --listen 0.0.0.0:"$DEBUG_PORT" "$(command -v cognee-mcp)" "${ARGS[@]}"
 else
     exec cognee-mcp "${ARGS[@]}"
 fi

@@ -286,7 +286,7 @@ async def search(
         await set_session_user_context_variable(user)
 
         # Transform string based datasets to UUID - String based datasets can only be found for current user
-        if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
+        if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
             datasets = await get_authorized_existing_datasets(datasets, "read", user)
             datasets = [dataset.id for dataset in datasets]
             if not datasets:

@@ -136,7 +136,7 @@ async def main():
     # Test visualization
     from cognee import visualize_graph
 
-    await visualize_graph()
+    await visualize_graph(dataset="artificial_intelligence")
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()
