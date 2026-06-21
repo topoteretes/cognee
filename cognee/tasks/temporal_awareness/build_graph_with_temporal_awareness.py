@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
 
-from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.data.models import Data
 
 logger = logging.getLogger(__name__)
@@ -16,10 +16,7 @@ async def build_graph_with_temporal_awareness(data: List[Data]):
     text_list: List[str] = []
 
     for text_data in data:
-        file_dir = os.path.dirname(text_data.raw_data_location)
-        file_name = os.path.basename(text_data.raw_data_location)
-        file_storage = get_file_storage(file_dir)
-        async with file_storage.open(file_name, "r") as file:
+        async with open_data_file(text_data.raw_data_location, "r") as file:
             text_list.append(file.read())
 
     url = os.getenv("GRAPH_DATABASE_URL", "")
