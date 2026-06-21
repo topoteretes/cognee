@@ -127,8 +127,14 @@ async def run_tasks(
                         incremental_loading,
                     )
 
+            # return_exceptions=True so a single failing data item does not abort
+            # the whole batch: every item runs to completion and per-item failures
+            # are collected below as PipelineRunErrored results. Without it, the
+            # first exception propagates straight out of gather() and the
+            # success/error aggregation that follows never runs.
             gathered = await asyncio.gather(
                 *[asyncio.create_task(_run_item(item)) for item in data],
+                return_exceptions=True,
             )
 
             # Separate successes from unhandled exceptions
