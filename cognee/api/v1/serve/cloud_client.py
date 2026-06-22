@@ -45,11 +45,11 @@ class CloudClient:
             await self._session.close()
             self._session = None
 
-    async def _health_check(self) -> bool:
+    async def _health_check(self, timeout: Optional[aiohttp.ClientTimeout] = None) -> bool:
         """Verify the remote instance is reachable."""
         try:
             session = await self._get_session()
-            async with session.get(f"{self.service_url}/health") as resp:
+            async with session.get(f"{self.service_url}/health", timeout=timeout) as resp:
                 return resp.status == 200
         except Exception:
             return False

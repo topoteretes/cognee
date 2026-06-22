@@ -137,8 +137,31 @@ async def _serve_cloud(
     creds = load_credentials()
 
     if creds and creds.service_url and creds.api_key:
+        import aiohttp
+        import asyncio
+
+        client = CloudClient(creds.service_url, creds.api_key)
+        health_ok = False
+        timeout = aiohttp.ClientTimeout(total=3.0, sock_connect=2.0)
+        
+        # Retry up to 3 times to mitigate intermittent network/startup blips
+        for attempt in range(3):
+            if await client._health_check(timeout=timeout):
+                health_ok = True
+                break
+            if attempt < 2:
+                await asyncio.sleep(0.5)
+
+        if health_ok:
+            logger.info("Using saved credentials for %s (health check passed)", creds.email)
+            set_remote_client(client)
+            print(f"  Connected to Cognee Cloud at {creds.service_url}")
+            return client
+        
+        await client.close()
+        
         if not is_token_expired(creds):
-            logger.info("Using saved credentials for %s", creds.email)
+            logger.info("Saved credentials health check failed, checking if service is reachable with longer timeout")
             client = CloudClient(creds.service_url, creds.api_key)
             if await client._health_check():
                 set_remote_client(client)
@@ -147,7 +170,7 @@ async def _serve_cloud(
             else:
                 logger.warning("Saved service URL unreachable, re-authenticating")
                 await client.close()
-
+        
         elif creds.refresh_token:
             try:
                 logger.info("Refreshing expired token for %s", creds.email)
