@@ -203,7 +203,7 @@ Same scripts, indexed by what they demonstrate.
 uv sync --dev --all-extras --reinstall
 
 # Configure API keys (one-time)
-cp .env.example .env
+cp .env.template .env
 # edit .env: set LLM_API_KEY (your OpenAI key) at minimum
 
 # Run any example
@@ -211,7 +211,7 @@ uv run python examples/demos/simple_cognee_example.py
 ```
 
 For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
-[the cognee docs](https://docs.cognee.ai) and `cognee/.env.example`.
+[the cognee docs](https://docs.cognee.ai) and `.env.template`.
 
 ## 🤝 Contributing a new example
 
