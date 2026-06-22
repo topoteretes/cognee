@@ -10,7 +10,7 @@ jobs:
 
   run_llama-cpp_test:
 
-    # needs 4 Gb RAM for phi3-mini in a container which the smallest runner has
+    # needs ~4 Gb RAM for the GGUF model in a container which the smallest runner has
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
@@ -26,26 +26,25 @@ jobs:
         run: |
           uv add torch
 
-      - name: Download Phi-3 GGUF model from S3
-        # Mirrored from huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf (MIT)
-        # into our bucket to avoid HuggingFace 429 rate limits in CI.
+      - name: Download Phi-3.5 GGUF model from HuggingFace
+        # huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF (MIT).
+        # Phi-3.5-mini reliably emits the required per-node `description`;
+        # the previous Phi-3-mini-q4 dropped it, failing extraction.
+        # Pinned by sha256; --retry guards transient 429s on the single nightly pull.
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
-          AWS_DEFAULT_REGION: eu-west-1
-          BUCKET: github-runner-cognee-tests
-          MODEL_KEY: nightly_ci_artifacts/huggingface_models/Phi-3-mini-4k-instruct-q4.gguf
-          MODEL_SHA256: 8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef
+          MODEL_URL: https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf
+          MODEL_SHA256: e4165e3a71af97f1b4820da61079826d8752a2088e313af0c7d346796c38eff5
         run: |
           set -euo pipefail
-          aws s3 cp "s3://$BUCKET/$MODEL_KEY" ./Phi-3-mini-4k-instruct-q4.gguf
-          echo "$MODEL_SHA256  ./Phi-3-mini-4k-instruct-q4.gguf" | sha256sum -c -
+          curl -fL --retry 5 --retry-delay 15 --retry-all-errors \
+            -o ./Phi-3.5-mini-instruct-Q4_K_M.gguf "$MODEL_URL"
+          echo "$MODEL_SHA256  ./Phi-3.5-mini-instruct-Q4_K_M.gguf" | sha256sum -c -
 
       - name: Run example test
         env:
           PYTHONFAULTHANDLER: 1
           LLM_PROVIDER: "llama_cpp"
-          LLAMA_CPP_MODEL_PATH: "./Phi-3-mini-4k-instruct-q4.gguf"
+          LLAMA_CPP_MODEL_PATH: "./Phi-3.5-mini-instruct-Q4_K_M.gguf"
           LLM_ENDPOINT: ""
           LLAMA_CPP_N_CTX: 4096
           EMBEDDING_PROVIDER: "openai"
