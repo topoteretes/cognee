@@ -159,14 +159,14 @@ def create_graph_engine(
     kuzu_max_db_size = normalized_optional_params["kuzu_max_db_size"]
 
     # Check USE_UNIFIED_PROVIDER outside the cache so it's always re-read
-    unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
-    if unified_provider == "pghybrid":
-        from .postgres.adapter import PostgresAdapter
-        from cognee.infrastructure.databases.relational.get_relational_engine import (
-            get_relational_engine,
-        )
-
-        return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+    # unified_provider = os.environ.get("USE_UNIFIED_PROVIDER", "")
+    # if unified_provider == "pghybrid":
+    #     from .postgres.adapter import PostgresAdapter
+    #     from cognee.infrastructure.databases.relational.get_relational_engine import (
+    #         get_relational_engine,
+    #     )
+    #
+    #     return PostgresAdapter(connection_string=get_relational_engine().db_uri)
 
     return _create_graph_engine(
         graph_database_provider,

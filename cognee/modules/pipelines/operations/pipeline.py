@@ -46,6 +46,7 @@ async def run_pipeline(
     rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = False,
 ):
     validate_pipeline_tasks(tasks)
     await setup_and_check_environment(vector_db_config, graph_db_config)
@@ -67,6 +68,7 @@ async def run_pipeline(
             rollback_handler=rollback_handler,
             llm_config=llm_config,
             embedding_config=embedding_config,
+            data_cache=data_cache,
         ):
             yield run_info
 
@@ -83,6 +85,7 @@ async def run_pipeline_per_dataset(
     rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache=False,
 ):
     if not data:
         data = await get_dataset_data(dataset_id=dataset.id)
@@ -115,6 +118,7 @@ async def run_pipeline_per_dataset(
         rollback_handler=rollback_handler,
         llm_config=llm_config,
         embedding_config=embedding_config,
+        data_cache=data_cache,
     )
 
     async for pipeline_run_info in pipeline_run:
