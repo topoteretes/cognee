@@ -48,7 +48,7 @@ class DefaultChunkEngine:
         source_data: Iterable[str],
         chunk_size: int,
         chunk_overlap: int,
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list, list]:
         """
         Chunk data based on the specified strategy.
 
@@ -85,7 +85,7 @@ class DefaultChunkEngine:
 
     def chunk_data_exact(
         self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list[str], list[list[int | str]]]:
         """
         Chunk data exactly by specified sizes and overlaps.
 
@@ -113,7 +113,7 @@ class DefaultChunkEngine:
 
     def chunk_by_sentence(
         self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list, list]:
         """
         Chunk data into sentences based on specified sizes and overlaps.
 
@@ -154,7 +154,7 @@ class DefaultChunkEngine:
 
     def chunk_data_by_paragraph(
         self, data_chunks: Iterable[str], chunk_size: int, chunk_overlap: int, bound: float = 0.75
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list[str], list[list[int | str]]]:
         """
         Chunk data based on paragraphs while considering overlaps and boundaries.
 

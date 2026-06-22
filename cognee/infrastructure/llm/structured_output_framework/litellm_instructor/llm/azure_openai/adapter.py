@@ -201,7 +201,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             )
 
         # Managed identity path: use native OpenAI client (not litellm)
-        merged_kwargs = {**self.llm_args, **kwargs}
+        merged_kwargs: dict[str, Any] = {**self.llm_args, **kwargs}
         # Remove litellm-specific kwargs that OpenAI client doesn't understand
         merged_kwargs.pop("api_key", None)
         merged_kwargs.pop("api_base", None)

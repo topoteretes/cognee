@@ -28,7 +28,7 @@ class LangchainChunkEngine:
         source_data: Iterable[str],
         chunk_size: int,
         chunk_overlap: int,
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list, list]:
         """
         Chunk data based on the specified strategy.
 
@@ -73,7 +73,7 @@ class LangchainChunkEngine:
         chunk_size: int,
         chunk_overlap: int = 10,
         language=None,
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list[str], list[list]]:
         """
         Chunk data specifically for code snippets.
 
@@ -118,7 +118,7 @@ class LangchainChunkEngine:
 
     def chunk_data_by_character(
         self, data_chunks: Iterable[str], chunk_size: int = 1500, chunk_overlap: int = 10
-    ) -> tuple[list[str], list[int]]:
+    ) -> tuple[list[str], list[list]]:
         """
         Chunk data based on character count.
 
