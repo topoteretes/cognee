@@ -464,9 +464,7 @@ class GraphDBInterface(ABC):
         """
         raise UnsupportedProvenanceCapability("get_edges_delete_data_by_source_ref")
 
-    async def get_nodes_delete_data_by_dataset_id(
-        self, dataset_id: UUID
-    ) -> List[NodeDeleteData]:
+    async def get_nodes_delete_data_by_dataset_id(self, dataset_id: UUID) -> List[NodeDeleteData]:
         """Return delete-data for every node belonging to ``dataset_id``.
 
         Parameters:
@@ -475,9 +473,7 @@ class GraphDBInterface(ABC):
         """
         raise UnsupportedProvenanceCapability("get_nodes_delete_data_by_dataset_id")
 
-    async def get_edges_delete_data_by_dataset_id(
-        self, dataset_id: UUID
-    ) -> List[EdgeDeleteData]:
+    async def get_edges_delete_data_by_dataset_id(self, dataset_id: UUID) -> List[EdgeDeleteData]:
         """Return delete-data for every edge belonging to ``dataset_id``.
 
         Parameters:
