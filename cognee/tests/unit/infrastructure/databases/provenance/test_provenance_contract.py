@@ -94,9 +94,35 @@ def test_graph_native_marker_constants_import_cleanly():
 
 
 @pytest.mark.asyncio
-async def test_graph_source_ref_defaults_raise_typed_error():
+@pytest.mark.parametrize(
+    ("method_name", "args"),
+    [
+        ("attach_node_source_refs", (["node"], ["source_ref"])),
+        (
+            "attach_edge_source_refs",
+            ([EdgeIdentity("source", "target", "mentions")], ["source_ref"]),
+        ),
+        ("remove_node_source_refs", (["node"], ["source_ref"])),
+        (
+            "remove_edge_source_refs",
+            ([EdgeIdentity("source", "target", "mentions")], ["source_ref"]),
+        ),
+        ("delete_edge_triples", ([EdgeIdentity("source", "target", "mentions")],)),
+        ("get_node_delete_data", (["node"],)),
+        ("get_edge_delete_data", ([EdgeIdentity("source", "target", "mentions")],)),
+        ("find_nodes_by_source_ref", ("source_ref",)),
+        ("find_edges_by_source_ref", ("source_ref",)),
+        ("find_node_source_refs_by_dataset", ("dataset",)),
+        ("find_edge_source_refs_by_dataset", ("dataset",)),
+        ("find_node_source_refs_by_pipeline_run", ("run",)),
+        ("find_edge_source_refs_by_pipeline_run", ("run",)),
+        ("set_graph_metadata", ({"provenance_version": "1"},)),
+        ("get_graph_metadata", ()),
+    ],
+)
+async def test_graph_provenance_defaults_raise_typed_error(method_name, args):
     with pytest.raises(UnsupportedProvenanceCapability):
-        await GraphDBInterface.attach_node_source_refs(object(), ["node"], ["source_ref"])
+        await getattr(GraphDBInterface, method_name)(object(), *args)
 
 
 @pytest.mark.asyncio
