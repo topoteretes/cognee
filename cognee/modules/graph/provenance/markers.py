@@ -72,9 +72,19 @@ async def ensure_graph_native_for_new_graph(graph_engine) -> bool:
     it is a pre-existing unmarked graph that must stay on the ledger path.
 
     Idempotent: re-marking an already-marked graph is a no-op.
+
+    A graph is only ever marked when the backend actually implements the
+    graph-native provenance primitives (``supports_graph_native_provenance()``).
+    Until Part 1 lands those on the real adapters, this returns False on the
+    default stack, so add/cognify keep writing the relational ledger and nothing
+    routes through the graph-native path — Part 2 stays inert in production while
+    being fully exercised against the Part 0 fakes.
     """
     if await is_graph_native_graph(graph_engine):
         return True
+
+    if not graph_engine.supports_graph_native_provenance():
+        return False
 
     try:
         is_empty = await graph_engine.is_empty()

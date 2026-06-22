@@ -83,6 +83,58 @@ def _triplet_vector_ids(edges: List[EdgeDeleteData]) -> List[str]:
     return ids
 
 
+def _remaining_edge_retrieval_text(edge_tuple) -> str:
+    properties = edge_tuple[3] if len(edge_tuple) > 3 and isinstance(edge_tuple[3], dict) else {}
+    return get_edge_retrieval_text(properties.get("edge_text"), edge_tuple[2])
+
+
+async def _strip_orphaned_nodeset_tags(graph_engine, vector_engine, unowned_nodes) -> None:
+    """Strip now-orphaned NodeSet labels from surviving rows/nodes.
+
+    Mirrors delete_from_graph_and_vector: when a uniquely-owned NodeSet node is
+    deleted, surviving entities tagged with its label must stop advertising it.
+    Best-effort and non-fatal — adapters without ``remove_belongs_to_set_tags``
+    keep the default no-op.
+    """
+    labels = sorted({n.label for n in unowned_nodes if n.node_type == "NodeSet" and n.label})
+    if not labels:
+        return
+    try:
+        await graph_engine.remove_belongs_to_set_tags(labels)
+    except Exception as error:  # noqa: BLE001 - cleanup is non-fatal
+        logger.warning("Graph NodeSet tag cleanup failed (non-fatal): %s", error)
+    try:
+        await vector_engine.remove_belongs_to_set_tags(labels)
+    except Exception as error:  # noqa: BLE001 - cleanup is non-fatal
+        logger.warning("Vector NodeSet tag cleanup failed (non-fatal): %s", error)
+
+
+async def _prune_orphaned_edge_types(graph_engine, unowned_edges) -> None:
+    """Delete EdgeType nodes whose retrieval text no longer occurs on any edge.
+
+    Mirrors delete_from_graph_and_vector's orphan-EdgeType pass. Best-effort and
+    non-fatal — reads the remaining graph to recompute surviving edge texts.
+    """
+    if not unowned_edges:
+        return
+    deleted_edge_texts = {t for t in (_edge_retrieval_text(e) for e in unowned_edges) if t}
+    if not deleted_edge_texts:
+        return
+    try:
+        _, remaining_edges = await graph_engine.get_graph_data()
+        remaining_texts = {
+            t for t in (_remaining_edge_retrieval_text(e) for e in remaining_edges) if t
+        }
+        orphaned_ids = [
+            str(EdgeType.id_for(text)) for text in deleted_edge_texts if text not in remaining_texts
+        ]
+        if orphaned_ids:
+            await graph_engine.delete_nodes(orphaned_ids)
+            logger.info("Deleted %d orphaned EdgeType node(s).", len(orphaned_ids))
+    except Exception as error:  # noqa: BLE001 - cleanup is non-fatal
+        logger.warning("EdgeType cleanup failed (non-fatal): %s", error)
+
+
 async def execute_ref_removal(
     graph_engine,
     vector_engine,
@@ -101,13 +153,13 @@ async def execute_ref_removal(
     that encode the operation's ownership rule (source-ref delete, dataset
     delete, or run rollback).
     """
+    if not nodes and not edges:
+        return ProvenanceDeleteResult()
+
     surviving_nodes = [n for n in nodes if node_survives(n)]
     unowned_nodes = [n for n in nodes if not node_survives(n)]
     surviving_edges = [e for e in edges if edge_survives(e)]
     unowned_edges = [e for e in edges if not edge_survives(e)]
-
-    if not nodes and not edges:
-        return ProvenanceDeleteResult()
 
     # 1) Compute vector ids for the unowned artifacts (snapshots only).
     node_vector_ids = _node_vector_ids(unowned_nodes)
@@ -142,6 +194,12 @@ async def execute_ref_removal(
         await graph_engine.delete_nodes([str(n.node_id) for n in unowned_nodes])
     if unowned_edges:
         await graph_engine.delete_edges([e.identity for e in unowned_edges])
+
+    # 5) Post-delete cleanup mirroring delete_from_graph_and_vector: strip now
+    # orphaned NodeSet tags and prune orphaned EdgeType nodes. Both are
+    # non-fatal best-effort passes (some adapters/fakes don't implement them).
+    await _strip_orphaned_nodeset_tags(graph_engine, vector_engine, unowned_nodes)
+    await _prune_orphaned_edge_types(graph_engine, unowned_edges)
 
     return ProvenanceDeleteResult(
         nodes_deleted=len(unowned_nodes),

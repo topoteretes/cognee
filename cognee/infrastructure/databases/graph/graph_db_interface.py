@@ -554,3 +554,36 @@ class GraphDBInterface(ABC):
             - edges (List[EdgeIdentity]): Edge identities to delete.
         """
         raise UnsupportedProvenanceCapability("delete_edges")
+
+    async def attach_provenance_refs_to_nodes(
+        self, node_ids: List[str], property_key: str, refs: List[str]
+    ) -> None:
+        """Append ``refs`` to the ``property_key`` array of each node in ``node_ids``.
+
+        The write-side inverse of ``detach_provenance_refs_from_nodes``. Used by
+        graph-native ``add_data_points`` to stamp source refs / source-run refs /
+        dataset ids onto nodes after the graph write succeeds. Idempotent:
+        re-attaching an existing ref is a no-op.
+
+        Parameters:
+        -----------
+            - node_ids (List[str]): Graph node ids to stamp.
+            - property_key (str): One of the provenance list keys (e.g. "source_refs").
+            - refs (List[str]): Ref values to append to that array.
+        """
+        raise UnsupportedProvenanceCapability("attach_provenance_refs_to_nodes")
+
+    async def attach_provenance_refs_to_edges(
+        self, edges: List["EdgeIdentity"], property_key: str, refs: List[str]
+    ) -> None:
+        """Append ``refs`` to the ``property_key`` array of each edge in ``edges``.
+
+        The write-side inverse of ``detach_provenance_refs_from_edges``.
+
+        Parameters:
+        -----------
+            - edges (List[EdgeIdentity]): Edge identities to stamp.
+            - property_key (str): One of the provenance list keys (e.g. "source_refs").
+            - refs (List[str]): Ref values to append to that array.
+        """
+        raise UnsupportedProvenanceCapability("attach_provenance_refs_to_edges")

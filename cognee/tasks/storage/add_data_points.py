@@ -7,6 +7,14 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.infrastructure.databases.relational import get_async_session
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
+from cognee.modules.graph.provenance.markers import ensure_graph_native_for_new_graph
+from cognee.modules.graph.provenance.refs import make_source_ref, make_source_run_ref
+from cognee.modules.graph.provenance.constants import (
+    DATASET_IDS_KEY,
+    SOURCE_REFS_KEY,
+    SOURCE_RUN_REFS_KEY,
+)
+from cognee.modules.graph.provenance.snapshots import EdgeIdentity
 from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
     ensure_default_edge_properties,
@@ -91,7 +99,16 @@ async def add_data_points(
     vector_engine = unified.vector
     use_hybrid = unified.has_capability(EngineCapability.HYBRID_WRITE)
 
+    # Graph-native graphs carry provenance on the graph itself (stamped after
+    # the writes below) and write no relational ledger rows. Marking only ever
+    # happens on a brand-new empty graph whose backend implements the provenance
+    # primitives, so on the default stack (until Part 1) this is always False and
+    # the existing ledger path below runs unchanged.
+    is_graph_native = False
     if user and dataset and data_item:
+        is_graph_native = await ensure_graph_native_for_new_graph(graph_engine)
+
+    if user and dataset and data_item and not is_graph_native:
         # Single session for all upserts: one transaction, one commit. The
         # rollback ledger is written BEFORE the graph/vector writes so a
         # failed write can always be swept by the rollback handler.
@@ -157,6 +174,35 @@ async def add_data_points(
             )
 
         edges.extend(custom_edges)
+
+    if is_graph_native and user and dataset and data_item:
+        # Stamp provenance AFTER the graph writes succeed, so a failed node/edge
+        # write never leaves orphan provenance. `edges` now includes custom
+        # edges (extended above), so both are stamped in one pass. source_run
+        # refs are attached only when a pipeline_run_id is present — without one
+        # the artifact is deletable (source ref + dataset id) but carries no run
+        # ownership, mirroring the ledger's pipeline_run_id=None behaviour.
+        source_ref = make_source_ref(dataset.id, data_item.id)
+        dataset_key = str(dataset.id)
+        node_ids = [str(node.id) for node in nodes]
+        edge_identities = [EdgeIdentity(str(edge[0]), edge[2], str(edge[1])) for edge in edges]
+
+        await graph_engine.attach_provenance_refs_to_nodes(node_ids, SOURCE_REFS_KEY, [source_ref])
+        await graph_engine.attach_provenance_refs_to_nodes(node_ids, DATASET_IDS_KEY, [dataset_key])
+        await graph_engine.attach_provenance_refs_to_edges(
+            edge_identities, SOURCE_REFS_KEY, [source_ref]
+        )
+        await graph_engine.attach_provenance_refs_to_edges(
+            edge_identities, DATASET_IDS_KEY, [dataset_key]
+        )
+        if pipeline_run_id:
+            run_ref = make_source_run_ref(dataset.id, pipeline_run_id)
+            await graph_engine.attach_provenance_refs_to_nodes(
+                node_ids, SOURCE_RUN_REFS_KEY, [run_ref]
+            )
+            await graph_engine.attach_provenance_refs_to_edges(
+                edge_identities, SOURCE_RUN_REFS_KEY, [run_ref]
+            )
 
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)

@@ -18,7 +18,10 @@ from cognee.modules.graph.methods import (
 from cognee.modules.graph.methods.delete_from_graph_and_vector import (
     delete_from_graph_and_vector,
 )
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+from cognee.modules.graph.provenance.markers import is_graph_native_graph
+from cognee.modules.graph.provenance.refs import make_source_ref
 from cognee.modules.users.methods.get_user import get_user
 from cognee.shared.logging_utils import get_logger
 
@@ -32,6 +35,15 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
     # Check if user has delete permissions for the dataset before proceeding with deletion of related graph/vector nodes and edges.
     dataset = await get_authorized_dataset(user, dataset_id, "delete")
     dataset_id = dataset.id
+
+    # Graph-native graphs carry provenance on the graph; route the delete
+    # through the unified boundary by source ref. Old/unmarked graphs (the
+    # default until Part 1) fall through to the relational-ledger path below.
+    graph_engine = await get_graph_engine()
+    unified = await get_unified_engine()
+    if await is_graph_native_graph(graph_engine) and unified.supports_graph_native_delete():
+        await unified.delete_by_source_ref(make_source_ref(dataset_id, data_id))
+        return
 
     if backend_access_control_enabled():
         affected_nodes = await get_data_related_nodes(dataset_id, data_id)
