@@ -3,6 +3,8 @@ from abc import abstractmethod, ABC
 from typing import Optional, Dict, Any, List, Tuple, Type, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.provenance.exceptions import UnsupportedProvenanceCapability
+from cognee.modules.graph.provenance.snapshots import EdgeDeleteData, NodeDeleteData
 
 logger = get_logger()
 
@@ -415,3 +417,93 @@ class GraphDBInterface(ABC):
         Returns per-id update success.
         """
         raise NotImplementedError("set_edge_frequency_weights is not implemented for this adapter")
+
+    # ------------------------------------------------------------------
+    # Graph-native provenance read primitives (Part 0 contract)
+    #
+    # These let delete/rollback discover the artifacts to remove by reading
+    # provenance off the graph itself, instead of the relational nodes/edges
+    # ledger. Part 1 implements them on Ladybug; the defaults below raise
+    # ``UnsupportedProvenanceCapability`` so an un-implemented backend never
+    # silently returns an empty set (which would make a delete look successful
+    # while leaving artifacts behind). They are intentionally NOT
+    # ``@abstractmethod`` — every existing adapter must keep instantiating
+    # while the capability is filled in backend by backend.
+    # ------------------------------------------------------------------
+
+    def supports_graph_native_provenance(self) -> bool:
+        """Whether this backend can answer the provenance read primitives below.
+
+        Defaults to ``False``. Backends that implement the methods override this
+        to ``True`` so callers can branch without catching
+        ``UnsupportedProvenanceCapability``.
+
+        Distinct from ``GraphVectorStoreInterface.supports_graph_native_delete``:
+        this flag covers only the *graph read primitives* on this interface,
+        whereas that one covers full graph+vector delete/rollback orchestration.
+        A graph backend can support these reads before the unified store can
+        orchestrate deletion.
+        """
+        return False
+
+    async def get_nodes_delete_data_by_source_ref(self, source_ref: str) -> List[NodeDeleteData]:
+        """Return delete-data for every node carrying ``source_ref``.
+
+        Parameters:
+        -----------
+            - source_ref (str): A source ref (see provenance.make_source_ref).
+        """
+        raise UnsupportedProvenanceCapability("get_nodes_delete_data_by_source_ref")
+
+    async def get_edges_delete_data_by_source_ref(self, source_ref: str) -> List[EdgeDeleteData]:
+        """Return delete-data for every edge carrying ``source_ref``.
+
+        Parameters:
+        -----------
+            - source_ref (str): A source ref (see provenance.make_source_ref).
+        """
+        raise UnsupportedProvenanceCapability("get_edges_delete_data_by_source_ref")
+
+    async def get_nodes_delete_data_by_dataset_id(
+        self, dataset_id: UUID
+    ) -> List[NodeDeleteData]:
+        """Return delete-data for every node belonging to ``dataset_id``.
+
+        Parameters:
+        -----------
+            - dataset_id (UUID): The dataset whose nodes to enumerate.
+        """
+        raise UnsupportedProvenanceCapability("get_nodes_delete_data_by_dataset_id")
+
+    async def get_edges_delete_data_by_dataset_id(
+        self, dataset_id: UUID
+    ) -> List[EdgeDeleteData]:
+        """Return delete-data for every edge belonging to ``dataset_id``.
+
+        Parameters:
+        -----------
+            - dataset_id (UUID): The dataset whose edges to enumerate.
+        """
+        raise UnsupportedProvenanceCapability("get_edges_delete_data_by_dataset_id")
+
+    async def get_nodes_delete_data_by_source_run_ref(
+        self, source_run_ref: str
+    ) -> List[NodeDeleteData]:
+        """Return delete-data for every node touched by ``source_run_ref``.
+
+        Parameters:
+        -----------
+            - source_run_ref (str): A source-run ref (see provenance.make_source_run_ref).
+        """
+        raise UnsupportedProvenanceCapability("get_nodes_delete_data_by_source_run_ref")
+
+    async def get_edges_delete_data_by_source_run_ref(
+        self, source_run_ref: str
+    ) -> List[EdgeDeleteData]:
+        """Return delete-data for every edge touched by ``source_run_ref``.
+
+        Parameters:
+        -----------
+            - source_run_ref (str): A source-run ref (see provenance.make_source_run_ref).
+        """
+        raise UnsupportedProvenanceCapability("get_edges_delete_data_by_source_run_ref")
