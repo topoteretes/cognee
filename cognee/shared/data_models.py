@@ -23,7 +23,10 @@ if get_llm_config().llm_provider.lower() == "gemini":
         id: str
         name: str
         type: str
-        description: str
+        description: str | None = Field(
+            None,
+            description="Concise one-sentence description of the entity, using its name.",
+        )
         label: str
 
     class Edge(BaseModel):
@@ -52,7 +55,10 @@ else:
         id: str
         name: str = ""
         type: str
-        description: str
+        description: str | None = Field(
+            None,
+            description="Concise one-sentence description of the entity, using its name.",
+        )
 
         def __init__(self, **data: Any) -> None:
             if not data.get("name"):

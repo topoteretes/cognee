@@ -168,7 +168,7 @@ def _create_type_node(
 def _create_entity_node(
     node_id: str,
     node_name: str,
-    node_description: str,
+    node_description: str | None,
     type_node: EntityType,
     ontology_resolver: RDFLibOntologyResolver,
     added_nodes_map: dict,

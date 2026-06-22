@@ -7,7 +7,7 @@ from cognee.modules.engine.models.EntityType import EntityType
 class Entity(DataPoint):
     name: str
     is_a: Optional[EntityType] = None
-    description: str
+    description: Optional[str] = None
     relations: List[tuple] = []
     # identity_fields makes the id deterministic and namespaced by class
     # (``Entity:<name>``) when constructed without an explicit id — the same
