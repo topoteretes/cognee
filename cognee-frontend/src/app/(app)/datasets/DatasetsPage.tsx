@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
+import { type CogneeInstance } from "@/modules/instances/types";
 import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
 import getDatasetData from "@/modules/datasets/getDatasetData";
@@ -130,6 +131,18 @@ function formatDate(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function getDatasetDataWithRetry(datasetId: string, instance: CogneeInstance, shouldRetryEmpty: boolean) {
+  const maxAttempts = shouldRetryEmpty ? 4 : 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const data = await getDatasetData(datasetId, instance);
+    if (!shouldRetryEmpty || !Array.isArray(data) || data.length > 0 || attempt === maxAttempts) return data;
+    await delay(1500);
+  }
+  return [];
+}
+
 export default function DatasetsPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { tenant } = useTenant();
@@ -234,7 +247,7 @@ export default function DatasetsPage() {
       const statusData: Record<string, DatasetProcessingStatus> = statusResp?.ok ? await statusResp.json() : {};
 
       for (const ds of list) {
-        getDatasetData(ds.id, cogniInstance)
+        getDatasetDataWithRetry(ds.id, cogniInstance, statusData[ds.id] === "DATASET_PROCESSING_COMPLETED")
           .then((data) => {
             const count = Array.isArray(data) ? data.length : 0;
             setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: count, status: mapProcessingStatus(statusData[ds.id], count) } : d));
