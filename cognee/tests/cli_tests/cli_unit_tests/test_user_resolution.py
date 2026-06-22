@@ -6,7 +6,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+from cognee.cli.user_resolution import (
+    resolve_cli_user,
+    scoped_session_id,
+    _get_default_user_with_recovery,
+)
 
 
 class TestScopedSessionId:
@@ -69,3 +73,87 @@ class TestResolveCliUser:
                     assert result is default_user
                     mock_warn.assert_called_once()
                     assert "falling back" in mock_warn.call_args[0][0].lower()
+
+
+class TestGetDefaultUserWithRecovery:
+    """Tests for _get_default_user_with_recovery (issue #3267).
+
+    On a fresh Postgres database, get_default_user() raises
+    DatabaseNotCreatedError because `principals` doesn't exist yet.
+    The recovery helper catches that, runs migrations, and retries.
+    """
+
+    def test_no_recovery_when_get_default_user_succeeds(self):
+        mock_user = MagicMock()
+        mock_get_default = AsyncMock(return_value=mock_user)
+        mock_run_migrations = AsyncMock(return_value=[])
+
+        with patch("cognee.modules.users.methods.get_default_user", mock_get_default):
+            with patch(
+                "cognee.modules.migrations.startup.run_migrations",
+                mock_run_migrations,
+            ):
+                result = asyncio.run(_get_default_user_with_recovery())
+
+        assert result is mock_user
+        mock_get_default.assert_awaited_once()
+        mock_run_migrations.assert_not_awaited()
+
+    def test_recovery_on_database_not_created_error(self):
+        from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+
+        mock_user = MagicMock()
+        mock_get_default = AsyncMock(side_effect=[DatabaseNotCreatedError(), mock_user])
+        mock_run_migrations = AsyncMock(return_value=[])
+
+        with patch("cognee.modules.users.methods.get_default_user", mock_get_default):
+            with patch(
+                "cognee.modules.migrations.startup.run_migrations",
+                mock_run_migrations,
+            ):
+                result = asyncio.run(_get_default_user_with_recovery())
+
+        assert result is mock_user
+        assert mock_get_default.await_count == 2
+        mock_run_migrations.assert_awaited_once()
+
+    def test_recovery_creates_db_when_migrations_fail(self):
+        from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+
+        mock_user = MagicMock()
+        mock_get_default = AsyncMock(side_effect=[DatabaseNotCreatedError(), mock_user])
+        mock_run_migrations = AsyncMock(side_effect=[Exception("alembic fails"), []])
+        mock_engine = MagicMock()
+        mock_engine.create_database = AsyncMock(return_value=None)
+        mock_get_engine = MagicMock(return_value=mock_engine)
+
+        with patch("cognee.modules.users.methods.get_default_user", mock_get_default):
+            with patch(
+                "cognee.modules.migrations.startup.run_migrations",
+                mock_run_migrations,
+            ):
+                with patch(
+                    "cognee.infrastructure.databases.relational.get_relational_engine",
+                    mock_get_engine,
+                ):
+                    result = asyncio.run(_get_default_user_with_recovery())
+
+        assert result is mock_user
+        assert mock_run_migrations.await_count == 2
+        mock_engine.create_database.assert_awaited_once()
+
+    def test_recovery_propagates_if_retry_fails(self):
+        from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+
+        mock_get_default = AsyncMock(
+            side_effect=[DatabaseNotCreatedError(), RuntimeError("still broken")]
+        )
+        mock_run_migrations = AsyncMock(return_value=[])
+
+        with patch("cognee.modules.users.methods.get_default_user", mock_get_default):
+            with patch(
+                "cognee.modules.migrations.startup.run_migrations",
+                mock_run_migrations,
+            ):
+                with pytest.raises(RuntimeError, match="still broken"):
+                    asyncio.run(_get_default_user_with_recovery())
