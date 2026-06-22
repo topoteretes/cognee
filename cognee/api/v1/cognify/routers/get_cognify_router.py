@@ -9,9 +9,15 @@ from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 
 from cognee.api.DTO import InDTO
+from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.pipelines.methods import get_pipeline_run
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.methods import (
+    REQUIRE_AUTHENTICATION,
+    get_authenticated_user,
+    get_default_user,
+    get_user,
+)
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
@@ -114,6 +120,65 @@ class CognifyPayloadDTO(InDTO):
         examples=[20],
         description="Maximum number of data items to process concurrently within a dataset.",
     )
+
+
+def _get_websocket_access_token(websocket: WebSocket) -> Optional[str]:
+    authorization_header = websocket.headers.get("authorization")
+    if authorization_header:
+        scheme, _, token = authorization_header.partition(" ")
+        if scheme.lower() == "bearer" and token.strip():
+            return token.strip()
+
+    return websocket.cookies.get(os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"))
+
+
+async def _read_websocket_jwt_user(token: Optional[str]) -> Optional[User]:
+    if not token:
+        return None
+
+    secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
+    lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
+    strategy = DefaultJWTStrategy(secret, lifetime_seconds=lifetime_seconds)
+
+    db_engine = get_relational_engine()
+
+    async with db_engine.get_async_session() as session:
+        async with get_user_db_context(session) as user_db:
+            async with get_user_manager_context(user_db) as user_manager:
+                return await strategy.read_token(token, user_manager)
+
+
+async def _get_websocket_authenticated_user(websocket: WebSocket) -> Optional[User]:
+    token = _get_websocket_access_token(websocket)
+    user = await _read_websocket_jwt_user(token)
+
+    if user is None:
+        if REQUIRE_AUTHENTICATION:
+            return None
+
+        return await get_default_user()
+
+    if not user.is_active:
+        return None
+
+    return await get_user(user.id)
+
+
+async def _get_authorized_cognify_pipeline_run(pipeline_run_id: str, user: User):
+    try:
+        parsed_pipeline_run_id = UUID(pipeline_run_id)
+    except ValueError:
+        return None
+
+    pipeline_run = await get_pipeline_run(parsed_pipeline_run_id)
+    if not pipeline_run or not pipeline_run.dataset_id:
+        return None
+
+    dataset = await get_authorized_dataset(user, pipeline_run.dataset_id, "read")
+    if not dataset:
+        return None
+
+    return pipeline_run
 
 
 def get_cognify_router() -> APIRouter:
@@ -288,32 +353,29 @@ def get_cognify_router() -> APIRouter:
     async def subscribe_to_cognify_info(websocket: WebSocket, pipeline_run_id: str):
         await websocket.accept()
 
-        access_token = websocket.cookies.get(os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"))
-
         try:
-            secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
-
-            strategy = DefaultJWTStrategy(secret, lifetime_seconds=3600)
-
-            db_engine = get_relational_engine()
-
-            async with db_engine.get_async_session() as session:
-                async with get_user_db_context(session) as user_db:
-                    async with get_user_manager_context(user_db) as user_manager:
-                        user = await get_authenticated_user(
-                            cookie=access_token,
-                            strategy_cookie=strategy,
-                            user_manager=user_manager,
-                            bearer=None,
-                        )
+            user = await _get_websocket_authenticated_user(websocket)
         except Exception as error:
             logger.error(f"Authentication failed: {str(error)}")
             await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
             return
 
-        pipeline_run_id = UUID(pipeline_run_id)
+        if user is None:
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+            return
 
-        pipeline_run = await get_pipeline_run(pipeline_run_id)
+        try:
+            pipeline_run = await _get_authorized_cognify_pipeline_run(pipeline_run_id, user)
+        except Exception as error:
+            logger.error(f"Authorization failed: {str(error)}")
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+            return
+
+        if pipeline_run is None:
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+            return
+
+        pipeline_run_id = pipeline_run.pipeline_run_id
 
         initialize_queue(pipeline_run_id)
 
