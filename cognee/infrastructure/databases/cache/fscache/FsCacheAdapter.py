@@ -3,10 +3,10 @@ import os
 import uuid
 from datetime import datetime
 
-import diskcache as dc
 from pydantic import ValidationError
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.cache.fscache.json_sqlite_cache import JsonSqliteCache
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions.exceptions import (
     CacheConnectionError,
@@ -30,7 +30,7 @@ class FSCacheAdapter(CacheDBInterface):
         data_root_directory = storage_config["data_root_directory"]
         self.cache_directory = os.path.join(data_root_directory, ".cognee_fs_cache", default_key)
         os.makedirs(self.cache_directory, exist_ok=True)
-        self.cache = dc.Cache(directory=self.cache_directory)
+        self.cache = JsonSqliteCache(directory=self.cache_directory)
         self.session_ttl_seconds = session_ttl_seconds
         # Evict any entries whose TTL has already elapsed
         self.cache.expire()
@@ -524,7 +524,7 @@ class FSCacheAdapter(CacheDBInterface):
     async def prune(self) -> None:
         """
         Remove all items from the cache. In Cognee, prune means emptying the cache.
-        Uses diskcache's clear() - does not delete the directory or recreate the cache.
+        Uses the store's clear() - does not delete the directory or recreate the cache.
         """
         try:
             self.cache.clear()
@@ -557,7 +557,7 @@ class FSCacheAdapter(CacheDBInterface):
         return []
 
     async def close(self):
-        """Flush diskcache expirations and close the underlying cache handle."""
+        """Flush cache expirations and close the underlying cache handle."""
         if self.cache is not None:
             self.cache.expire()
             self.cache.close()
