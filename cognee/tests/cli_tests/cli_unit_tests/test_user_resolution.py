@@ -60,19 +60,16 @@ class TestResolveCliUser:
             result = asyncio.run(resolve_cli_user(uid))
             assert result is mock_user
 
-    def test_valid_uuid_unknown_user_warns_and_falls_back(self):
+    def test_valid_uuid_unknown_user_raises(self):
         uid = "550e8400-e29b-41d4-a716-446655440000"
-        default_user = MagicMock()
         mock_get_user = AsyncMock(side_effect=Exception("not found"))
-        mock_get_default = AsyncMock(return_value=default_user)
+        mock_get_default = AsyncMock()
 
         with patch("cognee.modules.users.methods.get_user", mock_get_user):
             with patch("cognee.modules.users.methods.get_default_user", mock_get_default):
-                with patch("cognee.cli.echo.warning") as mock_warn:
-                    result = asyncio.run(resolve_cli_user(uid))
-                    assert result is default_user
-                    mock_warn.assert_called_once()
-                    assert "falling back" in mock_warn.call_args[0][0].lower()
+                with pytest.raises(ValueError, match="does not exist"):
+                    asyncio.run(resolve_cli_user(uid))
+                mock_get_default.assert_not_awaited()
 
 
 class TestGetDefaultUserWithRecovery:

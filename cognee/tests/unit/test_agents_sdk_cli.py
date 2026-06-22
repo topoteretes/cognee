@@ -449,7 +449,7 @@ def test_agents_command_execute_list(monkeypatch):
     # avoid any DB work: resolve_cli_user and the SDK list call are mocked
     fake_user = _make_user()
 
-    async def fake_resolve_cli_user(_user_id, strict=False):
+    async def fake_resolve_cli_user(_user_id):
         return fake_user
 
     monkeypatch.setattr("cognee.cli.user_resolution.resolve_cli_user", fake_resolve_cli_user)
@@ -498,21 +498,20 @@ def test_agents_command_execute_no_action_raises(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Strict --user-id resolution (no silent fallback for agent commands)
+# --user-id resolution (no fallback when user not found)
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
-async def test_resolve_cli_user_strict_unknown_uuid_raises(monkeypatch):
-    """A valid-but-unknown --user-id must be a hard error in strict mode rather
-    than silently falling back to the default user."""
+async def test_resolve_cli_user_unknown_uuid_raises(monkeypatch):
+    """A valid-but-unknown --user-id must error rather than fall back to the default user."""
     from cognee.cli import user_resolution
 
     async def fake_get_user(uid):
         raise Exception("user not found")
 
     async def fake_get_default_user():
-        raise AssertionError("strict mode must not fall back to the default user")
+        raise AssertionError("must not fall back to the default user")
 
     monkeypatch.setattr("cognee.modules.users.methods.get_user", fake_get_user, raising=False)
     monkeypatch.setattr(
@@ -520,28 +519,4 @@ async def test_resolve_cli_user_strict_unknown_uuid_raises(monkeypatch):
     )
 
     with pytest.raises(ValueError):
-        await user_resolution.resolve_cli_user(str(uuid4()), strict=True)
-
-
-@pytest.mark.asyncio
-async def test_resolve_cli_user_non_strict_falls_back(monkeypatch):
-    """Default (non-strict) behaviour still warns and falls back, preserving the
-    existing contract for other commands (e.g. datasets)."""
-    from cognee.cli import user_resolution
-
-    sentinel = _make_user()
-
-    async def fake_get_user(uid):
-        raise Exception("user not found")
-
-    async def fake_get_default_user():
-        return sentinel
-
-    monkeypatch.setattr("cognee.modules.users.methods.get_user", fake_get_user, raising=False)
-    monkeypatch.setattr(
-        "cognee.modules.users.methods.get_default_user", fake_get_default_user, raising=False
-    )
-    monkeypatch.setattr("cognee.cli.echo.warning", lambda *a, **k: None)
-
-    resolved = await user_resolution.resolve_cli_user(str(uuid4()))
-    assert resolved is sentinel
+        await user_resolution.resolve_cli_user(str(uuid4()))

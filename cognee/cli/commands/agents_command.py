@@ -131,7 +131,7 @@ Subcommands:
             import cognee
             from cognee.cli.user_resolution import resolve_cli_user
 
-            user = await resolve_cli_user(getattr(args, "user_id", None), strict=True)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             result = await cognee.agents.create(args.name, datasets=args.datasets, user=user)
 
             fmt.success(f"Created agent '{args.name}' ({result['agent_id']})")
@@ -149,7 +149,7 @@ Subcommands:
             import cognee
             from cognee.cli.user_resolution import resolve_cli_user
 
-            user = await resolve_cli_user(getattr(args, "user_id", None), strict=True)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             agents = await cognee.agents.list(user=user)
             if not agents:
                 fmt.echo("No agents found.")
@@ -166,7 +166,7 @@ Subcommands:
             import cognee
             from cognee.cli.user_resolution import resolve_cli_user
 
-            user = await resolve_cli_user(getattr(args, "user_id", None), strict=True)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             info = await cognee.agents.get(args.agent_id, user=user)
             fmt.echo(f"Agent ID:      {info['agent_id']}")
             fmt.echo(f"Agent email:   {info['agent_email']}")
@@ -185,7 +185,7 @@ Subcommands:
             import cognee
             from cognee.cli.user_resolution import resolve_cli_user
 
-            user = await resolve_cli_user(getattr(args, "user_id", None), strict=True)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             await cognee.agents.delete(agent_id, user=user)
             fmt.success(f"Agent {agent_id} deleted.")
 
@@ -196,7 +196,7 @@ Subcommands:
             import cognee
             from cognee.cli.user_resolution import resolve_cli_user
 
-            user = await resolve_cli_user(getattr(args, "user_id", None), strict=True)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             connection = await cognee.agents.register(
                 args.agent_session_name,
                 user=user,
@@ -217,7 +217,7 @@ Subcommands:
             import cognee
             from cognee.cli.user_resolution import resolve_cli_user
 
-            user = await resolve_cli_user(getattr(args, "user_id", None), strict=True)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             count = await cognee.agents.unregister(args.agent_session_name, user=user)
             fmt.success(f"Active connections: {count}")
 
@@ -228,7 +228,7 @@ Subcommands:
             import cognee
             from cognee.cli.user_resolution import resolve_cli_user
 
-            user = await resolve_cli_user(getattr(args, "user_id", None), strict=True)
+            user = await resolve_cli_user(getattr(args, "user_id", None))
             agent_id = UUID(args.agent_id) if args.agent_id else None
             response = await cognee.agents.list_connections(
                 user=user,
