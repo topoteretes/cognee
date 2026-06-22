@@ -6,6 +6,20 @@ from uuid import UUID
 import cognee.cli.echo as fmt
 
 
+async def _ensure_database_ready() -> None:
+    """Initialize storage before CLI commands resolve users.
+
+    SDK entry points such as ``cognee.add`` call setup internally, but the CLI
+    resolves the acting user before delegating to those entry points.  On a fresh
+    Postgres database that means the first ``get_default_user`` query can run
+    before the ``principals`` table exists.  Running setup here keeps user
+    resolution safe for every in-process CLI command.
+    """
+    from cognee.modules.engine.operations.setup import setup
+
+    await setup()
+
+
 async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
     """Return the User for the given --user-id, or the default user when omitted.
 
@@ -19,6 +33,7 @@ async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
     from cognee.modules.users.methods import get_default_user
 
     if not user_id:
+        await _ensure_database_ready()
         return await get_default_user()
 
     try:
@@ -28,6 +43,8 @@ async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
             f"Invalid --user-id: '{user_id}' is not a valid UUID.  "
             f"Example: --user-id 550e8400-e29b-41d4-a716-446655440000"
         )
+
+    await _ensure_database_ready()
 
     from cognee.modules.users.methods import get_user
 
