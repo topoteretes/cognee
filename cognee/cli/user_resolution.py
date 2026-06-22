@@ -4,6 +4,7 @@ from typing import Optional
 from uuid import UUID
 
 import cognee.cli.echo as fmt
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 
 
 async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
@@ -33,7 +34,7 @@ async def resolve_cli_user(user_id: Optional[str] = None, strict: bool = False):
 
     try:
         return await get_user(uid)
-    except Exception:
+    except EntityNotFoundError:
         if strict:
             raise ValueError(
                 f"--user-id {uid} does not exist.  Refusing to fall back to the default "

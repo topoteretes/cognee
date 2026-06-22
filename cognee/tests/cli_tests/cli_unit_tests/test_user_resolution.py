@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 
 
 class TestScopedSessionId:
@@ -59,7 +60,7 @@ class TestResolveCliUser:
     def test_valid_uuid_unknown_user_warns_and_falls_back(self):
         uid = "550e8400-e29b-41d4-a716-446655440000"
         default_user = MagicMock()
-        mock_get_user = AsyncMock(side_effect=Exception("not found"))
+        mock_get_user = AsyncMock(side_effect=EntityNotFoundError(message="not found"))
         mock_get_default = AsyncMock(return_value=default_user)
 
         with patch("cognee.modules.users.methods.get_user", mock_get_user):
@@ -69,3 +70,11 @@ class TestResolveCliUser:
                     assert result is default_user
                     mock_warn.assert_called_once()
                     assert "falling back" in mock_warn.call_args[0][0].lower()
+
+    def test_unexpected_lookup_error_propagates(self):
+        uid = "550e8400-e29b-41d4-a716-446655440000"
+        mock_get_user = AsyncMock(side_effect=RuntimeError("db offline"))
+
+        with patch("cognee.modules.users.methods.get_user", mock_get_user):
+            with pytest.raises(RuntimeError, match="db offline"):
+                asyncio.run(resolve_cli_user(uid))

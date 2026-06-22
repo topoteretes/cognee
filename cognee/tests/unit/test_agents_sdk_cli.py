@@ -18,6 +18,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+
 agents_sdk = pytest.importorskip(
     "cognee.api.v1.agents.agents",
     reason="agents SDK namespace not yet available",
@@ -509,7 +511,7 @@ async def test_resolve_cli_user_strict_unknown_uuid_raises(monkeypatch):
     from cognee.cli import user_resolution
 
     async def fake_get_user(uid):
-        raise Exception("user not found")
+        raise EntityNotFoundError(message="user not found")
 
     async def fake_get_default_user():
         raise AssertionError("strict mode must not fall back to the default user")
@@ -532,7 +534,7 @@ async def test_resolve_cli_user_non_strict_falls_back(monkeypatch):
     sentinel = _make_user()
 
     async def fake_get_user(uid):
-        raise Exception("user not found")
+        raise EntityNotFoundError(message="user not found")
 
     async def fake_get_default_user():
         return sentinel
