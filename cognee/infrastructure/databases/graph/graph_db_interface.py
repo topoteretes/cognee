@@ -4,7 +4,11 @@ from typing import Optional, Dict, Any, List, Tuple, Type, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.provenance.exceptions import UnsupportedProvenanceCapability
-from cognee.modules.graph.provenance.snapshots import EdgeDeleteData, NodeDeleteData
+from cognee.modules.graph.provenance.snapshots import (
+    EdgeDeleteData,
+    EdgeIdentity,
+    NodeDeleteData,
+)
 
 logger = get_logger()
 
@@ -503,3 +507,50 @@ class GraphDBInterface(ABC):
             - source_run_ref (str): A source-run ref (see provenance.make_source_run_ref).
         """
         raise UnsupportedProvenanceCapability("get_edges_delete_data_by_source_run_ref")
+
+    # ------------------------------------------------------------------
+    # Graph-native provenance write primitives (Part 0 contract)
+    #
+    # The delete/rollback planner uses these to detach a provenance ref from a
+    # surviving artifact (one ref removed, the artifact kept) and to delete edges
+    # by identity (nodes already have delete_nodes). Raising defaults; Part 1
+    # implements them on real adapters.
+    # ------------------------------------------------------------------
+
+    async def detach_provenance_refs_from_nodes(
+        self, node_ids: List[str], property_key: str, refs: List[str]
+    ) -> None:
+        """Remove ``refs`` from the ``property_key`` array of each node in ``node_ids``.
+
+        Used to detach a source ref / source-run ref / dataset id from artifacts
+        that survive a delete because another ref still owns them.
+
+        Parameters:
+        -----------
+            - node_ids (List[str]): Graph node ids to detach from.
+            - property_key (str): One of the provenance list keys (e.g. "source_refs").
+            - refs (List[str]): Ref values to remove from that array.
+        """
+        raise UnsupportedProvenanceCapability("detach_provenance_refs_from_nodes")
+
+    async def detach_provenance_refs_from_edges(
+        self, edges: List["EdgeIdentity"], property_key: str, refs: List[str]
+    ) -> None:
+        """Remove ``refs`` from the ``property_key`` array of each edge in ``edges``.
+
+        Parameters:
+        -----------
+            - edges (List[EdgeIdentity]): Edge identities to detach from.
+            - property_key (str): One of the provenance list keys (e.g. "source_refs").
+            - refs (List[str]): Ref values to remove from that array.
+        """
+        raise UnsupportedProvenanceCapability("detach_provenance_refs_from_edges")
+
+    async def delete_edges(self, edges: List["EdgeIdentity"]) -> None:
+        """Delete the given edges from the graph by identity.
+
+        Parameters:
+        -----------
+            - edges (List[EdgeIdentity]): Edge identities to delete.
+        """
+        raise UnsupportedProvenanceCapability("delete_edges")

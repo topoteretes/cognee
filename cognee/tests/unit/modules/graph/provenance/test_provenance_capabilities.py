@@ -341,12 +341,14 @@ def test_dataclass_field_names_are_stable():
         "indexed_fields",
         "source_refs",
         "source_run_refs",
+        "dataset_ids",
     ]
     assert [f.name for f in fields(EdgeDeleteData)] == [
         "identity",
         "edge_retrieval_text",
         "source_refs",
         "source_run_refs",
+        "dataset_ids",
     ]
     assert [f.name for f in fields(ProvenanceDeleteResult)] == [
         "nodes_deleted",
